@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends
+
+from app.dependencies import get_db
+from app.queries import metrics as q
+from app.schemas.metrics import (
+    CostEntry,
+    DashboardMetrics,
+    DeveloperStat,
+    FeedbackEntry,
+)
+from reva.db.engine import Database
+
+router = APIRouter()
+
+_VALID_PERIODS = {"week", "month", "quarter"}
+
+
+@router.get("/metrics/dashboard", response_model=DashboardMetrics)
+def dashboard(db: Database = Depends(get_db)) -> dict:
+    return q.dashboard_metrics(db)
+
+
+@router.get("/metrics/developers", response_model=list[DeveloperStat])
+def developers(period: str = "month", db: Database = Depends(get_db)) -> list[dict]:
+    if period not in _VALID_PERIODS:
+        period = "month"
+    return [DeveloperStat.model_validate(r) for r in q.developer_stats(db, period)]
+
+
+@router.get("/metrics/cost", response_model=list[CostEntry])
+def cost(
+    period: str = "month",
+    repo: str | None = None,
+    db: Database = Depends(get_db),
+) -> list[dict]:
+    if period not in _VALID_PERIODS:
+        period = "month"
+    return [CostEntry.model_validate(r) for r in q.cost_stats(db, period, repo)]
+
+
+@router.get("/metrics/feedback", response_model=list[FeedbackEntry])
+def feedback(db: Database = Depends(get_db)) -> list[dict]:
+    return [FeedbackEntry.model_validate(r) for r in q.feedback_stats(db)]

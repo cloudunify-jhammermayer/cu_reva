@@ -150,12 +150,13 @@ def _params(s: dict, **overrides) -> dict:
     return base
 
 
-def _completed_result(findings: list[Finding] | None = None) -> ReviewResult:
+def _completed_result(findings: list[Finding] | None = None, diff: str = SAMPLE_DIFF) -> ReviewResult:
     return ReviewResult(
         status="completed",
         summary="Looks fine.",
         risk_level="low",
         findings=findings or [],
+        diff=diff,
         model="claude-sonnet-4-6",
         prompt_version="v1.0",
         started_at=datetime.now(timezone.utc),
@@ -198,7 +199,7 @@ def test_completed_run_posts_check_and_review(ctx_and_fakes):
     assert len(s["github"].created_pr_reviews) == 1
     assert len(s["github"].created_check_runs) == 1
     assert len(s["github"].created_issue_comments) == 0
-    assert s["github"].diff_fetch_count == 1
+    assert s["github"].diff_fetch_count == 0  # diff is carried in result.diff, not re-fetched
 
     review = s["github"].created_pr_reviews[0]
     assert review["event"] == "COMMENT"

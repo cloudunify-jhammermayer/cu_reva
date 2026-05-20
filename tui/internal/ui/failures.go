@@ -1,0 +1,191 @@
+package ui
+
+import (
+	"fmt"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"reva-tui/internal/api"
+)
+
+type Failures struct {
+	client    api.ClientIface
+	items     []api.ReviewDetail
+	total     int
+	err       error
+	loading   bool
+	cursor    int
+	offset    int
+	width     int
+	height    int
+	statusMsg string
+}
+
+func newFailures(client api.ClientIface) Failures {
+	return Failures{client: client, loading: true}
+}
+
+func (f Failures) load() tea.Cmd {
+	return func() tea.Msg {
+		data, err := f.client.Failures(50)
+		return failuresLoadedMsg{data: data, err: err}
+	}
+}
+
+func (f Failures) update(msg tea.Msg) (Failures, tea.Cmd) {
+	switch m := msg.(type) {
+	case failuresLoadedMsg:
+		f.loading = false
+		f.err = m.err
+		if m.data != nil {
+			f.items = m.data.Items
+			f.total = m.data.Total
+		}
+		f.cursor = 0
+		f.offset = 0
+
+	case requeuedMsg:
+		if m.err != nil {
+			f.statusMsg = styleStatusFailed.Render("requeue failed: " + m.err.Error())
+		} else {
+			f.statusMsg = styleStatusCompleted.Render("✓ queued — review will run shortly")
+		}
+
+	case tea.KeyMsg:
+		visibleRows := f.height - 5
+		if visibleRows < 1 {
+			visibleRows = 1
+		}
+		switch m.String() {
+		case "j", "down":
+			if f.cursor < len(f.items)-1 {
+				f.cursor++
+				if f.cursor >= f.offset+visibleRows {
+					f.offset++
+				}
+			}
+		case "k", "up":
+			if f.cursor > 0 {
+				f.cursor--
+				if f.cursor < f.offset {
+					f.offset--
+				}
+			}
+		case "r":
+			f.loading = true
+			f.statusMsg = ""
+			return f, f.load()
+		case "e":
+			if f.cursor < len(f.items) {
+				id := f.items[f.cursor].ID
+				client := f.client
+				return f, func() tea.Msg {
+					err := client.Requeue(id)
+					return requeuedMsg{id: id, err: err}
+				}
+			}
+		}
+	}
+	return f, nil
+}
+
+func (f Failures) view(w, h int) string {
+
+	header := styleTitle.Padding(0, 1).Render(fmt.Sprintf("Failures  (%d)", f.total))
+
+	if f.loading && len(f.items) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "",
+			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
+				styleSubtitle.Render("Loading…")))
+	}
+	if f.err != nil {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "",
+			styleStatusFailed.Render("  Error: "+f.err.Error()))
+	}
+	if len(f.items) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "",
+			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
+				styleSubtitle.Render("No failures — all good")))
+	}
+
+	visibleRows := h - 5
+	if visibleRows < 1 {
+		visibleRows = 1
+	}
+
+	colStatus := 3
+	colRepo := 22
+	colPR := 6
+	colErr := w - colStatus - colRepo - colPR - 8
+
+	hdr := lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
+		fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s",
+			colStatus, " ",
+			colRepo, "Repository",
+			colPR, "PR#",
+			colErr, "Error"),
+	)
+
+	var rows []string
+	rows = append(rows, hdr)
+
+	end := f.offset + visibleRows
+	if end > len(f.items) {
+		end = len(f.items)
+	}
+	for i := f.offset; i < end; i++ {
+		item := f.items[i]
+		sym := statusSymbol(item.Status)
+		repo := truncate(item.RepoFullName, colRepo)
+		prNum := fmt.Sprintf("#%d", item.PRNumber)
+		errMsg := ""
+		if item.ErrorMessage != nil {
+			errMsg = *item.ErrorMessage
+		} else if item.Status == "stale" {
+			errMsg = "timed out"
+		}
+		errMsg = truncate(errMsg, colErr)
+
+		line := fmt.Sprintf("  %s  %-*s  %-*s  %-*s",
+			sym,
+			colRepo, repo,
+			colPR, prNum,
+			colErr, errMsg,
+		)
+		if i == f.cursor {
+			line = styleSelected.Width(w - 2).Render(line)
+		}
+		rows = append(rows, line)
+	}
+
+	table := strings.Join(rows, "\n")
+
+	// Detail panel for selected item
+	var detail string
+	if f.cursor < len(f.items) {
+		detail = f.renderDetail(f.items[f.cursor], w)
+	}
+
+	statusText := fmt.Sprintf("%d/%d  j/k  r=refresh  e=requeue", f.cursor+1, len(f.items))
+	if f.statusMsg != "" {
+		statusText = f.statusMsg
+	}
+	status := styleStatusBar.Render(statusText)
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", detail, "", status)
+}
+
+func (f Failures) renderDetail(item api.ReviewDetail, w int) string {
+	var b strings.Builder
+	b.WriteString(styleTitle.Render(fmt.Sprintf("#%d  %s", item.PRNumber, truncate(item.PRTitle, w-20))) + "\n")
+	b.WriteString(fmt.Sprintf("  Repo    %s\n", item.RepoFullName))
+	b.WriteString(fmt.Sprintf("  Status  %s  %s\n", statusSymbol(item.Status), item.Status))
+	if item.ErrorClass != nil {
+		b.WriteString(fmt.Sprintf("  Class   %s\n", styleSubtitle.Render(*item.ErrorClass)))
+	}
+	if item.ErrorMessage != nil {
+		b.WriteString(fmt.Sprintf("  Error   %s\n", styleStatusFailed.Render(truncate(*item.ErrorMessage, w-12))))
+	}
+	return styleBorder.Width(w - 2).Height(6).Render(b.String())
+}

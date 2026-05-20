@@ -25,6 +25,7 @@ from reva.review_tool import build_review_tool_schema, tool_choice_force_submit
 from reva.types import (
     Finding,
     JobParams,
+    RepoConfig,
     ReviewResult,
     RiskLevel,
 )
@@ -154,9 +155,8 @@ class Reviewer:
 
         # 9. skip_paths short-circuit: if every changed file matches a skip
         # glob, there's nothing to review. Per-hunk filtering is a TODO.
-        skip_patterns = _extract_skip_patterns(repo_config)
-        if changed_files and skip_patterns and all(
-            _matches_any(p, skip_patterns) for p in changed_files
+        if changed_files and repo_config.skip_paths and all(
+            _matches_any(p, repo_config.skip_paths) for p in changed_files
         ):
             return _decline(
                 "All changed files match skip_paths; nothing to review."
@@ -221,6 +221,7 @@ class Reviewer:
             summary=summary,
             risk_level=risk_level,
             findings=capped,
+            diff=diff,
             model=response.model or model,
             prompt_version=prompt_version,
             started_at=started_at,
@@ -237,13 +238,13 @@ class Reviewer:
 
     def _load_repo_config(
         self, token: str, owner: str, name: str, head_sha: str
-    ) -> dict:
-        """Load .claude-review.yml. Malformed YAML -> empty config + warning."""
+    ) -> RepoConfig:
+        """Load .claude-review.yml. Malformed or missing YAML -> empty config."""
         raw = self.github.get_file_content(
             token, owner, name, ".claude-review.yml", head_sha
         )
         if not raw:
-            return {}
+            return RepoConfig()
         try:
             parsed = yaml.safe_load(raw)
         except yaml.YAMLError as exc:
@@ -254,14 +255,16 @@ class Reviewer:
                 head_sha=head_sha[:8],
                 error=str(exc),
             )
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
+            return RepoConfig()
+        if not isinstance(parsed, dict):
+            return RepoConfig()
+        return RepoConfig.model_validate(parsed)
 
-    def _resolve_limits(self, repo_config: dict) -> tuple[int, int]:
+    def _resolve_limits(self, repo_config: RepoConfig) -> tuple[int, int]:
         """Per-repo overrides for diff size guards."""
-        max_lines = repo_config.get("max_diff_lines", self.max_diff_lines)
-        max_tokens = repo_config.get("max_diff_tokens", self.max_diff_tokens)
-        return int(max_lines), int(max_tokens)
+        max_lines = repo_config.max_diff_lines if repo_config.max_diff_lines is not None else self.max_diff_lines
+        max_tokens = repo_config.max_diff_tokens if repo_config.max_diff_tokens is not None else self.max_diff_tokens
+        return max_lines, max_tokens
 
 
 # --- Module-level helpers -----------------------------------------------------
@@ -274,13 +277,6 @@ def _decline(reason: str) -> ReviewResult:
         risk_level="low",
         decline_reason=reason,
     )
-
-
-def _extract_skip_patterns(repo_config: dict) -> list[str]:
-    raw = repo_config.get("skip_paths") or []
-    if not isinstance(raw, list):
-        return []
-    return [str(p) for p in raw if isinstance(p, str)]
 
 
 def _matches_any(path: str, patterns: list[str]) -> bool:

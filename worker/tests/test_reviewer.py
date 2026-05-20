@@ -16,7 +16,7 @@ from worker.reviewer import (
     _cap_findings,
     _recompute_risk_level,
 )
-from reva.types import ClaudeResponse, Finding, JobParams
+from reva.types import ClaudeResponse, Finding, JobParams, RepoConfig
 
 
 # --- Fakes --------------------------------------------------------------------
@@ -92,13 +92,12 @@ class FakePrompts:
         self.version = version
         self.last_system_blocks: list[dict] | None = None
 
-    def build_system_blocks(self, repo_config: dict, claude_md: str | None) -> list:
+    def build_system_blocks(self, repo_config: RepoConfig, claude_md: str | None) -> list:
         blocks = [{"type": "text", "text": "SYSTEM"}]
         if claude_md:
             blocks.append({"type": "text", "text": claude_md})
-        custom = repo_config.get("custom_instructions")
-        if isinstance(custom, str) and custom.strip():
-            blocks.append({"type": "text", "text": custom})
+        if repo_config.custom_instructions and repo_config.custom_instructions.strip():
+            blocks.append({"type": "text", "text": repo_config.custom_instructions})
         self.last_system_blocks = blocks
         return blocks
 
@@ -186,6 +185,7 @@ def test_happy_path_returns_completed_result():
     assert result.cache_creation_tokens == 300
     assert result.estimated_cost_usd > 0
     assert result.duration_ms is not None and result.duration_ms >= 0
+    assert result.diff == gh.diff
     assert gh.diff_calls == 1
     assert gh.token_calls == 1
 

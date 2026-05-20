@@ -12,14 +12,15 @@ for analytics, cost tracking, and developer feedback loops.
 
 ```
 .
+├── reva/                 Installable library — types, errors, clients, formatters, db
 ├── doc/                  Architecture, schemas, and decision docs (start with 00-overview.md)
 ├── prompts/              REVA's actual prompt content; versioned via CHANGELOG.md
 ├── db/migrations/        Plain-SQL migrations applied at worker/api startup
-├── shared/               Installable `reva` library — types, errors, clients, formatters, db
-├── worker/               RQ-based review worker — Reviewer + orchestration glue, depends on shared/
+├── worker/               RQ-based review worker — Reviewer + orchestration glue
 ├── api/                  (Not built yet) FastAPI webhook receiver
 ├── scheduler/            (Not built yet) Debounce poller — enqueues due jobs into RQ
 ├── tui/                  (Not built yet) Bubble Tea ops dashboard
+├── pyproject.toml        Package definition for the reva library
 ├── HANDOFF.md            Per-slice implementation status and decision log
 └── README.md             This file
 ```
@@ -57,8 +58,8 @@ Tests use SQLite in-memory and httpx MockTransport; no Docker required.
 ## Status
 
 The worker pipeline is wired end-to-end (Reviewer → ClaudeClient → GitHubClient
-→ DB writers → poster), and the reusable building blocks have been extracted
-into `shared/reva/` as an installable library. What's still missing for a
+→ DB writers → poster), and the reusable building blocks live in `reva/` as an
+installable library at the project root. What's still missing for a
 fully working production system: the `api/` service (webhook), the
 `scheduler/` service (debounce poller), `docker-compose.yml`, Nginx config,
 and the TUI. See `HANDOFF.md` for the running implementation log.

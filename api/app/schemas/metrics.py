@@ -1,0 +1,50 @@
+"""Pydantic response schemas for metrics endpoints."""
+
+from __future__ import annotations
+
+from pydantic import BaseModel
+
+
+class PeriodStats(BaseModel):
+    reviews_completed: int
+    reviews_failed: int
+    success_rate: float
+    avg_duration_ms: float | None
+
+
+class FindingCounts(BaseModel):
+    critical: int
+    major: int
+    minor: int
+    info: int
+
+
+class DashboardMetrics(BaseModel):
+    last_24h: PeriodStats
+    last_7d: PeriodStats
+    findings_24h: FindingCounts
+    total_cost_7d: float
+    avg_cost_per_review_7d: float | None
+
+
+class DeveloperStat(BaseModel):
+    author_login: str
+    review_count: int
+    avg_findings: float
+    avg_major_critical: float
+    trend: str  # improving | stable | worsening
+
+
+class CostEntry(BaseModel):
+    repo_full_name: str
+    period: str
+    total_cost_usd: float
+    review_count: int
+
+
+class FeedbackEntry(BaseModel):
+    category: str
+    severity: str
+    thumbs_up: int
+    thumbs_down: int
+    approval_rate: float | None

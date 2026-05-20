@@ -1,0 +1,167 @@
+# Production compose — Nginx + Let's Encrypt TLS, Docker secrets for PEM.
+# Prereqs:
+#   1. Copy .env.example to .env and fill in values.
+#   2. Place GitHub App private key at ./secrets/github-app-private-key.pem
+#   3. Run scripts/setup-letsencrypt.sh once to obtain the initial cert.
+#   4. docker compose -f docker-compose.prod.yml up -d
+
+services:
+  nginx:
+    build: ./nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      REVA_DOMAIN: ${REVA_DOMAIN}
+      # Tell the nginx entrypoint to only expand $REVA_DOMAIN in templates,
+      # leaving nginx variables like $host and $remote_addr untouched.
+      NGINX_ENVSUBST_FILTER: REVA_DOMAIN
+    volumes:
+      - letsencrypt_data:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    depends_on:
+      - api
+    networks:
+      - reva-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - letsencrypt_data:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    entrypoint: >
+      /bin/sh -c 'trap exit TERM;
+      while :; do certbot renew --webroot -w /var/www/certbot --quiet;
+      sleep 12h; done'
+    networks:
+      - reva-net
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://review:${POSTGRES_PASSWORD}@postgres:5432/reviews
+      REDIS_URL: redis://redis:6379/0
+      GITHUB_APP_ID: ${GITHUB_APP_ID}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
+      GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_private_key
+    secrets:
+      - github_private_key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - reva-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: scheduler/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://review:${POSTGRES_PASSWORD}@postgres:5432/reviews
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - reva-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://review:${POSTGRES_PASSWORD}@postgres:5432/reviews
+      REDIS_URL: redis://redis:6379/0
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GITHUB_APP_ID: ${GITHUB_APP_ID}
+      GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_private_key
+    secrets:
+      - github_private_key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+    networks:
+      - reva-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: reviews
+      POSTGRES_USER: review
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U review -d reviews"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - reva-net
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - reva-net
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  letsencrypt_data:
+  certbot_www:
+
+networks:
+  reva-net:
+    driver: bridge
+
+secrets:
+  github_private_key:
+    file: ./secrets/github-app-private-key.pem

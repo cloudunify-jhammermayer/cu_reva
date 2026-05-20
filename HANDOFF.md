@@ -1,7 +1,7 @@
 # REVA — Implementation Handoff
 
 Persistent context for agents picking up this project. Read this **before**
-touching code or docs. Updated: 2026-05-20 (after slice 9a).
+touching code or docs. Updated: 2026-05-20 (after slice 10 — Docker Compose + Nginx).
 
 ---
 
@@ -29,37 +29,36 @@ Bubble Tea TUI, deployed via Docker Compose on Hetzner.
 - **Slice 6** — GitHub *poster* (write surface): `create_check_run`, `create_pr_review`, `create_issue_comment` on `GitHubClient`; shared `_github_http.py` for error mapping (used by reader and writer); pure `review_formatter.py` with conclusion matrix + Check Run output + PR body + inline-comment + decline templates; diff hunk parser (`parse_diff_hunks`, `find_line_in_hunks`) + `split_findings` for inline-vs-unmapped partitioning. 30 more pytest cases (98 total). Doc 08 ARIA→REVA renamed.
 - **Slice 7** — end-to-end wiring: `Settings` (env-loaded), `WorkerContext` + `build_worker_context`, `run_review` orchestrator with idempotent retry (skip post if `check_run_id` already set), per-status posting paths (completed → PR review + check run; declined → issue comment + neutral check; stale → skipped check; failed → failure check with best-effort posting). `main.py` builds the context and starts RQ; `tasks.run_review` is a thin re-export so the import path stays stable. 10 more pytest cases (108 total).
 - **Slice 8** — `prompts/` content: `system.md` (REVA identity, anti-injection guard, tool_use contract, severity/category definitions, rules), `diff_review.md`, `deep_review.md`, `odoo19.md`, `CHANGELOG.md` (v1.0). 8 sanity-tests confirming `PromptBuilder` loads the real files (116 total). Per-directory README.md added to root, doc/, db/migrations/, prompts/, worker/, worker/worker/db/, worker/tests/.
-- **Slice 9a** — extracted reusable building blocks into `shared/reva/` as an installable package (`reva-shared`, pyproject.toml). Moved 11 modules + the `db/` subpackage. Rewrote all imports inside `shared/`, `worker/`, and `worker/tests/` (`from worker.X` → `from reva.X` for moved modules). `worker/conftest.py` now adds both `worker/` and `shared/` to `sys.path`; `worker/requirements-dev.txt` adds `-e ../shared`. Updated `worker/Dockerfile` to install the shared package first. **All 116 existing tests still pass** — refactor was lossless.
+- **Slice 9a** — extracted reusable building blocks into `reva/` as an installable package (`reva-shared`, `pyproject.toml` at project root). Moved 11 modules + the `db/` subpackage. Rewrote all imports (`from worker.X` → `from reva.X` for moved modules). `worker/conftest.py` adds both `worker/` and project root to `sys.path`; `worker/requirements-dev.txt` adds `-e ..`. Updated `worker/Dockerfile` to install the reva package first. **All 116 existing tests still pass** — refactor was lossless.
+- **Slice 9b** — `api/` (FastAPI webhook receiver) + `scheduler/` (RQ enqueuer) as two new containers. **138 tests total.**
+- **Slice 10** — Docker Compose + Nginx. `docker-compose.yml` (dev, direct port exposure), `docker-compose.prod.yml` (production, Nginx + certbot TLS, Docker secrets for PEM). Nginx config uses template substitution for `${REVA_DOMAIN}`. `Makefile` covers dev/prod/deploy/test/scale. `scripts/deploy.sh` and `scripts/setup-letsencrypt.sh`. `.env.example` and `.gitignore`. `secrets/` directory gitignored but kept in tree. Both compose files pass `docker compose config` validation. API: HMAC-SHA256 signature verification, upserts repo/PR/pending_review on reviewable `pull_request` events, stores all events in `github_events`, debounce upsert resets `scheduled_at` on synchronize, draft PRs skipped (except `ready_for_review`). Scheduler: polls `pending_reviews` where `consumed=False AND scheduled_at <= now()`, marks consumed first (crash-safe), checks idempotency against `review_runs`, enqueues `worker.tasks.run_review` with `rq.Retry(max=3, interval=[30,120,300])`. Each service has its own `Dockerfile`, `requirements.txt`, and `requirements-dev.txt`. **138 tests total: 116 worker + 12 api + 10 scheduler.**
 
-### Files created (current layout after slice 9a)
+### Files created (current layout after slice 9b)
 
 ```
-shared/                              ✅ installable `reva-shared` package
-├── pyproject.toml
-├── README.md
-└── reva/
-    ├── __init__.py                 version stub
-    ├── types.py                    ✅ Finding, ReviewResult, JobParams, ClaudeResponse, ContentBlock
-    ├── errors.py                   ✅ WorkerError / Transient / Permanent / StaleHead / Declined
-    ├── review_tool.py              ✅ submit_review tool schema derived from pydantic
-    ├── claude_client.py            ✅ httpx POST + tool_use parse + cache-token accounting + status mapping
-    ├── prompt_builder.py           ✅ build_system_blocks returns cache-tagged blocks (file IO works)
-    ├── cost.py                     ✅ pricing table + estimate_cost (placeholder rates)
-    ├── diff_utils.py               ✅ count_diff_lines + estimate_diff_tokens + iter_diff_files + parse_diff_hunks + find_line_in_hunks
-    ├── github_client.py            ✅ Read + write surface: JWT auth, installation-token cache, reads + writes, shared error mapping
-    ├── _github_http.py             ✅ map_github_status + NotFound + retry-after parsing
-    ├── review_formatter.py         ✅ compute_check_conclusion + format_* + severity emoji + split_findings
-    └── db/                         ✅ Postgres layer — own README
-        ├── __init__.py
-        ├── engine.py               ✅ create_engine_from_url, Database facade, migrate() runner
-        ├── models.py               ✅ 9 SQLAlchemy 2.0 typed declarative models; SQLite-friendly PK variant
-        ├── repo_lookup.py          ✅ DatabaseRepoLookup adapter
-        └── writers.py              ✅ idempotent record_review_* + upserts + record_github_event + is_already_posted
+reva/                                ✅ installable library (pyproject.toml at project root)
+├── __init__.py                 version stub
+├── types.py                    ✅ Finding, ReviewResult, RepoConfig, JobParams, ClaudeResponse, ContentBlock
+├── errors.py                   ✅ WorkerError / Transient / Permanent / StaleHead / Declined
+├── review_tool.py              ✅ submit_review tool schema derived from pydantic
+├── claude_client.py            ✅ httpx POST + tool_use parse + cache-token accounting + status mapping
+├── prompt_builder.py           ✅ build_system_blocks returns cache-tagged blocks (file IO works)
+├── cost.py                     ✅ pricing table + estimate_cost (placeholder rates)
+├── diff_utils.py               ✅ count_diff_lines + estimate_diff_tokens + iter_diff_files + parse_diff_hunks + find_line_in_hunks
+├── github_client.py            ✅ Read + write surface: JWT auth, installation-token cache, reads + writes, shared error mapping
+├── _github_http.py             ✅ map_github_status + NotFound + retry-after parsing
+├── review_formatter.py         ✅ compute_check_conclusion + format_* + severity emoji + split_findings
+└── db/                         ✅ Postgres layer — own README
+    ├── __init__.py
+    ├── engine.py               ✅ create_engine_from_url, Database facade, migrate() runner
+    ├── models.py               ✅ 9 SQLAlchemy 2.0 typed declarative models; SQLite-friendly PK variant
+    ├── repo_lookup.py          ✅ get_owner_name + get_pr_basic + DatabaseRepoLookup adapter
+    └── writers.py              ✅ idempotent record_review_* + upserts + record_github_event + is_already_posted
 
 worker/                              ✅ RQ worker — orchestration glue only
-├── Dockerfile                      installs shared/ first, then worker requirements
+├── Dockerfile                      installs reva from project root first, then worker requirements
 ├── requirements.txt                worker-only: rq, redis
-├── requirements-dev.txt            adds -e ../shared and pytest
+├── requirements-dev.txt            adds -e .. (project root) and pytest
 ├── README.md
 └── worker/
     ├── __init__.py
@@ -68,6 +67,56 @@ worker/                              ✅ RQ worker — orchestration glue only
     ├── tasks.py                    ✅ stable enqueue path (re-exports run_review)
     ├── settings.py                 ✅ frozen Settings dataclass; from_env classmethod
     └── main.py                     ✅ load Settings → build context → start RQ worker
+
+api/                                 ✅ FastAPI webhook receiver
+├── Dockerfile                      installs reva from root, then api requirements
+├── requirements.txt                fastapi, uvicorn[standard]
+├── requirements-dev.txt            adds -e .. and pytest + httpx
+├── app/
+│   ├── __init__.py
+│   ├── main.py                     ✅ lifespan: migrate + set app.state.db/settings
+│   ├── settings.py                 ✅ frozen Settings dataclass; from_env classmethod
+│   ├── security.py                 ✅ verify_signature (HMAC-SHA256, constant-time)
+│   ├── dependencies.py             ✅ get_db / get_settings FastAPI DI helpers
+│   └── routes/
+│       ├── webhooks.py             ✅ POST /webhooks/github — event store + debounce upsert
+│       └── health.py               ✅ GET /health — SELECT 1 liveness
+└── tests/
+    ├── __init__.py
+    ├── conftest.py                 ✅ adds api/ + project root to sys.path
+    └── test_webhooks.py            ✅ 12 tests; TestClient + StaticPool SQLite in-memory
+
+scheduler/                          ✅ Standalone poller — enqueues into RQ
+├── Dockerfile                      installs reva from root, then scheduler requirements
+├── requirements.txt                rq, redis
+├── requirements-dev.txt            adds -e .. and pytest
+├── scheduler/
+│   ├── __init__.py
+│   ├── main.py                     ✅ SIGTERM/SIGINT-safe loop; configurable poll_interval_seconds
+│   ├── poller.py                   ✅ Poller.poll() — fetch due rows, mark consumed, idempotency check, enqueue
+│   └── settings.py                 ✅ frozen Settings dataclass; from_env classmethod
+└── tests/
+    ├── __init__.py
+    ├── conftest.py                 ✅ adds scheduler/ + project root to sys.path
+    └── test_poller.py              ✅ 10 tests; FakeQueue + SQLite in-memory
+
+nginx/                               ✅ Nginx reverse proxy (production)
+├── Dockerfile                      nginx:1.27-alpine + template substitution
+├── nginx.conf                      JSON access log, 10m client_max_body_size
+└── templates/
+    └── reva.conf.template          rate-limited webhook + /api/ + /health proxies;
+                                    ${REVA_DOMAIN} substituted at container start
+
+docker-compose.yml                   ✅ Dev compose (direct ports, bind-mount PEM)
+docker-compose.prod.yml              ✅ Prod compose (Nginx, certbot, Docker secrets)
+.env.example                         Required env vars with comments
+.gitignore                           Ignores .env, secrets/, .venv/, __pycache__
+Makefile                             dev / prod / deploy / logs / test / scale targets
+scripts/
+├── deploy.sh                        git pull → build → stop → up -d → health poll
+└── setup-letsencrypt.sh             certbot standalone; run once before first deploy
+secrets/
+└── .gitkeep                         directory tracked; *.pem files gitignored
 
 db/migrations/                       ✅ Postgres DDL applied at startup
 ├── 001_initial.sql
@@ -123,8 +172,14 @@ Legend: ✅ = functional, 🟡 = interface locked but body stubbed.
 | Migration runner | **At process startup**, idempotent. Tracks state in `schema_migrations`. Plain SQL files (no Alembic). | Both worker and api call `Database.migrate()` on boot; first one wins, second is a no-op. |
 | Test DB | **SQLite in-memory.** Postgres-only features (JSONB ops, partial-index WHERE) are dialect-guarded; `_PK` variant downgrades `BIGINT PRIMARY KEY` → `INTEGER PRIMARY KEY` so SQLite autoincrement works. | Fast feedback (no Docker). Known trade-off: prod-only behavior isn't exercised. |
 | Idempotency | All write helpers are idempotent on natural keys: `review_runs(repo, pr, head_sha, review_mode)`, `repositories.github_repository_id`, `pull_requests(repository_id, pr_number)`, `pending_reviews(repository_id, pr_number)`, `github_events.delivery_id`. | RQ retries don't create duplicates; webhook redeliveries are safe. |
-| Code sharing | **`shared/reva/` extracted as an installable package** (`reva-shared`). Worker, api, and scheduler all `pip install ./shared`. | Single source for types/clients/db/formatters across processes. Imports: `from reva.X import ...` for shared, `from worker.X import ...` for worker-internal orchestration. |
-| Scheduler topology | **Separate process / container** (planned, not yet built). Polls `pending_reviews` and enqueues into RQ. | Independent scaling and lifecycle from the api. |
+| Code sharing | **`reva/` at project root as an installable package** (`reva-shared`). Worker, api, and scheduler all `pip install .` from the root. | Single source for types/clients/db/formatters across processes. Imports: `from reva.X import ...` for shared, `from worker.X import ...` for worker-internal orchestration. |
+| Scheduler topology | **Separate container**. Polls `pending_reviews` and enqueues into RQ. | Independent scaling and lifecycle from the api; both can restart without affecting the other. |
+| Webhook raw body | FastAPI `await request.body()` called **before** JSON parse; stored bytes passed to HMAC verifier. | Standard GitHub webhook security pattern — signature covers the exact bytes GitHub sent. |
+| Scheduler consume-first | Poller marks `consumed=True` **before** enqueuing into RQ. | If the process crashes after marking but before enqueuing, the row is lost — acceptable. The alternative (enqueue-then-mark) risks double-enqueue which is harder to recover from. Idempotency in `record_review_started` is the second line of defence. |
+| Test DB (api) | `StaticPool` + `check_same_thread=False` for SQLite in-memory in api tests. | FastAPI `TestClient` runs sync handlers in a threadpool; without `StaticPool` each thread gets a fresh empty in-memory DB, missing all tables created in the fixture. |
+| Build context | **Project root** for all three service Dockerfiles. | All Dockerfiles do `COPY pyproject.toml . && COPY reva/ ./reva/` so they need to see the root-level installable package. Compose: `context: . / dockerfile: api/Dockerfile`. |
+| Nginx domain config | **Template substitution** (`nginx/templates/reva.conf.template`). `${REVA_DOMAIN}` substituted by the nginx entrypoint via `NGINX_ENVSUBST_FILTER=REVA_DOMAIN`. | Keeps the nginx image stateless (no rebuild needed for domain change). Nginx variables like `$host` are left untouched because the filter is scoped to `REVA_DOMAIN`. |
+| Private key delivery | **Bind-mount** (`./secrets/github-app-private-key.pem`) in dev; **Docker secrets** (`/run/secrets/github_private_key`) in prod. Both cases read via `GITHUB_PRIVATE_KEY_PATH`. | Docker secrets are the correct prod pattern — file is injected via tmpfs, not exposed in `docker inspect` env. Dev uses a bind-mount for convenience. |
 
 ## Contracts you can rely on
 
@@ -138,11 +193,11 @@ Legend: ✅ = functional, 🟡 = interface locked but body stubbed.
 
 ### Next slice candidates (pick one)
 
-1. **Slice 9b — `api/` + `scheduler/`** — Now that `shared/` exists, build the FastAPI webhook receiver (writes events, upserts repo/pr/pending_review) and the separate scheduler container (polls pending_reviews, enqueues into RQ). Doc 04 + 05. After this, real PR pushes flow end-to-end through REVA. Plan in earlier message holds: ~30 new tests, two new containers, deferred internal `/api/v1/*` endpoints and comment triggers.
+1. **Internal API** (`api/routes/v1/`) — `/api/v1/repos`, `/api/v1/reviews`, `/api/v1/findings`, etc. Needed by the TUI. Deferred from slice 9b. Doc 04.
 
-2. **`docker-compose.yml` + Nginx** — wire up Postgres + Redis + worker + api + scheduler + Nginx (TLS). Doc 09. Can ship before 9b if you want to bring up Postgres/Redis first.
+2. **TUI** (`tui/`) — Bubble Tea dashboard. Doc 10. Depends on the internal API existing.
 
-3. **TUI** (`tui/`) — Bubble Tea. Doc 10. Depends on the api existing.
+3. **Google Chat notifications** — `runner.py` already has a placeholder. Add `GOOGLE_CHAT_WEBHOOK_URL` to worker Settings and post a summary card after review completion.
 
 ### Deferred work (tracked here so it doesn't get lost)
 
@@ -184,24 +239,31 @@ Note: ARIA inside `system.md`-quoted prompt content in `doc/07` and elsewhere is
 - **Token estimate is `len(diff) // 4`** — coarse but cheap. Don't replace with a tokenizer unless we see misclassification in production; the cost of being too conservative is just declining a PR.
 - **`Reviewer` takes `RepoLookup` for owner/name** rather than touching SQLAlchemy. When implementing the DB layer, expose `RepoLookup` as a thin wrapper around session queries, NOT as a model method.
 - **`prompt_builder._read` opens files at call time**, not at startup. Hot-reload of prompts works without restarting the worker. If we add a file watcher later, this design supports it.
-- **No git repo yet.** When you run `git init`, do it at `/Users/joseph/Projects/cu_reva/` so `doc/` and `worker/` are both tracked.
+- **Git repo is initialized** at the project root. All of `doc/`, `reva/`, `worker/`, `prompts/`, and `db/` are tracked under the same repo.
 
 ## Verification commands
 
 ```bash
 # 1. Ensure Python 3.14 is available
 brew install python@3.14            # macOS; use distro package on Linux
-/opt/homebrew/bin/python3.14 --version
+python3.14 --version                # Linux: install via distro or pyenv
 
-# 2. Create / refresh venv
-cd /Users/joseph/Projects/cu_reva/worker
-/opt/homebrew/bin/python3.14 -m venv .venv
-.venv/bin/pip install -U pip
+# 2. Worker tests (116)
+cd worker && python3.14 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
-
-# 3. Run the test suite
 .venv/bin/python -m pytest tests/ -v
-# Expected: 12 passed
+
+# 3. API tests (12)
+cd ../api && python3.14 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/ -v
+
+# 4. Scheduler tests (10)
+cd ../scheduler && python3.14 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/ -v
+
+# Expected totals: 116 + 12 + 10 = 138 passed
 ```
 
 ## Pointers

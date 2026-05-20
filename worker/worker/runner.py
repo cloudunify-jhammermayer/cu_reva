@@ -27,6 +27,7 @@ from reva.db import (
     Database,
     DatabaseRepoLookup,
     create_engine_from_url,
+    repo_lookup,
     writers,
 )
 from reva.diff_utils import parse_diff_hunks
@@ -80,7 +81,7 @@ def get_context() -> WorkerContext:
 
 
 def build_worker_context(settings: Settings) -> WorkerContext:
-    """Construct the singletons. Runs migrations as a side effect."""
+    """Construct the singletons, register them as the process context, and run migrations."""
     engine = create_engine_from_url(settings.database_url)
     db = Database(engine)
     db.migrate(settings.migrations_dir)
@@ -98,7 +99,9 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         repos=DatabaseRepoLookup(db),
         prompts=prompts,
     )
-    return WorkerContext(db=db, claude=claude, github=github, reviewer=reviewer)
+    context = WorkerContext(db=db, claude=claude, github=github, reviewer=reviewer)
+    set_context(context)
+    return context
 
 
 # ---------------------------------------------------------------- task entry
@@ -153,8 +156,8 @@ def run_review(job_params: dict) -> dict:
         writers.record_review_stale(ctx.db, params)
 
     # Post to GitHub.
-    owner, name = writers.get_owner_name(ctx.db, params.repository_id)
-    pr_basic = writers.get_pr_basic(ctx.db, params.pull_request_id)
+    owner, name = repo_lookup.get_owner_name(ctx.db, params.repository_id)
+    pr_basic = repo_lookup.get_pr_basic(ctx.db, params.pull_request_id)
     pr_number = pr_basic["pr_number"]
     token = ctx.github.get_installation_token(params.installation_id)
 
@@ -190,8 +193,7 @@ def _post_completed(
     pr_number: int,
 ) -> tuple[int, int]:
     """Post a completed review: PR Review (with inline comments) + Check Run."""
-    diff = ctx.github.get_pull_request_diff(token, owner, name, pr_number)
-    hunks = parse_diff_hunks(diff)
+    hunks = parse_diff_hunks(result.diff)
     inline, unmapped = split_findings(result.findings, hunks)
 
     body = format_pr_review_body(result, unmapped=unmapped, run_id=run_id)
@@ -286,7 +288,7 @@ def _post_failure_check_run(
     """Best-effort failure Check Run on PermanentError. Posting failures here
     must not mask the original error, so we swallow exceptions."""
     try:
-        owner, name = writers.get_owner_name(ctx.db, params.repository_id)
+        owner, name = repo_lookup.get_owner_name(ctx.db, params.repository_id)
         token = ctx.github.get_installation_token(params.installation_id)
         failed_result = ReviewResult(
             status="failed",

@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from reva.prompt_builder import PromptBuilder
+from reva.types import RepoConfig
 
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
 
@@ -27,7 +28,7 @@ def test_prompts_dir_exists():
 
 
 def test_system_blocks_baseline(builder):
-    blocks = builder.build_system_blocks({}, claude_md=None)
+    blocks = builder.build_system_blocks(RepoConfig(), claude_md=None)
     assert len(blocks) == 1
     assert blocks[0]["type"] == "text"
     assert "REVA" in blocks[0]["text"]
@@ -36,14 +37,14 @@ def test_system_blocks_baseline(builder):
 
 
 def test_system_blocks_with_odoo(builder):
-    blocks = builder.build_system_blocks({"framework": "odoo"}, claude_md=None)
+    blocks = builder.build_system_blocks(RepoConfig(framework="odoo"), claude_md=None)
     assert len(blocks) == 2
     assert "Odoo 19" in blocks[1]["text"]
     assert blocks[1]["cache_control"] == {"type": "ephemeral"}
 
 
 def test_system_blocks_with_claude_md(builder):
-    blocks = builder.build_system_blocks({}, claude_md="This module handles money.")
+    blocks = builder.build_system_blocks(RepoConfig(), claude_md="This module handles money.")
     assert len(blocks) == 2
     assert "Repository-Specific Instructions" in blocks[1]["text"]
     assert "handles money" in blocks[1]["text"]
@@ -51,7 +52,7 @@ def test_system_blocks_with_claude_md(builder):
 
 def test_system_blocks_full_set(builder):
     blocks = builder.build_system_blocks(
-        {"framework": "odoo", "custom_instructions": "Be strict on currency_id."},
+        RepoConfig(framework="odoo", custom_instructions="Be strict on currency_id."),
         claude_md="CLAUDE.md content here.",
     )
     # system + odoo + claude_md + custom = 4

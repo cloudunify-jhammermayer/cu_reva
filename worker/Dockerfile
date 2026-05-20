@@ -9,11 +9,12 @@ RUN useradd --create-home --shell /bin/bash worker
 WORKDIR /app
 
 # Build context for this Dockerfile is the project root (see docker-compose),
-# so `worker/`, `shared/`, and `prompts/` are all reachable here.
+# so `worker/`, `reva/`, and `prompts/` are all reachable here.
 
-# 1. Install the shared library first so its deps + pinned versions land.
-COPY shared/ ./shared/
-RUN pip install --no-cache-dir ./shared
+# 1. Install the reva library first so its deps + pinned versions land.
+COPY pyproject.toml .
+COPY reva/ ./reva/
+RUN pip install --no-cache-dir .
 
 # 2. Install worker-only deps (RQ, redis client).
 COPY worker/requirements.txt ./worker-requirements.txt

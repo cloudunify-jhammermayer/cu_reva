@@ -15,7 +15,11 @@
       "Bash(mv worker/worker/errors.py shared/reva/errors.py)",
       "Bash(mv worker/worker/review_tool.py shared/reva/review_tool.py)",
       "Bash(mv worker/worker/claude_client.py shared/reva/claude_client.py)",
-      "Bash(mv worker/worker/cost.py shared/reva/cost.py)"
+      "Bash(mv worker/worker/cost.py shared/reva/cost.py)",
+      "Bash(python3.14 -m venv .venv)",
+      "Bash(mv shared/reva reva)",
+      "Bash(mv shared/pyproject.toml pyproject.toml)",
+      "Bash(rm -rf shared/)"
     ]
   }
 }
