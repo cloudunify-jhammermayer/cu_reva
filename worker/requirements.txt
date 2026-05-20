@@ -1,0 +1,5 @@
+# Worker-only dependencies. Shared deps (httpx, sqlalchemy, pydantic, etc.)
+# are pulled in transitively by the `reva-shared` package, installed from
+# ../shared (see Dockerfile + dev install).
+rq>=1.16.0
+redis>=5.0.0

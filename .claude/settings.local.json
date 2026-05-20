@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 *)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/python -m pytest tests/ -v)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(/usr/bin/python3 --version)",
+      "Bash(.venv/bin/python --version)",
+      "Bash(.venv/bin/python -c \"import ast; ast.parse\\(open\\('worker/reviewer.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(.venv/bin/python -c \"from worker.reviewer import Reviewer, _cap_findings, _recompute_risk_level, _matches_any; print\\('imports OK'\\)\")",
+      "Bash(.venv/bin/python -m pytest tests/)",
+      "Bash(.venv/bin/python *)",
+      "Bash(mv worker/worker/types.py shared/reva/types.py)",
+      "Bash(mv worker/worker/errors.py shared/reva/errors.py)",
+      "Bash(mv worker/worker/review_tool.py shared/reva/review_tool.py)",
+      "Bash(mv worker/worker/claude_client.py shared/reva/claude_client.py)",
+      "Bash(mv worker/worker/cost.py shared/reva/cost.py)"
+    ]
+  }
+}

@@ -1,0 +1,441 @@
+"""Tests for Reviewer.execute.
+
+Uses in-memory fakes for GitHubReader, RepoLookup, ClaudeClient, and
+PromptBuilder so we never touch the network or the filesystem.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import pytest
+
+from reva.errors import PermanentError, TransientError
+from worker.reviewer import (
+    Reviewer,
+    _cap_findings,
+    _recompute_risk_level,
+)
+from reva.types import ClaudeResponse, Finding, JobParams
+
+
+# --- Fakes --------------------------------------------------------------------
+
+
+@dataclass
+class FakeGitHub:
+    diff: str = "diff --git a/x.py b/x.py\n+++ b/x.py\n+ added\n- removed\n"
+    files: list[dict] = field(default_factory=lambda: [{"filename": "x.py"}])
+    head_sha: str = "deadbeef"
+    file_contents: dict[str, str | None] = field(default_factory=dict)
+    diff_calls: int = 0
+    token_calls: int = 0
+
+    def get_installation_token(self, installation_id: int) -> str:
+        self.token_calls += 1
+        return "ghs_tok"
+
+    def get_pull_request(self, token, owner, repo, pr_number) -> dict:
+        return {"head": {"sha": self.head_sha}, "body": "PR body from GitHub"}
+
+    def get_pull_request_diff(self, token, owner, repo, pr_number) -> str:
+        self.diff_calls += 1
+        return self.diff
+
+    def get_changed_files(self, token, owner, repo, pr_number) -> list[dict]:
+        return self.files
+
+    def get_file_content(self, token, owner, repo, path, ref) -> str | None:
+        return self.file_contents.get(path)
+
+
+@dataclass
+class FakeRepos:
+    owner: str = "acme"
+    name: str = "widgets"
+    pr: dict = field(
+        default_factory=lambda: {
+            "pr_number": 42,
+            "title": "Add foo",
+            "body": "",
+            "base_branch": "main",
+            "head_branch": "feat/foo",
+        }
+    )
+
+    def get_owner_name(self, repository_id: int) -> tuple[str, str]:
+        return self.owner, self.name
+
+    def get_pr_basic(self, pull_request_id: int) -> dict:
+        return self.pr
+
+
+@dataclass
+class FakeClaude:
+    response: ClaudeResponse | None = None
+    raise_exc: Exception | None = None
+    default_model: str = "claude-sonnet-4-6"
+    deep_model: str = "claude-opus-4-7"
+    last_model: str | None = None
+
+    def review(self, system_blocks, user_prompt, tools, tool_choice, model=None, max_tokens=8192):
+        self.last_model = model
+        if self.raise_exc:
+            raise self.raise_exc
+        return self.response
+
+
+class FakePrompts:
+    """Stand-in for PromptBuilder that does no file IO."""
+
+    def __init__(self, version: str = "v1.0") -> None:
+        self.version = version
+        self.last_system_blocks: list[dict] | None = None
+
+    def build_system_blocks(self, repo_config: dict, claude_md: str | None) -> list:
+        blocks = [{"type": "text", "text": "SYSTEM"}]
+        if claude_md:
+            blocks.append({"type": "text", "text": claude_md})
+        custom = repo_config.get("custom_instructions")
+        if isinstance(custom, str) and custom.strip():
+            blocks.append({"type": "text", "text": custom})
+        self.last_system_blocks = blocks
+        return blocks
+
+    def build_user_prompt(self, **kwargs) -> str:
+        return "USER PROMPT"
+
+    def get_version(self) -> str:
+        return self.version
+
+
+def _claude_response_with_findings(findings: list[dict]) -> ClaudeResponse:
+    return ClaudeResponse(
+        model="claude-sonnet-4-6",
+        stop_reason="tool_use",
+        tool_use_input={
+            "summary": "Looks fine overall.",
+            "risk_level": "low",
+            "findings": findings,
+        },
+        input_tokens=100,
+        output_tokens=50,
+        cache_read_tokens=2000,
+        cache_creation_tokens=300,
+    )
+
+
+def _make_reviewer(**overrides) -> tuple[Reviewer, FakeGitHub, FakeRepos, FakeClaude, FakePrompts]:
+    github = overrides.pop("github", None) or FakeGitHub()
+    repos = overrides.pop("repos", None) or FakeRepos()
+    claude = overrides.pop("claude", None) or FakeClaude()
+    prompts = overrides.pop("prompts", None) or FakePrompts()
+    reviewer = Reviewer(
+        claude=claude,  # type: ignore[arg-type]
+        github=github,
+        repos=repos,
+        prompts=prompts,  # type: ignore[arg-type]
+        **overrides,
+    )
+    return reviewer, github, repos, claude, prompts
+
+
+def _params(**overrides) -> JobParams:
+    base = {
+        "repository_id": 1,
+        "pull_request_id": 1,
+        "head_sha": "deadbeef",
+        "installation_id": 100,
+        "review_mode": "diff",
+        "trigger_event": "opened",
+    }
+    base.update(overrides)
+    return JobParams(**base)
+
+
+# --- happy path ---------------------------------------------------------------
+
+
+def test_happy_path_returns_completed_result():
+    finding = {
+        "severity": "minor",
+        "category": "maintainability",
+        "file": "x.py",
+        "line_start": 10,
+        "line_end": 10,
+        "title": "Use clearer variable name",
+        "body": "Detail here.",
+        "suggestion": None,
+        "confidence": 0.7,
+        "is_odoo_specific": False,
+    }
+    claude = FakeClaude(response=_claude_response_with_findings([finding]))
+    reviewer, gh, _, _, prompts = _make_reviewer(claude=claude)
+
+    result = reviewer.execute(_params())
+
+    assert result.status == "completed"
+    assert result.summary == "Looks fine overall."
+    assert len(result.findings) == 1
+    assert result.findings[0].title == "Use clearer variable name"
+    assert result.risk_level == "low"
+    assert result.model == "claude-sonnet-4-6"
+    assert result.prompt_version == "v1.0"
+    assert result.input_tokens == 100
+    assert result.cache_read_tokens == 2000
+    assert result.cache_creation_tokens == 300
+    assert result.estimated_cost_usd > 0
+    assert result.duration_ms is not None and result.duration_ms >= 0
+    assert gh.diff_calls == 1
+    assert gh.token_calls == 1
+
+
+def test_deep_mode_uses_opus_model():
+    claude = FakeClaude(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(claude=claude)
+    reviewer.execute(_params(review_mode="deep"))
+    assert claude.last_model == "claude-opus-4-7"
+
+
+def test_default_mode_uses_sonnet_model():
+    claude = FakeClaude(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(claude=claude)
+    reviewer.execute(_params(review_mode="diff"))
+    assert claude.last_model == "claude-sonnet-4-6"
+
+
+# --- stale --------------------------------------------------------------------
+
+
+def test_stale_head_returns_stale_without_fetching_diff():
+    github = FakeGitHub(head_sha="newsha")  # current SHA differs from job
+    reviewer, gh, *_ = _make_reviewer(github=github)
+    result = reviewer.execute(_params(head_sha="deadbeef"))
+    assert result.status == "stale"
+    assert gh.diff_calls == 0
+
+
+# --- declined paths -----------------------------------------------------------
+
+
+def test_decline_when_diff_too_many_lines():
+    big_diff = "\n".join(f"+line {i}" for i in range(2001))
+    github = FakeGitHub(diff=big_diff)
+    reviewer, *_ = _make_reviewer(github=github)
+    result = reviewer.execute(_params())
+    assert result.status == "declined"
+    assert "lines" in (result.decline_reason or "").lower()
+
+
+def test_decline_when_diff_exceeds_token_budget():
+    # Many short '+' lines so line count stays under default 1000 but
+    # token estimate (chars/4) exceeds the configured 200 cap.
+    diff = "\n".join(f"+x{i:08d}" for i in range(500))  # ~5000 chars
+    github = FakeGitHub(diff=diff)
+    reviewer, *_ = _make_reviewer(github=github, max_diff_tokens=200)
+    result = reviewer.execute(_params())
+    assert result.status == "declined"
+    assert "token" in (result.decline_reason or "").lower()
+
+
+def test_per_repo_config_tightens_max_diff_lines():
+    diff = "\n".join(f"+line {i}" for i in range(150))  # 150 lines
+    github = FakeGitHub(
+        diff=diff,
+        file_contents={".claude-review.yml": "max_diff_lines: 100\n"},
+    )
+    reviewer, *_ = _make_reviewer(github=github)  # default cap is 1000
+    result = reviewer.execute(_params())
+    assert result.status == "declined"
+    assert "100" in (result.decline_reason or "")
+
+
+def test_decline_when_all_files_match_skip_paths():
+    github = FakeGitHub(
+        files=[{"filename": "package-lock.json"}, {"filename": "yarn.lock"}],
+        file_contents={".claude-review.yml": "skip_paths:\n  - '*.lock'\n  - '*.json'\n"},
+    )
+    reviewer, *_ = _make_reviewer(github=github)
+    result = reviewer.execute(_params())
+    assert result.status == "declined"
+    assert "skip_paths" in (result.decline_reason or "")
+
+
+# --- repo config edge cases ---------------------------------------------------
+
+
+def test_malformed_claude_review_yml_falls_back_to_empty():
+    github = FakeGitHub(
+        file_contents={".claude-review.yml": "max_diff_lines: [unclosed"},
+    )
+    claude = FakeClaude(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, claude=claude)
+    result = reviewer.execute(_params())
+    # Did NOT decline — default limits applied since the YAML was unparseable.
+    assert result.status == "completed"
+
+
+def test_custom_instructions_appended_as_block():
+    github = FakeGitHub(
+        file_contents={
+            ".claude-review.yml": (
+                "custom_instructions: |\n"
+                "  This module handles money. Be strict about currency_id.\n"
+            )
+        }
+    )
+    claude = FakeClaude(response=_claude_response_with_findings([]))
+    reviewer, _, _, _, prompts = _make_reviewer(github=github, claude=claude)
+    reviewer.execute(_params())
+    assert prompts.last_system_blocks is not None
+    assert any(
+        "currency_id" in block["text"] for block in prompts.last_system_blocks
+    )
+
+
+def test_missing_claude_md_and_yml_still_succeeds():
+    github = FakeGitHub(file_contents={})  # nothing fetched
+    claude = FakeClaude(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, claude=claude)
+    result = reviewer.execute(_params())
+    assert result.status == "completed"
+
+
+# --- finding cap + risk recompute --------------------------------------------
+
+
+def test_findings_capped_to_15_by_severity_and_confidence():
+    # 17 minor findings + 1 critical buried at the end. Critical must survive.
+    findings = [
+        {
+            "severity": "minor",
+            "category": "maintainability",
+            "title": f"Minor #{i}",
+            "body": "x",
+            "confidence": 0.9,
+            "is_odoo_specific": False,
+        }
+        for i in range(17)
+    ]
+    findings.append(
+        {
+            "severity": "critical",
+            "category": "security",
+            "title": "SQL injection",
+            "body": "x",
+            "confidence": 0.5,
+            "is_odoo_specific": False,
+        }
+    )
+    claude = FakeClaude(response=_claude_response_with_findings(findings))
+    reviewer, *_ = _make_reviewer(claude=claude)
+    result = reviewer.execute(_params())
+    assert len(result.findings) == 15
+    assert any(f.severity == "critical" for f in result.findings)
+    # risk recomputed deterministically — critical present -> critical
+    assert result.risk_level == "critical"
+
+
+def test_risk_level_recomputed_when_no_critical_or_major():
+    findings = [
+        {
+            "severity": "minor",
+            "category": "style",
+            "title": f"m {i}",
+            "body": "x",
+            "confidence": 0.6,
+            "is_odoo_specific": False,
+        }
+        for i in range(4)
+    ]
+    claude = FakeClaude(response=_claude_response_with_findings(findings))
+    reviewer, *_ = _make_reviewer(claude=claude)
+    result = reviewer.execute(_params())
+    # >= 3 minor -> medium
+    assert result.risk_level == "medium"
+
+
+# --- error propagation --------------------------------------------------------
+
+
+def test_invalid_finding_shape_raises_permanent_error():
+    bad = {
+        "severity": "blocker",  # not in Literal
+        "category": "bug",
+        "title": "x",
+        "body": "x",
+        "confidence": 0.5,
+        "is_odoo_specific": False,
+    }
+    claude = FakeClaude(response=_claude_response_with_findings([bad]))
+    reviewer, *_ = _make_reviewer(claude=claude)
+    with pytest.raises(PermanentError):
+        reviewer.execute(_params())
+
+
+def test_missing_summary_raises_permanent_error():
+    claude = FakeClaude(
+        response=ClaudeResponse(
+            model="claude-sonnet-4-6",
+            stop_reason="tool_use",
+            tool_use_input={"summary": "", "risk_level": "low", "findings": []},
+            input_tokens=1,
+            output_tokens=1,
+        )
+    )
+    reviewer, *_ = _make_reviewer(claude=claude)
+    with pytest.raises(PermanentError):
+        reviewer.execute(_params())
+
+
+def test_transient_error_propagates():
+    claude = FakeClaude(raise_exc=TransientError("rate limited", retry_after=30))
+    reviewer, *_ = _make_reviewer(claude=claude)
+    with pytest.raises(TransientError):
+        reviewer.execute(_params())
+
+
+# --- pure helper tests --------------------------------------------------------
+
+
+def _f(severity: str, confidence: float, title: str = "t") -> Finding:
+    return Finding(
+        severity=severity,  # type: ignore[arg-type]
+        category="bug",
+        title=title,
+        body="x",
+        confidence=confidence,
+        is_odoo_specific=False,
+    )
+
+
+def test_cap_findings_ranks_by_severity_times_confidence():
+    # critical * 0.5 = 2.0 beats minor * 0.9 = 1.8 — high-severity wins
+    # at comparable confidence, per pr-review-requirements §5 rule 10.
+    high = _f("critical", 0.5, "keep-critical")
+    middling = [_f("minor", 0.9, f"minor-{i}") for i in range(20)]
+    capped = _cap_findings([*middling, high], 15)
+    assert any(f.title == "keep-critical" for f in capped)
+
+
+def test_cap_findings_drops_low_confidence_high_severity_per_spec():
+    # Spec rule: severity * confidence determines rank. A 0.3-confidence
+    # critical (1.2) SHOULD lose to a 1.0-confidence minor (2.0). This
+    # documents the trade-off so anyone changing the spec sees the test.
+    low_conf_critical = _f("critical", 0.3, "low-conf-critical")
+    high_conf_minors = [_f("minor", 1.0, f"m{i}") for i in range(20)]
+    capped = _cap_findings([low_conf_critical, *high_conf_minors], 15)
+    assert all(f.title != "low-conf-critical" for f in capped)
+
+
+def test_cap_findings_noop_when_under_limit():
+    findings = [_f("minor", 1.0)] * 5
+    assert _cap_findings(findings, 15) is findings
+
+
+def test_recompute_risk_level_levels():
+    assert _recompute_risk_level([_f("critical", 0.5)]) == "critical"
+    assert _recompute_risk_level([_f("major", 0.5)]) == "high"
+    assert _recompute_risk_level([_f("minor", 0.5)] * 3) == "medium"
+    assert _recompute_risk_level([_f("minor", 0.5)]) == "low"
+    assert _recompute_risk_level([]) == "low"
