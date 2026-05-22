@@ -43,7 +43,7 @@ func (d Dashboard) update(msg tea.Msg) (Dashboard, tea.Cmd) {
 	return d, nil
 }
 
-func (d Dashboard) view(w, h int) string {
+func (d Dashboard) view(w, h, pendingCount int) string {
 	d.width = w
 	d.height = h
 
@@ -67,7 +67,7 @@ func (d Dashboard) view(w, h int) string {
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
 	findingsCard := d.renderFindingsCard(m.Findings24h, col)
-	costCard := d.renderCostCard(m, col)
+	costCard := d.renderCostCard(m, pendingCount, col)
 	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, findingsCard, costCard)
 
 	refreshNote := styleSubtitle.Render(fmt.Sprintf("  refreshed %s · auto-refresh 30s",
@@ -112,7 +112,7 @@ func (d Dashboard) renderFindingsCard(fc api.FindingCounts, w int) string {
 	return styleBorder.Width(w).Render(b.String())
 }
 
-func (d Dashboard) renderCostCard(m *api.DashboardMetrics, w int) string {
+func (d Dashboard) renderCostCard(m *api.DashboardMetrics, pendingCount, w int) string {
 	var b strings.Builder
 	b.WriteString(styleTitle.Render("Cost (7 d)") + "\n")
 	b.WriteString(fmt.Sprintf("  Total   $%.4f\n", m.TotalCost7d))
@@ -120,6 +120,20 @@ func (d Dashboard) renderCostCard(m *api.DashboardMetrics, w int) string {
 		b.WriteString(fmt.Sprintf("  Per PR  $%.4f\n", *m.AvgCostPerReview7d))
 	} else {
 		b.WriteString("  Per PR  " + styleSubtitle.Render("—") + "\n")
+	}
+	if pendingCount > 0 {
+		b.WriteString(fmt.Sprintf("  Queue   %s pending\n",
+			lipgloss.NewStyle().Foreground(colorYellow).Render(fmt.Sprintf("%d", pendingCount))))
+	} else {
+		b.WriteString(fmt.Sprintf("  Queue   %s\n",
+			styleStatusCompleted.Render("0 pending")))
+	}
+	if m.ActiveWorkers > 0 {
+		b.WriteString(fmt.Sprintf("  Workers %s\n",
+			styleStatusCompleted.Render(fmt.Sprintf("%d active", m.ActiveWorkers))))
+	} else {
+		b.WriteString(fmt.Sprintf("  Workers %s\n",
+			styleSubtitle.Render("0 active")))
 	}
 	return styleBorder.Width(w).Render(b.String())
 }

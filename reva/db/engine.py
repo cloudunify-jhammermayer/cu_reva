@@ -23,6 +23,7 @@ from pathlib import Path
 
 import structlog
 from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 logger = structlog.get_logger()
@@ -77,12 +78,26 @@ def migrate(engine: Engine, migrations_dir: str | Path) -> list[int]:
             continue
         sql = path.read_text()
         logger.info("migration_applying", version=version, file=path.name)
-        with engine.begin() as conn:
-            conn.execute(text(sql))
-            conn.execute(
-                text("INSERT INTO schema_migrations (version) VALUES (:v)"),
-                {"v": version},
-            )
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(sql))
+                conn.execute(
+                    text("INSERT INTO schema_migrations (version) VALUES (:v)"),
+                    {"v": version},
+                )
+        except (IntegrityError, OperationalError):
+            # Another process applied this migration concurrently (IntegrityError on
+            # the schema_migrations INSERT, or DDL "already exists" OperationalError).
+            # Verify by re-reading the applied set; skip only if confirmed applied.
+            with engine.connect() as c:
+                confirmed = c.execute(
+                    text("SELECT 1 FROM schema_migrations WHERE version = :v"),
+                    {"v": version},
+                ).first()
+            if confirmed:
+                logger.info("migration_applied_by_peer", version=version, file=path.name)
+                continue
+            raise
         newly_applied.append(version)
 
     return newly_applied

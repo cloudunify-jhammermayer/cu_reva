@@ -2,8 +2,10 @@ package ui
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"reva-tui/internal/api"
@@ -24,15 +26,26 @@ type Reviews struct {
 	height        int
 	focusLeft     bool
 	statusMsg     string
+	// filter state
+	filterMode   bool
+	repoInput    textinput.Model
+	statusFilter string // "", "completed", "failed", "stale"
+	authorFilter string
 }
 
 func newReviews(client api.ClientIface) Reviews {
-	return Reviews{client: client, loadingList: true, focusLeft: true}
+	ti := textinput.New()
+	ti.Placeholder = "repo or author…"
+	ti.CharLimit = 100
+	return Reviews{client: client, loadingList: true, focusLeft: true, repoInput: ti}
 }
 
 func (r Reviews) loadList() tea.Cmd {
+	repo := r.repoInput.Value()
+	status := r.statusFilter
+	author := r.authorFilter
 	return func() tea.Msg {
-		data, err := r.client.Reviews(100)
+		data, err := r.client.Reviews(100, repo, status, author)
 		return reviewsLoadedMsg{data: data, err: err}
 	}
 }
@@ -73,8 +86,65 @@ func (r Reviews) update(msg tea.Msg) (Reviews, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
-		visibleRows := r.listHeight()
+		// Filter mode: route most keys to the textinput
+		if r.filterMode {
+			switch m.String() {
+			case "esc":
+				r.filterMode = false
+				r.repoInput.Blur()
+				return r, nil
+			case "enter":
+				r.filterMode = false
+				r.repoInput.Blur()
+				r.loadingList = true
+				r.items = nil
+				r.statusMsg = ""
+				return r, r.loadList()
+			case "ctrl+c":
+				return r, tea.Quit
+			default:
+				var cmd tea.Cmd
+				r.repoInput, cmd = r.repoInput.Update(msg)
+				return r, cmd
+			}
+		}
+
+		visibleRows := r.listHeight() // rows, not display lines
 		switch m.String() {
+		case "/":
+			r.filterMode = true
+			r.repoInput.Focus()
+			return r, textinput.Blink
+		case "s":
+			switch r.statusFilter {
+			case "":
+				r.statusFilter = "completed"
+			case "completed":
+				r.statusFilter = "failed"
+			case "failed":
+				r.statusFilter = "stale"
+			default:
+				r.statusFilter = ""
+			}
+			r.loadingList = true
+			r.items = nil
+			r.statusMsg = ""
+			return r, r.loadList()
+		case "c":
+			// Clear all filters
+			r.repoInput.SetValue("")
+			r.statusFilter = ""
+			r.authorFilter = ""
+			r.loadingList = true
+			r.items = nil
+			r.statusMsg = ""
+			return r, r.loadList()
+		case "o":
+			if r.detail != nil {
+				url := fmt.Sprintf("https://github.com/%s/pull/%d",
+					r.detail.RepoFullName, r.detail.PRNumber)
+				_ = exec.Command("xdg-open", url).Start()
+			}
 		case "j", "down":
 			if r.cursor < len(r.items)-1 {
 				r.cursor++
@@ -120,7 +190,9 @@ func (r Reviews) update(msg tea.Msg) (Reviews, tea.Cmd) {
 }
 
 func (r Reviews) listHeight() int {
-	h := r.height - 4
+	// Each row renders as 2 display lines. Outer chrome: header(1) + filterLine(1)
+	// + blank(1) + border-top(1) + status(1) + border-bottom(1) = 6.
+	h := (r.height - 6) / 2
 	if h < 1 {
 		h = 1
 	}
@@ -128,7 +200,6 @@ func (r Reviews) listHeight() int {
 }
 
 func (r Reviews) view(w, h int) string {
-
 	leftW := w * 2 / 5
 	rightW := w - leftW - 1
 
@@ -139,21 +210,45 @@ func (r Reviews) view(w, h int) string {
 }
 
 func (r Reviews) renderList(w, h int) string {
+	// Build filter line (always 1 line to keep height stable)
+	var filterLine string
+	if r.filterMode {
+		label := styleSubtitle.Render(" / ")
+		filterLine = label + r.repoInput.View()
+		if r.statusFilter != "" {
+			filterLine += styleSubtitle.Render("  [s=" + r.statusFilter + "]")
+		}
+	} else {
+		var parts []string
+		if r.repoInput.Value() != "" {
+			parts = append(parts, "repo="+r.repoInput.Value())
+		}
+		if r.statusFilter != "" {
+			parts = append(parts, "s="+r.statusFilter)
+		}
+		if len(parts) > 0 {
+			filterLine = styleSubtitle.Render("  ▸ "+strings.Join(parts, " · ")) +
+				styleSubtitle.Render("  c=clear")
+		} else {
+			filterLine = styleSubtitle.Render("  / filter  s=status")
+		}
+	}
+
 	header := styleTitle.Padding(0, 1).Render(fmt.Sprintf("Reviews  (%d)", r.total))
 
 	if r.loadingList && len(r.items) == 0 {
-		content := lipgloss.Place(w, h-2, lipgloss.Center, lipgloss.Center,
+		content := lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
 			styleSubtitle.Render("Loading…"))
-		return lipgloss.JoinVertical(lipgloss.Left, header, content)
+		return lipgloss.JoinVertical(lipgloss.Left, header, filterLine, content)
 	}
 	if r.errList != nil {
-		return lipgloss.JoinVertical(lipgloss.Left, header, "",
+		return lipgloss.JoinVertical(lipgloss.Left, header, filterLine, "",
 			styleStatusFailed.Render("  "+r.errList.Error()))
 	}
 	if len(r.items) == 0 {
-		content := lipgloss.Place(w, h-2, lipgloss.Center, lipgloss.Center,
-			styleSubtitle.Render("No reviews yet"))
-		return lipgloss.JoinVertical(lipgloss.Left, header, content)
+		content := lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
+			styleSubtitle.Render("No reviews"))
+		return lipgloss.JoinVertical(lipgloss.Left, header, filterLine, content)
 	}
 
 	visibleRows := r.listHeight()
@@ -165,27 +260,27 @@ func (r Reviews) renderList(w, h int) string {
 	var rows []string
 	for i := r.offset; i < end; i++ {
 		item := r.items[i]
-		sym := statusSymbol(item.Status)
 		repo := truncate(item.RepoFullName, w-8)
-		line1 := fmt.Sprintf(" %s %s", sym, repo)
 		prTitle := truncate(fmt.Sprintf("  #%d %s", item.PRNumber, item.PRTitle), w-2)
-		line2 := styleSubtitle.Render(prTitle)
-
-		combined := line1 + "\n" + line2
+		var combined string
 		if i == r.cursor {
-			combined = styleSelected.Width(w - 2).Render(combined)
+			line1 := fmt.Sprintf(" %s %s", statusChar(item.Status), repo)
+			combined = styleSelected.Width(w - 2).Render(line1 + "\n" + prTitle)
+		} else {
+			line1 := fmt.Sprintf(" %s %s", statusSymbol(item.Status), repo)
+			combined = line1 + "\n" + styleSubtitle.Render(prTitle)
 		}
 		rows = append(rows, combined)
 	}
 
-	statusText := fmt.Sprintf("%d/%d  j/k  r=refresh  e=requeue", r.cursor+1, len(r.items))
+	var statusContent string
 	if r.statusMsg != "" {
-		statusText = r.statusMsg
+		statusContent = r.statusMsg
+	} else {
+		statusContent = styleSubtitle.Render(fmt.Sprintf("  %d/%d", r.cursor+1, len(r.items)))
 	}
-	status := styleStatusBar.Render(statusText)
 
-	// header outside the border for consistent visibility
-	innerH := h - 4 // header(1) + blank(1) + border(2)
+	innerH := h - 6 // header + filterLine + blank + border-top + pos + border-bottom
 	if innerH < 1 {
 		innerH = 1
 	}
@@ -193,10 +288,10 @@ func (r Reviews) renderList(w, h int) string {
 		lipgloss.JoinVertical(lipgloss.Left,
 			strings.Join(rows, "\n"),
 			"",
-			status,
+			statusContent,
 		),
 	)
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", list)
+	return lipgloss.JoinVertical(lipgloss.Left, header, filterLine, "", list)
 }
 
 func (r Reviews) renderDetail(w, h int) string {
@@ -243,6 +338,10 @@ func (r Reviews) renderDetail(w, h int) string {
 	if d.EstimatedCostUSD != nil {
 		b.WriteString(fmt.Sprintf("  Cost    %s\n", styleSubtitle.Render(fmt.Sprintf("$%.4f", *d.EstimatedCostUSD))))
 	}
+
+	// PR URL hint
+	prURL := fmt.Sprintf("https://github.com/%s/pull/%d", d.RepoFullName, d.PRNumber)
+	b.WriteString(fmt.Sprintf("  URL     %s\n", styleSubtitle.Render(truncate(prURL, w-12))))
 
 	// Summary
 	if d.Summary != nil && *d.Summary != "" {

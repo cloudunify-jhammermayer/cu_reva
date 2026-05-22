@@ -102,7 +102,7 @@ def test_check_run_title_lists_severities_present():
     assert "1 critical" in out["title"]
     assert "2 minor" in out["title"]
     assert out["summary"].startswith("## Review Summary")
-    assert "Risk Level" in out["summary"]
+    assert "**RISK**" in out["summary"]
     assert "Run #7" in out["summary"]
     assert "claude-sonnet-4-6" in out["summary"]
     assert "$0.0420" in out["summary"]
@@ -122,9 +122,9 @@ def test_pr_review_body_includes_counts_table_and_footer():
         unmapped=[],
         run_id=42,
     )
-    assert body.startswith("## 🔍 REVA Review")
-    assert "| 🔴 Critical | 1 |" in body
-    assert "| 🟡 Minor | 1 |" in body
+    assert body.startswith("## REVA · Review")
+    assert "**CRITICAL** `1`" in body
+    assert "**MINOR** `1`" in body
     assert "Run #42" in body
     assert "Other Observations" not in body
 
@@ -132,7 +132,7 @@ def test_pr_review_body_includes_counts_table_and_footer():
 def test_pr_review_body_includes_unmapped_section_when_present():
     unmapped = [_f("major", title="general concern")]
     body = format_pr_review_body(_result(findings=unmapped), unmapped=unmapped, run_id=1)
-    assert "### Other Observations" in body
+    assert "**GENERAL**" in body
     assert "general concern" in body
 
 
@@ -145,7 +145,7 @@ def test_inline_comment_includes_emoji_confidence_category():
            title="SQL injection")
     )
     assert "🔴" in text
-    assert "Critical: SQL injection" in text
+    assert "CRITICAL: SQL injection" in text
     assert "**Confidence**: 0.95" in text
     assert "**Category**: bug" in text
     assert "Suggestion" not in text

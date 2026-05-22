@@ -69,3 +69,21 @@ class FailurePage(BaseModel):
 class FindingPage(BaseModel):
     items: list[FindingSummary]
     total: int
+
+
+class PendingReview(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: int
+    repo_full_name: str
+    pr_number: int
+    pr_title: str
+    head_sha: str
+    scheduled_at: datetime
+    trigger_event: str
+    review_mode: str
+
+
+class PendingPage(BaseModel):
+    items: list[PendingReview]
+    total: int

@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # --- Literals from pr-review-requirements.md ----------------------------------
 
@@ -69,6 +69,13 @@ class Finding(BaseModel):
     suggestion: str | None = None
     confidence: float = Field(ge=0.0, le=1.0)
     is_odoo_specific: bool = False
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def _truncate_title(cls, v: object) -> object:
+        if isinstance(v, str) and len(v) > 80:
+            return v[:77] + "..."
+        return v
 
     @model_validator(mode="after")
     def _check_line_range(self) -> "Finding":

@@ -22,6 +22,7 @@ class Settings:
     prompts_dir: str = "/app/prompts"
     migrations_dir: str = "/app/db/migrations"
     queue_name: str = "reviews"
+    google_chat_webhook_url: str = ""  # empty = notifications disabled
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -46,4 +47,5 @@ class Settings:
             prompts_dir=os.environ.get("REVA_PROMPTS_DIR", "/app/prompts"),
             migrations_dir=os.environ.get("REVA_MIGRATIONS_DIR", "/app/db/migrations"),
             queue_name=os.environ.get("REVA_QUEUE_NAME", "reviews"),
+            google_chat_webhook_url=os.environ.get("GOOGLE_CHAT_WEBHOOK_URL", ""),
         )

@@ -13,7 +13,8 @@ var (
 	colorDim      = lipgloss.Color("#45475A")
 	colorBg       = lipgloss.Color("#1E1E2E")
 	colorBorder   = lipgloss.Color("#313244")
-	colorSelected = lipgloss.Color("#313244")
+	colorSelected    = lipgloss.Color("#2A5298")
+	colorSelectedFg  = lipgloss.Color("#CDD6F4")
 
 	styleTitle = lipgloss.NewStyle().
 			Bold(true).
@@ -31,7 +32,9 @@ var (
 				BorderForeground(colorAccent)
 
 	styleSelected = lipgloss.NewStyle().
-			Background(colorSelected)
+			Background(colorSelected).
+			Foreground(colorSelectedFg).
+			Bold(true)
 
 	styleStatusBar = lipgloss.NewStyle().
 			Foreground(colorMuted).
@@ -91,6 +94,21 @@ func riskStyle(risk string) lipgloss.Style {
 		return styleRiskCritical
 	default:
 		return styleStatusOther
+	}
+}
+
+// statusChar returns the status symbol without ANSI wrapping, for use inside
+// styleSelected.Render() where embedded ANSI resets would break the background.
+func statusChar(status string) string {
+	switch status {
+	case "completed":
+		return "✓"
+	case "failed":
+		return "✗"
+	case "stale":
+		return "⚠"
+	default:
+		return "⊘"
 	}
 }
 

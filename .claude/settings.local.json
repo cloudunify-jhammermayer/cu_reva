@@ -19,7 +19,14 @@
       "Bash(python3.14 -m venv .venv)",
       "Bash(mv shared/reva reva)",
       "Bash(mv shared/pyproject.toml pyproject.toml)",
-      "Bash(rm -rf shared/)"
+      "Bash(rm -rf shared/)",
+      "Bash(python3.14 *)",
+      "Bash(/home/joseph/Projects/cu_reva/.venv/bin/pip install *)",
+      "Bash(PYTHONPATH=/home/joseph/Projects/cu_reva .venv/bin/python *)",
+      "Bash(docker compose *)",
+      "Bash(go build *)",
+      "Bash(go get *)",
+      "Bash(python -c ' *)"
     ]
   }
 }

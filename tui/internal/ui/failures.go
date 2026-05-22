@@ -35,6 +35,9 @@ func (f Failures) load() tea.Cmd {
 
 func (f Failures) update(msg tea.Msg) (Failures, tea.Cmd) {
 	switch m := msg.(type) {
+	case tickMsg:
+		return f, f.load()
+
 	case failuresLoadedMsg:
 		f.loading = false
 		f.err = m.err
@@ -42,8 +45,10 @@ func (f Failures) update(msg tea.Msg) (Failures, tea.Cmd) {
 			f.items = m.data.Items
 			f.total = m.data.Total
 		}
-		f.cursor = 0
-		f.offset = 0
+		if f.cursor >= len(f.items) {
+			f.cursor = 0
+			f.offset = 0
+		}
 
 	case requeuedMsg:
 		if m.err != nil {
@@ -136,7 +141,6 @@ func (f Failures) view(w, h int) string {
 	}
 	for i := f.offset; i < end; i++ {
 		item := f.items[i]
-		sym := statusSymbol(item.Status)
 		repo := truncate(item.RepoFullName, colRepo)
 		prNum := fmt.Sprintf("#%d", item.PRNumber)
 		errMsg := ""
@@ -147,14 +151,21 @@ func (f Failures) view(w, h int) string {
 		}
 		errMsg = truncate(errMsg, colErr)
 
-		line := fmt.Sprintf("  %s  %-*s  %-*s  %-*s",
-			sym,
-			colRepo, repo,
-			colPR, prNum,
-			colErr, errMsg,
-		)
+		var line string
 		if i == f.cursor {
-			line = styleSelected.Width(w - 2).Render(line)
+			line = styleSelected.Width(w - 2).Render(fmt.Sprintf("  %s  %-*s  %-*s  %-*s",
+				statusChar(item.Status),
+				colRepo, repo,
+				colPR, prNum,
+				colErr, errMsg,
+			))
+		} else {
+			line = fmt.Sprintf("  %s  %-*s  %-*s  %-*s",
+				statusSymbol(item.Status),
+				colRepo, repo,
+				colPR, prNum,
+				colErr, errMsg,
+			)
 		}
 		rows = append(rows, line)
 	}
@@ -167,13 +178,14 @@ func (f Failures) view(w, h int) string {
 		detail = f.renderDetail(f.items[f.cursor], w)
 	}
 
-	statusText := fmt.Sprintf("%d/%d  j/k  r=refresh  e=requeue", f.cursor+1, len(f.items))
+	var posLine string
 	if f.statusMsg != "" {
-		statusText = f.statusMsg
+		posLine = f.statusMsg
+	} else {
+		posLine = styleSubtitle.Render(fmt.Sprintf("  %d/%d", f.cursor+1, len(f.items)))
 	}
-	status := styleStatusBar.Render(statusText)
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", detail, "", status)
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", detail, "", posLine)
 }
 
 func (f Failures) renderDetail(item api.ReviewDetail, w int) string {

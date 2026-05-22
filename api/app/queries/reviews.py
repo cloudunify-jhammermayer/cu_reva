@@ -8,7 +8,7 @@ from sqlalchemy import case, func, select
 
 from reva.db import writers
 from reva.db.engine import Database
-from reva.db.models import PullRequest, Repository, ReviewFeedback, ReviewFinding, ReviewRun
+from reva.db.models import PendingReview, PullRequest, Repository, ReviewFeedback, ReviewFinding, ReviewRun
 
 # Severity sort order for findings (critical first).
 _SEVERITY_ORDER = case(
@@ -246,6 +246,36 @@ def list_failures(db: Database, *, limit: int = 20) -> tuple[list[dict], int]:
                 "findings": [],
             }
             for rr, repo_full_name, pr_number, pr_title, author_login in rows
+        ]
+    return items, total
+
+
+def list_pending(db: Database) -> tuple[list[dict], int]:
+    with db.session() as s:
+        base = (
+            select(
+                PendingReview,
+                Repository.full_name.label("repo_full_name"),
+                PullRequest.title.label("pr_title"),
+            )
+            .join(Repository, PendingReview.repository_id == Repository.id)
+            .join(PullRequest, PendingReview.pull_request_id == PullRequest.id)
+            .where(PendingReview.consumed == False)  # noqa: E712
+        )
+        total = s.execute(select(func.count()).select_from(base.subquery())).scalar_one()
+        rows = s.execute(base.order_by(PendingReview.scheduled_at.asc())).all()
+        items = [
+            {
+                "id": pr.id,
+                "repo_full_name": repo_full_name,
+                "pr_number": pr.pr_number,
+                "pr_title": pr_title or "",
+                "head_sha": pr.head_sha,
+                "scheduled_at": pr.scheduled_at,
+                "trigger_event": pr.trigger_event,
+                "review_mode": pr.review_mode,
+            }
+            for pr, repo_full_name, pr_title in rows
         ]
     return items, total
 

@@ -206,7 +206,7 @@ def test_completed_run_posts_check_and_review(ctx_and_fakes):
     assert review["commit_id"] == "deadbeef"
     assert len(review["comments"]) == 1  # only the in-hunk one
     assert review["comments"][0]["line"] == 12
-    assert "Other Observations" in review["body"]  # unmapped found
+    assert "**GENERAL**" in review["body"]  # unmapped found
 
     check = s["github"].created_check_runs[0]
     assert check["conclusion"] == "failure"  # major → failure
@@ -222,7 +222,7 @@ def test_completed_with_no_findings_is_success(ctx_and_fakes):
     assert check["conclusion"] == "success"
     review = s["github"].created_pr_reviews[0]
     assert review["comments"] == []
-    assert "Other Observations" not in review["body"]
+    assert "**GENERAL**" not in review["body"]
 
 
 def test_completed_with_only_unmapped_findings_skips_inlines(ctx_and_fakes):
@@ -234,7 +234,7 @@ def test_completed_with_only_unmapped_findings_skips_inlines(ctx_and_fakes):
 
     review = s["github"].created_pr_reviews[0]
     assert review["comments"] == []
-    assert "Other Observations" in review["body"]
+    assert "**GENERAL**" in review["body"]
 
 
 def test_declined_posts_issue_comment_and_neutral_check(ctx_and_fakes):

@@ -9,6 +9,7 @@ send notifications — those side effects live in `tasks.run_review`.
 from __future__ import annotations
 
 import fnmatch
+import os
 from datetime import datetime, timezone
 from typing import Protocol
 
@@ -18,7 +19,13 @@ from pydantic import ValidationError
 
 from reva.claude_client import ClaudeClient
 from reva.cost import estimate_cost
-from reva.diff_utils import count_diff_lines, estimate_diff_tokens
+from reva.diff_utils import (
+    DEFAULT_EXCLUDE_EXTENSIONS,
+    DEFAULT_REVIEW_PREFIXES,
+    count_diff_lines,
+    estimate_diff_tokens,
+    filter_diff,
+)
 from reva.errors import PermanentError
 from reva.prompt_builder import PromptBuilder
 from reva.review_tool import build_review_tool_schema, tool_choice_force_submit
@@ -125,10 +132,36 @@ class Reviewer:
                 risk_level="low",
             )
 
-        # 5. Fetch diff + changed files.
-        diff = self.github.get_pull_request_diff(token, owner, name, pr_number)
+        # 5. Fetch diff + changed files; restrict to DEFAULT_REVIEW_PREFIXES and
+        #    strip excluded extensions before size-guarding or token counting.
+        raw_diff = self.github.get_pull_request_diff(token, owner, name, pr_number)
+        diff = filter_diff(raw_diff)
+        if len(diff) < len(raw_diff):
+            logger.info(
+                "diff_filtered",
+                owner=owner,
+                repo=name,
+                pr=pr_number,
+                raw_bytes=len(raw_diff),
+                filtered_bytes=len(diff),
+                review_prefixes=DEFAULT_REVIEW_PREFIXES,
+                excluded_extensions=sorted(DEFAULT_EXCLUDE_EXTENSIONS),
+            )
+
+        # If nothing reviewable remains, decline gracefully.
+        if not diff.strip():
+            prefixes = ", ".join(f"`{p}`" for p in DEFAULT_REVIEW_PREFIXES)
+            return _decline(
+                f"No reviewable files found. Only changes under {prefixes} "
+                f"are reviewed (excluding {', '.join(sorted(DEFAULT_EXCLUDE_EXTENSIONS))})."
+            )
+
         changed_files_payload = self.github.get_changed_files(token, owner, name, pr_number)
-        changed_files = [f["filename"] for f in changed_files_payload]
+        changed_files = [
+            f["filename"] for f in changed_files_payload
+            if any(f["filename"].startswith(p) for p in DEFAULT_REVIEW_PREFIXES)
+            and os.path.splitext(f["filename"])[1].lower() not in DEFAULT_EXCLUDE_EXTENSIONS
+        ]
 
         # 6. Load .claude-review.yml + CLAUDE.md (both optional).
         repo_config = self._load_repo_config(token, owner, name, params.head_sha)

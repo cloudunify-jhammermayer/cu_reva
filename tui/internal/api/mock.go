@@ -32,10 +32,11 @@ func (m *MockClient) Dashboard() (*DashboardMetrics, error) {
 		},
 		TotalCost7d:        0.2814,
 		AvgCostPerReview7d: &avgCost,
+		ActiveWorkers:      2,
 	}, nil
 }
 
-func (m *MockClient) Reviews(limit int) (*ReviewPage, error) {
+func (m *MockClient) Reviews(limit int, repo, status, author string) (*ReviewPage, error) {
 	now := time.Now()
 	strPtr := func(s string) *string { return &s }
 	intPtr := func(i int) *int { return &i }
@@ -122,7 +123,21 @@ func (m *MockClient) Reviews(limit int) (*ReviewPage, error) {
 		},
 	}
 
-	return &ReviewPage{Items: items[:min(limit, len(items))], Total: len(items)}, nil
+	var filtered []ReviewSummary
+	for _, it := range items {
+		if repo != "" && it.RepoFullName != repo {
+			continue
+		}
+		if status != "" && it.Status != status {
+			continue
+		}
+		if author != "" && (it.AuthorLogin == nil || *it.AuthorLogin != author) {
+			continue
+		}
+		filtered = append(filtered, it)
+	}
+	n := min(limit, len(filtered))
+	return &ReviewPage{Items: filtered[:n], Total: len(filtered)}, nil
 }
 
 func (m *MockClient) ReviewDetail(id int) (*ReviewDetail, error) {
@@ -215,7 +230,7 @@ func (m *MockClient) ReviewDetail(id int) (*ReviewDetail, error) {
 
 	default:
 		// Generate a simple completed review for any other ID
-		page, _ := m.Reviews(100)
+		page, _ := m.Reviews(100, "", "", "")
 		for _, s := range page.Items {
 			if s.ID == id {
 				summary := fmt.Sprintf("Review of PR #%d completed. No critical issues found.", s.PRNumber)
@@ -275,6 +290,121 @@ func (m *MockClient) Failures(limit int) (*FailurePage, error) {
 		n = len(items)
 	}
 	return &FailurePage{Items: items[:n], Total: len(items)}, nil
+}
+
+func (m *MockClient) Pending() (*PendingPage, error) {
+	now := time.Now()
+	items := []PendingReview{
+		{
+			ID: 1, RepoFullName: "acme/odoo-modules", PRNumber: 313,
+			PRTitle: "feat: new inventory workflow", HeadSHA: "a1b2c3d4",
+			ScheduledAt: now.Add(7 * time.Minute), TriggerEvent: "opened", ReviewMode: "diff",
+		},
+		{
+			ID: 2, RepoFullName: "acme/backend", PRNumber: 202,
+			PRTitle: "fix: null pointer in payment processor", HeadSHA: "b2c3d4e5",
+			ScheduledAt: now.Add(-30 * time.Second), TriggerEvent: "synchronize", ReviewMode: "diff",
+		},
+	}
+	return &PendingPage{Items: items, Total: len(items)}, nil
+}
+
+func (m *MockClient) Findings(severity, category string, limit int) (*FindingPage, error) {
+	strPtr := func(s string) *string { return &s }
+	intPtr := func(i int) *int { return &i }
+	f64Ptr := func(f float64) *float64 { return &f }
+
+	all := []FindingSummary{
+		{
+			ID: 1, Severity: "critical", Category: "security",
+			Title:      "Direct SQL execution bypasses ORM access rules",
+			Confidence: f64Ptr(0.95), FilePath: strPtr("models/stock_valuation.py"), LineStart: intPtr(142),
+		},
+		{
+			ID: 2, Severity: "major", Category: "access-control",
+			Title:      "Missing @api.model decorator on public method",
+			Confidence: f64Ptr(0.88), FilePath: strPtr("models/stock_valuation.py"), LineStart: intPtr(87),
+		},
+		{
+			ID: 3, Severity: "major", Category: "data-integrity",
+			Title:      "Valuation update not wrapped in savepoint",
+			Confidence: f64Ptr(0.82), FilePath: strPtr("models/stock_valuation.py"), LineStart: intPtr(201),
+		},
+		{
+			ID: 4, Severity: "minor", Category: "style",
+			Title:      "Magic number 365 should be a constant",
+			Confidence: f64Ptr(0.72), FilePath: strPtr("models/stock_valuation.py"), LineStart: intPtr(55),
+		},
+		{
+			ID: 5, Severity: "info", Category: "performance",
+			Title:      "N+1 query in valuation report",
+			Confidence: f64Ptr(0.65), FilePath: strPtr("reports/stock_report.py"), LineStart: intPtr(33),
+		},
+		{
+			ID: 6, Severity: "critical", Category: "security",
+			Title:      "Unvalidated redirect via request parameter",
+			Confidence: f64Ptr(0.97), FilePath: strPtr("controllers/main.py"), LineStart: intPtr(78),
+		},
+		{
+			ID: 7, Severity: "major", Category: "performance",
+			Title:      "Missing index on frequently queried column",
+			Confidence: f64Ptr(0.79), FilePath: strPtr("models/sale_order.py"), LineStart: intPtr(310),
+		},
+		{
+			ID: 8, Severity: "minor", Category: "style",
+			Title:      "Inconsistent string quoting across module",
+			Confidence: f64Ptr(0.55), FilePath: strPtr("models/sale_order.py"), LineStart: intPtr(12),
+		},
+		{
+			ID: 9, Severity: "info", Category: "documentation",
+			Title:      "Public method missing docstring",
+			Confidence: f64Ptr(0.60), FilePath: strPtr("models/account_move.py"), LineStart: intPtr(44),
+		},
+	}
+
+	var filtered []FindingSummary
+	for _, f := range all {
+		if severity == "" || f.Severity == severity {
+			filtered = append(filtered, f)
+		}
+	}
+	n := limit
+	if n > len(filtered) {
+		n = len(filtered)
+	}
+	return &FindingPage{Items: filtered[:n], Total: len(filtered)}, nil
+}
+
+func (m *MockClient) Repos() (*RepoPage, error) {
+	strPtr := func(s string) *string { return &s }
+	now := time.Now()
+	t1 := now.Add(-10 * time.Minute)
+	t2 := now.Add(-2 * time.Hour)
+	t3 := now.Add(-26 * time.Hour)
+
+	items := []RepoSummary{
+		{
+			ID: 1, FullName: "acme/odoo-modules", DefaultBranch: strPtr("main"),
+			Enabled: true, ReviewCount: 312, LastReviewAt: &t1,
+			CreatedAt: now.Add(-180 * 24 * time.Hour),
+		},
+		{
+			ID: 2, FullName: "acme/backend", DefaultBranch: strPtr("main"),
+			Enabled: true, ReviewCount: 201, LastReviewAt: &t2,
+			CreatedAt: now.Add(-120 * 24 * time.Hour),
+		},
+		{
+			ID: 3, FullName: "acme/integrations", DefaultBranch: strPtr("develop"),
+			Enabled: true, ReviewCount: 88, LastReviewAt: &t3,
+			CreatedAt: now.Add(-60 * 24 * time.Hour),
+		},
+		{
+			ID: 4, FullName: "acme/legacy-erp", DefaultBranch: strPtr("master"),
+			Enabled: false, ReviewCount: 5, LastReviewAt: nil,
+			CreatedAt: now.Add(-365 * 24 * time.Hour),
+		},
+	}
+	return &RepoPage{Items: items, Total: len(items)}, nil
 }
 
 func (m *MockClient) Requeue(id int) error {

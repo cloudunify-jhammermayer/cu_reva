@@ -83,6 +83,48 @@ class ClaudeClient:
 
         return _parse_success(response.json())
 
+    def chat(
+        self,
+        system: str,
+        user: str,
+        model: str | None = None,
+        max_tokens: int = 1024,
+    ) -> str:
+        """Plain text call — no tool use. Returns the first text block.
+
+        Raises TransientError / PermanentError with the same semantics as review().
+        """
+        body = {
+            "model": model or self.default_model,
+            "max_tokens": max_tokens,
+            "system": system,
+            "messages": [{"role": "user", "content": user}],
+        }
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+            "content-type": "application/json",
+        }
+        try:
+            response = self._client.post(self.BASE_URL, headers=headers, json=body)
+        except httpx.TimeoutException as exc:
+            raise TransientError(f"Claude request timed out: {exc}") from exc
+        except httpx.TransportError as exc:
+            raise TransientError(f"Claude transport error: {exc}") from exc
+
+        if response.status_code != 200:
+            raise _map_status_to_error(
+                response.status_code,
+                response.headers.get("retry-after"),
+                response.text,
+            )
+
+        content = response.json().get("content") or []
+        for block in content:
+            if block.get("type") == "text":
+                return block["text"].strip()
+        raise PermanentError("Claude returned no text block in chat response")
+
     def close(self) -> None:
         self._client.close()
 

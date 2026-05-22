@@ -28,10 +28,10 @@ SEVERITY_EMOJI: dict[Severity, str] = {
 }
 
 _SEVERITY_LABEL: dict[Severity, str] = {
-    "critical": "Critical",
-    "major": "Major",
-    "minor": "Minor",
-    "info": "Info",
+    "critical": "CRITICAL",
+    "major": "MAJOR",
+    "minor": "MINOR",
+    "info": "INFO",
 }
 
 
@@ -116,8 +116,8 @@ def format_check_run_output(result: ReviewResult, run_id: int | None = None) -> 
     if result.status == "completed":
         if result.summary:
             parts.append(f"## Review Summary\n\n{result.summary}")
-        parts.append(_counts_table(_severity_counts(result.findings)))
-        parts.append(f"**Risk Level**: {result.risk_level}")
+        parts.append(_findings_tldr(result.findings))
+        parts.append(f"**RISK** `{result.risk_level}`")
     elif result.status == "declined":
         parts.append(f"## Declined\n\n{result.decline_reason or result.summary or 'Declined.'}")
     elif result.status == "stale":
@@ -149,7 +149,35 @@ def _counts_table(counts: dict[Severity, int]) -> str:
         f"| {SEVERITY_EMOJI[sev]} {_SEVERITY_LABEL[sev]} | {counts[sev]} |"
         for sev in ("critical", "major", "minor", "info")
     ]
-    return "### Findings Summary\n\n| Severity | Count |\n|---|---|\n" + "\n".join(rows)
+    return "| Severity | Count |\n|---|---|\n" + "\n".join(rows)
+
+
+def _findings_tldr(findings: list[Finding]) -> str:
+    """Findings summary grouped by severity with a sub-table per level."""
+    by_severity: dict[Severity, list[Finding]] = {
+        "critical": [], "major": [], "minor": [], "info": []
+    }
+    for f in findings:
+        by_severity[f.severity].append(f)
+
+    lines = ["### Findings Summary", ""]
+    for sev in ("critical", "major", "minor", "info"):
+        group = by_severity[sev]
+        label = _SEVERITY_LABEL[sev]
+        lines.append(f"**{label}** `{len(group)}`")
+        lines.append("")
+        if group:
+            lines.append("| File | Issue | Confidence |")
+            lines.append("|---|---|---|")
+            for f in group:
+                location = f"`{f.file}:{f.line_start}`" if f.file and f.line_start else (f"`{f.file}`" if f.file else "*(general)*")
+                lines.append(f"| {location} | {f.title} | {f.confidence:.0%} |")
+        else:
+            lines.append("*No findings.*")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def _footer(result: ReviewResult, run_id: int | None) -> str:
@@ -165,7 +193,7 @@ def _footer(result: ReviewResult, run_id: int | None) -> str:
         bits.append(f"${result.estimated_cost_usd:.4f}")
     if run_id is not None:
         bits.append(f"Run #{run_id}")
-    return f"*{' | '.join(bits)}*"
+    return f"*{' · '.join(bits)}*"
 
 
 def _format_duration(ms: int) -> str:
@@ -187,11 +215,11 @@ def format_pr_review_body(
     run_id: int | None = None,
 ) -> str:
     """Top-level body of the PR review (not an inline comment)."""
-    parts: list[str] = [f"## 🔍 {AGENT_NAME} Review"]
+    parts: list[str] = [f"## {AGENT_NAME} · Review"]
     if result.summary:
         parts.append(result.summary)
-    parts.append(_counts_table(_severity_counts(result.findings)))
-    parts.append(f"**Risk Level**: {result.risk_level}")
+    parts.append(_findings_tldr(result.findings))
+    parts.append(f"**RISK** `{result.risk_level}`")
     if unmapped:
         parts.append(_format_unmapped_section(unmapped))
     parts.append(_footer(result, run_id))
@@ -200,15 +228,10 @@ def format_pr_review_body(
 
 
 def _format_unmapped_section(unmapped: list[Finding]) -> str:
-    lines = ["### Other Observations", ""]
+    lines = ["**GENERAL**", "", "| File | Issue | Confidence |", "|---|---|---|"]
     for f in unmapped:
-        emoji = SEVERITY_EMOJI[f.severity]
-        location = f.file or "(no file)"
-        if f.file and f.line_start:
-            location = f"{f.file}:{f.line_start}"
-        lines.append(f"- {emoji} **{_SEVERITY_LABEL[f.severity]}** — {f.title} ({location})")
-        if f.body:
-            lines.append(f"  {f.body}")
+        location = f"`{f.file}:{f.line_start}`" if f.file and f.line_start else (f"`{f.file}`" if f.file else "*(general)*")
+        lines.append(f"| {location} | {f.title} | {f.confidence:.0%} |")
     return "\n".join(lines)
 
 
@@ -240,11 +263,17 @@ def format_inline_comment(finding: Finding) -> str:
 
 def format_inline_comment_payload(finding: Finding) -> dict:
     """Shape the dict the GitHub Reviews API expects in `comments[]`."""
-    return {
+    payload: dict = {
         "path": finding.file,
         "line": finding.line_start,
+        "side": "RIGHT",
         "body": format_inline_comment(finding),
     }
+    if finding.line_end is not None and finding.line_end > finding.line_start:
+        payload["start_line"] = finding.line_start
+        payload["start_side"] = "RIGHT"
+        payload["line"] = finding.line_end
+    return payload
 
 
 # --- Decline message ---------------------------------------------------------

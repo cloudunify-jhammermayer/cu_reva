@@ -17,7 +17,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 
 from reva.db.engine import Database
 from reva.db.models import (
@@ -282,24 +283,109 @@ def record_github_event(
     payload: dict,
 ) -> int | None:
     """Idempotent insert keyed on delivery_id. Returns the row id, or None
-    if a row with this delivery_id already existed."""
+    if a row with this delivery_id already existed (including concurrent inserts)."""
+    try:
+        with db.session() as s:
+            existing = s.execute(
+                select(GithubEvent.id).where(GithubEvent.delivery_id == delivery_id)
+            ).first()
+            if existing:
+                return None
+            ev = GithubEvent(
+                delivery_id=delivery_id,
+                event_type=event_type,
+                action=action,
+                repository_full_name=repository_full_name,
+                sender_login=sender_login,
+                payload=payload,
+            )
+            s.add(ev)
+            s.flush()
+            return ev.id
+    except IntegrityError:
+        # Concurrent request inserted the same delivery_id between our SELECT and INSERT.
+        return None
+
+
+def lookup_pull_request(
+    db: Database,
+    repository_id: int,
+    pr_number: int,
+) -> dict | None:
+    """Return {id, head_sha, installation_id} for a known PR, or None."""
     with db.session() as s:
-        existing = s.execute(
-            select(GithubEvent.id).where(GithubEvent.delivery_id == delivery_id)
+        row = s.execute(
+            select(
+                PullRequest.id,
+                PullRequest.head_sha,
+                Repository.installation_id,
+            )
+            .join(Repository, PullRequest.repository_id == Repository.id)
+            .where(
+                PullRequest.repository_id == repository_id,
+                PullRequest.pr_number == pr_number,
+            )
         ).first()
-        if existing:
-            return None
-        ev = GithubEvent(
-            delivery_id=delivery_id,
-            event_type=event_type,
-            action=action,
-            repository_full_name=repository_full_name,
-            sender_login=sender_login,
-            payload=payload,
-        )
-        s.add(ev)
-        s.flush()
-        return ev.id
+    if not row:
+        return None
+    return {"id": row[0], "head_sha": row[1], "installation_id": row[2]}
+
+
+# --- finding comment IDs -----------------------------------------------------
+
+
+def get_findings_for_run(db: Database, review_run_id: int) -> list[dict]:
+    """Return all findings for a run with their DB id and location info."""
+    with db.session() as s:
+        rows = s.execute(
+            select(
+                ReviewFinding.id,
+                ReviewFinding.file_path,
+                ReviewFinding.line_start,
+                ReviewFinding.line_end,
+            ).where(ReviewFinding.review_run_id == review_run_id)
+        ).all()
+    return [
+        {"id": r[0], "file_path": r[1], "line_start": r[2], "line_end": r[3]}
+        for r in rows
+    ]
+
+
+def attach_finding_comment_ids(db: Database, finding_id_to_comment_id: dict[int, int]) -> None:
+    """Write github_comment_id + posted_to_github=True for a batch of findings."""
+    with db.session() as s:
+        for finding_id, comment_id in finding_id_to_comment_id.items():
+            finding = s.get(ReviewFinding, finding_id)
+            if finding is not None:
+                finding.github_comment_id = comment_id
+                finding.posted_to_github = True
+
+
+def lookup_finding_by_comment_id(db: Database, github_comment_id: int) -> dict | None:
+    """Return finding details for a given github_comment_id, or None."""
+    with db.session() as s:
+        row = s.execute(
+            select(
+                ReviewFinding.id,
+                ReviewFinding.severity,
+                ReviewFinding.title,
+                ReviewFinding.body,
+                ReviewFinding.file_path,
+                ReviewFinding.line_start,
+                ReviewFinding.suggestion,
+            ).where(ReviewFinding.github_comment_id == github_comment_id)
+        ).first()
+    if row is None:
+        return None
+    return {
+        "id": row[0],
+        "severity": row[1],
+        "title": row[2],
+        "body": row[3],
+        "file_path": row[4],
+        "line_start": row[5],
+        "suggestion": row[6],
+    }
 
 
 # --- internals --------------------------------------------------------------
@@ -334,9 +420,7 @@ def _upsert_review_run(s, params: JobParams, status: str) -> ReviewRun:
 
 def _replace_findings(s, review_run_id: int, findings: list[Finding]) -> None:
     """Replace any existing findings for a run. Idempotent retries don't dupe."""
-    s.query(ReviewFinding).filter(ReviewFinding.review_run_id == review_run_id).delete(
-        synchronize_session=False
-    )
+    s.execute(delete(ReviewFinding).where(ReviewFinding.review_run_id == review_run_id))
     for f in findings:
         s.add(
             ReviewFinding(

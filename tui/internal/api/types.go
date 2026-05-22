@@ -2,6 +2,36 @@ package api
 
 import "time"
 
+type FindingSummary struct {
+	ID         int      `json:"id"`
+	Severity   string   `json:"severity"`
+	Category   string   `json:"category"`
+	Title      string   `json:"title"`
+	Confidence *float64 `json:"confidence"`
+	FilePath   *string  `json:"file_path"`
+	LineStart  *int     `json:"line_start"`
+}
+
+type FindingPage struct {
+	Items []FindingSummary `json:"items"`
+	Total int              `json:"total"`
+}
+
+type RepoSummary struct {
+	ID            int        `json:"id"`
+	FullName      string     `json:"full_name"`
+	DefaultBranch *string    `json:"default_branch"`
+	Enabled       bool       `json:"enabled"`
+	ReviewCount   int        `json:"review_count"`
+	LastReviewAt  *time.Time `json:"last_review_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+type RepoPage struct {
+	Items []RepoSummary `json:"items"`
+	Total int           `json:"total"`
+}
+
 type ReviewSummary struct {
 	ID               int       `json:"id"`
 	RepoFullName     string    `json:"repo_full_name"`
@@ -69,10 +99,27 @@ type FindingCounts struct {
 	Info     int `json:"info"`
 }
 
+type PendingReview struct {
+	ID          int       `json:"id"`
+	RepoFullName string   `json:"repo_full_name"`
+	PRNumber    int       `json:"pr_number"`
+	PRTitle     string    `json:"pr_title"`
+	HeadSHA     string    `json:"head_sha"`
+	ScheduledAt time.Time `json:"scheduled_at"`
+	TriggerEvent string   `json:"trigger_event"`
+	ReviewMode  string    `json:"review_mode"`
+}
+
+type PendingPage struct {
+	Items []PendingReview `json:"items"`
+	Total int             `json:"total"`
+}
+
 type DashboardMetrics struct {
 	Last24h            PeriodStats   `json:"last_24h"`
 	Last7d             PeriodStats   `json:"last_7d"`
 	Findings24h        FindingCounts `json:"findings_24h"`
 	TotalCost7d        float64       `json:"total_cost_7d"`
 	AvgCostPerReview7d *float64      `json:"avg_cost_per_review_7d"`
+	ActiveWorkers      int           `json:"active_workers"`
 }

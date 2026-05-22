@@ -63,7 +63,17 @@ def _period_stats(s, since: datetime) -> dict:
     }
 
 
-def dashboard_metrics(db: Database) -> dict:
+def _count_workers(redis_url: str) -> int:
+    try:
+        import redis as redis_lib
+        from rq import Worker
+        conn = redis_lib.from_url(redis_url)
+        return len(Worker.all(connection=conn))
+    except Exception:
+        return 0
+
+
+def dashboard_metrics(db: Database, redis_url: str = "") -> dict:
     now = datetime.now(timezone.utc)
     since_24h = now - timedelta(hours=24)
     since_7d = now - timedelta(days=7)
@@ -105,6 +115,7 @@ def dashboard_metrics(db: Database) -> dict:
         },
         "total_cost_7d": total_cost,
         "avg_cost_per_review_7d": avg_cost,
+        "active_workers": _count_workers(redis_url) if redis_url else 0,
     }
 
 

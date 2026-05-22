@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from app.dependencies import get_db
 from app.queries import metrics as q
@@ -18,8 +18,9 @@ _VALID_PERIODS = {"week", "month", "quarter"}
 
 
 @router.get("/metrics/dashboard", response_model=DashboardMetrics)
-def dashboard(db: Database = Depends(get_db)) -> dict:
-    return q.dashboard_metrics(db)
+def dashboard(request: Request, db: Database = Depends(get_db)) -> dict:
+    redis_url = request.app.state.settings.redis_url
+    return q.dashboard_metrics(db, redis_url)
 
 
 @router.get("/metrics/developers", response_model=list[DeveloperStat])

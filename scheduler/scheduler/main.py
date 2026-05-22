@@ -11,11 +11,15 @@ from __future__ import annotations
 
 import signal
 import time
+from datetime import datetime, timezone
 
 import structlog
+from redis import Redis
+from rq import Queue
 
 from reva.db.engine import Database, create_engine_from_url
 from scheduler.poller import Poller
+from scheduler.reporter import WeeklyReporter
 from scheduler.settings import Settings
 
 logger = structlog.get_logger()
@@ -28,7 +32,16 @@ def main() -> None:
     db = Database(engine)
     db.migrate(settings.migrations_dir)
 
-    poller = Poller(db=db, settings=settings)
+    redis_conn = Redis.from_url(settings.redis_url)
+    queue = Queue(settings.queue_name, connection=redis_conn)
+
+    poller = Poller(db=db, settings=settings, queue=queue)
+    reporter = WeeklyReporter(
+        db=db,
+        queue=queue,
+        report_weekday=settings.report_weekday,
+        report_hour_utc=settings.report_hour_utc,
+    )
 
     stop = False
 
@@ -39,15 +52,26 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
-    logger.info("scheduler_starting", interval_s=settings.poll_interval_seconds)
+    logger.info(
+        "scheduler_starting",
+        interval_s=settings.poll_interval_seconds,
+        report_weekday=settings.report_weekday,
+        report_hour_utc=settings.report_hour_utc,
+    )
 
     while not stop:
+        now = datetime.now(timezone.utc)
         try:
             count = poller.poll()
             if count:
                 logger.info("scheduler_cycle", enqueued=count)
         except Exception:
             logger.exception("scheduler_poll_error")
+
+        try:
+            reporter.check_and_send(now)
+        except Exception:
+            logger.exception("scheduler_reporter_error")
 
         for _ in range(settings.poll_interval_seconds):
             if stop:

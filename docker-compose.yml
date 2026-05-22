@@ -6,6 +6,12 @@
 #   docker compose up --build worker   # rebuild + restart just the worker
 #   docker compose logs -f api         # tail api logs
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   api:
     build:
@@ -30,6 +36,7 @@ services:
     networks:
       - reva-net
     restart: unless-stopped
+    logging: *default-logging
 
   scheduler:
     build:
@@ -46,6 +53,7 @@ services:
     networks:
       - reva-net
     restart: unless-stopped
+    logging: *default-logging
 
   worker:
     build:
@@ -57,6 +65,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       GITHUB_APP_ID: ${GITHUB_APP_ID}
       GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_private_key
+      GOOGLE_CHAT_WEBHOOK_URL: ${GOOGLE_CHAT_WEBHOOK_URL:-}
     volumes:
       - ./secrets/github-app-private-key.pem:/run/secrets/github_private_key:ro
     depends_on:
@@ -67,6 +76,7 @@ services:
     networks:
       - reva-net
     restart: unless-stopped
+    logging: *default-logging
 
   postgres:
     image: postgres:16-alpine
@@ -86,6 +96,7 @@ services:
     networks:
       - reva-net
     restart: unless-stopped
+    logging: *default-logging
 
   redis:
     image: redis:7-alpine
@@ -95,6 +106,7 @@ services:
     networks:
       - reva-net
     restart: unless-stopped
+    logging: *default-logging
 
 volumes:
   postgres_data:

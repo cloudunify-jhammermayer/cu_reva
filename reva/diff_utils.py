@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
+
+# Extensions stripped from diffs before size-guarding and Claude ingestion.
+# These files are rarely useful for code review and can be extremely large
+# (Odoo XML views, gettext .po/.pot catalogs).
+DEFAULT_EXCLUDE_EXTENSIONS: frozenset[str] = frozenset({".xml", ".po", ".pot"})
+
+# Only files under these path prefixes are reviewed. Everything else
+# (CI configs, root-level scripts, OCA modules, etc.) is dropped.
+DEFAULT_REVIEW_PREFIXES: tuple[str, ...] = ("custom_addons/",)
 
 # Matches a hunk header: `@@ -old_start,old_count +new_start,new_count @@`
 # Counts are optional and default to 1.
@@ -37,6 +47,37 @@ def iter_diff_files(diff: str) -> Iterator[str]:
     for line in diff.split("\n"):
         if line.startswith("+++ b/"):
             yield line[len("+++ b/") :]
+
+
+def filter_diff(
+    diff: str,
+    exclude_extensions: frozenset[str] = DEFAULT_EXCLUDE_EXTENSIONS,
+    include_prefixes: tuple[str, ...] = DEFAULT_REVIEW_PREFIXES,
+) -> str:
+    """Keep only per-file sections that pass both filters:
+
+    - include_prefixes: file path must start with at least one prefix
+      (empty tuple = no restriction).
+    - exclude_extensions: file extension must not be in this set.
+
+    Splits on `diff --git` boundaries and reassembles the kept sections.
+    """
+    if not diff:
+        return diff
+    sections = re.split(r"(?=^diff --git )", diff, flags=re.MULTILINE)
+    kept = []
+    for section in sections:
+        if not section:
+            continue
+        m = re.search(r"^\+\+\+ b/(.+)$", section, re.MULTILINE)
+        if m:
+            path = m.group(1)
+            if include_prefixes and not any(path.startswith(p) for p in include_prefixes):
+                continue
+            if os.path.splitext(path)[1].lower() in exclude_extensions:
+                continue
+        kept.append(section)
+    return "".join(kept)
 
 
 # --- Hunk parsing ------------------------------------------------------------

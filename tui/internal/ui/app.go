@@ -14,7 +14,10 @@ type view int
 const (
 	viewDashboard view = iota
 	viewReviews
-	viewFailures
+	viewFindings // tab 3
+	viewFailures // tab 4
+	viewRepos    // tab 5
+	viewPending  // tab 6
 )
 
 type App struct {
@@ -22,7 +25,10 @@ type App struct {
 	active    view
 	dashboard Dashboard
 	reviews   Reviews
+	findings  Findings
 	failures  Failures
+	repos     Repos
+	pending   Pending
 	width     int
 	height    int
 }
@@ -33,7 +39,10 @@ func NewApp(client api.ClientIface) *App {
 		active:    viewDashboard,
 		dashboard: newDashboard(client),
 		reviews:   newReviews(client),
+		findings:  newFindings(client),
 		failures:  newFailures(client),
+		repos:     newRepos(client),
+		pending:   newPending(client),
 	}
 }
 
@@ -41,7 +50,10 @@ func (a *App) Init() tea.Cmd {
 	return tea.Batch(
 		a.dashboard.load(),
 		a.reviews.loadList(),
+		a.findings.load(),
 		a.failures.load(),
+		a.repos.load(),
+		a.pending.load(),
 		tick(),
 	)
 }
@@ -63,8 +75,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.reviews.width = m.Width
 		a.reviews.height = contentH
+		a.findings.width = m.Width
+		a.findings.height = contentH
 		a.failures.width = m.Width
 		a.failures.height = contentH
+		a.repos.width = m.Width
+		a.repos.height = contentH
+		a.pending.width = m.Width
+		a.pending.height = contentH
 		return a, nil
 
 	case tea.KeyMsg:
@@ -78,7 +96,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.active = viewReviews
 			return a, nil
 		case "3":
+			a.active = viewFindings
+			return a, nil
+		case "4":
 			a.active = viewFailures
+			return a, nil
+		case "5":
+			a.active = viewRepos
+			return a, nil
+		case "6":
+			a.active = viewPending
 			return a, nil
 		}
 		if a.active == viewReviews {
@@ -86,16 +113,39 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.reviews, cmd = a.reviews.update(msg)
 			return a, cmd
 		}
+		if a.active == viewFindings {
+			var cmd tea.Cmd
+			a.findings, cmd = a.findings.update(msg)
+			return a, cmd
+		}
 		if a.active == viewFailures {
 			var cmd tea.Cmd
 			a.failures, cmd = a.failures.update(msg)
+			return a, cmd
+		}
+		if a.active == viewRepos {
+			var cmd tea.Cmd
+			a.repos, cmd = a.repos.update(msg)
+			return a, cmd
+		}
+		if a.active == viewPending {
+			var cmd tea.Cmd
+			a.pending, cmd = a.pending.update(msg)
 			return a, cmd
 		}
 
 	case tickMsg:
 		var cmd tea.Cmd
 		a.dashboard, cmd = a.dashboard.update(msg)
-		return a, tea.Batch(cmd, tick())
+		var findCmd tea.Cmd
+		a.findings, findCmd = a.findings.update(msg)
+		var failCmd tea.Cmd
+		a.failures, failCmd = a.failures.update(msg)
+		var repoCmd tea.Cmd
+		a.repos, repoCmd = a.repos.update(msg)
+		var pendCmd tea.Cmd
+		a.pending, pendCmd = a.pending.update(msg)
+		return a, tea.Batch(cmd, findCmd, failCmd, repoCmd, pendCmd, tick())
 
 	case dashboardLoadedMsg:
 		a.dashboard, _ = a.dashboard.update(msg)
@@ -112,6 +162,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case failuresLoadedMsg:
 		a.failures, _ = a.failures.update(msg)
+
+	case findingsLoadedMsg:
+		a.findings, _ = a.findings.update(msg)
+
+	case reposLoadedMsg:
+		a.repos, _ = a.repos.update(msg)
+
+	case pendingLoadedMsg:
+		a.pending, _ = a.pending.update(msg)
 
 	case requeuedMsg:
 		// Deliver to whichever view is active so the status message lands there.
@@ -140,11 +199,17 @@ func (a *App) View() string {
 	var content string
 	switch a.active {
 	case viewDashboard:
-		content = a.dashboard.view(a.width, contentH)
+		content = a.dashboard.view(a.width, contentH, a.pending.total)
 	case viewReviews:
 		content = a.reviews.view(a.width, contentH)
+	case viewFindings:
+		content = a.findings.view(a.width, contentH)
 	case viewFailures:
 		content = a.failures.view(a.width, contentH)
+	case viewRepos:
+		content = a.repos.view(a.width, contentH)
+	case viewPending:
+		content = a.pending.view(a.width, contentH)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left,
@@ -159,23 +224,32 @@ func (a *App) tabBar() string {
 	tabs := []struct {
 		key   string
 		label string
+		badge int
 		v     view
 	}{
-		{"1", "Dashboard", viewDashboard},
-		{"2", "Reviews", viewReviews},
-		{"3", "Failures", viewFailures},
+		{"1", "Dashboard", 0, viewDashboard},
+		{"2", "Reviews", 0, viewReviews},
+		{"3", "Findings", 0, viewFindings},
+		{"4", "Failures", a.failures.total, viewFailures},
+		{"5", "Repos", 0, viewRepos},
+		{"6", "Pending", a.pending.total, viewPending},
 	}
 
 	var parts []string
 	for _, t := range tabs {
-		label := fmt.Sprintf("  %s %s  ", t.key, t.label)
+		label := t.label
+		if t.badge > 0 {
+			label = fmt.Sprintf("%s (%d)", label, t.badge)
+		}
+		text := fmt.Sprintf("  %s %s  ", t.key, label)
 		if a.active == t.v {
 			parts = append(parts, lipgloss.NewStyle().
 				Bold(true).
 				Foreground(colorAccent).
-				Render(label))
+				Underline(true).
+				Render(text))
 		} else {
-			parts = append(parts, styleSubtitle.Render(label))
+			parts = append(parts, styleSubtitle.Render(text))
 		}
 	}
 
@@ -189,6 +263,22 @@ func (a *App) tabBar() string {
 }
 
 func (a *App) statusBar() string {
-	hint := "1 Dashboard · 2 Reviews · 3 Failures · q Quit"
+	var hint string
+	switch a.active {
+	case viewDashboard:
+		hint = "1–6 switch tabs · r=refresh · q quit"
+	case viewReviews:
+		hint = "j/k navigate · / filter · s=status · c=clear · e=requeue · o=browser · r=refresh · q quit"
+	case viewFindings:
+		hint = "j/k navigate · a=all · c=critical · m=major · n=minor · i=info · r=refresh · q quit"
+	case viewFailures:
+		hint = "j/k navigate · e=requeue · r=refresh · q quit"
+	case viewRepos:
+		hint = "j/k navigate · o=open in browser · r=refresh · q quit"
+	case viewPending:
+		hint = "j/k navigate · r=refresh · q quit"
+	default:
+		hint = "1 Dash · 2 Reviews · 3 Findings · 4 Failures · 5 Repos · 6 Pending · q quit"
+	}
 	return styleStatusBar.Width(a.width).Render(hint)
 }

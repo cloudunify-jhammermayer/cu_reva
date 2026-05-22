@@ -24,13 +24,3 @@ class PermanentError(WorkerError):
     """Non-retryable failure (4xx, invalid response, validation failure)."""
 
 
-class StaleHeadError(WorkerError):
-    """Head SHA changed before the review completed. Terminal, not retried."""
-
-
-class DeclinedError(WorkerError):
-    """Review declined by policy (diff too large, etc.). Terminal, not retried."""
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(reason)
-        self.reason = reason

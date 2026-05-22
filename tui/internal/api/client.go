@@ -37,9 +37,19 @@ func (c *Client) Dashboard() (*DashboardMetrics, error) {
 	return &d, c.get("/metrics/dashboard", &d)
 }
 
-func (c *Client) Reviews(limit int) (*ReviewPage, error) {
+func (c *Client) Reviews(limit int, repo, status, author string) (*ReviewPage, error) {
+	path := fmt.Sprintf("/reviews?limit=%d", limit)
+	if repo != "" {
+		path += "&repo=" + repo
+	}
+	if status != "" {
+		path += "&status=" + status
+	}
+	if author != "" {
+		path += "&author=" + author
+	}
 	var p ReviewPage
-	return &p, c.get(fmt.Sprintf("/reviews?limit=%d", limit), &p)
+	return &p, c.get(path, &p)
 }
 
 func (c *Client) ReviewDetail(id int) (*ReviewDetail, error) {
@@ -50,6 +60,28 @@ func (c *Client) ReviewDetail(id int) (*ReviewDetail, error) {
 func (c *Client) Failures(limit int) (*FailurePage, error) {
 	var p FailurePage
 	return &p, c.get(fmt.Sprintf("/failures?limit=%d", limit), &p)
+}
+
+func (c *Client) Pending() (*PendingPage, error) {
+	var p PendingPage
+	return &p, c.get("/pending", &p)
+}
+
+func (c *Client) Findings(severity, category string, limit int) (*FindingPage, error) {
+	path := fmt.Sprintf("/findings?limit=%d", limit)
+	if severity != "" {
+		path += "&severity=" + severity
+	}
+	if category != "" {
+		path += "&category=" + category
+	}
+	var p FindingPage
+	return &p, c.get(path, &p)
+}
+
+func (c *Client) Repos() (*RepoPage, error) {
+	var p RepoPage
+	return &p, c.get("/repos", &p)
 }
 
 func (c *Client) Requeue(id int) error {

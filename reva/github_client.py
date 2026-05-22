@@ -50,7 +50,7 @@ class GitHubClient:
         self.app_id = app_id
         self.private_key_pem = private_key_pem
         self.base_url = base_url.rstrip("/")
-        self._client = client or httpx.Client(timeout=timeout)
+        self._client = client or httpx.Client(timeout=timeout, follow_redirects=True)
         self._token_cache: dict[int, _CachedToken] = {}
 
     # --- JWT ----------------------------------------------------------------
@@ -214,6 +214,36 @@ class GitHubClient:
         response = self._post(
             token,
             f"/repos/{owner}/{repo}/issues/{pr_number}/comments",
+            {"body": body},
+        )
+        return response.json()["id"]
+
+    def get_review_comments(
+        self, token: str, owner: str, repo: str, pr_number: int, review_id: int
+    ) -> list[dict]:
+        """Return all inline comments posted in a PR review.
+
+        Each item has at minimum: id, path, line, start_line (nullable).
+        """
+        response = self._get(
+            token,
+            f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews/{review_id}/comments",
+        )
+        return response.json()
+
+    def reply_to_review_comment(
+        self,
+        token: str,
+        owner: str,
+        repo: str,
+        pr_number: int,
+        comment_id: int,
+        body: str,
+    ) -> int:
+        """Post a reply in an existing review comment thread. Returns the new comment id."""
+        response = self._post(
+            token,
+            f"/repos/{owner}/{repo}/pulls/{pr_number}/comments/{comment_id}/replies",
             {"body": body},
         )
         return response.json()["id"]

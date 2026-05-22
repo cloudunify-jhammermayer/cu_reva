@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
+from redis import Redis
+from rq import Queue
 
 from app.routes import health, webhooks
 from app.routes.v1 import router as v1_router
@@ -21,10 +23,13 @@ async def lifespan(app: FastAPI):
     engine = create_engine_from_url(settings.database_url)
     db = Database(engine)
     db.migrate(settings.migrations_dir)
+    redis_conn = Redis.from_url(settings.redis_url)
     app.state.db = db
     app.state.settings = settings
+    app.state.rq_queue = Queue(settings.queue_name, connection=redis_conn)
     logger.info("api_started")
     yield
+    redis_conn.close()
     logger.info("api_stopped")
 
 

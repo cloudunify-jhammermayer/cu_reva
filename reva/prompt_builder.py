@@ -87,10 +87,15 @@ class PromptBuilder:
     # --- Versioning ----------------------------------------------------------
 
     def get_version(self) -> str:
-        """Return prompt version parsed from the first heading in CHANGELOG.md."""
+        """Return prompt version parsed from the first ## heading in CHANGELOG.md."""
         changelog = self._read("CHANGELOG.md")
-        first_line = changelog.strip().split("\n")[0]
-        return first_line.split("—")[0].replace("##", "").strip()
+        for line in changelog.strip().split("\n"):
+            line = line.strip()
+            if line.startswith("##"):
+                heading = line.lstrip("#").strip()
+                # Strip trailing description after em dash (—) or en dash (–)
+                return heading.split("—")[0].split("–")[0].strip()
+        raise ValueError("No ## heading found in CHANGELOG.md")
 
     # --- IO -----------------------------------------------------------------
 
