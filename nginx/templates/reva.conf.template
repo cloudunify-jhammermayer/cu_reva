@@ -30,8 +30,18 @@ server {
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 10m;
 
-    # Webhook endpoint (public, HMAC-verified, rate-limited).
+    # Webhook endpoint — restricted to GitHub's published hook IP ranges.
+    # Source: https://api.github.com/meta (hooks key). Update when GitHub rotates ranges.
     location /webhooks/ {
+        # GitHub hook source CIDRs — last updated 2026-05-25.
+        allow 192.30.252.0/22;
+        allow 185.199.108.0/22;
+        allow 140.82.112.0/20;
+        allow 143.55.64.0/20;
+        allow 2a0a:a440::/29;
+        allow 2606:50c0::/32;
+        deny all;
+
         limit_req zone=webhooks burst=10 nodelay;
         proxy_pass http://api:8080;
         proxy_set_header Host $host;
