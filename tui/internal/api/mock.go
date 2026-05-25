@@ -407,6 +407,40 @@ func (m *MockClient) Repos() (*RepoPage, error) {
 	return &RepoPage{Items: items, Total: len(items)}, nil
 }
 
+func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
+	now := time.Now()
+	strPtr := func(s string) *string { return &s }
+	intPtr := func(i int) *int { return &i }
+	f64Ptr := func(f float64) *float64 { return &f }
+	t1 := now.Add(-5 * time.Minute)
+
+	items := []TicketAnalysisSummary{
+		{
+			ID: 3, TicketID: 456, ModelName: "helpdesk.ticket", FieldName: "description",
+			Status: "completed", Model: strPtr("claude-sonnet-4-6"),
+			InputTokens: intPtr(1840), OutputTokens: intPtr(712),
+			EstimatedCostUSD: f64Ptr(0.0032), CreatedAt: now.Add(-2 * time.Minute), CompletedAt: &t1,
+		},
+		{
+			ID: 2, TicketID: 123, ModelName: "project.task", FieldName: "description",
+			Status: "failed", Model: nil,
+			InputTokens: nil, OutputTokens: nil,
+			EstimatedCostUSD: nil, CreatedAt: now.Add(-10 * time.Minute), CompletedAt: nil,
+		},
+		{
+			ID: 1, TicketID: 99, ModelName: "helpdesk.ticket", FieldName: "description",
+			Status: "pending", Model: nil,
+			InputTokens: nil, OutputTokens: nil,
+			EstimatedCostUSD: nil, CreatedAt: now.Add(-30 * time.Second), CompletedAt: nil,
+		},
+	}
+	n := limit
+	if n > len(items) {
+		n = len(items)
+	}
+	return &TicketAnalysisPage{Items: items[:n], Total: len(items)}, nil
+}
+
 func (m *MockClient) Requeue(id int) error {
 	return nil
 }

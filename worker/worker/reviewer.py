@@ -25,6 +25,7 @@ from reva.diff_utils import (
     count_diff_lines,
     estimate_diff_tokens,
     filter_diff,
+    filter_diff_by_paths,
 )
 from reva.errors import PermanentError
 from reva.prompt_builder import PromptBuilder
@@ -186,14 +187,27 @@ class Reviewer:
                 f"{max_tokens} max). Please split this PR."
             )
 
-        # 9. skip_paths short-circuit: if every changed file matches a skip
-        # glob, there's nothing to review. Per-hunk filtering is a TODO.
-        if changed_files and repo_config.skip_paths and all(
-            _matches_any(p, repo_config.skip_paths) for p in changed_files
-        ):
-            return _decline(
-                "All changed files match skip_paths; nothing to review."
-            )
+        # 9. skip_paths: strip matching file sections from the diff.
+        if repo_config.skip_paths:
+            diff = filter_diff_by_paths(diff, repo_config.skip_paths)
+            if not diff.strip():
+                return _decline(
+                    "All changed files matched skip_paths; nothing reviewable remains."
+                )
+            diff_lines = count_diff_lines(diff)
+            diff_tokens = estimate_diff_tokens(diff)
+            if diff_lines > max_lines:
+                return _decline(
+                    f"Diff still too large after skip_paths filtering "
+                    f"({diff_lines} lines > {max_lines} max). "
+                    f"Add more patterns to skip_paths or split the PR."
+                )
+            if diff_tokens > max_tokens:
+                return _decline(
+                    f"Diff still too large after skip_paths filtering "
+                    f"({diff_tokens} tokens > {max_tokens} max). "
+                    f"Add more patterns to skip_paths or split the PR."
+                )
 
         # 10. Build prompts.
         system_blocks = self.prompts.build_system_blocks(repo_config, claude_md)
@@ -323,17 +337,17 @@ def _parse_tool_use(tool_use_input: dict | None) -> tuple[str, list[Finding]]:
     violation per pr-review-requirements §5.
     """
     if not isinstance(tool_use_input, dict):
-        raise PermanentError("Claude tool_use input missing or not an object")
+        raise PermanentError("Claude returned no tool_use input (expected an object)")
     summary = tool_use_input.get("summary")
     if not isinstance(summary, str) or not summary.strip():
-        raise PermanentError("Claude tool_use input missing non-empty summary")
+        raise PermanentError("Claude tool_use input has missing or empty summary")
     raw_findings = tool_use_input.get("findings", [])
     if not isinstance(raw_findings, list):
-        raise PermanentError("Claude tool_use input findings is not a list")
+        raise PermanentError("Claude tool_use input: 'findings' field is not a list")
     try:
         findings = [Finding.model_validate(f) for f in raw_findings]
     except ValidationError as exc:
-        raise PermanentError(f"Claude finding failed validation: {exc}") from exc
+        raise PermanentError(f"Claude finding failed schema validation: {exc}") from exc
     return summary, findings
 
 

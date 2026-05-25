@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
+from reva.cost import estimate_cost
 from reva.db.engine import Database
 from reva.db.models import (
     GithubEvent,
@@ -28,8 +29,9 @@ from reva.db.models import (
     Repository,
     ReviewFinding,
     ReviewRun,
+    TicketAnalysis,
 )
-from reva.types import Finding, JobParams, ReviewResult
+from reva.types import ClaudeResponse, Finding, JobParams, ReviewResult, TicketJobParams
 
 
 # --- review_runs writers -----------------------------------------------------
@@ -386,6 +388,120 @@ def lookup_finding_by_comment_id(db: Database, github_comment_id: int) -> dict |
         "line_start": row[5],
         "suggestion": row[6],
     }
+
+
+# --- ticket_analyses writers -------------------------------------------------
+
+
+def record_ticket_analysis_created(db: Database, params: TicketJobParams) -> int:
+    """Insert a pending ticket_analyses row and return its id."""
+    with db.session() as s:
+        row = TicketAnalysis(
+            ticket_id=params.ticket_id,
+            model_name=params.model_name,
+            field_name=params.field_name,
+            input_text=params.text,
+            status="pending",
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def attach_ticket_job_id(db: Database, analysis_id: int, job_id: str) -> None:
+    """Store the RQ job ID on the ticket_analyses row after enqueuing."""
+    with db.session() as s:
+        row = s.get(TicketAnalysis, analysis_id)
+        if row is not None:
+            row.job_id = job_id
+
+
+def record_ticket_analysis_completed(
+    db: Database,
+    analysis_id: int,
+    result_html: str,
+    response: ClaudeResponse,
+) -> None:
+    """Mark a ticket analysis as completed and store the result."""
+    with db.session() as s:
+        row = s.get(TicketAnalysis, analysis_id)
+        if row is None:
+            return
+        row.status = "completed"
+        row.result_html = result_html
+        row.model = response.model
+        row.input_tokens = response.input_tokens
+        row.output_tokens = response.output_tokens
+        row.cache_read_tokens = response.cache_read_tokens
+        row.cache_creation_tokens = response.cache_creation_tokens
+        row.estimated_cost_usd = estimate_cost(
+            model=response.model,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cache_read_tokens=response.cache_read_tokens,
+            cache_write_tokens=response.cache_creation_tokens,
+        )
+        row.completed_at = datetime.now(timezone.utc)
+
+
+def record_ticket_analysis_failed(
+    db: Database,
+    analysis_id: int,
+    error_message: str,
+) -> None:
+    """Mark a ticket analysis as failed."""
+    with db.session() as s:
+        row = s.get(TicketAnalysis, analysis_id)
+        if row is None:
+            return
+        row.status = "failed"
+        row.error_message = error_message
+        row.completed_at = datetime.now(timezone.utc)
+
+
+def get_pending_ticket_analysis(
+    db: Database, ticket_id: int, model_name: str, field_name: str
+) -> dict | None:
+    """Return the most recent pending analysis for this record, or None."""
+    with db.session() as s:
+        row = s.execute(
+            select(TicketAnalysis)
+            .where(
+                TicketAnalysis.ticket_id == ticket_id,
+                TicketAnalysis.model_name == model_name,
+                TicketAnalysis.field_name == field_name,
+                TicketAnalysis.status == "pending",
+            )
+            .order_by(TicketAnalysis.created_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        return {"id": row.id, "job_id": row.job_id, "status": row.status}
+
+
+def get_ticket_analysis(db: Database, analysis_id: int) -> dict | None:
+    """Return a ticket_analyses row as a dict, or None."""
+    with db.session() as s:
+        row = s.get(TicketAnalysis, analysis_id)
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "job_id": row.job_id,
+            "ticket_id": row.ticket_id,
+            "model_name": row.model_name,
+            "field_name": row.field_name,
+            "status": row.status,
+            "result_html": row.result_html,
+            "error_message": row.error_message,
+            "model": row.model,
+            "input_tokens": row.input_tokens,
+            "output_tokens": row.output_tokens,
+            "estimated_cost_usd": float(row.estimated_cost_usd) if row.estimated_cost_usd else None,
+            "created_at": row.created_at,
+            "completed_at": row.completed_at,
+        }
 
 
 # --- internals --------------------------------------------------------------

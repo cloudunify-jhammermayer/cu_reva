@@ -6,6 +6,7 @@ from reva.diff_utils import (
     DiffHunk,
     count_diff_lines,
     estimate_diff_tokens,
+    filter_diff_by_paths,
     find_line_in_hunks,
     iter_diff_files,
     parse_diff_hunks,
@@ -69,3 +70,41 @@ def test_estimate_diff_tokens_simple_ratio():
 
 def test_iter_diff_files_yields_both():
     assert list(iter_diff_files(SAMPLE_DIFF)) == ["foo.py", "bar.py"]
+
+
+TWO_FILE_DIFF = """\
+diff --git a/src/app.py b/src/app.py
+--- a/src/app.py
++++ b/src/app.py
+@@ -1 +1 @@
+-old
++new
+diff --git a/package-lock.json b/package-lock.json
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1 +1 @@
+-old
++new
+"""
+
+
+def test_filter_diff_by_paths_strips_matching():
+    result = filter_diff_by_paths(TWO_FILE_DIFF, ["*.json"])
+    assert "package-lock.json" not in result
+    assert "src/app.py" in result
+
+
+def test_filter_diff_by_paths_keeps_non_matching():
+    result = filter_diff_by_paths(TWO_FILE_DIFF, ["*.lock"])
+    assert "src/app.py" in result
+    assert "package-lock.json" in result  # .json doesn't match *.lock
+
+
+def test_filter_diff_by_paths_empty_patterns():
+    result = filter_diff_by_paths(TWO_FILE_DIFF, [])
+    assert result == TWO_FILE_DIFF
+
+
+def test_filter_diff_by_paths_all_stripped():
+    result = filter_diff_by_paths(TWO_FILE_DIFF, ["*.py", "*.json"])
+    assert result.strip() == ""

@@ -24,6 +24,8 @@ import structlog
 
 from reva.claude_client import ClaudeClient
 from reva.notifications import notify_worker_error
+from reva.odoo_client import OdooCallbackClient
+from reva.ticket_analyzer import TicketAnalyzer
 from reva.weekly_report import build_weekly_report
 from reva.db import (
     Database,
@@ -62,6 +64,8 @@ class WorkerContext:
     claude: ClaudeClient
     github: GitHubClient
     reviewer: Reviewer
+    ticket_analyzer: TicketAnalyzer
+    odoo: OdooCallbackClient
     google_chat_webhook_url: str = ""
 
 
@@ -102,8 +106,20 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         repos=DatabaseRepoLookup(db),
         prompts=prompts,
     )
-    context = WorkerContext(db=db, claude=claude, github=github, reviewer=reviewer,
-                            google_chat_webhook_url=settings.google_chat_webhook_url)
+    ticket_analyzer = TicketAnalyzer(claude=claude, prompts_dir=settings.prompts_dir)
+    odoo = OdooCallbackClient(
+        callback_url=settings.odoo_callback_url,
+        api_key=settings.odoo_callback_api_key,
+    )
+    context = WorkerContext(
+        db=db,
+        claude=claude,
+        github=github,
+        reviewer=reviewer,
+        ticket_analyzer=ticket_analyzer,
+        odoo=odoo,
+        google_chat_webhook_url=settings.google_chat_webhook_url,
+    )
     set_context(context)
     return context
 

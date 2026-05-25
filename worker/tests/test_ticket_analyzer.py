@@ -1,0 +1,195 @@
+"""Tests for TicketAnalyzer and format_ticket_html.
+
+Uses httpx.MockTransport to inject canned Claude responses — no live API calls.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import httpx
+import pytest
+
+from reva.claude_client import ClaudeClient
+from reva.errors import PermanentError
+from reva.ticket_analyzer import TicketAnalyzer, format_ticket_html
+from reva.ticket_tool import TICKET_TOOL_NAME
+from reva.types import (
+    AcceptanceCriterion,
+    TicketAnalysisResult,
+    TicketJobParams,
+    TicketTestCase,
+)
+
+FIXTURES = Path(__file__).parent / "fixtures"
+PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
+
+
+def _make_client(handler):
+    transport = httpx.MockTransport(handler)
+    return ClaudeClient(api_key="test-key", client=httpx.Client(transport=transport))
+
+
+def _make_analyzer(handler):
+    return TicketAnalyzer(
+        claude=_make_client(handler),
+        prompts_dir=str(PROMPTS_DIR),
+    )
+
+
+def _params() -> TicketJobParams:
+    return TicketJobParams(
+        analysis_id=1,
+        ticket_id=123,
+        model_name="helpdesk.ticket",
+        field_name="description",
+        text="Als Benutzer möchte ich einen Knopf sehen.",
+    )
+
+
+def _fixture_response(name: str = "sample_ticket_analysis.json") -> bytes:
+    return (FIXTURES / name).read_bytes()
+
+
+def _ok_handler(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(200, content=_fixture_response())
+
+
+def test_analyze_happy_path():
+    analyzer = _make_analyzer(_ok_handler)
+    result = analyzer.analyze(_params())
+    assert isinstance(result, TicketAnalysisResult)
+    assert "button" in result.summary.lower() or "ticket" in result.summary.lower()
+    assert len(result.missing_info) == 3
+    assert len(result.acceptance_criteria) == 1
+    assert len(result.test_cases) == 3
+    assert len(result.definition_of_ready) == 3
+    assert len(result.definition_of_done) == 3
+    assert len(result.odoo_notes) == 2
+
+
+def test_analyze_with_response_returns_both():
+    analyzer = _make_analyzer(_ok_handler)
+    response, result = analyzer.analyze_with_response(_params())
+    assert response.model == "claude-sonnet-4-6"
+    assert response.input_tokens == 1840
+    assert response.output_tokens == 712
+    assert isinstance(result, TicketAnalysisResult)
+
+
+def test_analyze_no_tool_call():
+    payload = {
+        "id": "msg_01",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-4-6",
+        "stop_reason": "end_turn",
+        "content": [{"type": "text", "text": "I can help with that."}],
+        "usage": {"input_tokens": 10, "output_tokens": 5,
+                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+    }
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=json.dumps(payload).encode())
+
+    analyzer = _make_analyzer(handler)
+    with pytest.raises(PermanentError, match=TICKET_TOOL_NAME):
+        analyzer.analyze(_params())
+
+
+def test_analyze_bad_tool_input():
+    payload = {
+        "id": "msg_01",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-4-6",
+        "stop_reason": "tool_use",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "toolu_01",
+                "name": TICKET_TOOL_NAME,
+                "input": {"summary": 12345},  # wrong type
+            }
+        ],
+        "usage": {"input_tokens": 10, "output_tokens": 5,
+                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+    }
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=json.dumps(payload).encode())
+
+    analyzer = _make_analyzer(handler)
+    with pytest.raises(PermanentError, match="validation"):
+        analyzer.analyze(_params())
+
+
+# ---------------------------------------------------------------------------
+# format_ticket_html
+# ---------------------------------------------------------------------------
+
+
+def _full_result() -> TicketAnalysisResult:
+    return TicketAnalysisResult(
+        summary="The ticket is clear.",
+        missing_info=["User role not specified"],
+        acceptance_criteria=[
+            AcceptanceCriterion(
+                given="a logged-in user",
+                when="they submit the form",
+                then="the record is saved",
+            )
+        ],
+        test_cases=[
+            TicketTestCase(category="happy_path", description="Submit valid form"),
+            TicketTestCase(category="edge_case", description="Submit empty form"),
+            TicketTestCase(category="error_scenario", description="Submit without rights"),
+        ],
+        definition_of_ready=["Problem is clear"],
+        definition_of_done=["Code reviewed"],
+        odoo_notes=["Affects helpdesk.ticket"],
+    )
+
+
+def test_format_html_all_sections():
+    html = format_ticket_html(_full_result())
+    assert "<h2>Summary</h2>" in html
+    assert "<h2>Missing Information</h2>" in html
+    assert "<h2>Acceptance Criteria</h2>" in html
+    assert "<h2>Test Cases</h2>" in html
+    assert "<h2>Definition of Ready</h2>" in html
+    assert "<h2>Definition of Done</h2>" in html
+    assert "<h2>Odoo-Specific Notes</h2>" in html
+    assert "Generated by REVA" in html
+
+
+def test_format_html_empty_lists():
+    result = TicketAnalysisResult(summary="Minimal ticket.")
+    html = format_ticket_html(result)
+    assert "<h2>Summary</h2>" in html
+    assert "Generated by REVA" in html
+    # empty lists should not crash and should not add empty <ul></ul>
+    assert "<h2>Missing Information</h2>" in html
+    assert "<li>" not in html.split("<h2>Missing Information</h2>")[1].split("<h2>")[0]
+
+
+def test_format_html_escapes_html():
+    result = TicketAnalysisResult(
+        summary='<script>alert("xss")</script>',
+        missing_info=['<b>bold</b>'],
+    )
+    html = format_ticket_html(result)
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+    assert "&lt;b&gt;" in html
+
+
+def test_format_html_test_case_grouping():
+    html = format_ticket_html(_full_result())
+    assert "<h3>Happy Path</h3>" in html
+    assert "<h3>Edge Cases</h3>" in html
+    assert "<h3>Error Scenarios</h3>" in html
+    # happy path comes before edge cases in the output
+    assert html.index("<h3>Happy Path</h3>") < html.index("<h3>Edge Cases</h3>")
+    assert html.index("<h3>Edge Cases</h3>") < html.index("<h3>Error Scenarios</h3>")

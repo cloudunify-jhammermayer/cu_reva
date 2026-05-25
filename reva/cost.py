@@ -1,10 +1,8 @@
 """Cost estimation for Claude API calls.
 
-Pricing values are placeholders based on the published Anthropic
-Sonnet/Opus 4.x baseline ($3 / $15 per MTok input/output for Sonnet,
-$15 / $75 for Opus). Cache reads are ~10% of input; 5-minute cache writes
-are ~1.25x input. VERIFY against current Anthropic pricing before billing
-treats these numbers as authoritative.
+Rates reflect Anthropic public pricing for Sonnet 4.6 and Opus 4.7 as of
+May 2026. Verify against https://www.anthropic.com/pricing if billing
+accuracy matters.
 """
 
 from __future__ import annotations

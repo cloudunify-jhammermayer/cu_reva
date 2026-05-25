@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 from collections.abc import Iterator
@@ -76,6 +77,27 @@ def filter_diff(
                 continue
             if os.path.splitext(path)[1].lower() in exclude_extensions:
                 continue
+        kept.append(section)
+    return "".join(kept)
+
+
+def filter_diff_by_paths(diff: str, patterns: list[str]) -> str:
+    """Strip file sections whose path matches any glob in patterns.
+
+    Unlike filter_diff (which strips fixed extensions/prefixes), this uses
+    caller-supplied globs from .claude-review.yml skip_paths for per-file
+    filtering without discarding the rest of the diff.
+    """
+    if not patterns:
+        return diff
+    sections = re.split(r"(?=^diff --git )", diff, flags=re.MULTILINE)
+    kept: list[str] = []
+    for section in sections:
+        if not section:
+            continue
+        m = re.search(r"^\+\+\+ b/(.+)$", section, re.MULTILINE)
+        if m and any(fnmatch.fnmatch(m.group(1), p) for p in patterns):
+            continue
         kept.append(section)
     return "".join(kept)
 

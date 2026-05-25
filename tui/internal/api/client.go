@@ -84,6 +84,11 @@ func (c *Client) Repos() (*RepoPage, error) {
 	return &p, c.get("/repos", &p)
 }
 
+func (c *Client) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
+	var p TicketAnalysisPage
+	return &p, c.get(fmt.Sprintf("/ticket-analyses?limit=%d", limit), &p)
+}
+
 func (c *Client) Requeue(id int) error {
 	resp, err := c.http.Post(
 		fmt.Sprintf("%s/reviews/%d/requeue", c.base, id),

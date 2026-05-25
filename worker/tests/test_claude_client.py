@@ -98,7 +98,7 @@ def test_review_cache_fields_default_to_zero_when_absent():
 # --- malformed 200 responses --------------------------------------------------
 
 
-def test_review_raises_permanent_when_tool_use_block_missing():
+def test_review_returns_none_tool_use_input_when_no_tool_use_block():
     payload = {
         "id": "msg_1",
         "type": "message",
@@ -110,12 +110,13 @@ def test_review_raises_permanent_when_tool_use_block_missing():
     }
     client = _make_client(lambda req: httpx.Response(200, json=payload))
 
-    with pytest.raises(PermanentError) as exc_info:
-        client.review(**_review_args())
-    assert REVIEW_TOOL_NAME in str(exc_info.value)
+    result = client.review(**_review_args())
+    # Callers (Reviewer, TicketAnalyzer) check for None and raise PermanentError.
+    assert result.tool_use_input is None
+    assert result.stop_reason == "end_turn"
 
 
-def test_review_raises_permanent_when_tool_use_has_wrong_name():
+def test_review_accepts_any_tool_name():
     payload = {
         "id": "msg_1",
         "type": "message",
@@ -123,14 +124,15 @@ def test_review_raises_permanent_when_tool_use_has_wrong_name():
         "model": "claude-sonnet-4-6",
         "stop_reason": "tool_use",
         "content": [
-            {"type": "tool_use", "id": "t1", "name": "some_other_tool", "input": {}}
+            {"type": "tool_use", "id": "t1", "name": "some_other_tool", "input": {"x": 1}}
         ],
         "usage": {"input_tokens": 10, "output_tokens": 5},
     }
     client = _make_client(lambda req: httpx.Response(200, json=payload))
 
-    with pytest.raises(PermanentError):
-        client.review(**_review_args())
+    result = client.review(**_review_args())
+    # The client accepts any tool_use block; name validation is the caller's job.
+    assert result.tool_use_input == {"x": 1}
 
 
 # --- HTTP status mapping ------------------------------------------------------

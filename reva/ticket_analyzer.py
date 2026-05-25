@@ -1,0 +1,150 @@
+"""Pure ticket analysis: Claude call + HTML formatter.
+
+No side effects — no DB writes, no HTTP calls to Odoo.
+The caller (ticket_runner.py) owns persistence and the callback POST.
+"""
+
+from __future__ import annotations
+
+import os
+
+from reva.claude_client import ClaudeClient
+from reva.errors import PermanentError
+from reva.ticket_tool import TICKET_TOOL_NAME, build_ticket_tool_schema, ticket_tool_choice
+from reva.types import ClaudeResponse, ContentBlock, TicketAnalysisResult, TicketJobParams
+
+
+class TicketAnalyzer:
+    def __init__(self, claude: ClaudeClient, prompts_dir: str) -> None:
+        self._claude = claude
+        self._prompts_dir = prompts_dir
+
+    def analyze(self, params: TicketJobParams) -> TicketAnalysisResult:
+        """Call Claude and return a validated TicketAnalysisResult."""
+        _, result = self.analyze_with_response(params)
+        return result
+
+    def analyze_with_response(
+        self, params: TicketJobParams
+    ) -> tuple[ClaudeResponse, TicketAnalysisResult]:
+        """Call Claude and return (raw response, validated result).
+
+        The raw response is needed by the runner to record token usage.
+        """
+        system_blocks = self._build_system()
+        tool_schema = build_ticket_tool_schema()
+
+        response = self._claude.review(
+            system_blocks=system_blocks,
+            user_prompt=params.text,
+            tools=[tool_schema],
+            tool_choice=ticket_tool_choice(),
+        )
+
+        if response.tool_use_input is None:
+            raise PermanentError(
+                f"Claude did not call {TICKET_TOOL_NAME} "
+                f"(stop_reason={response.stop_reason})"
+            )
+
+        try:
+            result = TicketAnalysisResult.model_validate(response.tool_use_input)
+        except Exception as exc:
+            raise PermanentError(
+                f"ticket analysis result failed schema validation: {exc}"
+            ) from exc
+
+        return response, result
+
+    def _build_system(self) -> list[ContentBlock]:
+        path = os.path.join(self._prompts_dir, "ticket_analysis.md")
+        with open(path) as f:
+            text = f.read()
+        return [
+            {
+                "type": "text",
+                "text": text,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+
+# ---------------------------------------------------------------------------
+# HTML formatter
+# ---------------------------------------------------------------------------
+
+_CATEGORY_LABEL = {
+    "happy_path": "Happy Path",
+    "edge_case": "Edge Cases",
+    "error_scenario": "Error Scenarios",
+}
+
+
+def format_ticket_html(result: TicketAnalysisResult) -> str:
+    """Convert a TicketAnalysisResult into an HTML string suitable for Odoo HTML fields."""
+    parts: list[str] = []
+
+    # Summary
+    parts.append(f"<h2>Summary</h2><p>{_esc(result.summary)}</p>")
+
+    # Missing information
+    if result.missing_info:
+        items = "".join(f"<li>{_esc(i)}</li>" for i in result.missing_info)
+        parts.append(f"<h2>Missing Information</h2><ul>{items}</ul>")
+    else:
+        parts.append("<h2>Missing Information</h2><p><em>No missing information identified.</em></p>")
+
+    # Acceptance criteria
+    if result.acceptance_criteria:
+        items = "".join(
+            f"<li>"
+            f"<strong>Given</strong> {_esc(ac.given)} "
+            f"<strong>When</strong> {_esc(ac.when)} "
+            f"<strong>Then</strong> {_esc(ac.then)}"
+            f"</li>"
+            for ac in result.acceptance_criteria
+        )
+        parts.append(f"<h2>Acceptance Criteria</h2><ul>{items}</ul>")
+
+    # Test cases grouped by category
+    if result.test_cases:
+        by_category: dict[str, list[str]] = {}
+        for tc in result.test_cases:
+            by_category.setdefault(tc.category, []).append(tc.description)
+
+        tc_html = "<h2>Test Cases</h2>"
+        for cat in ("happy_path", "edge_case", "error_scenario"):
+            cases = by_category.get(cat, [])
+            if cases:
+                label = _CATEGORY_LABEL[cat]
+                items = "".join(f"<li>{_esc(c)}</li>" for c in cases)
+                tc_html += f"<h3>{label}</h3><ul>{items}</ul>"
+        parts.append(tc_html)
+
+    # Definition of ready
+    if result.definition_of_ready:
+        items = "".join(f"<li>&#9744; {_esc(i)}</li>" for i in result.definition_of_ready)
+        parts.append(f"<h2>Definition of Ready</h2><ul>{items}</ul>")
+
+    # Definition of done
+    if result.definition_of_done:
+        items = "".join(f"<li>&#9744; {_esc(i)}</li>" for i in result.definition_of_done)
+        parts.append(f"<h2>Definition of Done</h2><ul>{items}</ul>")
+
+    # Odoo-specific notes
+    if result.odoo_notes:
+        items = "".join(f"<li>{_esc(i)}</li>" for i in result.odoo_notes)
+        parts.append(f"<h2>Odoo-Specific Notes</h2><ul>{items}</ul>")
+
+    parts.append("<p><em>Generated by REVA</em></p>")
+    return "\n".join(parts)
+
+
+def _esc(text: str) -> str:
+    """Minimal HTML escaping for user-supplied strings."""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )

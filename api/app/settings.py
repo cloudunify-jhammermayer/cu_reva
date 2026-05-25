@@ -17,6 +17,9 @@ class Settings:
     migrations_dir: str = "/app/db/migrations"
     queue_name: str = "reviews"
     default_review_mode: str = "diff"
+    odoo_callback_url: str = ""
+    odoo_callback_api_key: str = ""
+    api_key: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -32,4 +35,7 @@ class Settings:
             migrations_dir=os.environ.get("REVA_MIGRATIONS_DIR", "/app/db/migrations"),
             queue_name=os.environ.get("REVA_QUEUE_NAME", "reviews"),
             default_review_mode=os.environ.get("REVA_DEFAULT_REVIEW_MODE", "diff"),
+            odoo_callback_url=os.environ.get("ODOO_CALLBACK_URL", ""),
+            odoo_callback_api_key=os.environ.get("ODOO_CALLBACK_API_KEY", ""),
+            api_key=os.environ.get("REVA_API_KEY", ""),
         )

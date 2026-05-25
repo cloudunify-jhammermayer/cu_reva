@@ -115,6 +115,25 @@ type PendingPage struct {
 	Total int             `json:"total"`
 }
 
+type TicketAnalysisSummary struct {
+	ID               int        `json:"id"`
+	TicketID         int        `json:"ticket_id"`
+	ModelName        string     `json:"model_name"`
+	FieldName        string     `json:"field_name"`
+	Status           string     `json:"status"`
+	Model            *string    `json:"model"`
+	InputTokens      *int       `json:"input_tokens"`
+	OutputTokens     *int       `json:"output_tokens"`
+	EstimatedCostUSD *float64   `json:"estimated_cost_usd"`
+	CreatedAt        time.Time  `json:"created_at"`
+	CompletedAt      *time.Time `json:"completed_at"`
+}
+
+type TicketAnalysisPage struct {
+	Items []TicketAnalysisSummary `json:"items"`
+	Total int                     `json:"total"`
+}
+
 type DashboardMetrics struct {
 	Last24h            PeriodStats   `json:"last_24h"`
 	Last7d             PeriodStats   `json:"last_7d"`

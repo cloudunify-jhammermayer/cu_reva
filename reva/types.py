@@ -159,6 +159,45 @@ class ContentBlock(TypedDict, total=False):
     cache_control: dict
 
 
+# --- Ticket analysis types ---------------------------------------------------
+
+
+class AcceptanceCriterion(BaseModel):
+    given: str
+    when: str
+    then: str
+
+
+class TicketTestCase(BaseModel):
+    category: Literal["happy_path", "edge_case", "error_scenario"]
+    description: str
+
+
+class TicketAnalysisResult(BaseModel):
+    """Structured output from the ticket analysis tool_use call."""
+
+    summary: str
+    missing_info: list[str] = Field(default_factory=list)
+    acceptance_criteria: list[AcceptanceCriterion] = Field(default_factory=list)
+    test_cases: list[TicketTestCase] = Field(default_factory=list)
+    definition_of_ready: list[str] = Field(default_factory=list)
+    definition_of_done: list[str] = Field(default_factory=list)
+    odoo_notes: list[str] = Field(default_factory=list)
+
+
+class TicketJobParams(BaseModel):
+    """Inputs handed to the ticket analysis RQ job."""
+
+    analysis_id: int
+    ticket_id: int
+    model_name: str  # e.g. "helpdesk.ticket" or "project.task"
+    field_name: str
+    text: str
+
+
+# --- Claude response ----------------------------------------------------------
+
+
 class ClaudeResponse(BaseModel):
     """Normalized response from ClaudeClient.review.
 

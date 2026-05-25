@@ -1,0 +1,63 @@
+{
+  "id": "msg_01TICKETANALYSISXYZ",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-6",
+  "stop_reason": "tool_use",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01TICKET",
+      "name": "submit_ticket_analysis",
+      "input": {
+        "summary": "The ticket describes a basic feature request to add a button to the helpdesk form view. The description is clear but missing several key details required before development can begin.",
+        "missing_info": [
+          "User role that should see the button is not specified",
+          "Expected behaviour after button click is not described",
+          "No mention of which Odoo module or view is affected"
+        ],
+        "acceptance_criteria": [
+          {
+            "given": "a logged-in helpdesk agent on the ticket form",
+            "when": "they click the new button",
+            "then": "the configured action is triggered and a success toast appears"
+          }
+        ],
+        "test_cases": [
+          {
+            "category": "happy_path",
+            "description": "Agent clicks button on an open ticket — action fires and toast shown"
+          },
+          {
+            "category": "edge_case",
+            "description": "Button clicked on a closed ticket — action is blocked with an error message"
+          },
+          {
+            "category": "error_scenario",
+            "description": "User without helpdesk agent role cannot see the button"
+          }
+        ],
+        "definition_of_ready": [
+          "Affected Odoo view and model are identified",
+          "Button label and icon agreed with stakeholder",
+          "Action triggered by button is fully specified"
+        ],
+        "definition_of_done": [
+          "Button renders in the helpdesk ticket form view",
+          "Access rights verified for agent and non-agent roles",
+          "All acceptance criteria verified on staging"
+        ],
+        "odoo_notes": [
+          "Affects helpdesk.ticket form view — ir.ui.view XML change required",
+          "May require security rule update in helpdesk/security/ir.model.access.csv"
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "input_tokens": 1840,
+    "cache_creation_input_tokens": 400,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 712
+  }
+}

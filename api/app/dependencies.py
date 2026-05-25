@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import Request
+import hmac
+
+from fastapi import Depends, HTTPException, Request
 
 from app.settings import Settings
 from reva.db.engine import Database
@@ -14,3 +16,12 @@ def get_db(request: Request) -> Database:
 
 def get_settings(request: Request) -> Settings:
     return request.app.state.settings
+
+
+def require_api_key(request: Request, settings: Settings = Depends(get_settings)) -> None:
+    """Validate Bearer token if REVA_API_KEY is set. No-op when key is empty."""
+    if not settings.api_key:
+        return
+    auth = request.headers.get("Authorization", "")
+    if not hmac.compare_digest(auth, f"Bearer {settings.api_key}"):
+        raise HTTPException(status_code=401, detail="Invalid API key")

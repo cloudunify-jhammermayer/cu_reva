@@ -310,6 +310,38 @@ class ReviewFeedback(Base):
     )
 
 
+# --------------------------------------------------------- ticket_analyses
+
+
+class TicketAnalysis(Base):
+    __tablename__ = "ticket_analyses"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    job_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    ticket_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_name: Mapped[str] = mapped_column(Text, nullable=False)
+    field_name: Mapped[str] = mapped_column(Text, nullable=False)
+    input_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    result_html: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_creation_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("idx_ticket_analyses_status", "status"),
+        Index("idx_ticket_analyses_ticket_id", "ticket_id"),
+    )
+
+
 # ----------------------------------------------------------- prompt_versions
 
 

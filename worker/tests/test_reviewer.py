@@ -22,10 +22,18 @@ from reva.types import ClaudeResponse, Finding, JobParams, RepoConfig
 # --- Fakes --------------------------------------------------------------------
 
 
+_DEFAULT_DIFF = (
+    "diff --git a/custom_addons/app.py b/custom_addons/app.py\n"
+    "+++ b/custom_addons/app.py\n"
+    "+ added\n"
+    "- removed\n"
+)
+
+
 @dataclass
 class FakeGitHub:
-    diff: str = "diff --git a/x.py b/x.py\n+++ b/x.py\n+ added\n- removed\n"
-    files: list[dict] = field(default_factory=lambda: [{"filename": "x.py"}])
+    diff: str = _DEFAULT_DIFF
+    files: list[dict] = field(default_factory=lambda: [{"filename": "custom_addons/app.py"}])
     head_sha: str = "deadbeef"
     file_contents: dict[str, str | None] = field(default_factory=dict)
     diff_calls: int = 0
@@ -159,7 +167,7 @@ def test_happy_path_returns_completed_result():
     finding = {
         "severity": "minor",
         "category": "maintainability",
-        "file": "x.py",
+        "file": "custom_addons/app.py",
         "line_start": 10,
         "line_end": 10,
         "title": "Use clearer variable name",
@@ -251,9 +259,15 @@ def test_per_repo_config_tightens_max_diff_lines():
 
 
 def test_decline_when_all_files_match_skip_paths():
+    # Use a diff under custom_addons/ so it passes filter_diff, then gets stripped by skip_paths.
     github = FakeGitHub(
-        files=[{"filename": "package-lock.json"}, {"filename": "yarn.lock"}],
-        file_contents={".claude-review.yml": "skip_paths:\n  - '*.lock'\n  - '*.json'\n"},
+        diff=(
+            "diff --git a/custom_addons/package-lock.json b/custom_addons/package-lock.json\n"
+            "+++ b/custom_addons/package-lock.json\n"
+            "+ lock content\n"
+        ),
+        files=[{"filename": "custom_addons/package-lock.json"}],
+        file_contents={".claude-review.yml": "skip_paths:\n  - '*.json'\n"},
     )
     reviewer, *_ = _make_reviewer(github=github)
     result = reviewer.execute(_params())

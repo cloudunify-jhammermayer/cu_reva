@@ -10,4 +10,5 @@ type ClientIface interface {
 	Pending() (*PendingPage, error)
 	Findings(severity, category string, limit int) (*FindingPage, error)
 	Repos() (*RepoPage, error)
+	TicketAnalyses(limit int) (*TicketAnalysisPage, error)
 }

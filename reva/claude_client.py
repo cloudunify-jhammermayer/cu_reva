@@ -1,8 +1,9 @@
 """Claude Messages API client.
 
 Implements `ClaudeClient.review`. Pure HTTP — no retries (RQ owns those),
-no SDK dependency. The client extracts the `submit_review` tool_use block
-and normalizes token usage (including cache read/write counts).
+no SDK dependency. The client extracts any tool_use block from the response
+and normalizes token usage (including cache read/write counts). Callers are
+responsible for validating the tool name and input schema.
 """
 
 from __future__ import annotations
@@ -10,7 +11,6 @@ from __future__ import annotations
 import httpx
 
 from reva.errors import PermanentError, TransientError
-from reva.review_tool import REVIEW_TOOL_NAME
 from reva.types import ClaudeResponse, ContentBlock
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
@@ -152,25 +152,17 @@ def _parse_retry_after(value: str | None) -> int | None:
 
 
 def _parse_success(payload: dict) -> ClaudeResponse:
-    """Extract tool_use input and usage from a 200 response.
+    """Extract the first tool_use block and usage from a 200 response.
 
-    A successful tool_use call has stop_reason="tool_use" and at least one
-    content block with type="tool_use". We require the block's `name` to
-    match REVIEW_TOOL_NAME — anything else means Claude went off-script
-    (a permanent failure for this contract).
+    Returns tool_use_input=None when no tool_use block is present; callers
+    check for None and raise PermanentError with context-specific messages.
     """
     content = payload.get("content") or []
     tool_use_input: dict | None = None
     for block in content:
-        if block.get("type") == "tool_use" and block.get("name") == REVIEW_TOOL_NAME:
+        if block.get("type") == "tool_use":
             tool_use_input = block.get("input")
             break
-
-    if tool_use_input is None:
-        raise PermanentError(
-            f"Claude response missing tool_use[{REVIEW_TOOL_NAME}] block "
-            f"(stop_reason={payload.get('stop_reason')!r})"
-        )
 
     usage = payload.get("usage") or {}
     return ClaudeResponse(

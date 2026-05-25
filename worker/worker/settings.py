@@ -23,6 +23,8 @@ class Settings:
     migrations_dir: str = "/app/db/migrations"
     queue_name: str = "reviews"
     google_chat_webhook_url: str = ""  # empty = notifications disabled
+    odoo_callback_url: str = ""        # empty = Odoo callback disabled
+    odoo_callback_api_key: str = ""
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -48,4 +50,6 @@ class Settings:
             migrations_dir=os.environ.get("REVA_MIGRATIONS_DIR", "/app/db/migrations"),
             queue_name=os.environ.get("REVA_QUEUE_NAME", "reviews"),
             google_chat_webhook_url=os.environ.get("GOOGLE_CHAT_WEBHOOK_URL", ""),
+            odoo_callback_url=os.environ.get("ODOO_CALLBACK_URL", ""),
+            odoo_callback_api_key=os.environ.get("ODOO_CALLBACK_API_KEY", ""),
         )

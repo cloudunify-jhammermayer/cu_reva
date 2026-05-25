@@ -26,7 +26,12 @@
       "Bash(docker compose *)",
       "Bash(go build *)",
       "Bash(go get *)",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(uv run *)",
+      "Read(//home/joseph/Projects/**)",
+      "Bash(git -C ~/Projects/ast-odoo status --short)",
+      "Bash(git -C ~/Projects/ast-odoo log --oneline -3)",
+      "Bash(git *)"
     ]
   }
 }
