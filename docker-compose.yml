@@ -21,7 +21,7 @@ services:
       - "8080:8080"
     environment:
       DATABASE_URL: postgresql://review:${POSTGRES_PASSWORD}@postgres:5432/reviews
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       GITHUB_APP_ID: ${GITHUB_APP_ID}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
       GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_private_key
@@ -44,7 +44,7 @@ services:
       dockerfile: scheduler/Dockerfile
     environment:
       DATABASE_URL: postgresql://review:${POSTGRES_PASSWORD}@postgres:5432/reviews
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
@@ -61,7 +61,7 @@ services:
       dockerfile: worker/Dockerfile
     environment:
       DATABASE_URL: postgresql://review:${POSTGRES_PASSWORD}@postgres:5432/reviews
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       GITHUB_APP_ID: ${GITHUB_APP_ID}
       GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_private_key
@@ -100,7 +100,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD}
     ports:
       - "6379:6379"
     networks:
