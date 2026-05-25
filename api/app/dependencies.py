@@ -18,6 +18,10 @@ def get_settings(request: Request) -> Settings:
     return request.app.state.settings
 
 
+def get_queue(request: Request) -> "Queue":
+    return request.app.state.rq_queue
+
+
 def require_api_key(request: Request, settings: Settings = Depends(get_settings)) -> None:
     """Validate Bearer token if REVA_API_KEY is set. No-op when key is empty."""
     if not settings.api_key:

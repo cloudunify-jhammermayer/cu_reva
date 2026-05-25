@@ -49,6 +49,7 @@ from reva.review_formatter import (
     format_pr_review_body,
     split_findings,
 )
+from worker.auditor import Auditor
 from worker.reviewer import Reviewer
 from worker.settings import Settings
 from reva.types import JobParams, ReviewResult
@@ -66,6 +67,7 @@ class WorkerContext:
     runner: ClaudeCodeRunner
     github: GitHubClient
     reviewer: Reviewer
+    auditor: Auditor
     ticket_analyzer: TicketAnalyzer
     odoo: OdooCallbackClient
     google_chat_webhook_url: str = ""
@@ -113,6 +115,11 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         repos=DatabaseRepoLookup(db),
         prompts=prompts,
     )
+    auditor = Auditor(
+        runner=runner,
+        github=github,
+        repos=DatabaseRepoLookup(db),
+    )
     ticket_analyzer = TicketAnalyzer(claude=claude, prompts_dir=settings.prompts_dir)
     odoo = OdooCallbackClient(
         callback_url=settings.odoo_callback_url,
@@ -124,6 +131,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         runner=runner,
         github=github,
         reviewer=reviewer,
+        auditor=auditor,
         ticket_analyzer=ticket_analyzer,
         odoo=odoo,
         google_chat_webhook_url=settings.google_chat_webhook_url,

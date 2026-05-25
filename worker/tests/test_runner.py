@@ -126,6 +126,7 @@ def ctx_and_fakes():
         runner=None,  # type: ignore[arg-type] — unused; reviewer is faked
         github=github,  # type: ignore[arg-type]
         reviewer=reviewer,  # type: ignore[arg-type]
+        auditor=None,  # type: ignore[arg-type]
         ticket_analyzer=None,  # type: ignore[arg-type] — unused in review tests
         odoo=None,  # type: ignore[arg-type] — unused in review tests
     )
