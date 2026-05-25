@@ -80,7 +80,62 @@ class ClaudeCodeRunner:
         params: dict,
         model: str | None = None,
     ) -> ClaudeResponse:
-        raise NotImplementedError("review() is implemented in Task 4")
+        """Run `claude --print` in repo_path using a skill template.
+
+        Reads prompts/skills/{skill}.md, appends task parameters and a temp
+        output path, runs the CLI, reads the JSON written by Claude, and
+        returns a ClaudeResponse with tool_use_input set to that JSON.
+
+        Raises:
+            PermanentError: non-zero exit code 1, or Claude wrote no valid JSON.
+            TransientError: non-zero exit code other than 1 (killed, OOM, etc.).
+        """
+        output_path = self._create_output_path()
+        skill_content = self._read_skill(skill)
+        param_lines = "\n".join(f"{k}: {v}" for k, v in params.items())
+        task = (
+            f"{skill_content}\n\n"
+            f"## Task Parameters\n\n"
+            f"{param_lines}\n"
+            f"output_path: {output_path}"
+        )
+        try:
+            proc = subprocess.run(
+                [
+                    _CLAUDE_BIN, "--print",
+                    "--output-format", "json",
+                    "--model", model or self.default_model,
+                    "--allowedTools", "Read,Bash,Grep,Write",
+                    task,
+                ],
+                cwd=repo_path,
+                env={**os.environ, "ANTHROPIC_API_KEY": self.api_key},
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if proc.returncode != 0:
+                raise _exit_to_error(proc.returncode, proc.stderr)
+
+            try:
+                with open(output_path) as f:
+                    tool_use_input = json.load(f)
+            except FileNotFoundError as exc:
+                raise PermanentError(
+                    f"Claude did not create output file at {output_path}"
+                ) from exc
+            except json.JSONDecodeError as exc:
+                raise PermanentError(
+                    f"Claude wrote invalid JSON to {output_path}: {exc}"
+                ) from exc
+
+            return ClaudeResponse(
+                model=model or self.default_model,
+                stop_reason="tool_use",
+                tool_use_input=tool_use_input,
+            )
+        finally:
+            Path(output_path).unlink(missing_ok=True)
 
     # ----------------------------------------------------------------- helpers
 

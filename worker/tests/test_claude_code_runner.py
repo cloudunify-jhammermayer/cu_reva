@@ -87,3 +87,151 @@ def test_ensure_repo_checkout_failure_raises_permanent(runner, tmp_path):
     with patch("subprocess.run", side_effect=responses):
         with pytest.raises(PermanentError, match="checkout failed"):
             runner.ensure_repo("acme", "widgets", "badsha", "tok")
+
+
+# ---- review ----
+
+@pytest.fixture
+def runner_with_skill(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    (skills_dir / "reva-diff-review.md").write_text("You are REVA. Write JSON to output_path.")
+    return ClaudeCodeRunner(
+        repo_cache_dir=str(tmp_path / "repos"),
+        api_key="test-key",
+        skills_dir=str(skills_dir),
+    )
+
+
+def _extract_output_path(task_str: str) -> str:
+    """Helper: parse output_path from the task string Claude receives."""
+    for line in task_str.splitlines():
+        if line.startswith("output_path:"):
+            return line.split(": ", 1)[1].strip()
+    raise ValueError("output_path not found in task string")
+
+
+def test_review_returns_claude_response(runner_with_skill, tmp_path):
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+    review_output = {"summary": "Looks good.", "findings": []}
+
+    def fake_run(args, **kwargs):
+        task_str = args[-1]
+        out_path = _extract_output_path(task_str)
+        with open(out_path, "w") as f:
+            json.dump(review_output, f)
+        return _ok()
+
+    with patch("subprocess.run", side_effect=fake_run):
+        resp = runner_with_skill.review(
+            repo_path=repo_path,
+            skill="reva-diff-review",
+            params={"pr_title": "Fix bug", "diff": "diff content"},
+        )
+
+    assert resp.tool_use_input == review_output
+    assert resp.model == "claude-sonnet-4-6"
+    assert resp.stop_reason == "tool_use"
+
+
+def test_review_passes_correct_subprocess_args(runner_with_skill, tmp_path):
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+
+    def fake_run(args, **kwargs):
+        out_path = _extract_output_path(args[-1])
+        with open(out_path, "w") as f:
+            json.dump({"summary": "ok", "findings": []}, f)
+        return _ok()
+
+    with patch("subprocess.run", side_effect=fake_run) as mock_run:
+        runner_with_skill.review(repo_path=repo_path, skill="reva-diff-review", params={})
+
+    call_args = mock_run.call_args
+    args = call_args.args[0]
+    assert args[0] == "claude"
+    assert "--print" in args
+    assert "--output-format" in args
+    assert "json" in args
+    assert call_args.kwargs["cwd"] == repo_path
+    assert call_args.kwargs["env"]["ANTHROPIC_API_KEY"] == "test-key"
+
+
+def test_review_cleans_up_output_file(runner_with_skill, tmp_path):
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+    captured = []
+
+    def fake_run(args, **kwargs):
+        out_path = _extract_output_path(args[-1])
+        captured.append(out_path)
+        with open(out_path, "w") as f:
+            json.dump({"summary": "ok", "findings": []}, f)
+        return _ok()
+
+    with patch("subprocess.run", side_effect=fake_run):
+        runner_with_skill.review(repo_path=repo_path, skill="reva-diff-review", params={})
+
+    assert captured, "output path was never captured"
+    assert not os.path.exists(captured[0]), "temp file was not cleaned up"
+
+
+def test_review_cleans_up_even_on_error(runner_with_skill, tmp_path):
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+    captured = []
+
+    def fake_run(args, **kwargs):
+        out_path = _extract_output_path(args[-1])
+        captured.append(out_path)
+        # Do NOT write the file — simulates Claude not writing output
+        return _ok()
+
+    with patch("subprocess.run", side_effect=fake_run):
+        with pytest.raises(PermanentError):
+            runner_with_skill.review(repo_path=repo_path, skill="reva-diff-review", params={})
+
+    assert captured
+    assert not os.path.exists(captured[0])
+
+
+def test_review_raises_permanent_on_exit_1(runner_with_skill, tmp_path):
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+
+    with patch("subprocess.run", return_value=_fail(code=1, stderr="bad prompt")):
+        with pytest.raises(PermanentError, match="exited 1"):
+            runner_with_skill.review(repo_path=repo_path, skill="reva-diff-review", params={})
+
+
+def test_review_raises_transient_on_exit_2(runner_with_skill, tmp_path):
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+
+    with patch("subprocess.run", return_value=_fail(code=2, stderr="killed")):
+        with pytest.raises(TransientError, match="exited 2"):
+            runner_with_skill.review(repo_path=repo_path, skill="reva-diff-review", params={})
+
+
+def test_review_raises_permanent_on_invalid_json(runner_with_skill, tmp_path):
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+
+    def fake_run(args, **kwargs):
+        out_path = _extract_output_path(args[-1])
+        with open(out_path, "w") as f:
+            f.write("not valid json {{{")
+        return _ok()
+
+    with patch("subprocess.run", side_effect=fake_run):
+        with pytest.raises(PermanentError, match="invalid JSON"):
+            runner_with_skill.review(repo_path=repo_path, skill="reva-diff-review", params={})
+
+
+def test_review_raises_permanent_for_missing_skill(runner_with_skill, tmp_path):
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+
+    with pytest.raises(PermanentError, match="Skill file not found"):
+        runner_with_skill.review(repo_path=repo_path, skill="nonexistent-skill", params={})
