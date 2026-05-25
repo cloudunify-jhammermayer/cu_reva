@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 import structlog
 
 from reva.claude_client import ClaudeClient
+from reva.claude_code_runner import ClaudeCodeRunner
 from reva.notifications import notify_worker_error
 from reva.odoo_client import OdooCallbackClient
 from reva.ticket_analyzer import TicketAnalyzer
@@ -62,6 +63,7 @@ logger = structlog.get_logger()
 class WorkerContext:
     db: Database
     claude: ClaudeClient
+    runner: ClaudeCodeRunner
     github: GitHubClient
     reviewer: Reviewer
     ticket_analyzer: TicketAnalyzer
@@ -94,6 +96,11 @@ def build_worker_context(settings: Settings) -> WorkerContext:
     db.migrate(settings.migrations_dir)
 
     claude = ClaudeClient(api_key=settings.anthropic_api_key)
+    runner = ClaudeCodeRunner(
+        repo_cache_dir=settings.repo_cache_dir,
+        api_key=settings.anthropic_api_key,
+        skills_dir=settings.skills_dir,
+    )
     github = GitHubClient(
         app_id=settings.github_app_id,
         private_key_pem=settings.github_private_key,
@@ -101,7 +108,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
     )
     prompts = PromptBuilder(prompts_dir=settings.prompts_dir)
     reviewer = Reviewer(
-        claude=claude,
+        runner=runner,
         github=github,
         repos=DatabaseRepoLookup(db),
         prompts=prompts,
@@ -114,6 +121,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
     context = WorkerContext(
         db=db,
         claude=claude,
+        runner=runner,
         github=github,
         reviewer=reviewer,
         ticket_analyzer=ticket_analyzer,

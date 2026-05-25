@@ -123,6 +123,7 @@ def ctx_and_fakes():
     context = WorkerContext(
         db=db,
         claude=None,  # type: ignore[arg-type] — unused; reviewer is faked
+        runner=None,  # type: ignore[arg-type] — unused; reviewer is faked
         github=github,  # type: ignore[arg-type]
         reviewer=reviewer,  # type: ignore[arg-type]
         ticket_analyzer=None,  # type: ignore[arg-type] — unused in review tests
