@@ -74,6 +74,9 @@ ANTHROPIC_API_KEY=sk-ant-api03-...
 # Database
 POSTGRES_PASSWORD=<generate-a-strong-password>
 
+# Redis
+REDIS_PASSWORD=<generate-a-strong-password>
+
 # Debounce — 600s (10 min) is the production default; tune to taste
 REVA_DEBOUNCE_SECONDS=600
 ```
@@ -287,4 +290,5 @@ HTTP server block handles this automatically.
 | `GITHUB_WEBHOOK_SECRET` | yes | — | Random string set in GitHub App webhook config |
 | `ANTHROPIC_API_KEY` | yes | — | API key from console.anthropic.com |
 | `POSTGRES_PASSWORD` | yes | — | Password for the `review` DB user |
+| `REDIS_PASSWORD` | yes | — | Redis `requirepass` value; embedded in all `REDIS_URL` values |
 | `REVA_DEBOUNCE_SECONDS` | no | 600 | Seconds to wait before enqueuing a review after a webhook |

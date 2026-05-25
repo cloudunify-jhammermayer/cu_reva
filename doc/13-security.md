@@ -28,6 +28,7 @@
 | GitHub App webhook secret | `.env` → env var | API |
 | Anthropic API key | `.env` → env var | Worker |
 | PostgreSQL password | `.env` → env var | API, Worker |
+| Redis password (`REDIS_PASSWORD`) | `.env` → env var | API, Scheduler, Worker (via `REDIS_URL`) |
 | Google Chat webhook URL | `.env` → env var | Worker |
 
 ### File Permissions
@@ -57,6 +58,7 @@ secrets/
 | GitHub App private key | Every 6 months | Generate new key in App settings, update file, restart |
 | Anthropic API key | Every 6 months | Generate new key in console, update .env, restart |
 | PostgreSQL password | Every 12 months | Update .env, update Postgres, restart all |
+| Redis password | Every 12 months | Update .env `REDIS_PASSWORD`, restart all containers |
 | GitHub webhook secret | Every 12 months | Update in App settings + .env, restart API |
 | Google Chat webhook URL | On revocation | Generate new webhook in Chat space |
 

@@ -82,6 +82,9 @@ ANTHROPIC_API_KEY=sk-ant-api03-...
 # Database
 POSTGRES_PASSWORD=<any-strong-password>
 
+# Redis
+REDIS_PASSWORD=<any-strong-password>
+
 # Debounce — how long to wait after a webhook before running the review.
 # Set low (e.g. 30) locally so you don't wait 10 minutes.
 REVA_DEBOUNCE_SECONDS=30
@@ -263,4 +266,5 @@ Always run `docker compose build <service> && docker compose up -d <service>`.
 | `GITHUB_WEBHOOK_SECRET` | yes | — | Random string set in GitHub App webhook config |
 | `ANTHROPIC_API_KEY` | yes | — | API key from console.anthropic.com |
 | `POSTGRES_PASSWORD` | yes | — | Password for the `review` DB user |
+| `REDIS_PASSWORD` | yes | — | Redis `requirepass` value; embedded in all `REDIS_URL` values |
 | `REVA_DEBOUNCE_SECONDS` | no | 600 | Seconds to wait before enqueuing a review after a webhook |
