@@ -16,7 +16,7 @@ from worker.reviewer import (
     _cap_findings,
     _recompute_risk_level,
 )
-from reva.types import ClaudeResponse, Finding, JobParams, RepoConfig
+from reva.types import ClaudeResponse, Finding, JobParams
 
 
 # --- Fakes --------------------------------------------------------------------
@@ -107,19 +107,6 @@ class FakePrompts:
 
     def __init__(self, version: str = "v1.0") -> None:
         self.version = version
-        self.last_system_blocks: list[dict] | None = None
-
-    def build_system_blocks(self, repo_config: RepoConfig, claude_md: str | None) -> list:
-        blocks = [{"type": "text", "text": "SYSTEM"}]
-        if claude_md:
-            blocks.append({"type": "text", "text": claude_md})
-        if repo_config.custom_instructions and repo_config.custom_instructions.strip():
-            blocks.append({"type": "text", "text": repo_config.custom_instructions})
-        self.last_system_blocks = blocks
-        return blocks
-
-    def build_user_prompt(self, **kwargs) -> str:
-        return "USER PROMPT"
 
     def get_version(self) -> str:
         return self.version
