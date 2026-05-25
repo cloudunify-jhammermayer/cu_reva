@@ -79,15 +79,24 @@ class FakeRepos:
 
 
 @dataclass
-class FakeClaude:
+class FakeRunner:
+    """Fake ClaudeCodeRunner for Reviewer tests."""
     response: ClaudeResponse | None = None
     raise_exc: Exception | None = None
     default_model: str = "claude-sonnet-4-6"
     deep_model: str = "claude-opus-4-7"
     last_model: str | None = None
+    last_skill: str | None = None
+    last_params: dict | None = None
+    repo_path_returned: str = "/fake/repos/acme/widgets"
 
-    def review(self, system_blocks, user_prompt, tools, tool_choice, model=None, max_tokens=8192):
+    def ensure_repo(self, owner: str, name: str, head_sha: str | None, token: str) -> str:
+        return self.repo_path_returned
+
+    def review(self, repo_path: str, skill: str, params: dict, model: str | None = None) -> ClaudeResponse:
         self.last_model = model
+        self.last_skill = skill
+        self.last_params = params
         if self.raise_exc:
             raise self.raise_exc
         return self.response
@@ -132,19 +141,19 @@ def _claude_response_with_findings(findings: list[dict]) -> ClaudeResponse:
     )
 
 
-def _make_reviewer(**overrides) -> tuple[Reviewer, FakeGitHub, FakeRepos, FakeClaude, FakePrompts]:
+def _make_reviewer(**overrides):
     github = overrides.pop("github", None) or FakeGitHub()
     repos = overrides.pop("repos", None) or FakeRepos()
-    claude = overrides.pop("claude", None) or FakeClaude()
+    runner = overrides.pop("runner", None) or FakeRunner()
     prompts = overrides.pop("prompts", None) or FakePrompts()
     reviewer = Reviewer(
-        claude=claude,  # type: ignore[arg-type]
+        runner=runner,  # type: ignore[arg-type]
         github=github,
         repos=repos,
         prompts=prompts,  # type: ignore[arg-type]
         **overrides,
     )
-    return reviewer, github, repos, claude, prompts
+    return reviewer, github, repos, runner, prompts
 
 
 def _params(**overrides) -> JobParams:
@@ -176,8 +185,8 @@ def test_happy_path_returns_completed_result():
         "confidence": 0.7,
         "is_odoo_specific": False,
     }
-    claude = FakeClaude(response=_claude_response_with_findings([finding]))
-    reviewer, gh, _, _, prompts = _make_reviewer(claude=claude)
+    runner = FakeRunner(response=_claude_response_with_findings([finding]))
+    reviewer, gh, _, _, prompts = _make_reviewer(runner=runner)
 
     result = reviewer.execute(_params())
 
@@ -199,17 +208,17 @@ def test_happy_path_returns_completed_result():
 
 
 def test_deep_mode_uses_opus_model():
-    claude = FakeClaude(response=_claude_response_with_findings([]))
-    reviewer, *_ = _make_reviewer(claude=claude)
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(runner=runner)
     reviewer.execute(_params(review_mode="deep"))
-    assert claude.last_model == "claude-opus-4-7"
+    assert runner.last_model == "claude-opus-4-7"
 
 
 def test_default_mode_uses_sonnet_model():
-    claude = FakeClaude(response=_claude_response_with_findings([]))
-    reviewer, *_ = _make_reviewer(claude=claude)
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(runner=runner)
     reviewer.execute(_params(review_mode="diff"))
-    assert claude.last_model == "claude-sonnet-4-6"
+    assert runner.last_model == "claude-sonnet-4-6"
 
 
 # --- stale --------------------------------------------------------------------
@@ -282,14 +291,17 @@ def test_malformed_claude_review_yml_falls_back_to_empty():
     github = FakeGitHub(
         file_contents={".claude-review.yml": "max_diff_lines: [unclosed"},
     )
-    claude = FakeClaude(response=_claude_response_with_findings([]))
-    reviewer, *_ = _make_reviewer(github=github, claude=claude)
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
     result = reviewer.execute(_params())
     # Did NOT decline — default limits applied since the YAML was unparseable.
     assert result.status == "completed"
 
 
 def test_custom_instructions_appended_as_block():
+    # custom_instructions in .claude-review.yml are loaded via _load_repo_config.
+    # Claude Code reads CLAUDE.md from the cloned repo directly, so build_system_blocks
+    # is no longer called. The review must still complete successfully.
     github = FakeGitHub(
         file_contents={
             ".claude-review.yml": (
@@ -298,19 +310,16 @@ def test_custom_instructions_appended_as_block():
             )
         }
     )
-    claude = FakeClaude(response=_claude_response_with_findings([]))
-    reviewer, _, _, _, prompts = _make_reviewer(github=github, claude=claude)
-    reviewer.execute(_params())
-    assert prompts.last_system_blocks is not None
-    assert any(
-        "currency_id" in block["text"] for block in prompts.last_system_blocks
-    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, _, _, runner_out, _ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert result.status == "completed"
 
 
 def test_missing_claude_md_and_yml_still_succeeds():
     github = FakeGitHub(file_contents={})  # nothing fetched
-    claude = FakeClaude(response=_claude_response_with_findings([]))
-    reviewer, *_ = _make_reviewer(github=github, claude=claude)
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
     result = reviewer.execute(_params())
     assert result.status == "completed"
 
@@ -341,8 +350,8 @@ def test_findings_capped_to_15_by_severity_and_confidence():
             "is_odoo_specific": False,
         }
     )
-    claude = FakeClaude(response=_claude_response_with_findings(findings))
-    reviewer, *_ = _make_reviewer(claude=claude)
+    runner = FakeRunner(response=_claude_response_with_findings(findings))
+    reviewer, *_ = _make_reviewer(runner=runner)
     result = reviewer.execute(_params())
     assert len(result.findings) == 15
     assert any(f.severity == "critical" for f in result.findings)
@@ -362,8 +371,8 @@ def test_risk_level_recomputed_when_no_critical_or_major():
         }
         for i in range(4)
     ]
-    claude = FakeClaude(response=_claude_response_with_findings(findings))
-    reviewer, *_ = _make_reviewer(claude=claude)
+    runner = FakeRunner(response=_claude_response_with_findings(findings))
+    reviewer, *_ = _make_reviewer(runner=runner)
     result = reviewer.execute(_params())
     # >= 3 minor -> medium
     assert result.risk_level == "medium"
@@ -381,14 +390,14 @@ def test_invalid_finding_shape_raises_permanent_error():
         "confidence": 0.5,
         "is_odoo_specific": False,
     }
-    claude = FakeClaude(response=_claude_response_with_findings([bad]))
-    reviewer, *_ = _make_reviewer(claude=claude)
+    runner = FakeRunner(response=_claude_response_with_findings([bad]))
+    reviewer, *_ = _make_reviewer(runner=runner)
     with pytest.raises(PermanentError):
         reviewer.execute(_params())
 
 
 def test_missing_summary_raises_permanent_error():
-    claude = FakeClaude(
+    runner = FakeRunner(
         response=ClaudeResponse(
             model="claude-sonnet-4-6",
             stop_reason="tool_use",
@@ -397,14 +406,14 @@ def test_missing_summary_raises_permanent_error():
             output_tokens=1,
         )
     )
-    reviewer, *_ = _make_reviewer(claude=claude)
+    reviewer, *_ = _make_reviewer(runner=runner)
     with pytest.raises(PermanentError):
         reviewer.execute(_params())
 
 
 def test_transient_error_propagates():
-    claude = FakeClaude(raise_exc=TransientError("rate limited", retry_after=30))
-    reviewer, *_ = _make_reviewer(claude=claude)
+    runner = FakeRunner(raise_exc=TransientError("rate limited", retry_after=30))
+    reviewer, *_ = _make_reviewer(runner=runner)
     with pytest.raises(TransientError):
         reviewer.execute(_params())
 

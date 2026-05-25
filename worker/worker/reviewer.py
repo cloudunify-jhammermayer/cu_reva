@@ -17,7 +17,7 @@ import structlog
 import yaml
 from pydantic import ValidationError
 
-from reva.claude_client import ClaudeClient
+from reva.claude_code_runner import ClaudeCodeRunner
 from reva.cost import estimate_cost
 from reva.diff_utils import (
     DEFAULT_EXCLUDE_EXTENSIONS,
@@ -28,8 +28,7 @@ from reva.diff_utils import (
     filter_diff_by_paths,
 )
 from reva.errors import PermanentError
-from reva.prompt_builder import PromptBuilder
-from reva.review_tool import build_review_tool_schema, tool_choice_force_submit
+from reva.prompt_builder import PromptBuilder  # kept for type annotation (prompts param)
 from reva.types import (
     Finding,
     JobParams,
@@ -86,14 +85,14 @@ class RepoLookup(Protocol):
 class Reviewer:
     def __init__(
         self,
-        claude: ClaudeClient,
+        runner: ClaudeCodeRunner,
         github: GitHubReader,
         repos: RepoLookup,
         prompts: PromptBuilder,
         max_diff_lines: int = DEFAULT_MAX_DIFF_LINES,
         max_diff_tokens: int = DEFAULT_MAX_DIFF_TOKENS,
     ) -> None:
-        self.claude = claude
+        self.runner = runner
         self.github = github
         self.repos = repos
         self.prompts = prompts
@@ -133,23 +132,17 @@ class Reviewer:
                 risk_level="low",
             )
 
-        # 5. Fetch diff + changed files; restrict to DEFAULT_REVIEW_PREFIXES and
-        #    strip excluded extensions before size-guarding or token counting.
+        # 5. Fetch diff + changed files.
         raw_diff = self.github.get_pull_request_diff(token, owner, name, pr_number)
         diff = filter_diff(raw_diff)
         if len(diff) < len(raw_diff):
             logger.info(
                 "diff_filtered",
-                owner=owner,
-                repo=name,
-                pr=pr_number,
-                raw_bytes=len(raw_diff),
-                filtered_bytes=len(diff),
+                owner=owner, repo=name, pr=pr_number,
+                raw_bytes=len(raw_diff), filtered_bytes=len(diff),
                 review_prefixes=DEFAULT_REVIEW_PREFIXES,
                 excluded_extensions=sorted(DEFAULT_EXCLUDE_EXTENSIONS),
             )
-
-        # If nothing reviewable remains, decline gracefully.
         if not diff.strip():
             prefixes = ", ".join(f"`{p}`" for p in DEFAULT_REVIEW_PREFIXES)
             return _decline(
@@ -164,16 +157,13 @@ class Reviewer:
             and os.path.splitext(f["filename"])[1].lower() not in DEFAULT_EXCLUDE_EXTENSIONS
         ]
 
-        # 6. Load .claude-review.yml + CLAUDE.md (both optional).
+        # 6. Load .claude-review.yml (CLAUDE.md is picked up automatically by Claude Code).
         repo_config = self._load_repo_config(token, owner, name, params.head_sha)
-        claude_md = self.github.get_file_content(
-            token, owner, name, "CLAUDE.md", params.head_sha
-        )
 
-        # 7. Resolve per-review limits (repo config overrides global defaults).
+        # 7. Resolve per-review limits.
         max_lines, max_tokens = self._resolve_limits(repo_config)
 
-        # 8. Diff size guards (line count AND token estimate).
+        # 8. Diff size guards.
         diff_lines = count_diff_lines(diff)
         diff_tokens = estimate_diff_tokens(diff)
         if diff_lines > max_lines:
@@ -187,7 +177,7 @@ class Reviewer:
                 f"{max_tokens} max). Please split this PR."
             )
 
-        # 9. skip_paths: strip matching file sections from the diff.
+        # 9. skip_paths filtering.
         if repo_config.skip_paths:
             diff = filter_diff_by_paths(diff, repo_config.skip_paths)
             if not diff.strip():
@@ -209,45 +199,34 @@ class Reviewer:
                     f"Add more patterns to skip_paths or split the PR."
                 )
 
-        # 10. Build prompts.
-        system_blocks = self.prompts.build_system_blocks(repo_config, claude_md)
-        user_prompt = self.prompts.build_user_prompt(
-            mode=params.review_mode,
-            pr_title=pr_basic.get("title", ""),
-            pr_body=pr_basic.get("body") or pr_detail.get("body") or "",
-            diff=diff,
-            changed_files=changed_files,
-            base_branch=pr_basic["base_branch"],
-            head_branch=pr_basic["head_branch"],
-        )
+        # 10. Select model and skill.
+        model = self.runner.deep_model if params.review_mode == "deep" else self.runner.default_model
+        skill = "reva-full-review" if params.review_mode == "full" else "reva-diff-review"
 
-        # 11. Select model.
-        model = (
-            self.claude.deep_model
-            if params.review_mode == "deep"
-            else self.claude.default_model
-        )
+        skill_params = {
+            "pr_title": pr_basic.get("title", ""),
+            "pr_body": pr_basic.get("body") or pr_detail.get("body") or "",
+            "diff": diff,
+            "changed_files": "\n".join(f"- {f}" for f in changed_files),
+            "base_branch": pr_basic["base_branch"],
+            "head_branch": pr_basic["head_branch"],
+        }
 
-        # 12. Call Claude.
+        # 11. Ensure repo is cloned/updated, then call Claude Code.
         started_at = datetime.now(timezone.utc)
-        response = self.claude.review(
-            system_blocks=system_blocks,
-            user_prompt=user_prompt,
-            tools=[build_review_tool_schema()],
-            tool_choice=tool_choice_force_submit(),
-            model=model,
-        )
+        repo_path = self.runner.ensure_repo(owner, name, params.head_sha, token)
+        response = self.runner.review(repo_path=repo_path, skill=skill, params=skill_params, model=model)
         completed_at = datetime.now(timezone.utc)
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 
-        # 13. Validate and parse findings (strict per pr-review-requirements §5).
+        # 12. Validate and parse findings.
         summary, findings = _parse_tool_use(response.tool_use_input)
 
-        # 14. Cap findings by severity * confidence, then recompute risk_level.
+        # 13. Cap findings by severity * confidence, then recompute risk_level.
         capped = _cap_findings(findings, MAX_FINDINGS)
         risk_level = _recompute_risk_level(capped)
 
-        # 15. Cost.
+        # 14. Cost (token counts are zero for CLI path).
         cost = estimate_cost(
             response.model or model,
             response.input_tokens,
@@ -256,10 +235,10 @@ class Reviewer:
             response.cache_creation_tokens,
         )
 
-        # 16. Prompt version (best-effort).
+        # 15. Prompt version (best-effort).
         try:
             prompt_version = self.prompts.get_version()
-        except Exception as exc:  # noqa: BLE001 — non-fatal
+        except Exception as exc:  # noqa: BLE001
             logger.warning("prompt_version_unavailable", error=str(exc))
             prompt_version = None
 
