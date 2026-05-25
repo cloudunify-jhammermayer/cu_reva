@@ -121,7 +121,7 @@ Short — the skill handles the rest:
 
 | Plugin | Location | How installed |
 |---|---|---|
-| Superpowers | `~/.claude/plugins/superpowers/` | `claude plugins install superpowers` in Dockerfile |
+| Superpowers | `~/.claude/plugins/superpowers/` | `COPY` plugin files into image at build time (no auth needed) |
 | REVA skills | `~/.claude/plugins/reva/skills/` | `COPY prompts/skills/ /root/.claude/plugins/reva/skills/` |
 
 ### REVA skill files (`prompts/skills/`)
@@ -140,11 +140,11 @@ When `ensure_repo()` clones a repo that has a `CLAUDE.md`, Claude Code picks it 
 
 ```
 prompts/
-  system.md              ← unchanged (API path)
-  odoo19.md              ← unchanged (API path)
-  ticket_analysis.md     ← unchanged (API path)
-  full_review.md         ← unchanged (API path fallback)
-  diff_review.md         ← unchanged (API path fallback)
+  system.md              ← unchanged (API path / ticket analysis)
+  odoo19.md              ← unchanged (API path / ticket analysis)
+  ticket_analysis.md     ← unchanged (ticket analysis)
+  full_review.md         ← kept, PR review role retired to CLI; delete in follow-up
+  diff_review.md         ← kept, PR review role retired to CLI; delete in follow-up
   CHANGELOG.md           ← version bump when skills ship
   skills/
     reva-diff-review.md  ← new
@@ -185,10 +185,11 @@ Both optional with defaults — no breaking change to `settings.py`.
 **`worker/Dockerfile`:**
 
 ```dockerfile
-RUN apt-get install -y git
+RUN apt-get install -y git nodejs npm
 RUN npm install -g @anthropic-ai/claude-code
 COPY prompts/skills/ /root/.claude/plugins/reva/skills/
-RUN claude plugins install superpowers
+# Superpowers: copy plugin files directly (no auth context at build time)
+COPY .claude/plugins/superpowers/ /root/.claude/plugins/superpowers/
 ```
 
 **`docker-compose.yml` and `docker-compose.prod.yml`:**
@@ -219,7 +220,7 @@ class Auditor:
 `execute()` steps:
 1. Resolve `owner/name` from `repository_id`
 2. Get fresh installation token
-3. `runner.ensure_repo()` at default branch HEAD
+3. `runner.ensure_repo()` at default branch HEAD — default branch resolved via `GET /repos/{owner}/{name}` GitHub API (`default_branch` field)
 4. Run `claude --print` with `/reva-repo-audit` skill
 5. Return `AuditResult`
 
