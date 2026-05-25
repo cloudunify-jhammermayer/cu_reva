@@ -25,6 +25,9 @@ class Settings:
     google_chat_webhook_url: str = ""  # empty = notifications disabled
     odoo_callback_url: str = ""        # empty = Odoo callback disabled
     odoo_callback_api_key: str = ""
+    repo_cache_dir: str = "/repos"
+    repo_cache_ttl_days: int = 30
+    skills_dir: str = "/app/prompts/skills"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -52,4 +55,7 @@ class Settings:
             google_chat_webhook_url=os.environ.get("GOOGLE_CHAT_WEBHOOK_URL", ""),
             odoo_callback_url=os.environ.get("ODOO_CALLBACK_URL", ""),
             odoo_callback_api_key=os.environ.get("ODOO_CALLBACK_API_KEY", ""),
+            repo_cache_dir=os.environ.get("REVA_REPO_CACHE_DIR", "/repos"),
+            repo_cache_ttl_days=int(os.environ.get("REVA_REPO_CACHE_TTL_DAYS", "30")),
+            skills_dir=os.environ.get("REVA_SKILLS_DIR", "/app/prompts/skills"),
         )
