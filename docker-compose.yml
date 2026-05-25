@@ -66,8 +66,10 @@ services:
       GITHUB_APP_ID: ${GITHUB_APP_ID}
       GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_private_key
       GOOGLE_CHAT_WEBHOOK_URL: ${GOOGLE_CHAT_WEBHOOK_URL:-}
+      REVA_REPO_CACHE_DIR: /repos
     volumes:
       - ./secrets/github-app-private-key.pem:/run/secrets/github_private_key:ro
+      - repo_cache:/repos
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,6 +112,7 @@ services:
 
 volumes:
   postgres_data:
+  repo_cache:
 
 networks:
   reva-net:
