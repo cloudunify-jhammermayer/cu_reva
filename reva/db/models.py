@@ -342,6 +342,35 @@ class TicketAnalysis(Base):
     )
 
 
+# --------------------------------------------------------------- audit_runs
+
+
+class AuditRun(Base):
+    __tablename__ = "audit_runs"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    repository_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("repositories.id"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="started")
+    requested_by: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    finding_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_audit_runs_repository_id", "repository_id"),
+        Index("idx_audit_runs_status", "status"),
+    )
+
+
 # ----------------------------------------------------------- prompt_versions
 
 
