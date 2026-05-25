@@ -27,7 +27,7 @@ Category = Literal[
     "odoo",
 ]
 RiskLevel = Literal["low", "medium", "high", "critical"]
-ReviewMode = Literal["diff", "deep"]
+ReviewMode = Literal["diff", "full", "deep"]
 TriggerEvent = Literal["opened", "synchronize", "reopened", "ready_for_review", "manual", "manual_requeue"]
 
 ReviewStatus = Literal["completed", "stale", "declined", "failed"]
@@ -193,6 +193,26 @@ class TicketJobParams(BaseModel):
     model_name: str  # e.g. "helpdesk.ticket" or "project.task"
     field_name: str
     text: str
+
+
+class AuditJobParams(BaseModel):
+    """Inputs handed to the repo audit RQ job."""
+
+    repository_id: int
+    installation_id: int
+    requested_by: str | None = None
+
+
+class AuditResult(BaseModel):
+    """Outcome of a single repo audit run."""
+
+    status: Literal["completed", "failed"]
+    summary: str
+    findings: list[Finding] = Field(default_factory=list)
+    model: str = ""
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    duration_ms: int = 0
 
 
 # --- Claude response ----------------------------------------------------------
