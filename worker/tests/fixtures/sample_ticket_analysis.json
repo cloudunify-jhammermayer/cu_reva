@@ -12,9 +12,9 @@
       "input": {
         "summary": "The ticket describes a basic feature request to add a button to the helpdesk form view. The description is clear but missing several key details required before development can begin.",
         "missing_info": [
-          "User role that should see the button is not specified",
-          "Expected behaviour after button click is not described",
-          "No mention of which Odoo module or view is affected"
+          {"text": "User role that should see the button is not specified", "confidence": "inferred"},
+          {"text": "Expected behaviour after button click is not described", "confidence": "inferred"},
+          {"text": "No mention of which Odoo module or view is affected", "confidence": "inferred"}
         ],
         "acceptance_criteria": [
           {
@@ -38,18 +38,18 @@
           }
         ],
         "definition_of_ready": [
-          "Affected Odoo view and model are identified",
-          "Button label and icon agreed with stakeholder",
-          "Action triggered by button is fully specified"
+          {"text": "Affected Odoo view and model are identified", "confidence": "inferred"},
+          {"text": "Button label and icon agreed with stakeholder", "confidence": "inferred"},
+          {"text": "Action triggered by button is fully specified", "confidence": "inferred"}
         ],
         "definition_of_done": [
-          "Button renders in the helpdesk ticket form view",
-          "Access rights verified for agent and non-agent roles",
-          "All acceptance criteria verified on staging"
+          {"text": "Button renders in the helpdesk ticket form view", "confidence": "inferred"},
+          {"text": "Access rights verified for agent and non-agent roles", "confidence": "inferred"},
+          {"text": "All acceptance criteria verified on staging", "confidence": "inferred"}
         ],
         "odoo_notes": [
-          "Affects helpdesk.ticket form view — ir.ui.view XML change required",
-          "May require security rule update in helpdesk/security/ir.model.access.csv"
+          {"text": "Affects helpdesk.ticket form view — ir.ui.view XML change required", "confidence": "inferred"},
+          {"text": "May require security rule update in helpdesk/security/ir.model.access.csv", "confidence": "inferred"}
         ]
       }
     }

@@ -16,6 +16,7 @@ from reva.ticket_analyzer import format_ticket_html
 from reva.types import (
     AcceptanceCriterion,
     ClaudeResponse,
+    SourcedItem,
     TicketAnalysisResult,
     TicketJobParams,
     TicketTestCase,
@@ -76,16 +77,16 @@ class FakeOdoo:
 def _good_result() -> TicketAnalysisResult:
     return TicketAnalysisResult(
         summary="The ticket is well-written.",
-        missing_info=["User role unspecified"],
+        missing_info=[SourcedItem(text="User role unspecified")],
         acceptance_criteria=[
             AcceptanceCriterion(given="user", when="clicks", then="action fires")
         ],
         test_cases=[
             TicketTestCase(category="happy_path", description="Standard click"),
         ],
-        definition_of_ready=["Scope clear"],
-        definition_of_done=["Code reviewed"],
-        odoo_notes=["Affects helpdesk.ticket"],
+        definition_of_ready=[SourcedItem(text="Scope clear")],
+        definition_of_done=[SourcedItem(text="Code reviewed")],
+        odoo_notes=[SourcedItem(text="Affects helpdesk.ticket")],
     )
 
 

@@ -17,6 +17,7 @@ from reva.ticket_analyzer import TicketAnalyzer, format_ticket_html
 from reva.ticket_tool import TICKET_TOOL_NAME
 from reva.types import (
     AcceptanceCriterion,
+    SourcedItem,
     TicketAnalysisResult,
     TicketJobParams,
     TicketTestCase,
@@ -133,7 +134,7 @@ def test_analyze_bad_tool_input():
 def _full_result() -> TicketAnalysisResult:
     return TicketAnalysisResult(
         summary="The ticket is clear.",
-        missing_info=["User role not specified"],
+        missing_info=[SourcedItem(text="User role not specified")],
         acceptance_criteria=[
             AcceptanceCriterion(
                 given="a logged-in user",
@@ -146,9 +147,9 @@ def _full_result() -> TicketAnalysisResult:
             TicketTestCase(category="edge_case", description="Submit empty form"),
             TicketTestCase(category="error_scenario", description="Submit without rights"),
         ],
-        definition_of_ready=["Problem is clear"],
-        definition_of_done=["Code reviewed"],
-        odoo_notes=["Affects helpdesk.ticket"],
+        definition_of_ready=[SourcedItem(text="Problem is clear")],
+        definition_of_done=[SourcedItem(text="Code reviewed")],
+        odoo_notes=[SourcedItem(text="Affects helpdesk.ticket")],
     )
 
 
@@ -177,7 +178,7 @@ def test_format_html_empty_lists():
 def test_format_html_escapes_html():
     result = TicketAnalysisResult(
         summary='<script>alert("xss")</script>',
-        missing_info=['<b>bold</b>'],
+        missing_info=[SourcedItem(text='<b>bold</b>')],
     )
     html = format_ticket_html(result)
     assert "<script>" not in html
