@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     nodejs \
     npm \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code
@@ -29,6 +30,10 @@ COPY worker/worker/ ./worker/
 COPY prompts/ ./prompts/
 COPY db/migrations/ ./db/migrations/
 
-USER worker
+COPY worker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
+# Container starts as root so entrypoint can chown the /repos volume,
+# then drops to worker via su-exec.
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "-m", "worker.main"]
