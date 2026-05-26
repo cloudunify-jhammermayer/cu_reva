@@ -180,11 +180,16 @@ class SourcedItem(BaseModel):
     confidence: Literal["explicit", "inferred", "assumed"] = "inferred"
 
 
+class MissingInfoItem(BaseModel):
+    text: str
+    confidence: Literal["certain", "likely", "possible"] = "likely"
+
+
 class TicketAnalysisResult(BaseModel):
     """Structured output from the ticket analysis tool_use call."""
 
     summary: str
-    missing_info: list[SourcedItem] = Field(default_factory=list)
+    missing_info: list[MissingInfoItem] = Field(default_factory=list)
     acceptance_criteria: list[AcceptanceCriterion] = Field(default_factory=list)
     test_cases: list[TicketTestCase] = Field(default_factory=list)
     definition_of_ready: list[SourcedItem] = Field(default_factory=list)

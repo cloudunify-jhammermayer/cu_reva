@@ -20,10 +20,10 @@ A 2–4 sentence assessment of the ticket: what it is asking for, whether the re
 ### 2. Missing Information
 List every piece of information that is absent but required to implement or test this ticket. Each item is a `SourcedItem` with `text` and `confidence`. For each item, be specific — not "more detail needed" but "the ticket does not state which user roles can trigger this action."
 
-Set `confidence`:
-- `"explicit"` — the ticket acknowledges this gap itself
-- `"inferred"` — the gap follows clearly from what is written
-- `"assumed"` — a standard requirement that is typically needed but the ticket gives no signal either way
+Set `confidence` to indicate how certain the gap is:
+- `"certain"` — unambiguously missing; implementation cannot proceed without it
+- `"likely"` — probably missing; the ticket implies it is needed but doesn't specify it
+- `"possible"` — might be needed depending on scope; the ticket gives no signal either way
 
 Common gaps to check:
 - **Who** — which user, role, or system triggers the action?

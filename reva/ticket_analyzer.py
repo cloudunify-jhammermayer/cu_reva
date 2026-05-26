@@ -80,6 +80,24 @@ _CATEGORY_LABEL = {
 }
 
 
+_MISSING_BADGE: dict[str, str] = {
+    "certain": (
+        '<span style="font-size:0.75em;font-weight:bold;color:#cf222e;'
+        'background:#fff0ee;border:1px solid #ff8182;border-radius:3px;'
+        'padding:1px 5px;margin-right:6px;vertical-align:middle;">certain</span>'
+    ),
+    "likely": (
+        '<span style="font-size:0.75em;font-weight:bold;color:#9a6700;'
+        'background:#fff8c5;border:1px solid #e3b341;border-radius:3px;'
+        'padding:1px 5px;margin-right:6px;vertical-align:middle;">likely</span>'
+    ),
+    "possible": (
+        '<span style="font-size:0.75em;font-weight:bold;color:#57606a;'
+        'background:#f6f8fa;border:1px solid #d0d7de;border-radius:3px;'
+        'padding:1px 5px;margin-right:6px;vertical-align:middle;">possible</span>'
+    ),
+}
+
 _CONFIDENCE_BADGE: dict[str, str] = {
     "explicit": (
         '<span style="font-size:0.75em;font-weight:bold;color:#1a7f37;'
@@ -104,17 +122,26 @@ def format_ticket_html(result: TicketAnalysisResult) -> str:
     parts: list[str] = []
 
     # Legend
-    legend_items = "".join(
-        f'<span style="margin-right:12px;">{_CONFIDENCE_BADGE[k]} {label}</span>'
+    sourced = "".join(
+        f'<span style="margin-right:10px;">{_CONFIDENCE_BADGE[k]} {label}</span>'
         for k, label in [
-            ("explicit", "directly stated in ticket"),
+            ("explicit", "stated in ticket"),
             ("inferred", "derived from context"),
-            ("assumed", "standard practice, not in ticket"),
+            ("assumed", "standard practice"),
+        ]
+    )
+    missing = "".join(
+        f'<span style="margin-right:10px;">{_MISSING_BADGE[k]} {label}</span>'
+        for k, label in [
+            ("certain", "definitely missing"),
+            ("likely", "probably missing"),
+            ("possible", "possibly missing"),
         ]
     )
     parts.append(
-        f'<p style="font-size:0.85em;color:#57606a;border-bottom:1px solid #d0d7de;'
-        f'padding-bottom:6px;">{legend_items}</p>'
+        f'<p style="font-size:0.8em;color:#57606a;border-bottom:1px solid #d0d7de;padding-bottom:6px;">'
+        f'<strong>Requirements:</strong> {sourced}&nbsp;&nbsp;'
+        f'<strong>Gaps:</strong> {missing}</p>'
     )
 
     # Summary
@@ -123,7 +150,7 @@ def format_ticket_html(result: TicketAnalysisResult) -> str:
     # Missing information
     if result.missing_info:
         items = "".join(
-            f"<li>{_CONFIDENCE_BADGE.get(i.confidence, '')} {_esc(i.text)}</li>"
+            f"<li>{_MISSING_BADGE.get(i.confidence, '')} {_esc(i.text)}</li>"
             for i in result.missing_info
         )
         parts.append(f"<h2>Missing Information</h2><ul>{items}</ul>")
