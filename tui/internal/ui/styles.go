@@ -72,13 +72,13 @@ func severityDot(severity string) string {
 func statusSymbol(status string) string {
 	switch status {
 	case "completed":
-		return styleStatusCompleted.Render("✓")
+		return styleStatusCompleted.Render("+")
 	case "failed":
-		return styleStatusFailed.Render("✗")
+		return styleStatusFailed.Render("x")
 	case "stale":
-		return styleStatusStale.Render("⚠")
+		return styleStatusStale.Render("!")
 	default:
-		return styleStatusOther.Render("⊘")
+		return styleStatusOther.Render("-")
 	}
 }
 
@@ -102,13 +102,13 @@ func riskStyle(risk string) lipgloss.Style {
 func statusChar(status string) string {
 	switch status {
 	case "completed":
-		return "✓"
+		return "+"
 	case "failed":
-		return "✗"
+		return "x"
 	case "stale":
-		return "⚠"
+		return "!"
 	default:
-		return "⊘"
+		return "-"
 	}
 }
 

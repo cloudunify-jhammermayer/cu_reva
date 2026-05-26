@@ -91,7 +91,7 @@ func (r Repos) view(w, h int) string {
 	if r.loading && len(r.items) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
 			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
-				styleSubtitle.Render("Loading…")))
+				styleSubtitle.Render("Loading...")))
 	}
 	if r.err != nil {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
@@ -152,9 +152,9 @@ func (r Repos) view(w, h int) string {
 
 		var line string
 		if i == r.cursor {
-			enabledChar := "✗"
+			enabledChar := "x"
 			if item.Enabled {
-				enabledChar = "✓"
+				enabledChar = "+"
 			}
 			line = styleSelected.Width(w - 2).Render(fmt.Sprintf("  %s  %-*s  %-*s  %-*s  %-*s",
 				enabledChar,
@@ -166,9 +166,9 @@ func (r Repos) view(w, h int) string {
 		} else {
 			var enabledSym string
 			if item.Enabled {
-				enabledSym = styleStatusCompleted.Render("✓")
+				enabledSym = styleStatusCompleted.Render("+")
 			} else {
-				enabledSym = styleStatusFailed.Render("✗")
+				enabledSym = styleStatusFailed.Render("x")
 			}
 			line = fmt.Sprintf("  %s  %-*s  %-*s  %-*s  %-*s",
 				enabledSym,

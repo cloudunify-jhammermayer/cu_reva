@@ -112,7 +112,7 @@ func (f Findings) view(w, h int) string {
 	if f.loading && len(f.items) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
 			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
-				styleSubtitle.Render("Loading…")))
+				styleSubtitle.Render("Loading...")))
 	}
 	if f.err != nil {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",

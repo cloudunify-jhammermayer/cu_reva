@@ -166,23 +166,43 @@ class AcceptanceCriterion(BaseModel):
     given: str
     when: str
     then: str
+    confidence: Literal["explicit", "inferred", "assumed"] = "inferred"
 
 
 class TicketTestCase(BaseModel):
     category: Literal["happy_path", "edge_case", "error_scenario"]
     description: str
+    confidence: Literal["explicit", "inferred", "assumed"] = "inferred"
+
+
+class SourcedItem(BaseModel):
+    text: str
+    confidence: Literal["explicit", "inferred", "assumed"] = "inferred"
 
 
 class TicketAnalysisResult(BaseModel):
     """Structured output from the ticket analysis tool_use call."""
 
     summary: str
-    missing_info: list[str] = Field(default_factory=list)
+    missing_info: list[SourcedItem] = Field(default_factory=list)
     acceptance_criteria: list[AcceptanceCriterion] = Field(default_factory=list)
     test_cases: list[TicketTestCase] = Field(default_factory=list)
-    definition_of_ready: list[str] = Field(default_factory=list)
-    definition_of_done: list[str] = Field(default_factory=list)
-    odoo_notes: list[str] = Field(default_factory=list)
+    definition_of_ready: list[SourcedItem] = Field(default_factory=list)
+    definition_of_done: list[SourcedItem] = Field(default_factory=list)
+    odoo_notes: list[SourcedItem] = Field(default_factory=list)
+
+    @field_validator(
+        "missing_info", "acceptance_criteria", "test_cases",
+        "definition_of_ready", "definition_of_done", "odoo_notes",
+        mode="before",
+    )
+    @classmethod
+    def _parse_json_string_list(cls, v: object) -> object:
+        """Claude occasionally returns list fields as JSON strings; unwrap them."""
+        if isinstance(v, str):
+            import json
+            return json.loads(v)
+        return v
 
 
 class TicketJobParams(BaseModel):

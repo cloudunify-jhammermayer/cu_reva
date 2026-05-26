@@ -53,6 +53,7 @@ class TicketAnalysisSummary(BaseModel):
     estimated_cost_usd: float | None
     created_at: datetime
     completed_at: datetime | None
+    error_message: str | None = None
 
 
 class TicketAnalysisPage(BaseModel):

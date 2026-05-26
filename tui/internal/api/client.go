@@ -103,3 +103,16 @@ func (c *Client) Requeue(id int) error {
 	}
 	return nil
 }
+
+func (c *Client) RequeueTicket(id int) (string, error) {
+	url := fmt.Sprintf("%s/ticket-analysis/%d/requeue", c.base, id)
+	resp, err := c.http.Post(url, "application/json", nil)
+	if err != nil {
+		return url, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 202 {
+		return url, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return url, nil
+}

@@ -35,7 +35,7 @@ type Reviews struct {
 
 func newReviews(client api.ClientIface) Reviews {
 	ti := textinput.New()
-	ti.Placeholder = "repo or author…"
+	ti.Placeholder = "repo or author..."
 	ti.CharLimit = 100
 	return Reviews{client: client, loadingList: true, focusLeft: true, repoInput: ti}
 }
@@ -82,7 +82,7 @@ func (r Reviews) update(msg tea.Msg) (Reviews, tea.Cmd) {
 		if m.err != nil {
 			r.statusMsg = styleStatusFailed.Render("requeue failed: " + m.err.Error())
 		} else {
-			r.statusMsg = styleStatusCompleted.Render("✓ queued — review will run shortly")
+			r.statusMsg = styleStatusCompleted.Render("queued - review will run shortly")
 		}
 
 	case tea.KeyMsg:
@@ -227,7 +227,7 @@ func (r Reviews) renderList(w, h int) string {
 			parts = append(parts, "s="+r.statusFilter)
 		}
 		if len(parts) > 0 {
-			filterLine = styleSubtitle.Render("  ▸ "+strings.Join(parts, " · ")) +
+			filterLine = styleSubtitle.Render("  >"+strings.Join(parts, " |")) +
 				styleSubtitle.Render("  c=clear")
 		} else {
 			filterLine = styleSubtitle.Render("  / filter  s=status")
@@ -238,7 +238,7 @@ func (r Reviews) renderList(w, h int) string {
 
 	if r.loadingList && len(r.items) == 0 {
 		content := lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
-			styleSubtitle.Render("Loading…"))
+			styleSubtitle.Render("Loading..."))
 		return lipgloss.JoinVertical(lipgloss.Left, header, filterLine, content)
 	}
 	if r.errList != nil {
@@ -298,7 +298,7 @@ func (r Reviews) renderDetail(w, h int) string {
 	if r.loadingDetail && r.detail == nil {
 		return styleBorder.Width(w - 2).Height(h - 2).Render(
 			lipgloss.Place(w-4, h-4, lipgloss.Center, lipgloss.Center,
-				styleSubtitle.Render("Loading…")))
+				styleSubtitle.Render("Loading...")))
 	}
 	if r.errDetail != nil {
 		return styleBorder.Width(w - 2).Height(h - 2).Render(

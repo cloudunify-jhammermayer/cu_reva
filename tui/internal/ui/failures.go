@@ -54,7 +54,7 @@ func (f Failures) update(msg tea.Msg) (Failures, tea.Cmd) {
 		if m.err != nil {
 			f.statusMsg = styleStatusFailed.Render("requeue failed: " + m.err.Error())
 		} else {
-			f.statusMsg = styleStatusCompleted.Render("✓ queued — review will run shortly")
+			f.statusMsg = styleStatusCompleted.Render("queued - review will run shortly")
 		}
 
 	case tea.KeyMsg:
@@ -102,7 +102,7 @@ func (f Failures) view(w, h int) string {
 	if f.loading && len(f.items) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
 			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
-				styleSubtitle.Render("Loading…")))
+				styleSubtitle.Render("Loading...")))
 	}
 	if f.err != nil {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",

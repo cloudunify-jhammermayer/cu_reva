@@ -11,4 +11,5 @@ type pendingLoadedMsg struct{ data *api.PendingPage; err error }
 type findingsLoadedMsg struct{ data *api.FindingPage; err error }
 type reposLoadedMsg struct{ data *api.RepoPage; err error }
 type ticketAnalysesLoadedMsg struct{ data *api.TicketAnalysisPage; err error }
+type ticketRequeuedMsg struct{ id int; url string; err error }
 type tickMsg struct{}

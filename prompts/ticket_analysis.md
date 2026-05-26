@@ -18,7 +18,12 @@ The ticket text may be written in German or English. **Always respond in English
 A 2–4 sentence assessment of the ticket: what it is asking for, whether the requirements are clear, and what the most critical gaps are.
 
 ### 2. Missing Information
-List every piece of information that is absent but required to implement or test this ticket. For each item, be specific — not "more detail needed" but "the ticket does not state which user roles can trigger this action."
+List every piece of information that is absent but required to implement or test this ticket. Each item is a `SourcedItem` with `text` and `confidence`. For each item, be specific — not "more detail needed" but "the ticket does not state which user roles can trigger this action."
+
+Set `confidence`:
+- `"explicit"` — the ticket acknowledges this gap itself
+- `"inferred"` — the gap follows clearly from what is written
+- `"assumed"` — a standard requirement that is typically needed but the ticket gives no signal either way
 
 Common gaps to check:
 - **Who** — which user, role, or system triggers the action?
@@ -42,6 +47,11 @@ Write each criterion in **GIVEN / WHEN / THEN** format. Cover:
 
 Each criterion must be independently testable with a clear pass/fail outcome. Aim for 3–8 criteria. Do not write more than 10.
 
+For each criterion, set `confidence`:
+- `"explicit"` — the ticket states this behaviour directly
+- `"inferred"` — the ticket implies this (e.g. a form field implies validation)
+- `"assumed"` — standard practice; the ticket says nothing about it
+
 ### 4. Test Cases
 Group test cases into three categories:
 
@@ -51,9 +61,15 @@ Group test cases into three categories:
 
 Each test case is a single actionable sentence describing what to test.
 
-### 5. Definition of Ready
-Checklist of conditions that must be true before development can start. Use standard items relevant to this ticket:
+For each test case, set `confidence`:
+- `"explicit"` — the ticket explicitly mentions this scenario
+- `"inferred"` — the scenario is a natural consequence of stated requirements
+- `"assumed"` — standard test coverage; the ticket does not mention this scenario
 
+### 5. Definition of Ready
+Checklist of conditions that must be true before development can start. Each item is a `SourcedItem` with `text` and `confidence`.
+
+Standard items to consider (only include if relevant):
 - Problem statement is clearly defined
 - Business value / justification is stated
 - Scope is defined (what is in and out of scope)
@@ -65,11 +81,17 @@ Checklist of conditions that must be true before development can start. Use stan
 - Non-functional requirements stated (performance, security)
 - Acceptance criteria reviewed and agreed by stakeholders
 
-Only include items that are genuinely relevant to this specific ticket. Remove any that do not apply.
+Set `confidence`:
+- `"explicit"` — the ticket already satisfies this condition
+- `"inferred"` — the ticket partially addresses it
+- `"assumed"` — standard checklist item; the ticket says nothing about it
+
+Only include items genuinely relevant to this ticket.
 
 ### 6. Definition of Done
-Checklist of conditions that must be true before the ticket can be closed:
+Checklist of conditions that must be true before the ticket can be closed. Each item is a `SourcedItem` with `text` and `confidence`.
 
+Standard items to consider:
 - Code implemented and self-reviewed
 - Code reviewed by a peer
 - Unit / integration tests written and passing
@@ -80,15 +102,21 @@ Checklist of conditions that must be true before the ticket can be closed:
 - Data migration script tested (if applicable)
 - Product owner sign-off
 
-Only include items relevant to this ticket.
+Set `confidence` using the same rules as Definition of Ready. Only include items relevant to this ticket.
 
 ### 7. Odoo-Specific Notes
-Flag any Odoo-specific concerns:
+Flag any Odoo-specific concerns. Each item is a `SourcedItem` with `text` and `confidence`.
+
 - Which module(s) and model(s) are affected
 - Whether Python model changes, XML view changes, or security rule changes are needed
 - Whether an automated action, server action, or scheduled action is involved
 - Whether the change affects Odoo's standard workflow or overrides a core method
 - Any known Odoo 19 quirks or constraints relevant to the feature
+
+Set `confidence`:
+- `"explicit"` — the ticket names the module/model directly
+- `"inferred"` — the module/model can be determined from context
+- `"assumed"` — standard Odoo concern that may or may not apply
 
 If no Odoo-specific concerns apply, return an empty list.
 
@@ -101,3 +129,5 @@ If no Odoo-specific concerns apply, return an empty list.
 - Do not invent requirements. Only derive them from the ticket text and flag gaps as missing info.
 - Keep each list item concise — one sentence per item.
 - If a section genuinely has nothing to report (e.g. no Odoo-specific concerns), return an empty list for that field — do not fabricate items.
+- Mark clearly what information is missing.
+- Set `confidence` honestly: `"explicit"` only when the ticket text directly states it, `"inferred"` when it follows naturally, `"assumed"` when you are adding something the ticket does not mention. Bias toward `"assumed"` when in doubt — it is better to flag something as assumed than to overstate the ticket's clarity.

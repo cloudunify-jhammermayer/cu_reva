@@ -10,15 +10,16 @@ import (
 )
 
 type Tickets struct {
-	client  api.ClientIface
-	items   []api.TicketAnalysisSummary
-	total   int
-	err     error
-	loading bool
-	cursor  int
-	offset  int
-	width   int
-	height  int
+	client    api.ClientIface
+	items     []api.TicketAnalysisSummary
+	total     int
+	err       error
+	loading   bool
+	cursor    int
+	offset    int
+	width     int
+	height    int
+	statusMsg string
 }
 
 func newTickets(client api.ClientIface) Tickets {
@@ -29,6 +30,13 @@ func (t Tickets) load() tea.Cmd {
 	return func() tea.Msg {
 		data, err := t.client.TicketAnalyses(100)
 		return ticketAnalysesLoadedMsg{data: data, err: err}
+	}
+}
+
+func (t Tickets) requeueCmd(id int) tea.Cmd {
+	return func() tea.Msg {
+		url, err := t.client.RequeueTicket(id)
+		return ticketRequeuedMsg{id: id, url: url, err: err}
 	}
 }
 
@@ -49,7 +57,15 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 			t.offset = 0
 		}
 
+	case ticketRequeuedMsg:
+		if m.err != nil {
+			t.statusMsg = fmt.Sprintf("POST %s -> %s", m.url, m.err)
+		} else {
+			t.statusMsg = fmt.Sprintf("POST %s -> 202 accepted", m.url)
+		}
+
 	case tea.KeyMsg:
+		t.statusMsg = ""
 		visibleRows := t.height - 5
 		if visibleRows < 1 {
 			visibleRows = 1
@@ -72,6 +88,14 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 		case "r":
 			t.loading = true
 			return t, t.load()
+		case "e":
+			if len(t.items) > 0 && t.cursor < len(t.items) {
+				item := t.items[t.cursor]
+				if item.Status == "failed" || item.Status == "completed" {
+					return t, t.requeueCmd(item.ID)
+				}
+				t.statusMsg = "only failed or completed analyses can be requeued"
+			}
 		}
 	}
 	return t, nil
@@ -83,7 +107,7 @@ func (t Tickets) view(w, h int) string {
 	if t.loading && len(t.items) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
 			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
-				styleSubtitle.Render("Loading…")))
+				styleSubtitle.Render("Loading...")))
 	}
 	if t.err != nil {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
@@ -163,18 +187,31 @@ func (t Tickets) view(w, h int) string {
 
 	table := strings.Join(rows, "\n")
 	pos := styleSubtitle.Render(fmt.Sprintf("  %d/%d", t.cursor+1, len(t.items)))
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", pos)
+
+	var extras []string
+	if t.cursor < len(t.items) {
+		if sel := t.items[t.cursor]; sel.ErrorMessage != nil && *sel.ErrorMessage != "" {
+			extras = append(extras, styleStatusFailed.Render("  error: "+*sel.ErrorMessage))
+		}
+	}
+	if t.statusMsg != "" {
+		extras = append(extras, styleSubtitle.Render("  "+t.statusMsg))
+	}
+
+	parts := []string{header, "", table, "", pos}
+	parts = append(parts, extras...)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 func ticketStatusSymbol(status string) string {
 	switch status {
 	case "completed":
-		return styleStatusCompleted.Render("✓")
+		return styleStatusCompleted.Render("+")
 	case "failed":
-		return styleStatusFailed.Render("✗")
+		return styleStatusFailed.Render("x")
 	case "pending":
-		return styleStatusStale.Render("…")
+		return styleStatusStale.Render("...")
 	default:
-		return styleStatusOther.Render("⊘")
+		return styleStatusOther.Render("-")
 	}
 }

@@ -113,3 +113,41 @@ def get_ticket_analysis(
     if row is None:
         raise HTTPException(status_code=404, detail="Ticket analysis not found")
     return row
+
+
+@router.post(
+    "/ticket-analysis/{analysis_id}/requeue",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=TicketAnalysisCreated,
+)
+def requeue_ticket_analysis(
+    analysis_id: int,
+    request: Request,
+    db: Database = Depends(get_db),
+) -> dict:
+    """Re-enqueue a failed ticket analysis using the originally submitted text."""
+    row = writers.get_ticket_analysis(db, analysis_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Ticket analysis not found")
+    if row["status"] not in ("failed", "completed"):
+        raise HTTPException(status_code=409, detail="Only failed or completed analyses can be requeued")
+
+    params = TicketJobParams(
+        analysis_id=analysis_id,
+        ticket_id=row["ticket_id"],
+        model_name=row["model_name"],
+        field_name=row["field_name"],
+        text=row["input_text"],
+    )
+    writers.reset_ticket_analysis(db, analysis_id)
+
+    rq_queue = request.app.state.rq_queue
+    job = rq_queue.enqueue(
+        "worker.ticket_tasks.run_ticket_analysis",
+        params.model_dump(),
+        job_timeout=_JOB_TIMEOUT,
+    )
+    writers.attach_ticket_job_id(db, analysis_id, job.id)
+
+    logger.info("ticket_analysis_requeued", analysis_id=analysis_id, job_id=job.id)
+    return {"analysis_id": analysis_id, "job_id": job.id, "status": "pending"}

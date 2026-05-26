@@ -459,6 +459,18 @@ def record_ticket_analysis_failed(
         row.completed_at = datetime.now(timezone.utc)
 
 
+def reset_ticket_analysis(db: Database, analysis_id: int) -> None:
+    """Reset a failed ticket analysis to pending so it can be re-enqueued."""
+    with db.session() as s:
+        row = s.get(TicketAnalysis, analysis_id)
+        if row is None:
+            return
+        row.status = "pending"
+        row.error_message = None
+        row.completed_at = None
+        row.job_id = None
+
+
 def get_pending_ticket_analysis(
     db: Database, ticket_id: int, model_name: str, field_name: str
 ) -> dict | None:
@@ -492,6 +504,7 @@ def get_ticket_analysis(db: Database, analysis_id: int) -> dict | None:
             "ticket_id": row.ticket_id,
             "model_name": row.model_name,
             "field_name": row.field_name,
+            "input_text": row.input_text,
             "status": row.status,
             "result_html": row.result_html,
             "error_message": row.error_message,

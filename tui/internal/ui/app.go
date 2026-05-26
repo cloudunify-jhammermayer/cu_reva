@@ -191,6 +191,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ticketAnalysesLoadedMsg:
 		a.tickets, _ = a.tickets.update(msg)
 
+	case ticketRequeuedMsg:
+		a.tickets, _ = a.tickets.update(msg)
+
 	case requeuedMsg:
 		// Deliver to whichever view is active so the status message lands there.
 		if a.active == viewReviews {
@@ -288,21 +291,21 @@ func (a *App) statusBar() string {
 	var hint string
 	switch a.active {
 	case viewDashboard:
-		hint = "1–6 switch tabs · r=refresh · q quit"
+		hint = "1-6 switch tabs | r=refresh | q quit"
 	case viewReviews:
-		hint = "j/k navigate · / filter · s=status · c=clear · e=requeue · o=browser · r=refresh · q quit"
+		hint = "j/k navigate | / filter | s=status | c=clear | e=requeue | o=browser | r=refresh | q quit"
 	case viewFindings:
-		hint = "j/k navigate · a=all · c=critical · m=major · n=minor · i=info · r=refresh · q quit"
+		hint = "j/k navigate | a=all | c=critical | m=major | n=minor | i=info | r=refresh | q quit"
 	case viewFailures:
-		hint = "j/k navigate · e=requeue · r=refresh · q quit"
+		hint = "j/k navigate | e=requeue | r=refresh | q quit"
 	case viewRepos:
-		hint = "j/k navigate · o=open in browser · r=refresh · q quit"
+		hint = "j/k navigate | o=open in browser | r=refresh | q quit"
 	case viewPending:
-		hint = "j/k navigate · r=refresh · q quit"
+		hint = "j/k navigate | r=refresh | q quit"
 	case viewTickets:
-		hint = "j/k navigate · r=refresh · q quit"
+		hint = "j/k navigate | e=requeue | r=refresh | q quit"
 	default:
-		hint = "1 Dash · 2 Reviews · 3 Findings · 4 Failures · 5 Repos · 6 Pending · 7 Tickets · q quit"
+		hint = "1 Dash | 2 Reviews | 3 Findings | 4 Failures | 5 Repos | 6 Pending | 7 Tickets | q quit"
 	}
 	return styleStatusBar.Width(a.width).Render(hint)
 }

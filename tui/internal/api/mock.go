@@ -426,6 +426,7 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 			Status: "failed", Model: nil,
 			InputTokens: nil, OutputTokens: nil,
 			EstimatedCostUSD: nil, CreatedAt: now.Add(-10 * time.Minute), CompletedAt: nil,
+			ErrorMessage: strPtr("Odoo callback timed out: timed out"),
 		},
 		{
 			ID: 1, TicketID: 99, ModelName: "helpdesk.ticket", FieldName: "description",
@@ -443,6 +444,10 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 
 func (m *MockClient) Requeue(id int) error {
 	return nil
+}
+
+func (m *MockClient) RequeueTicket(id int) (string, error) {
+	return fmt.Sprintf("(mock)/ticket-analysis/%d/requeue", id), nil
 }
 
 func min(a, b int) int {

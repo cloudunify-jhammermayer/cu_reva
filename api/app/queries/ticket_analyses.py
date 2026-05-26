@@ -42,6 +42,7 @@ def list_ticket_analyses(
                 ),
                 "created_at": r.created_at,
                 "completed_at": r.completed_at,
+                "error_message": r.error_message,
             }
             for r in rows
         ]

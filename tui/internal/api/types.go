@@ -127,6 +127,7 @@ type TicketAnalysisSummary struct {
 	EstimatedCostUSD *float64   `json:"estimated_cost_usd"`
 	CreatedAt        time.Time  `json:"created_at"`
 	CompletedAt      *time.Time `json:"completed_at"`
+	ErrorMessage     *string    `json:"error_message"`
 }
 
 type TicketAnalysisPage struct {

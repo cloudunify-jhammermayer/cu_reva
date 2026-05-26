@@ -73,7 +73,7 @@ async def receive_webhook(
     return {"status": "accepted"}
 
 
-def _handle_pull_request(db: Database, payload: dict, settings: Settings) -> None:
+def _handle_pull_requesty(db: Database, payload: dict, settings: Settings) -> None:
     action = payload.get("action", "")
     if action not in _REVIEWABLE_ACTIONS:
         return

@@ -49,7 +49,7 @@ func (d Dashboard) view(w, h, pendingCount int) string {
 
 	if d.loading && d.data == nil {
 		return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center,
-			styleSubtitle.Render("Loading…"))
+			styleSubtitle.Render("Loading..."))
 	}
 	if d.err != nil {
 		return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center,
@@ -70,7 +70,7 @@ func (d Dashboard) view(w, h, pendingCount int) string {
 	costCard := d.renderCostCard(m, pendingCount, col)
 	bottomRow := lipgloss.JoinHorizontal(lipgloss.Top, findingsCard, costCard)
 
-	refreshNote := styleSubtitle.Render(fmt.Sprintf("  refreshed %s · auto-refresh 30s",
+	refreshNote := styleSubtitle.Render(fmt.Sprintf("  refreshed %s |auto-refresh 30s",
 		time.Now().Format("15:04:05")))
 
 	return lipgloss.JoinVertical(lipgloss.Left,
