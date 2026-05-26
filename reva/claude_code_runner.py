@@ -103,19 +103,20 @@ class ClaudeCodeRunner:
             proc = subprocess.run(
                 [
                     _CLAUDE_BIN, "--print",
+                    "--dangerously-skip-permissions",
                     "--output-format", "json",
                     "--model", model or self.default_model,
                     "--allowedTools", "Read,Bash,Grep,Write",
-                    task,
                 ],
+                input=task,
                 cwd=repo_path,
-                env={**os.environ, "ANTHROPIC_API_KEY": self.api_key},
+                env={**os.environ, "ANTHROPIC_API_KEY": self.api_key, "HOME": "/home/worker"},
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=900,
             )
             if proc.returncode != 0:
-                raise _exit_to_error(proc.returncode, proc.stderr)
+                raise _exit_to_error(proc.returncode, proc.stderr or proc.stdout)
 
             try:
                 with open(output_path) as f:
