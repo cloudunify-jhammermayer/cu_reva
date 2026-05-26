@@ -100,6 +100,9 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       GITHUB_APP_ID: ${GITHUB_APP_ID}
       GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_private_key
+      REVA_REPO_CACHE_DIR: /repos
+    volumes:
+      - repo_cache:/repos
     secrets:
       - github_private_key
     depends_on:
@@ -157,6 +160,7 @@ volumes:
   postgres_data:
   letsencrypt_data:
   certbot_www:
+  repo_cache:
 
 networks:
   reva-net:

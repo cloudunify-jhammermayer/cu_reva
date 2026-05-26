@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 import structlog
 
 from reva.claude_client import ClaudeClient
+from reva.claude_code_runner import ClaudeCodeRunner
 from reva.notifications import notify_worker_error
 from reva.odoo_client import OdooCallbackClient
 from reva.ticket_analyzer import TicketAnalyzer
@@ -48,6 +49,7 @@ from reva.review_formatter import (
     format_pr_review_body,
     split_findings,
 )
+from worker.auditor import Auditor
 from worker.reviewer import Reviewer
 from worker.settings import Settings
 from reva.types import JobParams, ReviewResult
@@ -62,8 +64,10 @@ logger = structlog.get_logger()
 class WorkerContext:
     db: Database
     claude: ClaudeClient
+    runner: ClaudeCodeRunner
     github: GitHubClient
     reviewer: Reviewer
+    auditor: Auditor
     ticket_analyzer: TicketAnalyzer
     odoo: OdooCallbackClient
     google_chat_webhook_url: str = ""
@@ -94,6 +98,11 @@ def build_worker_context(settings: Settings) -> WorkerContext:
     db.migrate(settings.migrations_dir)
 
     claude = ClaudeClient(api_key=settings.anthropic_api_key)
+    runner = ClaudeCodeRunner(
+        repo_cache_dir=settings.repo_cache_dir,
+        api_key=settings.anthropic_api_key,
+        skills_dir=settings.skills_dir,
+    )
     github = GitHubClient(
         app_id=settings.github_app_id,
         private_key_pem=settings.github_private_key,
@@ -101,10 +110,15 @@ def build_worker_context(settings: Settings) -> WorkerContext:
     )
     prompts = PromptBuilder(prompts_dir=settings.prompts_dir)
     reviewer = Reviewer(
-        claude=claude,
+        runner=runner,
         github=github,
         repos=DatabaseRepoLookup(db),
         prompts=prompts,
+    )
+    auditor = Auditor(
+        runner=runner,
+        github=github,
+        repos=DatabaseRepoLookup(db),
     )
     ticket_analyzer = TicketAnalyzer(claude=claude, prompts_dir=settings.prompts_dir)
     odoo = OdooCallbackClient(
@@ -114,8 +128,10 @@ def build_worker_context(settings: Settings) -> WorkerContext:
     context = WorkerContext(
         db=db,
         claude=claude,
+        runner=runner,
         github=github,
         reviewer=reviewer,
+        auditor=auditor,
         ticket_analyzer=ticket_analyzer,
         odoo=odoo,
         google_chat_webhook_url=settings.google_chat_webhook_url,

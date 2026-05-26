@@ -100,8 +100,10 @@ def ctx_and_fakes():
     ctx = WorkerContext(
         db=db,
         claude=None,  # type: ignore[arg-type]
+        runner=None,  # type: ignore[arg-type]
         github=None,  # type: ignore[arg-type]
         reviewer=None,  # type: ignore[arg-type]
+        auditor=None,  # type: ignore[arg-type]
         ticket_analyzer=analyzer,  # type: ignore[arg-type]
         odoo=odoo,  # type: ignore[arg-type]
     )

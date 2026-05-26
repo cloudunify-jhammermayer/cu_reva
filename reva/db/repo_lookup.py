@@ -43,6 +43,27 @@ def get_pr_basic(db: Database, pull_request_id: int) -> dict:
     }
 
 
+def get_repo_meta(db: Database, repository_id: int) -> dict:
+    """Return {owner, name, installation_id, default_branch} for a repo."""
+    with db.session() as s:
+        row = s.execute(
+            select(
+                Repository.owner,
+                Repository.name,
+                Repository.installation_id,
+                Repository.default_branch,
+            ).where(Repository.id == repository_id)
+        ).first()
+    if not row:
+        raise LookupError(f"Repository {repository_id} not found")
+    return {
+        "owner": row.owner,
+        "name": row.name,
+        "installation_id": row.installation_id,
+        "default_branch": row.default_branch or "main",
+    }
+
+
 class DatabaseRepoLookup:
     """Implements `worker.reviewer.RepoLookup` against the live DB."""
 
@@ -54,3 +75,6 @@ class DatabaseRepoLookup:
 
     def get_pr_basic(self, pull_request_id: int) -> dict:
         return get_pr_basic(self._db, pull_request_id)
+
+    def get_repo_meta(self, repository_id: int) -> dict:
+        return get_repo_meta(self._db, repository_id)
