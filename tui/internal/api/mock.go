@@ -446,8 +446,8 @@ func (m *MockClient) Requeue(id int) error {
 	return nil
 }
 
-func (m *MockClient) RequeueTicket(id int) (string, error) {
-	return fmt.Sprintf("(mock)/ticket-analysis/%d/requeue", id), nil
+func (m *MockClient) RequeueTicket(id int) error {
+	return nil
 }
 
 func min(a, b int) int {

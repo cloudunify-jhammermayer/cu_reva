@@ -35,7 +35,7 @@ type App struct {
 	height    int
 }
 
-func NewApp(client api.ClientIface) *App {
+func NewApp(client api.ClientIface, odooURL string) *App {
 	return &App{
 		client:    client,
 		active:    viewDashboard,
@@ -45,7 +45,7 @@ func NewApp(client api.ClientIface) *App {
 		failures:  newFailures(client),
 		repos:     newRepos(client),
 		pending:   newPending(client),
-		tickets:   newTickets(client),
+		tickets:   newTickets(client, odooURL),
 	}
 }
 
@@ -303,7 +303,7 @@ func (a *App) statusBar() string {
 	case viewPending:
 		hint = "j/k navigate | r=refresh | q quit"
 	case viewTickets:
-		hint = "j/k navigate | e=requeue | r=refresh | q quit"
+		hint = "j/k navigate | e=requeue | o=open in Odoo | r=refresh | q quit"
 	default:
 		hint = "1 Dash | 2 Reviews | 3 Findings | 4 Failures | 5 Repos | 6 Pending | 7 Tickets | q quit"
 	}

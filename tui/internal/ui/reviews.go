@@ -261,14 +261,22 @@ func (r Reviews) renderList(w, h int) string {
 	for i := r.offset; i < end; i++ {
 		item := r.items[i]
 		repo := truncate(item.RepoFullName, w-8)
-		prTitle := truncate(fmt.Sprintf("  #%d %s", item.PRNumber, item.PRTitle), w-2)
+
+		timeInfo := relativeTime(item.CreatedAt)
+		if item.DurationMS != nil {
+			timeInfo += "  " + fmtDurationMS(*item.DurationMS)
+		}
+		titleBase := truncate(fmt.Sprintf("  #%d %s", item.PRNumber, item.PRTitle), w-2-len(timeInfo)-2)
+
 		var combined string
 		if i == r.cursor {
 			line1 := fmt.Sprintf(" %s %s", statusChar(item.Status), repo)
-			combined = styleSelected.Width(w - 2).Render(line1 + "\n" + prTitle)
+			line2 := titleBase + "  " + timeInfo
+			combined = styleSelected.Width(w - 2).Render(line1 + "\n" + line2)
 		} else {
 			line1 := fmt.Sprintf(" %s %s", statusSymbol(item.Status), repo)
-			combined = line1 + "\n" + styleSubtitle.Render(prTitle)
+			line2 := styleSubtitle.Render(titleBase + "  " + timeInfo)
+			combined = line1 + "\n" + line2
 		}
 		rows = append(rows, combined)
 	}
@@ -329,11 +337,13 @@ func (r Reviews) renderDetail(w, h int) string {
 		model = truncate(*d.Model, 20)
 	}
 	b.WriteString(fmt.Sprintf("  Status  %s %s\n", statusSymbol(d.Status), d.Status))
+	b.WriteString(fmt.Sprintf("  Queued  %s\n", styleSubtitle.Render(
+		d.CreatedAt.Local().Format("2006-01-02 15:04")+" ("+relativeTime(d.CreatedAt)+")")))
 	b.WriteString(fmt.Sprintf("  Author  %s\n", styleSubtitle.Render(author)))
 	b.WriteString(fmt.Sprintf("  Risk    %s\n", risk))
 	b.WriteString(fmt.Sprintf("  Model   %s\n", styleSubtitle.Render(model)))
 	if d.DurationMS != nil {
-		b.WriteString(fmt.Sprintf("  Time    %s\n", styleSubtitle.Render(fmt.Sprintf("%d ms", *d.DurationMS))))
+		b.WriteString(fmt.Sprintf("  Took    %s\n", styleSubtitle.Render(fmtDurationMS(*d.DurationMS))))
 	}
 	if d.EstimatedCostUSD != nil {
 		b.WriteString(fmt.Sprintf("  Cost    %s\n", styleSubtitle.Render(fmt.Sprintf("$%.4f", *d.EstimatedCostUSD))))

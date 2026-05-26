@@ -11,5 +11,5 @@ type ClientIface interface {
 	Findings(severity, category string, limit int) (*FindingPage, error)
 	Repos() (*RepoPage, error)
 	TicketAnalyses(limit int) (*TicketAnalysisPage, error)
-	RequeueTicket(id int) (string, error)
+	RequeueTicket(id int) error
 }

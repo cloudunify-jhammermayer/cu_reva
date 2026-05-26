@@ -2,7 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -11,6 +13,7 @@ import (
 
 type Tickets struct {
 	client    api.ClientIface
+	odooURL   string
 	items     []api.TicketAnalysisSummary
 	total     int
 	err       error
@@ -22,8 +25,8 @@ type Tickets struct {
 	statusMsg string
 }
 
-func newTickets(client api.ClientIface) Tickets {
-	return Tickets{client: client, loading: true}
+func newTickets(client api.ClientIface, odooURL string) Tickets {
+	return Tickets{client: client, odooURL: odooURL, loading: true}
 }
 
 func (t Tickets) load() tea.Cmd {
@@ -35,8 +38,8 @@ func (t Tickets) load() tea.Cmd {
 
 func (t Tickets) requeueCmd(id int) tea.Cmd {
 	return func() tea.Msg {
-		url, err := t.client.RequeueTicket(id)
-		return ticketRequeuedMsg{id: id, url: url, err: err}
+		err := t.client.RequeueTicket(id)
+		return ticketRequeuedMsg{id: id, err: err}
 	}
 }
 
@@ -59,9 +62,9 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 
 	case ticketRequeuedMsg:
 		if m.err != nil {
-			t.statusMsg = fmt.Sprintf("POST %s -> %s", m.url, m.err)
+			t.statusMsg = fmt.Sprintf("requeue failed: %s", m.err)
 		} else {
-			t.statusMsg = fmt.Sprintf("POST %s -> 202 accepted", m.url)
+			t.statusMsg = fmt.Sprintf("analysis #%d requeued", m.id)
 		}
 
 	case tea.KeyMsg:
@@ -95,6 +98,13 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 					return t, t.requeueCmd(item.ID)
 				}
 				t.statusMsg = "only failed or completed analyses can be requeued"
+			}
+		case "o":
+			if len(t.items) > 0 && t.cursor < len(t.items) {
+				item := t.items[t.cursor]
+				url := fmt.Sprintf("%s/web#model=%s&id=%d&view_type=form",
+					t.odooURL, item.ModelName, item.TicketID)
+				_ = exec.Command("xdg-open", url).Start()
 			}
 		}
 	}
@@ -161,7 +171,7 @@ func (t Tickets) view(w, h int) string {
 			cost = fmt.Sprintf("$%.4f", *item.EstimatedCostUSD)
 		}
 		created := item.CreatedAt.Local().Format("01-02 15:04")
-		statusStr := ticketStatusSymbol(item.Status) + " " + item.Status
+		statusStr := ticketStatusSymbol(item.Status, item.CreatedAt) + " " + item.Status
 
 		if i == t.cursor {
 			rows = append(rows, styleSelected.Width(w-2).Render(
@@ -203,14 +213,17 @@ func (t Tickets) view(w, h int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-func ticketStatusSymbol(status string) string {
+func ticketStatusSymbol(status string, createdAt time.Time) string {
 	switch status {
 	case "completed":
 		return styleStatusCompleted.Render("+")
 	case "failed":
 		return styleStatusFailed.Render("x")
 	case "pending":
-		return styleStatusStale.Render("...")
+		if time.Since(createdAt) > 10*time.Minute {
+			return styleStatusFailed.Render("?")
+		}
+		return styleStatusStale.Render("~")
 	default:
 		return styleStatusOther.Render("-")
 	}

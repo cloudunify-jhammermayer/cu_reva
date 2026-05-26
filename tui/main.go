@@ -44,7 +44,11 @@ func main() {
 		client = api.NewClient(baseURL)
 	}
 
-	app := ui.NewApp(client)
+	odooURL := os.Getenv("REVA_ODOO_URL")
+	if odooURL == "" {
+		odooURL = "http://localhost:8069"
+	}
+	app := ui.NewApp(client, odooURL)
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

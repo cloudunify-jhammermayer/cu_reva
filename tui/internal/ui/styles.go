@@ -1,6 +1,10 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"fmt"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 var (
 	colorAccent   = lipgloss.Color("#4A9EFF")
@@ -109,6 +113,19 @@ func statusChar(status string) string {
 		return "!"
 	default:
 		return "-"
+	}
+}
+
+func fmtDurationMS(ms int) string {
+	switch {
+	case ms < 1000:
+		return fmt.Sprintf("%dms", ms)
+	case ms < 60000:
+		return fmt.Sprintf("%.1fs", float64(ms)/1000)
+	default:
+		m := ms / 60000
+		s := (ms % 60000) / 1000
+		return fmt.Sprintf("%dm%ds", m, s)
 	}
 }
 
