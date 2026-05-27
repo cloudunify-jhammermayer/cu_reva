@@ -6,6 +6,7 @@ from reva.diff_utils import (
     DiffHunk,
     count_diff_lines,
     estimate_diff_tokens,
+    extract_file_paths,
     filter_diff_by_paths,
     find_line_in_hunks,
     iter_diff_files,
@@ -108,3 +109,19 @@ def test_filter_diff_by_paths_empty_patterns():
 def test_filter_diff_by_paths_all_stripped():
     result = filter_diff_by_paths(TWO_FILE_DIFF, ["*.py", "*.json"])
     assert result.strip() == ""
+
+
+def test_extract_file_paths_returns_set_of_touched_files():
+    diff = (
+        "diff --git a/custom_addons/a.py b/custom_addons/a.py\n"
+        "+++ b/custom_addons/a.py\n"
+        "+added\n"
+        "diff --git a/custom_addons/b.py b/custom_addons/b.py\n"
+        "+++ b/custom_addons/b.py\n"
+        "+added\n"
+    )
+    assert extract_file_paths(diff) == {"custom_addons/a.py", "custom_addons/b.py"}
+
+
+def test_extract_file_paths_empty_diff_returns_empty_set():
+    assert extract_file_paths("") == set()

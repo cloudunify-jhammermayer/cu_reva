@@ -50,6 +50,11 @@ def iter_diff_files(diff: str) -> Iterator[str]:
             yield line[len("+++ b/") :]
 
 
+def extract_file_paths(diff: str) -> set[str]:
+    """Return the set of file paths touched by the diff."""
+    return set(iter_diff_files(diff))
+
+
 def filter_diff(
     diff: str,
     exclude_extensions: frozenset[str] = DEFAULT_EXCLUDE_EXTENSIONS,
