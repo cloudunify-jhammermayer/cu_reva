@@ -128,6 +128,7 @@ class ReviewResult(BaseModel):
 
     error_message: str | None = None
     error_class: Literal["transient", "permanent"] | None = None
+    delta_base_sha: str | None = None   # set when this was a delta review
 
 
 # --- Job parameters -----------------------------------------------------------
