@@ -371,7 +371,7 @@ def _seed_repo_and_pr(db: Database) -> tuple[int, int]:
     return repo_id, pr_id
 
 
-def _seed_review_run(db: Database, pr_id: int, repo_id: int, *, head_sha: str = "abc123", status: str = "completed") -> int:
+def _seed_review_run(db: Database, pr_id: int, repo_id: int, *, head_sha: str = "abc123", status: str = "completed", completed_at=None) -> int:
     with db.session() as s:
         run = ReviewRun(
             repository_id=repo_id,
@@ -380,7 +380,7 @@ def _seed_review_run(db: Database, pr_id: int, repo_id: int, *, head_sha: str = 
             status=status,
             trigger_event="synchronize",
             review_mode="diff",
-            completed_at=datetime.now(timezone.utc),
+            completed_at=completed_at or datetime.now(timezone.utc),
         )
         s.add(run)
         s.flush()
@@ -448,9 +448,13 @@ def test_get_open_findings_for_pr_returns_findings_with_comment_ids(db_session):
 
 
 def test_get_open_findings_for_pr_uses_most_recent_run(db_session):
+    from datetime import timedelta
     repo_id, pr_id = _seed_repo_and_pr(db_session)
-    old_run = _seed_review_run(db_session, pr_id, repo_id, head_sha="old", status="completed")
-    new_run = _seed_review_run(db_session, pr_id, repo_id, head_sha="new", status="completed")
+    now = datetime.now(timezone.utc)
+    old_run = _seed_review_run(db_session, pr_id, repo_id, head_sha="old", status="completed",
+                                completed_at=now - timedelta(seconds=10))
+    new_run = _seed_review_run(db_session, pr_id, repo_id, head_sha="new", status="completed",
+                                completed_at=now)
     _seed_finding(db_session, old_run, file_path="custom_addons/old.py", github_comment_id=111)
     _seed_finding(db_session, new_run, file_path="custom_addons/new.py", github_comment_id=222)
 
