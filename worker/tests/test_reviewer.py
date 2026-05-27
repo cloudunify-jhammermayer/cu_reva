@@ -70,12 +70,16 @@ class FakeRepos:
             "head_branch": "feat/foo",
         }
     )
+    last_completed_review: dict | None = None
 
     def get_owner_name(self, repository_id: int) -> tuple[str, str]:
         return self.owner, self.name
 
     def get_pr_basic(self, pull_request_id: int) -> dict:
         return self.pr
+
+    def get_last_completed_review(self, pull_request_id: int) -> dict | None:
+        return self.last_completed_review
 
 
 @dataclass

@@ -93,3 +93,6 @@ class DatabaseRepoLookup:
 
     def get_repo_meta(self, repository_id: int) -> dict:
         return get_repo_meta(self._db, repository_id)
+
+    def get_last_completed_review(self, pull_request_id: int) -> dict | None:
+        return get_last_completed_review(self._db, pull_request_id)

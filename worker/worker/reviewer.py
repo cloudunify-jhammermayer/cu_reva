@@ -81,6 +81,10 @@ class RepoLookup(Protocol):
         """Returns {pr_number, title, body, base_branch, head_branch}."""
         ...
 
+    def get_last_completed_review(self, pull_request_id: int) -> dict | None:
+        """Returns {id, head_sha} or None if no completed review exists."""
+        ...
+
 
 class Reviewer:
     def __init__(
