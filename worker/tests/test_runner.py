@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 import pytest
+from unittest.mock import MagicMock, patch
 
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.errors import PermanentError, TransientError
@@ -128,6 +129,7 @@ def ctx_and_fakes():
         reviewer=reviewer,  # type: ignore[arg-type]
         auditor=None,  # type: ignore[arg-type]
         ticket_analyzer=None,  # type: ignore[arg-type] — unused in review tests
+        verifier=None,  # type: ignore[arg-type] — unused in review tests
         odoo=None,  # type: ignore[arg-type] — unused in review tests
     )
     set_context(context)
@@ -351,3 +353,127 @@ def test_settings_from_env_raises_on_missing(monkeypatch):
     from worker.settings import Settings
     with pytest.raises(KeyError):
         Settings.from_env()
+
+
+# --- run_comment_reply -------------------------------------------------------
+
+
+def test_run_comment_reply_raises_permanent_on_missing_key(ctx_and_fakes):
+    from worker.runner import run_comment_reply
+
+    # Missing 'comment_id' key — should raise PermanentError, not KeyError
+    with pytest.raises(PermanentError, match="missing required param"):
+        run_comment_reply({
+            "installation_id": 500,
+            "owner": "acme",
+            "repo": "widgets",
+            "pr_number": 42,
+            "question": "Is this safe?",
+            # 'comment_id' intentionally absent
+        })
+
+
+# --- _verify_and_resolve_findings --------------------------------------------
+
+
+def test_verify_and_resolve_calls_resolve_for_fixed_finding():
+    """When Claude says resolved and thread exists, resolve_review_thread is called."""
+    from worker.runner import _verify_and_resolve_findings
+
+    ctx = MagicMock()
+    ctx.github.get_review_threads.return_value = {12345: "THREAD_NODE_1"}
+    ctx.github.get_file_content.return_value = "def foo(): pass"
+    ctx.verifier.is_resolved.return_value = True
+
+    params = MagicMock()
+    params.pull_request_id = 1
+    params.head_sha = "newsha"
+
+    result = MagicMock()
+    result.diff = (
+        "diff --git a/custom_addons/foo.py b/custom_addons/foo.py\n"
+        "+++ b/custom_addons/foo.py\n+fixed\n"
+    )
+
+    with patch("worker.runner.writers") as mock_writers:
+        mock_writers.get_open_findings_for_pr.return_value = [{
+            "id": 1,
+            "file_path": "custom_addons/foo.py",
+            "line_start": 10,
+            "title": "Missing null check",
+            "body": "user may be None",
+            "severity": "major",
+            "category": "bug",
+            "github_comment_id": 12345,
+        }]
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42)
+
+    ctx.github.resolve_review_thread.assert_called_once_with("tok", "THREAD_NODE_1")
+
+
+def test_verify_and_resolve_skips_unfixed_finding():
+    from worker.runner import _verify_and_resolve_findings
+
+    ctx = MagicMock()
+    ctx.github.get_review_threads.return_value = {12345: "THREAD_NODE_1"}
+    ctx.github.get_file_content.return_value = "def foo(): x = user.name"
+    ctx.verifier.is_resolved.return_value = False
+
+    params = MagicMock()
+    params.pull_request_id = 1
+    params.head_sha = "newsha"
+
+    result = MagicMock()
+    result.diff = (
+        "diff --git a/custom_addons/foo.py b/custom_addons/foo.py\n"
+        "+++ b/custom_addons/foo.py\n+changed\n"
+    )
+
+    with patch("worker.runner.writers") as mock_writers:
+        mock_writers.get_open_findings_for_pr.return_value = [{
+            "id": 1,
+            "file_path": "custom_addons/foo.py",
+            "line_start": 10,
+            "title": "Missing null check",
+            "body": "user may be None",
+            "severity": "major",
+            "category": "bug",
+            "github_comment_id": 12345,
+        }]
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42)
+
+    ctx.github.resolve_review_thread.assert_not_called()
+
+
+def test_verify_and_resolve_swallows_verification_error():
+    from worker.runner import _verify_and_resolve_findings
+    from reva.errors import TransientError
+
+    ctx = MagicMock()
+    ctx.github.get_review_threads.return_value = {12345: "THREAD_NODE_1"}
+    ctx.github.get_file_content.return_value = "content"
+    ctx.verifier.is_resolved.side_effect = TransientError("rate limited")
+
+    params = MagicMock()
+    params.pull_request_id = 1
+    params.head_sha = "newsha"
+
+    result = MagicMock()
+    result.diff = (
+        "diff --git a/custom_addons/foo.py b/custom_addons/foo.py\n"
+        "+++ b/custom_addons/foo.py\n+changed\n"
+    )
+
+    with patch("worker.runner.writers") as mock_writers:
+        mock_writers.get_open_findings_for_pr.return_value = [{
+            "id": 1,
+            "file_path": "custom_addons/foo.py",
+            "line_start": 10,
+            "title": "t",
+            "body": "b",
+            "severity": "minor",
+            "category": "bug",
+            "github_comment_id": 12345,
+        }]
+        # Must not raise
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42)

@@ -12,10 +12,11 @@ import pytest
 
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.errors import PermanentError, TransientError
-from reva.ticket_analyzer import format_ticket_html
+from reva.ticket_formatter import format_ticket_html
 from reva.types import (
     AcceptanceCriterion,
     ClaudeResponse,
+    MissingInfoItem,
     SourcedItem,
     TicketAnalysisResult,
     TicketJobParams,
@@ -77,7 +78,7 @@ class FakeOdoo:
 def _good_result() -> TicketAnalysisResult:
     return TicketAnalysisResult(
         summary="The ticket is well-written.",
-        missing_info=[SourcedItem(text="User role unspecified")],
+        missing_info=[MissingInfoItem(text="User role unspecified")],
         acceptance_criteria=[
             AcceptanceCriterion(given="user", when="clicks", then="action fires")
         ],
@@ -106,6 +107,7 @@ def ctx_and_fakes():
         reviewer=None,  # type: ignore[arg-type]
         auditor=None,  # type: ignore[arg-type]
         ticket_analyzer=analyzer,  # type: ignore[arg-type]
+        verifier=None,  # type: ignore[arg-type] — unused in ticket tests
         odoo=odoo,  # type: ignore[arg-type]
     )
     set_context(ctx)

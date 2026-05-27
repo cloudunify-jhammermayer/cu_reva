@@ -35,8 +35,9 @@ from reva.db import (
     repo_lookup,
     writers,
 )
-from reva.diff_utils import parse_diff_hunks
+from reva.diff_utils import extract_file_paths, parse_diff_hunks
 from reva.errors import PermanentError, TransientError
+from reva.finding_verifier import FindingVerifier, StoredFinding
 from reva.github_client import GitHubClient
 from reva.prompt_builder import PromptBuilder
 from reva.review_formatter import (
@@ -69,6 +70,7 @@ class WorkerContext:
     reviewer: Reviewer
     auditor: Auditor
     ticket_analyzer: TicketAnalyzer
+    verifier: FindingVerifier
     odoo: OdooCallbackClient
     google_chat_webhook_url: str = ""
 
@@ -103,6 +105,8 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         api_key=settings.anthropic_api_key,
         skills_dir=settings.skills_dir,
     )
+    runner.evict_stale_repos(ttl_days=settings.repo_cache_ttl_days)
+    logger.info("repo_cache_eviction_done", ttl_days=settings.repo_cache_ttl_days)
     github = GitHubClient(
         app_id=settings.github_app_id,
         private_key_pem=settings.github_private_key,
@@ -121,6 +125,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         repos=DatabaseRepoLookup(db),
     )
     ticket_analyzer = TicketAnalyzer(claude=claude, prompts_dir=settings.prompts_dir)
+    verifier = FindingVerifier(claude=claude)
     odoo = OdooCallbackClient(
         callback_url=settings.odoo_callback_url,
         api_key=settings.odoo_callback_api_key,
@@ -133,6 +138,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         reviewer=reviewer,
         auditor=auditor,
         ticket_analyzer=ticket_analyzer,
+        verifier=verifier,
         odoo=odoo,
         google_chat_webhook_url=settings.google_chat_webhook_url,
     )
@@ -164,28 +170,54 @@ def run_review(job_params: dict) -> dict:
 
     run_id = writers.record_review_started(ctx.db, params)
 
-    # Reviewer.execute is pure. Errors flow through dedicated handlers below.
+    # Resolve repo/PR metadata once — reused on all success and error paths
+    # to avoid repeated DB round-trips per job.
+    try:
+        owner, name = repo_lookup.get_owner_name(ctx.db, params.repository_id)
+        pr_basic = repo_lookup.get_pr_basic(ctx.db, params.pull_request_id)
+        pr_number = pr_basic["pr_number"]
+    except LookupError as exc:
+        writers.record_review_failed(ctx.db, params, "permanent", str(exc))
+        raise PermanentError(f"Repository or PR not found: {exc}") from exc
+
+    log = log.bind(owner=owner, repo=name, pr_number=pr_number)
+
+    result = _execute_and_persist(ctx, params, run_id, owner, name, pr_number, log)
+    _post_result_to_github(ctx, params, result, run_id, owner, name, pr_number, log)
+
+    log.info("review_job_done", status=result.status)
+    return result.model_dump(mode="json")
+
+
+def _execute_and_persist(
+    ctx: WorkerContext,
+    params: JobParams,
+    run_id: int,
+    owner: str,
+    name: str,
+    pr_number: int,
+    log,
+) -> ReviewResult:
+    """Execute the reviewer and persist its outcome. Re-raises on any error."""
     try:
         result = ctx.reviewer.execute(params)
     except TransientError:
-        # Don't write a "failed" row — RQ will retry; we want started status preserved.
+        # Don't write a "failed" row — RQ will retry; started status preserved.
         log.warning("review_transient_error", exc_info=True)
         raise
     except PermanentError as exc:
         log.error("review_permanent_error", error=str(exc))
         writers.record_review_failed(ctx.db, params, "permanent", str(exc))
-        _post_failure_check_run(ctx, params, run_id, str(exc))
-        _notify_error(ctx, params, "PermanentError", str(exc))
+        _post_failure_check_run(ctx, params, run_id, str(exc), owner, name)
+        _notify_error(ctx, params, "PermanentError", str(exc), owner, name, pr_number)
         raise
     except Exception as exc:
-        # Truly unexpected — keep the surface narrow but don't lose data.
         log.exception("review_unexpected_error")
         writers.record_review_failed(ctx.db, params, "permanent", str(exc))
-        _post_failure_check_run(ctx, params, run_id, str(exc))
-        _notify_error(ctx, params, type(exc).__name__, str(exc))
+        _post_failure_check_run(ctx, params, run_id, str(exc), owner, name)
+        _notify_error(ctx, params, type(exc).__name__, str(exc), owner, name, pr_number)
         raise
 
-    # Persist the outcome.
     if result.status == "completed":
         writers.record_review_completed(ctx.db, params, result)
     elif result.status == "declined":
@@ -193,13 +225,21 @@ def run_review(job_params: dict) -> dict:
     elif result.status == "stale":
         writers.record_review_stale(ctx.db, params)
 
-    # Post to GitHub.  Wrapped so errors are classified correctly for RQ:
-    # LookupError means the repo/PR vanished from the DB (permanent);
-    # TransientError from GitHub propagates for retry; everything else re-raises.
+    return result
+
+
+def _post_result_to_github(
+    ctx: WorkerContext,
+    params: JobParams,
+    result: ReviewResult,
+    run_id: int,
+    owner: str,
+    name: str,
+    pr_number: int,
+    log,
+) -> None:
+    """Mint a token, post Check Run / PR Review to GitHub, attach IDs to DB row."""
     try:
-        owner, name = repo_lookup.get_owner_name(ctx.db, params.repository_id)
-        pr_basic = repo_lookup.get_pr_basic(ctx.db, params.pull_request_id)
-        pr_number = pr_basic["pr_number"]
         token = ctx.github.get_installation_token(params.installation_id)
 
         if result.status == "completed":
@@ -208,6 +248,8 @@ def run_review(job_params: dict) -> dict:
             )
             writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id, review_id=review_id)
             _backfill_comment_ids(ctx, run_id, token, owner, name, pr_number, review_id)
+            if result.delta_base_sha:
+                _verify_and_resolve_findings(ctx, params, result, token, owner, name, pr_number)
         elif result.status == "declined":
             check_run_id = _post_declined(ctx, params, result, run_id, token, owner, name, pr_number)
             writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id)
@@ -216,19 +258,12 @@ def run_review(job_params: dict) -> dict:
                 ctx, params, result, run_id, token, owner, name, conclusion="skipped"
             )
             writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id)
-    except LookupError as exc:
-        log.error("review_post_lookup_error", error=str(exc))
-        writers.record_review_failed(ctx.db, params, "permanent", str(exc))
-        raise PermanentError(f"Repository or PR not found after review: {exc}") from exc
     except TransientError:
         log.warning("review_post_transient_error", exc_info=True)
         raise
     except Exception:
         log.exception("review_post_unexpected_error")
         raise
-
-    log.info("review_job_done", status=result.status)
-    return result.model_dump(mode="json")
 
 
 # ---------------------------------------------------------------- post paths
@@ -335,12 +370,11 @@ def _post_simple_check_run(
 
 
 def _post_failure_check_run(
-    ctx: WorkerContext, params: JobParams, run_id: int, error_message: str
+    ctx: WorkerContext, params: JobParams, run_id: int, error_message: str,
+    owner: str, name: str,
 ) -> None:
-    """Best-effort failure Check Run on PermanentError. Posting failures here
-    must not mask the original error, so we swallow exceptions."""
+    """Best-effort failure Check Run on PermanentError. Must not mask the original error."""
     try:
-        owner, name = repo_lookup.get_owner_name(ctx.db, params.repository_id)
         token = ctx.github.get_installation_token(params.installation_id)
         failed_result = ReviewResult(
             status="failed",
@@ -400,6 +434,55 @@ def _backfill_comment_ids(
         logger.warning("backfill_comment_ids_failed", exc_info=True)
 
 
+def _verify_and_resolve_findings(
+    ctx: WorkerContext,
+    params: JobParams,
+    result: ReviewResult,
+    token: str,
+    owner: str,
+    name: str,
+    pr_number: int,
+) -> None:
+    """Best-effort: for old findings in touched files, verify if fixed and resolve threads."""
+    try:
+        threads = ctx.github.get_review_threads(token, owner, name, pr_number)
+    except Exception:
+        logger.warning("get_review_threads_failed", exc_info=True)
+        return
+
+    old_findings = writers.get_open_findings_for_pr(ctx.db, params.pull_request_id)
+    touched_files = extract_file_paths(result.diff)
+
+    for f in old_findings:
+        if f["file_path"] not in touched_files:
+            continue
+        try:
+            content = ctx.github.get_file_content(
+                token, owner, name, f["file_path"], params.head_sha
+            )
+            if content is None:
+                continue
+            stored = StoredFinding(
+                file_path=f["file_path"],
+                line_start=f["line_start"],
+                title=f["title"],
+                body=f["body"],
+                severity=f["severity"],
+                category=f["category"],
+            )
+            if ctx.verifier.is_resolved(stored, content):
+                thread_id = threads.get(f["github_comment_id"])
+                if thread_id:
+                    ctx.github.resolve_review_thread(token, thread_id)
+                    logger.info(
+                        "finding_resolved",
+                        finding_id=f["id"],
+                        file=f["file_path"],
+                    )
+        except Exception:
+            logger.warning("finding_verification_failed", finding_id=f["id"], exc_info=True)
+
+
 def run_comment_reply(params: dict) -> None:
     """RQ task: reply to a developer's question on one of REVA's inline findings.
 
@@ -407,19 +490,24 @@ def run_comment_reply(params: dict) -> None:
     original comment), question (text of the developer's reply).
     """
     ctx = get_context()
-    log = logger.bind(
-        comment_id=params.get("comment_id"),
-        owner=params.get("owner"),
-        repo=params.get("repo"),
-        pr=params.get("pr_number"),
-    )
+    try:
+        comment_id = params["comment_id"]
+        installation_id = params["installation_id"]
+        question = params["question"]
+        owner = params["owner"]
+        repo = params["repo"]
+        pr_number = params["pr_number"]
+    except KeyError as exc:
+        raise PermanentError(f"run_comment_reply: missing required param {exc}") from exc
 
-    finding = writers.lookup_finding_by_comment_id(ctx.db, params["comment_id"])
+    log = logger.bind(comment_id=comment_id, owner=owner, repo=repo, pr=pr_number)
+
+    finding = writers.lookup_finding_by_comment_id(ctx.db, comment_id)
     if finding is None:
         log.warning("reply_finding_not_found")
         return
 
-    token = ctx.github.get_installation_token(params["installation_id"])
+    token = ctx.github.get_installation_token(installation_id)
 
     location = ""
     if finding["file_path"]:
@@ -442,37 +530,38 @@ def run_comment_reply(params: dict) -> None:
             if finding["suggestion"]
             else ""
         )
-        + f"## Developer's reply\n\n{params['question']}"
+        + f"## Developer's reply\n\n{question}"
     )
 
     reply_text = ctx.claude.chat(system=system, user=user_prompt)
     ctx.github.reply_to_review_comment(
         token=token,
-        owner=params["owner"],
-        repo=params["repo"],
-        pr_number=params["pr_number"],
-        comment_id=params["comment_id"],
+        owner=owner,
+        repo=repo,
+        pr_number=pr_number,
+        comment_id=comment_id,
         body=reply_text,
     )
     log.info("comment_reply_posted")
 
 
-def _notify_error(ctx: WorkerContext, params: JobParams, error_class: str, message: str) -> None:
+def _notify_error(
+    ctx: WorkerContext, params: JobParams, error_class: str, message: str,
+    owner: str, name: str, pr_number: int,
+) -> None:
     """Best-effort Google Chat notification for server/API errors."""
     if not ctx.google_chat_webhook_url:
         return
     try:
-        owner, name = repo_lookup.get_owner_name(ctx.db, params.repository_id)
-        pr_basic = repo_lookup.get_pr_basic(ctx.db, params.pull_request_id)
         notify_worker_error(
             ctx.google_chat_webhook_url,
             repo_full_name=f"{owner}/{name}",
-            pr_number=pr_basic["pr_number"],
+            pr_number=pr_number,
             error_class=error_class,
             message=message,
         )
     except Exception:
-        pass  # never let notification failure mask the original error
+        logger.warning("notify_error_failed", exc_info=True)  # never mask the original error
 
 
 # --------------------------------------------------------------- formatting
