@@ -369,17 +369,20 @@ def get_findings_for_run(db: Database, review_run_id: int) -> list[dict]:
     ]
 
 
-def get_open_findings_for_pr(db: Database, pull_request_id: int) -> list[dict]:
-    """Return findings with a github_comment_id from the most recent completed review."""
+def get_open_findings_for_pr(db: Database, pull_request_id: int, before_run_id: int | None = None) -> list[dict]:
+    """Return findings with a github_comment_id from the most recent completed review.
+
+    Pass before_run_id to exclude the current run and target the prior review.
+    """
     with db.session() as s:
         subq = (
             select(ReviewRun.id)
             .where(ReviewRun.pull_request_id == pull_request_id)
             .where(ReviewRun.status == "completed")
-            .order_by(ReviewRun.completed_at.desc())
-            .limit(1)
-            .scalar_subquery()
         )
+        if before_run_id is not None:
+            subq = subq.where(ReviewRun.id < before_run_id)
+        subq = subq.order_by(ReviewRun.completed_at.desc()).limit(1).scalar_subquery()
         rows = s.execute(
             select(
                 ReviewFinding.id,

@@ -463,6 +463,23 @@ def test_get_open_findings_for_pr_uses_most_recent_run(db_session):
     assert findings[0]["file_path"] == "custom_addons/new.py"
 
 
+def test_get_open_findings_for_pr_excludes_current_run_with_before_run_id(db_session):
+    from datetime import timedelta
+    repo_id, pr_id = _seed_repo_and_pr(db_session)
+    now = datetime.now(timezone.utc)
+    old_run = _seed_review_run(db_session, pr_id, repo_id, head_sha="old", status="completed",
+                                completed_at=now - timedelta(seconds=10))
+    new_run = _seed_review_run(db_session, pr_id, repo_id, head_sha="new", status="completed",
+                                completed_at=now)
+    _seed_finding(db_session, old_run, file_path="custom_addons/old.py", github_comment_id=111)
+    _seed_finding(db_session, new_run, file_path="custom_addons/new.py", github_comment_id=222)
+
+    # Pass new_run as before_run_id — should get old run's findings
+    findings = get_open_findings_for_pr(db_session, pr_id, before_run_id=new_run)
+    assert len(findings) == 1
+    assert findings[0]["file_path"] == "custom_addons/old.py"
+
+
 # --- migration runner --------------------------------------------------------
 
 

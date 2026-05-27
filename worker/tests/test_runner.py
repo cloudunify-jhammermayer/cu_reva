@@ -406,7 +406,7 @@ def test_verify_and_resolve_calls_resolve_for_fixed_finding():
             "category": "bug",
             "github_comment_id": 12345,
         }]
-        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42)
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)
 
     ctx.github.resolve_review_thread.assert_called_once_with("tok", "THREAD_NODE_1")
 
@@ -440,7 +440,7 @@ def test_verify_and_resolve_skips_unfixed_finding():
             "category": "bug",
             "github_comment_id": 12345,
         }]
-        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42)
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)
 
     ctx.github.resolve_review_thread.assert_not_called()
 
@@ -476,4 +476,4 @@ def test_verify_and_resolve_swallows_verification_error():
             "github_comment_id": 12345,
         }]
         # Must not raise
-        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42)
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)

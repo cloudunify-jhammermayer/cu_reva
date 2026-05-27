@@ -249,7 +249,7 @@ def _post_result_to_github(
             writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id, review_id=review_id)
             _backfill_comment_ids(ctx, run_id, token, owner, name, pr_number, review_id)
             if result.delta_base_sha:
-                _verify_and_resolve_findings(ctx, params, result, token, owner, name, pr_number)
+                _verify_and_resolve_findings(ctx, params, result, token, owner, name, pr_number, run_id)
         elif result.status == "declined":
             check_run_id = _post_declined(ctx, params, result, run_id, token, owner, name, pr_number)
             writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id)
@@ -442,6 +442,7 @@ def _verify_and_resolve_findings(
     owner: str,
     name: str,
     pr_number: int,
+    run_id: int,
 ) -> None:
     """Best-effort: for old findings in touched files, verify if fixed and resolve threads."""
     try:
@@ -450,7 +451,7 @@ def _verify_and_resolve_findings(
         logger.warning("get_review_threads_failed", exc_info=True)
         return
 
-    old_findings = writers.get_open_findings_for_pr(ctx.db, params.pull_request_id)
+    old_findings = writers.get_open_findings_for_pr(ctx.db, params.pull_request_id, before_run_id=run_id)
     touched_files = extract_file_paths(result.diff)
 
     for f in old_findings:
