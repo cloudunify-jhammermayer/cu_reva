@@ -1,6 +1,6 @@
 """GitHub App API client (read-only surface).
 
-Implements the GitHubReader Protocol from reva.reviewer. Two-step auth:
+Satisfies the GitHubReader Protocol (reviewer.py / auditor.py). Two-step auth:
   1. Sign a short-lived JWT with the App's RSA private key.
   2. Exchange the JWT for an installation token scoped to one org.
 Installation tokens are cached in-process keyed by installation_id.
@@ -148,6 +148,17 @@ class GitHubClient:
             return None
         return response.text
 
+    def get_compare_diff(
+        self, token: str, owner: str, repo: str, base_sha: str, head_sha: str
+    ) -> str:
+        """Return the unified diff between two SHAs."""
+        response = self._get(
+            token,
+            f"/repos/{owner}/{repo}/compare/{base_sha}...{head_sha}",
+            extra_headers={"Accept": "application/vnd.github.v3.diff"},
+        )
+        return response.text
+
     # --- Writes -------------------------------------------------------------
 
     def create_check_run(
@@ -247,6 +258,57 @@ class GitHubClient:
             {"body": body},
         )
         return response.json()["id"]
+
+    def get_review_threads(
+        self, token: str, owner: str, repo: str, pr_number: int
+    ) -> dict[int, str]:
+        """Return {github_comment_database_id → thread_node_id} for unresolved threads."""
+        query = """
+        query GetPRThreads($owner: String!, $repo: String!, $prNumber: Int!) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $prNumber) {
+              reviewThreads(first: 100) {
+                nodes {
+                  id
+                  isResolved
+                  comments(first: 1) {
+                    nodes { databaseId }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+        response = self._post(
+            token,
+            "/graphql",
+            {"query": query, "variables": {"owner": owner, "repo": repo, "prNumber": pr_number}},
+        )
+        threads = (
+            response.json()
+            .get("data", {})
+            .get("repository", {})
+            .get("pullRequest", {})
+            .get("reviewThreads", {})
+            .get("nodes", [])
+        )
+        return {
+            node["comments"]["nodes"][0]["databaseId"]: node["id"]
+            for node in threads
+            if not node.get("isResolved") and node.get("comments", {}).get("nodes")
+        }
+
+    def resolve_review_thread(self, token: str, thread_node_id: str) -> None:
+        """Resolve a pull request review thread via GraphQL."""
+        mutation = """
+        mutation ResolveThread($threadId: ID!) {
+          resolveReviewThread(input: {threadId: $threadId}) {
+            thread { isResolved }
+          }
+        }
+        """
+        self._post(token, "/graphql", {"query": mutation, "variables": {"threadId": thread_node_id}})
 
     # --- shared HTTP --------------------------------------------------------
 

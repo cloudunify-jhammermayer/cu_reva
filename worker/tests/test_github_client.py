@@ -441,3 +441,67 @@ def test_post_500_maps_to_transient(rsa_key_pair):
     client = _make_client(lambda req: httpx.Response(500, text="boom"), private_pem)
     with pytest.raises(TransientError):
         client.create_issue_comment("tok", "a", "b", 1, "x")
+
+
+def test_get_compare_diff_returns_diff_text(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "/compare/abc123...def456" in str(request.url)
+        assert "diff" in request.headers.get("accept", "")
+        return httpx.Response(200, text="diff --git a/foo.py b/foo.py\n+added")
+
+    client = _make_client(handler, private_pem)
+    result = client.get_compare_diff("tok", "acme", "widgets", "abc123", "def456")
+    assert result.startswith("diff --git")
+
+
+def test_get_review_threads_returns_database_id_to_node_id_map(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/graphql"
+        return httpx.Response(200, json={
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [
+                                {
+                                    "id": "THREAD_NODE_1",
+                                    "isResolved": False,
+                                    "comments": {"nodes": [{"databaseId": 12345}]},
+                                },
+                                {
+                                    "id": "THREAD_NODE_2",
+                                    "isResolved": True,
+                                    "comments": {"nodes": [{"databaseId": 99999}]},
+                                },
+                            ]
+                        }
+                    }
+                }
+            }
+        })
+
+    client = _make_client(handler, private_pem)
+    result = client.get_review_threads("tok", "acme", "widgets", 42)
+    # Only unresolved threads returned
+    assert result == {12345: "THREAD_NODE_1"}
+
+
+def test_resolve_review_thread_posts_graphql_mutation(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    called = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/graphql"
+        body = request.read()
+        called.append(body)
+        return httpx.Response(200, json={
+            "data": {"resolveReviewThread": {"thread": {"isResolved": True}}}
+        })
+
+    client = _make_client(handler, private_pem)
+    client.resolve_review_thread("tok", "THREAD_NODE_1")
+    assert len(called) == 1
