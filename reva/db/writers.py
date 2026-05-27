@@ -17,8 +17,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import structlog
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
+
+logger = structlog.get_logger()
 
 from reva.cost import estimate_cost
 from reva.db.engine import Database
@@ -105,6 +108,13 @@ def record_review_failed(
         run.error_message = message
         run.completed_at = datetime.now(timezone.utc)
         s.flush()
+        logger.warning(
+            "review_run_failed",
+            run_id=run.id,
+            error_class=error_class,
+            repository_id=params.repository_id,
+            pull_request_id=params.pull_request_id,
+        )
         return run.id
 
 
@@ -169,6 +179,7 @@ def upsert_repository(
             )
             s.add(repo)
             s.flush()
+            logger.info("repository_registered", full_name=f"{owner}/{name}", installation_id=installation_id)
         else:
             repo.owner = owner
             repo.name = name
@@ -292,6 +303,11 @@ def record_github_event(
                 select(GithubEvent.id).where(GithubEvent.delivery_id == delivery_id)
             ).first()
             if existing:
+                logger.info(
+                    "github_event_duplicate",
+                    delivery_id=delivery_id,
+                    event_type=event_type,
+                )
                 return None
             ev = GithubEvent(
                 delivery_id=delivery_id,
@@ -349,6 +365,46 @@ def get_findings_for_run(db: Database, review_run_id: int) -> list[dict]:
         ).all()
     return [
         {"id": r[0], "file_path": r[1], "line_start": r[2], "line_end": r[3]}
+        for r in rows
+    ]
+
+
+def get_open_findings_for_pr(db: Database, pull_request_id: int) -> list[dict]:
+    """Return findings with a github_comment_id from the most recent completed review."""
+    with db.session() as s:
+        subq = (
+            select(ReviewRun.id)
+            .where(ReviewRun.pull_request_id == pull_request_id)
+            .where(ReviewRun.status == "completed")
+            .order_by(ReviewRun.completed_at.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        rows = s.execute(
+            select(
+                ReviewFinding.id,
+                ReviewFinding.file_path,
+                ReviewFinding.line_start,
+                ReviewFinding.title,
+                ReviewFinding.body,
+                ReviewFinding.severity,
+                ReviewFinding.category,
+                ReviewFinding.github_comment_id,
+            )
+            .where(ReviewFinding.review_run_id == subq)
+            .where(ReviewFinding.github_comment_id.is_not(None))
+        ).all()
+    return [
+        {
+            "id": r[0],
+            "file_path": r[1],
+            "line_start": r[2],
+            "title": r[3],
+            "body": r[4],
+            "severity": r[5],
+            "category": r[6],
+            "github_comment_id": r[7],
+        }
         for r in rows
     ]
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from reva.db.engine import Database
-from reva.db.models import PullRequest, Repository
+from reva.db.models import PullRequest, Repository, ReviewRun
 
 
 def get_owner_name(db: Database, repository_id: int) -> tuple[str, str]:
@@ -62,6 +62,21 @@ def get_repo_meta(db: Database, repository_id: int) -> dict:
         "installation_id": row.installation_id,
         "default_branch": row.default_branch or "main",
     }
+
+
+def get_last_completed_review(db: Database, pull_request_id: int) -> dict | None:
+    """Return {id, head_sha} of the most recent completed review_run, or None."""
+    with db.session() as s:
+        row = s.execute(
+            select(ReviewRun.id, ReviewRun.head_sha)
+            .where(ReviewRun.pull_request_id == pull_request_id)
+            .where(ReviewRun.status == "completed")
+            .order_by(ReviewRun.completed_at.desc())
+            .limit(1)
+        ).first()
+    if not row:
+        return None
+    return {"id": row[0], "head_sha": row[1]}
 
 
 class DatabaseRepoLookup:

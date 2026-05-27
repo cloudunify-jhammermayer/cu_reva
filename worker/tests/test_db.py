@@ -288,6 +288,177 @@ def test_record_github_event_is_idempotent_on_delivery_id(db):
         assert s.query(GithubEvent).count() == 1
 
 
+# --- structured logging in writers -------------------------------------------
+
+
+import structlog.testing
+
+
+def test_upsert_repository_logs_on_new_repo(db):
+    with structlog.testing.capture_logs() as logs:
+        writers.upsert_repository(
+            db, github_repository_id=9999, owner="acme", name="new-repo",
+            default_branch="main", installation_id=1,
+        )
+    assert any(log.get("event") == "repository_registered" for log in logs)
+
+
+def test_upsert_repository_no_log_on_update(db):
+    writers.upsert_repository(
+        db, github_repository_id=9999, owner="acme", name="new-repo",
+        default_branch="main", installation_id=1,
+    )
+    with structlog.testing.capture_logs() as logs:
+        writers.upsert_repository(
+            db, github_repository_id=9999, owner="acme", name="new-repo",
+            default_branch="main", installation_id=1,
+        )
+    assert not any(log.get("event") == "repository_registered" for log in logs)
+
+
+def test_record_github_event_logs_duplicate(db):
+    writers.record_github_event(
+        db, delivery_id="dup-001", event_type="pull_request", action="opened",
+        repository_full_name="acme/widgets", sender_login="alice", payload={},
+    )
+    with structlog.testing.capture_logs() as logs:
+        writers.record_github_event(
+            db, delivery_id="dup-001", event_type="pull_request", action="opened",
+            repository_full_name="acme/widgets", sender_login="alice", payload={},
+        )
+    assert any(log.get("event") == "github_event_duplicate" for log in logs)
+
+
+def test_record_review_failed_logs(db, seeded):
+    params = _params(seeded)
+    with structlog.testing.capture_logs() as logs:
+        writers.record_review_failed(db, params, error_class="permanent", message="test error")
+    assert any(log.get("event") == "review_run_failed" for log in logs)
+
+
+# --- db_session fixture + seed helpers for new query tests ------------------
+
+
+@pytest.fixture()
+def db_session(db: Database) -> Database:
+    """Alias for `db` used by the new query tests."""
+    return db
+
+
+def _seed_repo_and_pr(db: Database) -> tuple[int, int]:
+    """Insert a minimal repository + pull_request and return (repo_id, pr_id)."""
+    repo_id = writers.upsert_repository(
+        db,
+        github_repository_id=2001,
+        owner="test-org",
+        name="test-repo",
+        default_branch="main",
+        installation_id=600,
+    )
+    pr_id = writers.upsert_pull_request(
+        db,
+        repository_id=repo_id,
+        github_pr_id=5001,
+        pr_number=99,
+        title="Test PR",
+        author_login="bob",
+        base_branch="main",
+        head_branch="feat/test",
+        head_sha="cafebabe",
+        state="open",
+        draft=False,
+    )
+    return repo_id, pr_id
+
+
+def _seed_review_run(db: Database, pr_id: int, repo_id: int, *, head_sha: str = "abc123", status: str = "completed") -> int:
+    with db.session() as s:
+        run = ReviewRun(
+            repository_id=repo_id,
+            pull_request_id=pr_id,
+            head_sha=head_sha,
+            status=status,
+            trigger_event="synchronize",
+            review_mode="diff",
+            completed_at=datetime.now(timezone.utc),
+        )
+        s.add(run)
+        s.flush()
+        return run.id
+
+
+def _seed_finding(db: Database, run_id: int, *, file_path: str = "custom_addons/foo.py", github_comment_id=None) -> int:
+    with db.session() as s:
+        f = ReviewFinding(
+            review_run_id=run_id,
+            severity="minor",
+            category="bug",
+            file_path=file_path,
+            line_start=10,
+            title="Test finding",
+            body="Test body",
+            confidence=0.8,
+            github_comment_id=github_comment_id,
+        )
+        s.add(f)
+        s.flush()
+        return f.id
+
+
+# --- get_last_completed_review -----------------------------------------------
+
+from reva.db.repo_lookup import get_last_completed_review
+from reva.db.writers import get_open_findings_for_pr
+
+
+def test_get_last_completed_review_returns_none_when_no_reviews(db_session):
+    repo_id, pr_id = _seed_repo_and_pr(db_session)
+    assert get_last_completed_review(db_session, pr_id) is None
+
+
+def test_get_last_completed_review_returns_most_recent_completed(db_session):
+    repo_id, pr_id = _seed_repo_and_pr(db_session)
+    _seed_review_run(db_session, pr_id, repo_id, head_sha="aaa", status="completed")
+    _seed_review_run(db_session, pr_id, repo_id, head_sha="bbb", status="completed")
+    result = get_last_completed_review(db_session, pr_id)
+    assert result is not None
+    assert result["head_sha"] == "bbb"
+    assert "id" in result
+
+
+def test_get_last_completed_review_ignores_failed_runs(db_session):
+    repo_id, pr_id = _seed_repo_and_pr(db_session)
+    _seed_review_run(db_session, pr_id, repo_id, head_sha="aaa", status="failed")
+    assert get_last_completed_review(db_session, pr_id) is None
+
+
+# --- get_open_findings_for_pr ------------------------------------------------
+
+
+def test_get_open_findings_for_pr_returns_findings_with_comment_ids(db_session):
+    repo_id, pr_id = _seed_repo_and_pr(db_session)
+    run_id = _seed_review_run(db_session, pr_id, repo_id, head_sha="abc", status="completed")
+    _seed_finding(db_session, run_id, file_path="custom_addons/a.py", github_comment_id=999)
+    _seed_finding(db_session, run_id, file_path="custom_addons/b.py", github_comment_id=None)
+
+    findings = get_open_findings_for_pr(db_session, pr_id)
+    assert len(findings) == 1
+    assert findings[0]["file_path"] == "custom_addons/a.py"
+    assert findings[0]["github_comment_id"] == 999
+
+
+def test_get_open_findings_for_pr_uses_most_recent_run(db_session):
+    repo_id, pr_id = _seed_repo_and_pr(db_session)
+    old_run = _seed_review_run(db_session, pr_id, repo_id, head_sha="old", status="completed")
+    new_run = _seed_review_run(db_session, pr_id, repo_id, head_sha="new", status="completed")
+    _seed_finding(db_session, old_run, file_path="custom_addons/old.py", github_comment_id=111)
+    _seed_finding(db_session, new_run, file_path="custom_addons/new.py", github_comment_id=222)
+
+    findings = get_open_findings_for_pr(db_session, pr_id)
+    assert len(findings) == 1
+    assert findings[0]["file_path"] == "custom_addons/new.py"
+
+
 # --- migration runner --------------------------------------------------------
 
 
