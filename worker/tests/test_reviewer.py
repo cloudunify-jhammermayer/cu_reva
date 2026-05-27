@@ -29,6 +29,14 @@ _DEFAULT_DIFF = (
     "- removed\n"
 )
 
+_DEFAULT_PR = {
+    "pr_number": 42,
+    "title": "Add foo",
+    "body": "",
+    "base_branch": "main",
+    "head_branch": "feat/foo",
+}
+
 
 @dataclass
 class FakeGitHub:
@@ -38,6 +46,8 @@ class FakeGitHub:
     file_contents: dict[str, str | None] = field(default_factory=dict)
     diff_calls: int = 0
     token_calls: int = 0
+    compare_diff: str = _DEFAULT_DIFF
+    compare_diff_calls: int = 0
 
     def get_installation_token(self, installation_id: int) -> str:
         self.token_calls += 1
@@ -49,6 +59,10 @@ class FakeGitHub:
     def get_pull_request_diff(self, token, owner, repo, pr_number) -> str:
         self.diff_calls += 1
         return self.diff
+
+    def get_compare_diff(self, token, owner, repo, base_sha, head_sha) -> str:
+        self.compare_diff_calls += 1
+        return self.compare_diff
 
     def get_changed_files(self, token, owner, repo, pr_number) -> list[dict]:
         return self.files
@@ -453,3 +467,61 @@ def test_recompute_risk_level_levels():
     assert _recompute_risk_level([_f("minor", 0.5)] * 3) == "medium"
     assert _recompute_risk_level([_f("minor", 0.5)]) == "low"
     assert _recompute_risk_level([]) == "low"
+
+
+# --- delta detection ----------------------------------------------------------
+
+
+def test_delta_review_used_when_prior_review_exists():
+    """When a completed review exists, get_compare_diff is called and reva-delta-review skill used."""
+    github = FakeGitHub(head_sha="newsha", compare_diff=_DEFAULT_DIFF)
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 1, "head_sha": "prevsha"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(
+        repository_id=1, pull_request_id=1, head_sha="newsha",
+        installation_id=99, trigger_event="synchronize",
+    )
+
+    result = reviewer.execute(params)
+
+    assert result.status == "completed"
+    assert result.delta_base_sha == "prevsha"
+    assert runner.last_skill == "reva-delta-review"
+    assert github.compare_diff_calls == 1
+
+
+def test_full_review_used_when_no_prior_review():
+    """Without a prior review, get_pull_request_diff is called and reva-diff-review skill used."""
+    github = FakeGitHub(head_sha="sha1")
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review=None)
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(
+        repository_id=1, pull_request_id=1, head_sha="sha1",
+        installation_id=99, trigger_event="synchronize",
+    )
+
+    result = reviewer.execute(params)
+
+    assert result.status == "completed"
+    assert result.delta_base_sha is None
+    assert runner.last_skill in ("reva-diff-review", "reva-full-review")
+    assert github.diff_calls == 1
+
+
+def test_delta_empty_returns_stale():
+    """If the compare diff is empty, return stale without calling Claude."""
+    github = FakeGitHub(head_sha="newsha", compare_diff="")
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 1, "head_sha": "prevsha"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(
+        repository_id=1, pull_request_id=1, head_sha="newsha",
+        installation_id=99, trigger_event="synchronize",
+    )
+
+    result = reviewer.execute(params)
+
+    assert result.status == "stale"
+    assert runner.last_skill is None  # Claude never called

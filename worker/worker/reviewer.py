@@ -62,6 +62,10 @@ class GitHubReader(Protocol):
         self, token: str, owner: str, repo: str, pr_number: int
     ) -> str: ...
 
+    def get_compare_diff(
+        self, token: str, owner: str, repo: str, base_sha: str, head_sha: str
+    ) -> str: ...
+
     def get_changed_files(
         self, token: str, owner: str, repo: str, pr_number: int
     ) -> list[dict]: ...
@@ -137,8 +141,27 @@ class Reviewer:
             )
 
         # 5. Fetch diff + changed files.
-        raw_diff = self.github.get_pull_request_diff(token, owner, name, pr_number)
-        diff = filter_diff(raw_diff)
+        # Delta detection: if a prior completed review exists, use the compare diff.
+        last_review = self.repos.get_last_completed_review(params.pull_request_id)
+        if last_review:
+            raw_diff = self.github.get_compare_diff(
+                token, owner, name, last_review["head_sha"], params.head_sha
+            )
+            diff = filter_diff(raw_diff)
+            if not diff.strip():
+                return ReviewResult(
+                    status="stale",
+                    summary="No reviewable changes since last review.",
+                    risk_level="low",
+                )
+            skill = "reva-delta-review"
+            delta_base_sha: str | None = last_review["head_sha"]
+        else:
+            raw_diff = self.github.get_pull_request_diff(token, owner, name, pr_number)
+            diff = filter_diff(raw_diff)
+            skill = "reva-full-review" if params.review_mode == "full" else "reva-diff-review"
+            delta_base_sha = None
+
         if len(diff) < len(raw_diff):
             logger.info(
                 "diff_filtered",
@@ -203,9 +226,8 @@ class Reviewer:
                     f"Add more patterns to skip_paths or split the PR."
                 )
 
-        # 10. Select model and skill.
+        # 10. Select model.
         model = self.runner.deep_model if params.review_mode == "deep" else self.runner.default_model
-        skill = "reva-full-review" if params.review_mode == "full" else "reva-diff-review"
 
         skill_params = {
             "pr_title": pr_basic.get("title", ""),
@@ -262,6 +284,7 @@ class Reviewer:
             cache_read_tokens=response.cache_read_tokens,
             cache_creation_tokens=response.cache_creation_tokens,
             estimated_cost_usd=cost,
+            delta_base_sha=delta_base_sha,
         )
 
     # ----------------------------------------------------------------- helpers
