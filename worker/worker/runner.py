@@ -457,6 +457,9 @@ def _verify_and_resolve_findings(
     for f in old_findings:
         if f["file_path"] not in touched_files:
             continue
+        thread_id = threads.get(f["github_comment_id"])
+        if not thread_id:
+            continue  # thread already resolved by user — skip
         try:
             content = ctx.github.get_file_content(
                 token, owner, name, f["file_path"], params.head_sha
@@ -472,14 +475,12 @@ def _verify_and_resolve_findings(
                 category=f["category"],
             )
             if ctx.verifier.is_resolved(stored, content):
-                thread_id = threads.get(f["github_comment_id"])
-                if thread_id:
-                    ctx.github.resolve_review_thread(token, thread_id)
-                    logger.info(
-                        "finding_resolved",
-                        finding_id=f["id"],
-                        file=f["file_path"],
-                    )
+                ctx.github.resolve_review_thread(token, thread_id)
+                logger.info(
+                    "finding_resolved",
+                    finding_id=f["id"],
+                    file=f["file_path"],
+                )
         except Exception:
             logger.warning("finding_verification_failed", finding_id=f["id"], exc_info=True)
 

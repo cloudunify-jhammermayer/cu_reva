@@ -477,3 +477,38 @@ def test_verify_and_resolve_swallows_verification_error():
         }]
         # Must not raise
         _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)
+
+
+def test_verify_and_resolve_skips_already_resolved_threads():
+    """Findings whose thread was already resolved by the user are skipped entirely."""
+    from worker.runner import _verify_and_resolve_findings
+
+    ctx = MagicMock()
+    # Thread not in the map — user already resolved it
+    ctx.github.get_review_threads.return_value = {}
+
+    params = MagicMock()
+    params.pull_request_id = 1
+    params.head_sha = "newsha"
+
+    result = MagicMock()
+    result.diff = (
+        "diff --git a/custom_addons/foo.py b/custom_addons/foo.py\n"
+        "+++ b/custom_addons/foo.py\n+changed\n"
+    )
+
+    with patch("worker.runner.writers") as mock_writers:
+        mock_writers.get_open_findings_for_pr.return_value = [{
+            "id": 1,
+            "file_path": "custom_addons/foo.py",
+            "line_start": 10,
+            "title": "t",
+            "body": "b",
+            "severity": "minor",
+            "category": "bug",
+            "github_comment_id": 12345,
+        }]
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)
+
+    ctx.verifier.is_resolved.assert_not_called()
+    ctx.github.resolve_review_thread.assert_not_called()
