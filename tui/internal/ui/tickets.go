@@ -75,19 +75,9 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 		}
 		switch m.String() {
 		case "j", "down":
-			if t.cursor < len(t.items)-1 {
-				t.cursor++
-				if t.cursor >= t.offset+visibleRows {
-					t.offset++
-				}
-			}
+			t.cursor, t.offset = moveCursor(t.cursor, t.offset, len(t.items), visibleRows, true)
 		case "k", "up":
-			if t.cursor > 0 {
-				t.cursor--
-				if t.cursor < t.offset {
-					t.offset--
-				}
-			}
+			t.cursor, t.offset = moveCursor(t.cursor, t.offset, len(t.items), visibleRows, false)
 		case "r":
 			t.loading = true
 			return t, t.load()
@@ -136,19 +126,19 @@ func (t Tickets) view(w, h int) string {
 
 	colID := 5
 	colTicket := 9
-	colModel := 14
+	colModule := 12
 	colStatus := 10
 	colCost := 10
-	colCreated := w - colID - colTicket - colModel - colStatus - colCost - 12
+	colWhen := w - colID - colTicket - colModule - colStatus - colCost - 12
 
 	hdr := lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
 		fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s  %-*s",
 			colID, "ID",
 			colTicket, "Ticket",
-			colModel, "Model",
+			colModule, "Module",
 			colStatus, "Status",
 			colCost, "Cost",
-			colCreated, "Created"),
+			colWhen, "When"),
 	)
 
 	var rows []string
@@ -162,15 +152,17 @@ func (t Tickets) view(w, h int) string {
 		item := t.items[i]
 		id := fmt.Sprintf("%d", item.ID)
 		ticket := fmt.Sprintf("#%d", item.TicketID)
-		model := ""
-		if item.Model != nil {
-			model = truncate(*item.Model, colModel)
-		}
+		module := truncate(strings.SplitN(item.ModelName, ".", 2)[0], colModule)
 		cost := ""
 		if item.EstimatedCostUSD != nil {
 			cost = fmt.Sprintf("$%.4f", *item.EstimatedCostUSD)
 		}
-		created := item.CreatedAt.Local().Format("01-02 15:04")
+		when := relativeTime(item.CreatedAt)
+		if item.CompletedAt != nil {
+			dur := int(item.CompletedAt.Sub(item.CreatedAt).Milliseconds())
+			when += "  " + fmtDurationMS(dur)
+		}
+		when = truncate(when, colWhen)
 		statusStr := ticketStatusSymbol(item.Status, item.CreatedAt) + " " + item.Status
 
 		if i == t.cursor {
@@ -178,19 +170,19 @@ func (t Tickets) view(w, h int) string {
 				fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s  %-*s",
 					colID, id,
 					colTicket, ticket,
-					colModel, model,
+					colModule, module,
 					colStatus, item.Status,
 					colCost, cost,
-					colCreated, created),
+					colWhen, when),
 			))
 		} else {
 			rows = append(rows, fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s  %-*s",
 				colID, id,
 				colTicket, ticket,
-				colModel, model,
+				colModule, module,
 				colStatus, statusStr,
 				colCost, cost,
-				colCreated, created,
+				colWhen, when,
 			))
 		}
 	}
@@ -200,7 +192,17 @@ func (t Tickets) view(w, h int) string {
 
 	var extras []string
 	if t.cursor < len(t.items) {
-		if sel := t.items[t.cursor]; sel.ErrorMessage != nil && *sel.ErrorMessage != "" {
+		sel := t.items[t.cursor]
+		var meta []string
+		meta = append(meta, "field:"+sel.FieldName)
+		if sel.Model != nil {
+			meta = append(meta, "model:"+truncate(*sel.Model, 24))
+		}
+		if sel.InputTokens != nil && sel.OutputTokens != nil {
+			meta = append(meta, fmt.Sprintf("tokens:%d in / %d out", *sel.InputTokens, *sel.OutputTokens))
+		}
+		extras = append(extras, styleSubtitle.Render("  "+strings.Join(meta, "  ")))
+		if sel.ErrorMessage != nil && *sel.ErrorMessage != "" {
 			extras = append(extras, styleStatusFailed.Render("  error: "+*sel.ErrorMessage))
 		}
 	}

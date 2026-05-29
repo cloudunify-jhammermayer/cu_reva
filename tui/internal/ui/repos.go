@@ -59,19 +59,9 @@ func (r Repos) update(msg tea.Msg) (Repos, tea.Cmd) {
 		}
 		switch m.String() {
 		case "j", "down":
-			if r.cursor < len(r.items)-1 {
-				r.cursor++
-				if r.cursor >= r.offset+visibleRows {
-					r.offset++
-				}
-			}
+			r.cursor, r.offset = moveCursor(r.cursor, r.offset, len(r.items), visibleRows, true)
 		case "k", "up":
-			if r.cursor > 0 {
-				r.cursor--
-				if r.cursor < r.offset {
-					r.offset--
-				}
-			}
+			r.cursor, r.offset = moveCursor(r.cursor, r.offset, len(r.items), visibleRows, false)
 		case "o":
 			if r.cursor < len(r.items) {
 				url := "https://github.com/" + r.items[r.cursor].FullName

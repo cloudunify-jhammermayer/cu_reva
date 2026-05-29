@@ -129,6 +129,27 @@ func fmtDurationMS(ms int) string {
 	}
 }
 
+// moveCursor advances or retreats the cursor and keeps offset in sync so the
+// selected row stays within the visible window. Returns updated (cursor, offset).
+func moveCursor(cursor, offset, total, visibleRows int, down bool) (int, int) {
+	if down {
+		if cursor < total-1 {
+			cursor++
+			if cursor >= offset+visibleRows {
+				offset++
+			}
+		}
+	} else {
+		if cursor > 0 {
+			cursor--
+			if cursor < offset {
+				offset--
+			}
+		}
+	}
+	return cursor, offset
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s

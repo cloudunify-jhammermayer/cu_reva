@@ -252,36 +252,72 @@ def list_failures(db: Database, *, limit: int = 20) -> tuple[list[dict], int]:
 
 def list_pending(db: Database) -> tuple[list[dict], int]:
     with db.session() as s:
-        base = (
+        pending_q = (
             select(
-                PendingReview,
+                PendingReview.id,
                 Repository.full_name.label("repo_full_name"),
+                PullRequest.pr_number,
                 PullRequest.title.label("pr_title"),
+                PendingReview.head_sha,
+                PendingReview.scheduled_at,
+                PendingReview.trigger_event,
+                PendingReview.review_mode,
             )
             .join(Repository, PendingReview.repository_id == Repository.id)
             .join(PullRequest, PendingReview.pull_request_id == PullRequest.id)
             .where(PendingReview.consumed == False)  # noqa: E712
         )
-        total = s.execute(select(func.count()).select_from(base.subquery())).scalar_one()
-        rows = s.execute(base.order_by(PendingReview.scheduled_at.asc())).all()
+        running_q = (
+            select(
+                ReviewRun.id,
+                Repository.full_name.label("repo_full_name"),
+                PullRequest.pr_number,
+                PullRequest.title.label("pr_title"),
+                ReviewRun.head_sha,
+                ReviewRun.started_at.label("scheduled_at"),
+                ReviewRun.trigger_event,
+                ReviewRun.review_mode,
+            )
+            .join(Repository, ReviewRun.repository_id == Repository.id)
+            .join(PullRequest, ReviewRun.pull_request_id == PullRequest.id)
+            .where(ReviewRun.status == "running")
+        )
+
+        pending_rows = s.execute(pending_q.order_by(PendingReview.scheduled_at.asc())).all()
+        running_rows = s.execute(running_q.order_by(ReviewRun.started_at.asc())).all()
+
         items = [
             {
-                "id": pr.id,
-                "repo_full_name": repo_full_name,
-                "pr_number": pr.pr_number,
-                "pr_title": pr_title or "",
-                "head_sha": pr.head_sha,
-                "scheduled_at": pr.scheduled_at,
-                "trigger_event": pr.trigger_event,
-                "review_mode": pr.review_mode,
+                "id": row.id,
+                "repo_full_name": row.repo_full_name,
+                "pr_number": row.pr_number,
+                "pr_title": row.pr_title or "",
+                "head_sha": row.head_sha,
+                "scheduled_at": row.scheduled_at,
+                "trigger_event": row.trigger_event,
+                "review_mode": row.review_mode,
+                "status": "pending",
             }
-            for pr, repo_full_name, pr_title in rows
+            for row in pending_rows
+        ] + [
+            {
+                "id": row.id,
+                "repo_full_name": row.repo_full_name,
+                "pr_number": row.pr_number,
+                "pr_title": row.pr_title or "",
+                "head_sha": row.head_sha,
+                "scheduled_at": row.scheduled_at,
+                "trigger_event": row.trigger_event,
+                "review_mode": row.review_mode,
+                "status": "running",
+            }
+            for row in running_rows
         ]
-    return items, total
+    return items, len(items)
 
 
 def requeue_review(db: Database, review_run_id: int) -> bool:
-    """Reset a failed/stale review to be re-run immediately.
+    """Reset a failed/stale/completed/declined review to be re-run immediately.
 
     Returns False if the review_run doesn't exist or isn't in a terminal state.
     """
@@ -295,7 +331,7 @@ def requeue_review(db: Database, review_run_id: int) -> bool:
             .join(Repository, ReviewRun.repository_id == Repository.id)
             .join(PullRequest, ReviewRun.pull_request_id == PullRequest.id)
             .where(ReviewRun.id == review_run_id)
-            .where(ReviewRun.status.in_(["failed", "stale"]))
+            .where(ReviewRun.status.in_(["failed", "stale", "completed", "declined"]))
         ).one_or_none()
 
     if row is None:

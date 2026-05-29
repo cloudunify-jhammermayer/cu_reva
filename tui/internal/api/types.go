@@ -100,14 +100,15 @@ type FindingCounts struct {
 }
 
 type PendingReview struct {
-	ID          int       `json:"id"`
-	RepoFullName string   `json:"repo_full_name"`
-	PRNumber    int       `json:"pr_number"`
-	PRTitle     string    `json:"pr_title"`
-	HeadSHA     string    `json:"head_sha"`
-	ScheduledAt time.Time `json:"scheduled_at"`
-	TriggerEvent string   `json:"trigger_event"`
-	ReviewMode  string    `json:"review_mode"`
+	ID           int       `json:"id"`
+	RepoFullName string    `json:"repo_full_name"`
+	PRNumber     int       `json:"pr_number"`
+	PRTitle      string    `json:"pr_title"`
+	HeadSHA      string    `json:"head_sha"`
+	ScheduledAt  time.Time `json:"scheduled_at"`
+	TriggerEvent string    `json:"trigger_event"`
+	ReviewMode   string    `json:"review_mode"`
+	Status       string    `json:"status"`
 }
 
 type PendingPage struct {

@@ -11,11 +11,12 @@ from dataclasses import dataclass
 # Extensions stripped from diffs before size-guarding and Claude ingestion.
 # These files are rarely useful for code review and can be extremely large
 # (Odoo XML views, gettext .po/.pot catalogs).
-DEFAULT_EXCLUDE_EXTENSIONS: frozenset[str] = frozenset({".xml", ".po", ".pot"})
+DEFAULT_EXCLUDE_EXTENSIONS: frozenset[str] = frozenset({".xml", ".po", ".pot", ".md", ".rst"})
 
 # Only files under these path prefixes are reviewed. Everything else
-# (CI configs, root-level scripts, OCA modules, etc.) is dropped.
-DEFAULT_REVIEW_PREFIXES: tuple[str, ...] = ("custom_addons/",)
+# (CI configs, root-level scripts, OCA modules, etc.) is dropped. Both the
+# underscore and hyphen spellings of the custom-addons directory are accepted.
+DEFAULT_REVIEW_PREFIXES: tuple[str, ...] = ("custom_addons/", "custom-addons/")
 
 # Matches a hunk header: `@@ -old_start,old_count +new_start,new_count @@`
 # Counts are optional and default to 1.

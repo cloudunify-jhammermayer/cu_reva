@@ -25,6 +25,10 @@ class FakeRunner:
     last_skill: str | None = None
     last_params: dict | None = None
 
+    def repo_lock(self, owner, name):
+        import contextlib
+        return contextlib.nullcontext()
+
     def ensure_repo(self, owner, name, head_sha, token) -> str:
         return f"/fake/repos/{owner}/{name}"
 

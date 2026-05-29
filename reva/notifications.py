@@ -250,3 +250,18 @@ def notify_worker_error(
         httpx.post(webhook_url, json={"text": text}, timeout=5)
     except Exception as exc:
         logger.warning("google_chat_notify_failed", error=str(exc))
+
+
+def notify_operational_alert(webhook_url: str, title: str, detail: str) -> None:
+    """POST an operational/infra alert (queue depth, disk, failed jobs) to Google Chat.
+
+    Best-effort: swallows all exceptions so monitoring can never crash the caller.
+    """
+    if not webhook_url:
+        return
+    text = f"⚠️ *{title}*\n{detail}"
+    try:
+        import httpx
+        httpx.post(webhook_url, json={"text": text}, timeout=5)
+    except Exception as exc:
+        logger.warning("google_chat_notify_failed", error=str(exc))

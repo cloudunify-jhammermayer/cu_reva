@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from reva.config import required_env_or_file
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -15,15 +17,26 @@ class Settings:
     poll_interval_seconds: int = 30
     report_weekday: int = 0      # 0=Monday
     report_hour_utc: int = 8     # hour to fire the weekly report (UTC)
+    # Operational alerting (Google Chat). Empty webhook = alerts disabled.
+    google_chat_webhook_url: str = ""
+    queue_depth_alert: int = 50          # alert when the queue backs up past this
+    failed_jobs_alert: int = 10          # alert when RQ's failed registry exceeds this
+    repo_cache_disk_pct_alert: int = 90  # alert when the repo-cache filesystem is this % full
+    repo_cache_dir: str = "/repos"
 
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
-            database_url=os.environ["DATABASE_URL"],
-            redis_url=os.environ["REDIS_URL"],
+            database_url=required_env_or_file("DATABASE_URL"),
+            redis_url=required_env_or_file("REDIS_URL"),
             migrations_dir=os.environ.get("REVA_MIGRATIONS_DIR", "/app/db/migrations"),
             queue_name=os.environ.get("REVA_QUEUE_NAME", "reviews"),
             poll_interval_seconds=int(os.environ.get("REVA_POLL_INTERVAL_SECONDS", "30")),
             report_weekday=int(os.environ.get("REVA_REPORT_WEEKDAY", "0")),
             report_hour_utc=int(os.environ.get("REVA_REPORT_HOUR_UTC", "8")),
+            google_chat_webhook_url=os.environ.get("GOOGLE_CHAT_WEBHOOK_URL", ""),
+            queue_depth_alert=int(os.environ.get("REVA_QUEUE_DEPTH_ALERT", "50")),
+            failed_jobs_alert=int(os.environ.get("REVA_FAILED_JOBS_ALERT", "10")),
+            repo_cache_disk_pct_alert=int(os.environ.get("REVA_REPO_CACHE_DISK_PCT_ALERT", "90")),
+            repo_cache_dir=os.environ.get("REVA_REPO_CACHE_DIR", "/repos"),
         )

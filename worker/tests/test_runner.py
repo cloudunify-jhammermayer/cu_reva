@@ -326,6 +326,126 @@ def test_idempotent_retry_skips_post(ctx_and_fakes):
     assert s["reviewer"].call_count == 1
 
 
+def test_retry_after_check_run_failure_does_not_duplicate_pr_review(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["reviewer"].result = _completed_result()
+    gh = s["github"]
+
+    # First attempt: PR review posts, then the Check Run call fails.
+    original_create_check = gh.create_check_run
+    gh.create_check_run = lambda **kw: (_ for _ in ()).throw(RuntimeError("check run 500"))
+    with pytest.raises(RuntimeError):
+        run_review(_params(s))
+    assert len(gh.created_pr_reviews) == 1  # PR review was posted...
+
+    # Retry: Check Run succeeds now. The reviewer re-runs (check_run_id was
+    # never persisted) but the PR review must NOT be posted a second time.
+    gh.create_check_run = original_create_check
+    run_review(_params(s))
+    assert len(gh.created_pr_reviews) == 1  # still exactly one
+    assert len(gh.created_check_runs) == 1
+
+
+def test_requeue_of_failed_run_is_not_skipped(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["reviewer"].raise_exc = PermanentError("bad JSON")
+    with pytest.raises(PermanentError):
+        run_review(_params(s))
+    # The failure path posted a failure Check Run (sets check_run_id on a
+    # failed row). A requeue must still be allowed to run a real review.
+    s["reviewer"].raise_exc = None
+    s["reviewer"].result = _completed_result()
+    out = run_review(_params(s))
+    assert out != {"status": "already_posted"}
+    assert len(s["github"].created_pr_reviews) == 1
+
+
+def _set_budget(s, budget):
+    import dataclasses
+    from worker.runner import set_context
+    set_context(dataclasses.replace(s["ctx"], daily_budget_usd=budget))
+
+
+def test_review_declined_when_over_budget(ctx_and_fakes):
+    s = ctx_and_fakes
+    # Seed prior spend above the cap.
+    from reva.db.models import ReviewRun
+    with s["db"].session() as session:
+        session.add(ReviewRun(
+            repository_id=s["repo_id"], pull_request_id=s["pr_id"],
+            head_sha="older", status="completed", trigger_event="opened",
+            review_mode="diff", estimated_cost_usd=5.0,
+        ))
+    _set_budget(s, 1.0)
+    s["reviewer"].result = _completed_result()
+
+    out = run_review(_params(s))
+
+    assert out["status"] == "declined"
+    assert s["reviewer"].call_count == 0           # paid review never ran
+    assert len(s["github"].created_pr_reviews) == 0
+    assert len(s["github"].created_issue_comments) == 1  # decline posted
+
+
+def test_run_review_accepts_comment_trigger(ctx_and_fakes):
+    """A /review comment enqueues trigger_event='comment'; JobParams must accept it."""
+    s = ctx_and_fakes
+    s["reviewer"].result = _completed_result()
+    out = run_review(_params(s, trigger_event="comment"))
+    assert out["status"] == "completed"
+
+
+def test_comment_trigger_rereviews_even_if_already_posted(ctx_and_fakes):
+    """An explicit /review comment re-reviews the same SHA, despite a prior run."""
+    s = ctx_and_fakes
+    s["reviewer"].result = _completed_result()
+
+    run_review(_params(s))                       # auto (opened) review posts once
+    assert s["reviewer"].call_count == 1
+
+    out = run_review(_params(s, trigger_event="comment"))  # same SHA, via comment
+    assert out["status"] == "completed"
+    assert s["reviewer"].call_count == 2          # re-reviewed, not short-circuited
+    assert len(s["github"].created_pr_reviews) == 2
+    assert len(s["github"].created_check_runs) == 2  # stale IDs cleared on restart
+
+
+def test_review_runs_when_under_budget(ctx_and_fakes):
+    s = ctx_and_fakes
+    _set_budget(s, 1000.0)
+    s["reviewer"].result = _completed_result()
+
+    out = run_review(_params(s))
+
+    assert out["status"] == "completed"
+    assert s["reviewer"].call_count == 1
+
+
+def test_completed_review_falls_back_to_body_only_on_unresolvable_line(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["reviewer"].result = _completed_result(findings=[_f("major", file="x.py", line_start=12)])
+    gh = s["github"]
+    orig_create = gh.create_pr_review
+    calls = []
+
+    def flaky(**kw):
+        calls.append(kw)
+        if len(calls) == 1:
+            raise PermanentError(
+                'GitHub 422 (/repos/o/r/pulls/8/reviews): {"errors":["Line could not be resolved"]}'
+            )
+        return orig_create(**kw)
+
+    gh.create_pr_review = flaky
+    out = run_review(_params(s))
+
+    assert out["status"] == "completed"
+    assert len(calls) == 2                 # retried after the 422
+    assert calls[0]["comments"]            # first attempt carried inline comments
+    assert calls[1]["comments"] == []      # fallback posted body-only
+    assert len(gh.created_check_runs) == 1  # review still completed + check posted
+
+
 def test_completed_persists_findings_to_db(ctx_and_fakes):
     s = ctx_and_fakes
     s["reviewer"].result = _completed_result(
@@ -477,6 +597,63 @@ def test_verify_and_resolve_swallows_verification_error():
         }]
         # Must not raise
         _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)
+
+
+def _delta_finding(i: int, path: str) -> dict:
+    return {
+        "id": i, "file_path": path, "line_start": 1, "title": "t", "body": "b",
+        "severity": "minor", "category": "bug", "github_comment_id": i,
+    }
+
+
+def test_verify_and_resolve_fetches_each_file_once_and_caps():
+    """File content is fetched once per file, and no more than the cap is verified."""
+    from worker.runner import _MAX_DELTA_VERIFICATIONS, _verify_and_resolve_findings
+
+    ctx = MagicMock()
+    ctx.github.get_file_content.return_value = "content"
+    ctx.verifier.is_resolved.return_value = False
+
+    params = MagicMock(); params.pull_request_id = 1; params.head_sha = "newsha"
+    result = MagicMock()
+    result.diff = (
+        "diff --git a/custom_addons/foo.py b/custom_addons/foo.py\n+++ b/custom_addons/foo.py\n+x\n"
+        "diff --git a/custom_addons/bar.py b/custom_addons/bar.py\n+++ b/custom_addons/bar.py\n+y\n"
+    )
+    findings = [
+        _delta_finding(i, "custom_addons/foo.py" if i % 2 else "custom_addons/bar.py")
+        for i in range(1, 26)  # 25 findings across 2 files
+    ]
+    ctx.github.get_review_threads.return_value = {f["github_comment_id"]: f"T{f['id']}" for f in findings}
+
+    with patch("worker.runner.writers") as mock_writers:
+        mock_writers.get_open_findings_for_pr.return_value = findings
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)
+
+    assert ctx.github.get_file_content.call_count == 2          # once per file, not per finding
+    assert ctx.verifier.is_resolved.call_count == _MAX_DELTA_VERIFICATIONS  # capped
+
+
+def test_verify_and_resolve_bails_after_repeated_errors():
+    from worker.runner import _MAX_VERIFY_ERRORS, _verify_and_resolve_findings
+    from reva.errors import TransientError
+
+    ctx = MagicMock()
+    ctx.github.get_file_content.return_value = "content"
+    ctx.verifier.is_resolved.side_effect = TransientError("rate limited")
+
+    params = MagicMock(); params.pull_request_id = 1; params.head_sha = "newsha"
+    result = MagicMock()
+    result.diff = "diff --git a/custom_addons/foo.py b/custom_addons/foo.py\n+++ b/custom_addons/foo.py\n+x\n"
+    findings = [_delta_finding(i, "custom_addons/foo.py") for i in range(1, 11)]
+    ctx.github.get_review_threads.return_value = {f["github_comment_id"]: f"T{f['id']}" for f in findings}
+
+    with patch("worker.runner.writers") as mock_writers:
+        mock_writers.get_open_findings_for_pr.return_value = findings
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)
+
+    # Stopped after the error threshold instead of grinding through all 10.
+    assert ctx.verifier.is_resolved.call_count == _MAX_VERIFY_ERRORS
 
 
 def test_verify_and_resolve_skips_already_resolved_threads():

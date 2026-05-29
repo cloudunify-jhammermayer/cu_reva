@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import structlog
 
+from reva.errors import TransientError
 from reva.types import AuditJobParams
 from worker.runner import get_context
 
@@ -33,6 +34,10 @@ def run_audit(job_params: dict) -> dict:
 
     try:
         result = ctx.auditor.execute(params)
+    except TransientError:
+        # Don't mark as failed — RQ will retry and create a new run row.
+        log.warning("audit_job_transient_error", exc_info=True)
+        raise
     except Exception as exc:
         with ctx.db.session() as s:
             s.execute(

@@ -59,19 +59,9 @@ func (f Findings) update(msg tea.Msg) (Findings, tea.Cmd) {
 		}
 		switch m.String() {
 		case "j", "down":
-			if f.cursor < len(f.items)-1 {
-				f.cursor++
-				if f.cursor >= f.offset+visibleRows {
-					f.offset++
-				}
-			}
+			f.cursor, f.offset = moveCursor(f.cursor, f.offset, len(f.items), visibleRows, true)
 		case "k", "up":
-			if f.cursor > 0 {
-				f.cursor--
-				if f.cursor < f.offset {
-					f.offset--
-				}
-			}
+			f.cursor, f.offset = moveCursor(f.cursor, f.offset, len(f.items), visibleRows, false)
 		case "r":
 			f.loading = true
 			return f, f.load()

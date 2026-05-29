@@ -3,8 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"reva-tui/internal/api"
@@ -15,14 +15,18 @@ import (
 // is neither HTTPS nor a loopback address. The API key would be sent in
 // plaintext in that case. Returns false when the URL is safe.
 func checkAPIURLSecurity(baseURL string) bool {
-	if strings.HasPrefix(baseURL, "https://") {
+	u, err := url.Parse(baseURL)
+	if err == nil && u.Scheme == "https" {
 		return false
 	}
-	if strings.Contains(baseURL, "localhost") || strings.Contains(baseURL, "127.0.0.1") {
-		return false
+	if err == nil {
+		h := u.Hostname()
+		if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+			return false
+		}
 	}
 	fmt.Fprintf(os.Stderr,
-		"warning: REVA_API_URL %q is not HTTPS — REVA_API_KEY will be sent in plaintext\n",
+		"warning: REVA_API_URL %q is not HTTPS — credentials will be sent in plaintext\n",
 		baseURL,
 	)
 	return true
@@ -40,8 +44,11 @@ func main() {
 		if baseURL == "" {
 			baseURL = "http://localhost:8080/api/v1"
 		}
-		checkAPIURLSecurity(baseURL)
-		client = api.NewClient(baseURL)
+		apiKey := os.Getenv("REVA_API_KEY")
+		if apiKey != "" {
+			checkAPIURLSecurity(baseURL)
+		}
+		client = api.NewClient(baseURL, apiKey)
 	}
 
 	odooURL := os.Getenv("REVA_ODOO_URL")

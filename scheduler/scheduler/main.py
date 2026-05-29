@@ -18,6 +18,7 @@ from redis import Redis
 from rq import Queue
 
 from reva.db.engine import Database, create_engine_from_url
+from scheduler.monitor import Monitor
 from scheduler.poller import Poller
 from scheduler.reporter import WeeklyReporter
 from scheduler.settings import Settings
@@ -41,6 +42,14 @@ def main() -> None:
         queue=queue,
         report_weekday=settings.report_weekday,
         report_hour_utc=settings.report_hour_utc,
+    )
+    monitor = Monitor(
+        queue=queue,
+        webhook_url=settings.google_chat_webhook_url,
+        queue_depth_alert=settings.queue_depth_alert,
+        failed_jobs_alert=settings.failed_jobs_alert,
+        repo_cache_disk_pct_alert=settings.repo_cache_disk_pct_alert,
+        repo_cache_dir=settings.repo_cache_dir,
     )
 
     stop = False
@@ -72,6 +81,11 @@ def main() -> None:
             reporter.check_and_send(now)
         except Exception:
             logger.exception("scheduler_reporter_error")
+
+        try:
+            monitor.check()
+        except Exception:
+            logger.exception("scheduler_monitor_error")
 
         for _ in range(settings.poll_interval_seconds):
             if stop:

@@ -21,7 +21,7 @@ from reva.types import AuditJobParams, AuditResult, Finding
 logger = structlog.get_logger()
 
 
-class GitHubTokenProvider(Protocol):
+class GitHubReader(Protocol):
     def get_installation_token(self, installation_id: int) -> str: ...
 
 
@@ -33,7 +33,7 @@ class Auditor:
     def __init__(
         self,
         runner: ClaudeCodeRunner,
-        github: GitHubTokenProvider,
+        github: GitHubReader,
         repos: RepoMetaLookup,
     ) -> None:
         self.runner = runner
@@ -53,12 +53,13 @@ class Auditor:
         token = self.github.get_installation_token(params.installation_id)
 
         started_at = datetime.now(timezone.utc)
-        repo_path = self.runner.ensure_repo(owner, name, None, token)
-        response = self.runner.review(
-            repo_path=repo_path,
-            skill="reva-repo-audit",
-            params={"repo": f"{owner}/{name}", "default_branch": meta["default_branch"]},
-        )
+        with self.runner.repo_lock(owner, name):
+            repo_path = self.runner.ensure_repo(owner, name, None, token)
+            response = self.runner.review(
+                repo_path=repo_path,
+                skill="reva-repo-audit",
+                params={"repo": f"{owner}/{name}", "default_branch": meta["default_branch"]},
+            )
         completed_at = datetime.now(timezone.utc)
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 

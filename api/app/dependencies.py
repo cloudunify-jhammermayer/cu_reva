@@ -22,6 +22,10 @@ def get_queue(request: Request) -> "Queue":
     return request.app.state.rq_queue
 
 
+def get_github_client(request: Request):
+    return request.app.state.github
+
+
 def require_api_key(request: Request, settings: Settings = Depends(get_settings)) -> None:
     """Validate Bearer token if REVA_API_KEY is set. No-op when key is empty."""
     if not settings.api_key:

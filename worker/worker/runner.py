@@ -73,6 +73,7 @@ class WorkerContext:
     verifier: FindingVerifier
     odoo: OdooCallbackClient
     google_chat_webhook_url: str = ""
+    daily_budget_usd: float | None = None
 
 
 # Module-level singleton so RQ task functions (which can't take extra args)
@@ -104,6 +105,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         repo_cache_dir=settings.repo_cache_dir,
         api_key=settings.anthropic_api_key,
         skills_dir=settings.skills_dir,
+        prompts_dir=settings.prompts_dir,
     )
     runner.evict_stale_repos(ttl_days=settings.repo_cache_ttl_days)
     logger.info("repo_cache_eviction_done", ttl_days=settings.repo_cache_ttl_days)
@@ -141,6 +143,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         verifier=verifier,
         odoo=odoo,
         google_chat_webhook_url=settings.google_chat_webhook_url,
+        daily_budget_usd=settings.daily_budget_usd,
     )
     set_context(context)
     return context
@@ -163,12 +166,18 @@ def run_review(job_params: dict) -> dict:
     log.info("review_job_start")
 
     # Idempotent retry: if a previous attempt already created the Check Run,
-    # there's nothing more to do.
-    if writers.is_already_posted(ctx.db, params):
+    # there's nothing more to do. Explicit triggers (a /review comment or a
+    # manual requeue) always re-review, even if this SHA was reviewed before.
+    explicit = params.trigger_event in ("comment", "manual_requeue")
+    if not explicit and writers.is_already_posted(ctx.db, params):
         log.info("review_already_posted")
         return {"status": "already_posted"}
 
     run_id = writers.record_review_started(ctx.db, params)
+    if explicit:
+        # Re-review: wipe the prior attempt's posted IDs/outcome so the post
+        # step creates a fresh Check Run + PR Review rather than reusing them.
+        writers.reset_review_run_post_state(ctx.db, run_id)
 
     # Resolve repo/PR metadata once — reused on all success and error paths
     # to avoid repeated DB round-trips per job.
@@ -182,11 +191,38 @@ def run_review(job_params: dict) -> dict:
 
     log = log.bind(owner=owner, repo=name, pr_number=pr_number)
 
+    # Spend guard: if the rolling 24-hour estimated spend has reached the cap,
+    # decline (cheaply) instead of running a paid review.
+    budget_decline = _budget_decline_if_exceeded(ctx, log)
+    if budget_decline is not None:
+        writers.record_review_declined(ctx.db, params, budget_decline.decline_reason or "Over budget.")
+        _post_result_to_github(ctx, params, budget_decline, run_id, owner, name, pr_number, log)
+        log.info("review_job_done", status="declined", reason="over_budget")
+        return budget_decline.model_dump(mode="json")
+
     result = _execute_and_persist(ctx, params, run_id, owner, name, pr_number, log)
     _post_result_to_github(ctx, params, result, run_id, owner, name, pr_number, log)
 
     log.info("review_job_done", status=result.status)
     return result.model_dump(mode="json")
+
+
+def _budget_decline_if_exceeded(ctx: WorkerContext, log) -> ReviewResult | None:
+    """Return a declined ReviewResult if the rolling 24h spend cap is reached, else None."""
+    if ctx.daily_budget_usd is None:
+        return None
+    spent = writers.sum_estimated_cost_since(
+        ctx.db, datetime.now(timezone.utc) - timedelta(days=1)
+    )
+    if spent < ctx.daily_budget_usd:
+        return None
+    log.warning("review_over_budget", spent_usd=round(spent, 2), budget_usd=ctx.daily_budget_usd)
+    reason = (
+        f"REVA's rolling 24-hour review budget (${ctx.daily_budget_usd:.0f}) has been "
+        f"reached (≈${spent:.0f} spent). Reviews resume automatically as spend rolls off."
+    )
+    return ReviewResult(status="declined", summary="Daily review budget reached.",
+                        risk_level="low", decline_reason=reason)
 
 
 def _execute_and_persist(
@@ -243,10 +279,18 @@ def _post_result_to_github(
         token = ctx.github.get_installation_token(params.installation_id)
 
         if result.status == "completed":
-            check_run_id, review_id = _post_completed(
-                ctx, params, result, run_id, token, owner, name, pr_number
-            )
-            writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id, review_id=review_id)
+            # Persist each GitHub ID immediately so a retry after a partial post
+            # reuses the existing PR review instead of creating a duplicate.
+            existing_check_id, existing_review_id = writers.get_posted_github_ids(ctx.db, run_id)
+            review_id = existing_review_id
+            if review_id is None:
+                review_id = _post_completed_review(
+                    ctx, params, result, run_id, token, owner, name, pr_number
+                )
+                writers.attach_github_ids(ctx.db, run_id, review_id=review_id)
+            if existing_check_id is None:
+                check_run_id = _post_completed_check(ctx, params, result, run_id, token, owner, name)
+                writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id)
             _backfill_comment_ids(ctx, run_id, token, owner, name, pr_number, review_id)
             if result.delta_base_sha:
                 _verify_and_resolve_findings(ctx, params, result, token, owner, name, pr_number, run_id)
@@ -269,7 +313,7 @@ def _post_result_to_github(
 # ---------------------------------------------------------------- post paths
 
 
-def _post_completed(
+def _post_completed_review(
     ctx: WorkerContext,
     params: JobParams,
     result: ReviewResult,
@@ -278,26 +322,57 @@ def _post_completed(
     owner: str,
     name: str,
     pr_number: int,
-) -> tuple[int, int]:
-    """Post a completed review: PR Review (with inline comments) + Check Run."""
+) -> int:
+    """Post the PR Review (with inline comments). Returns the GitHub review id.
+
+    GitHub's create-review call is atomic: if any inline comment references a
+    line it can't resolve to the PR diff, the entire review (summary included)
+    is rejected with 422. We can't tell which comment is at fault, so on that
+    error we retry body-only with every finding folded into the body — a
+    degraded review beats no review.
+    """
     hunks = parse_diff_hunks(result.diff)
     inline, unmapped = split_findings(result.findings, hunks)
 
     body = format_pr_review_body(result, unmapped=unmapped, run_id=run_id)
     comments = [format_inline_comment_payload(f) for f in inline]
 
-    review_id = ctx.github.create_pr_review(
-        token=token,
-        owner=owner,
-        repo=name,
-        pr_number=pr_number,
-        commit_id=params.head_sha,
-        event=REVIEW_EVENT,
-        body=body,
-        comments=comments,
-    )
+    def _create(body_text: str, comment_payloads: list[dict]) -> int:
+        return ctx.github.create_pr_review(
+            token=token,
+            owner=owner,
+            repo=name,
+            pr_number=pr_number,
+            commit_id=params.head_sha,
+            event=REVIEW_EVENT,
+            body=body_text,
+            comments=comment_payloads,
+        )
 
-    check_run_id = ctx.github.create_check_run(
+    try:
+        return _create(body, comments)
+    except PermanentError as exc:
+        if not comments or "could not be resolved" not in str(exc).lower():
+            raise
+        logger.warning(
+            "inline_comments_unresolvable_fallback_body_only",
+            pr=pr_number, owner=owner, repo=name, inline_count=len(comments),
+        )
+        fallback_body = format_pr_review_body(result, unmapped=result.findings, run_id=run_id)
+        return _create(fallback_body, [])
+
+
+def _post_completed_check(
+    ctx: WorkerContext,
+    params: JobParams,
+    result: ReviewResult,
+    run_id: int,
+    token: str,
+    owner: str,
+    name: str,
+) -> int:
+    """Post the completed Check Run. Returns the GitHub check run id."""
+    return ctx.github.create_check_run(
         token=token,
         owner=owner,
         repo=name,
@@ -309,7 +384,6 @@ def _post_completed(
         completed_at=_iso(result.completed_at),
         output=format_check_run_output(result, run_id=run_id),
     )
-    return check_run_id, review_id
 
 
 def _post_declined(
@@ -434,6 +508,11 @@ def _backfill_comment_ids(
         logger.warning("backfill_comment_ids_failed", exc_info=True)
 
 
+# Bounds on the delta-review resolution pass (one Claude call per finding).
+_MAX_DELTA_VERIFICATIONS = 20
+_MAX_VERIFY_ERRORS = 3
+
+
 def _verify_and_resolve_findings(
     ctx: WorkerContext,
     params: JobParams,
@@ -444,7 +523,12 @@ def _verify_and_resolve_findings(
     pr_number: int,
     run_id: int,
 ) -> None:
-    """Best-effort: for old findings in touched files, verify if fixed and resolve threads."""
+    """Best-effort: for old findings in touched files, verify if fixed and resolve threads.
+
+    Bounded: fetches each touched file's content once (not per finding), caps the
+    number of findings verified, and bails out after repeated verification errors
+    (e.g. Claude rate limiting) so the post path can't stall or burn cost.
+    """
     try:
         threads = ctx.github.get_review_threads(token, owner, name, pr_number)
     except Exception:
@@ -454,20 +538,29 @@ def _verify_and_resolve_findings(
     old_findings = writers.get_open_findings_for_pr(ctx.db, params.pull_request_id, before_run_id=run_id)
     touched_files = extract_file_paths(result.diff)
 
-    for f in old_findings:
-        if f["file_path"] not in touched_files:
-            continue
-        thread_id = threads.get(f["github_comment_id"])
-        if not thread_id:
-            continue  # thread already resolved by user — skip
+    # Cheap pre-filter: only findings in touched files whose thread is still open.
+    candidates = [
+        f for f in old_findings
+        if f["file_path"] in touched_files and threads.get(f["github_comment_id"])
+    ]
+    if not candidates:
+        return
+    if len(candidates) > _MAX_DELTA_VERIFICATIONS:
+        logger.info("delta_verification_capped", total=len(candidates), cap=_MAX_DELTA_VERIFICATIONS)
+        candidates = candidates[:_MAX_DELTA_VERIFICATIONS]
+
+    file_cache: dict[str, str | None] = {}
+    errors = 0
+    for f in candidates:
+        path = f["file_path"]
         try:
-            content = ctx.github.get_file_content(
-                token, owner, name, f["file_path"], params.head_sha
-            )
+            if path not in file_cache:
+                file_cache[path] = ctx.github.get_file_content(token, owner, name, path, params.head_sha)
+            content = file_cache[path]
             if content is None:
                 continue
             stored = StoredFinding(
-                file_path=f["file_path"],
+                file_path=path,
                 line_start=f["line_start"],
                 title=f["title"],
                 body=f["body"],
@@ -475,14 +568,15 @@ def _verify_and_resolve_findings(
                 category=f["category"],
             )
             if ctx.verifier.is_resolved(stored, content):
-                ctx.github.resolve_review_thread(token, thread_id)
-                logger.info(
-                    "finding_resolved",
-                    finding_id=f["id"],
-                    file=f["file_path"],
-                )
+                ctx.github.resolve_review_thread(token, threads[f["github_comment_id"]])
+                logger.info("finding_resolved", finding_id=f["id"], file=path)
+            errors = 0
         except Exception:
+            errors += 1
             logger.warning("finding_verification_failed", finding_id=f["id"], exc_info=True)
+            if errors >= _MAX_VERIFY_ERRORS:
+                logger.warning("delta_verification_aborted", consecutive_errors=errors)
+                return
 
 
 def run_comment_reply(params: dict) -> None:

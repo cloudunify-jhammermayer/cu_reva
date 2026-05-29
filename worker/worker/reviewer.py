@@ -159,7 +159,8 @@ class Reviewer:
         else:
             raw_diff = self.github.get_pull_request_diff(token, owner, name, pr_number)
             diff = filter_diff(raw_diff)
-            skill = "reva-full-review" if params.review_mode == "full" else "reva-diff-review"
+            # deep == full repo exploration (like full) but on the Opus model.
+            skill = "reva-diff-review" if params.review_mode == "diff" else "reva-full-review"
             delta_base_sha = None
 
         if len(diff) < len(raw_diff):
@@ -238,10 +239,13 @@ class Reviewer:
             "head_branch": pr_basic["head_branch"],
         }
 
-        # 11. Ensure repo is cloned/updated, then call Claude Code.
+        # 11. Ensure repo is cloned/updated, then call Claude Code. The lock
+        # spans both so a concurrent job can't checkout a different SHA into the
+        # shared working tree while Claude is reading it.
         started_at = datetime.now(timezone.utc)
-        repo_path = self.runner.ensure_repo(owner, name, params.head_sha, token)
-        response = self.runner.review(repo_path=repo_path, skill=skill, params=skill_params, model=model)
+        with self.runner.repo_lock(owner, name):
+            repo_path = self.runner.ensure_repo(owner, name, params.head_sha, token)
+            response = self.runner.review(repo_path=repo_path, skill=skill, params=skill_params, model=model)
         completed_at = datetime.now(timezone.utc)
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 
@@ -252,8 +256,9 @@ class Reviewer:
         capped = _cap_findings(findings, MAX_FINDINGS)
         risk_level = _recompute_risk_level(capped)
 
-        # 14. Cost (token counts are zero for CLI path).
-        cost = estimate_cost(
+        # 14. Cost: prefer the CLI's authoritative total_cost_usd; fall back to
+        # the token-based estimate (Messages-API path, or older CLI output).
+        cost = response.total_cost_usd or estimate_cost(
             response.model or model,
             response.input_tokens,
             response.output_tokens,

@@ -10,10 +10,15 @@ process exits and deletes it regardless of outcome.
 
 from __future__ import annotations
 
+import base64
+import fcntl
 import json
 import os
+import shutil
 import subprocess
 import tempfile
+import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from reva.errors import PermanentError, TransientError
@@ -22,6 +27,13 @@ from reva.types import ClaudeResponse
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEEP_MODEL = "claude-opus-4-7"
 _CLAUDE_BIN = "claude"
+_SUBPROCESS_TIMEOUT = 1500  # seconds; large PRs can take 10–15 minutes
+
+# Only these host env vars are forwarded to the Claude CLI subprocess. The CLI
+# runs repo-directed tools with --dangerously-skip-permissions, so the worker's
+# other secrets (DATABASE_URL, REDIS_URL, GITHUB_*, ODOO_*) must NOT leak into
+# its environment. ANTHROPIC_API_KEY and HOME are injected explicitly below.
+_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR")
 
 
 class ClaudeCodeRunner:
@@ -30,16 +42,41 @@ class ClaudeCodeRunner:
         repo_cache_dir: str,
         api_key: str,
         skills_dir: str,
+        prompts_dir: str | None = None,
         default_model: str = DEFAULT_MODEL,
         deep_model: str = DEEP_MODEL,
     ) -> None:
         self.repo_cache_dir = repo_cache_dir
         self.api_key = api_key
         self.skills_dir = skills_dir
+        # Shared governance + domain rules prepended to every review skill. None
+        # disables the preamble (used in tests).
+        self.prompts_dir = prompts_dir
         self.default_model = default_model
         self.deep_model = deep_model
 
     # ------------------------------------------------------------------ public
+
+    @contextmanager
+    def repo_lock(self, owner: str, name: str):
+        """Exclusive per-repo lock spanning ensure_repo + review.
+
+        The working tree at repo_cache_dir/{owner}/{name} is shared across jobs.
+        Without this, two concurrent jobs (e.g. two PRs, or a PR + an audit)
+        would `git checkout` over each other and review the wrong SHA. Held as
+        a flock on a sibling lock file so it works across worker processes
+        sharing the repo-cache volume. Different repos never block each other.
+        """
+        lock_dir = os.path.join(self.repo_cache_dir, owner)
+        os.makedirs(lock_dir, exist_ok=True)
+        lock_path = os.path.join(lock_dir, f".{name}.lock")
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
 
     def ensure_repo(
         self,
@@ -57,14 +94,21 @@ class ClaudeCodeRunner:
             PermanentError: git checkout failure (SHA not found in repo).
         """
         repo_path = os.path.join(self.repo_cache_dir, owner, name)
-        clone_url = f"https://x-access-token:{token}@github.com/{owner}/{name}"
+        # Authenticate via a transient http.extraHeader instead of embedding the
+        # token in the remote URL, so it is never written to <repo>/.git/config
+        # (which the Claude CLI subprocess can Read). The stored remote stays
+        # token-less; the token lives only in this process's argv during the op.
+        clean_url = f"https://github.com/{owner}/{name}"
+        basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+        auth_args = ["-c", f"http.extraHeader=Authorization: Basic {basic}"]
 
         if not os.path.isdir(repo_path):
             os.makedirs(os.path.dirname(repo_path), exist_ok=True)
-            self._run_git_transient(["clone", clone_url, repo_path])
+            self._run_git_transient(auth_args + ["clone", clean_url, repo_path])
         else:
-            self._run_git_transient(["-C", repo_path, "remote", "set-url", "origin", clone_url])
-            self._run_git_transient(["-C", repo_path, "fetch", "origin"])
+            # Ensure any token-bearing URL from older clones is scrubbed.
+            self._run_git_transient(["-C", repo_path, "remote", "set-url", "origin", clean_url])
+            self._run_git_transient(auth_args + ["-C", repo_path, "fetch", "origin"])
 
         if head_sha:
             self._run_git_permanent(["-C", repo_path, "checkout", head_sha])
@@ -91,14 +135,21 @@ class ClaudeCodeRunner:
             TransientError: non-zero exit code other than 1 (killed, OOM, etc.).
         """
         output_path = self._create_output_path()
+        preamble = self._build_preamble()
         skill_content = self._read_skill(skill)
-        param_lines = "\n".join(f"{k}: {v}" for k, v in params.items())
+        body = f"{preamble}\n\n{skill_content}" if preamble else skill_content
+        # XML-delimit each value so user-controlled content (pr_body, diff, etc.)
+        # cannot be confused with task instructions by the model.
+        param_lines = "\n".join(f"<{k}>\n{v}\n</{k}>" for k, v in params.items())
         task = (
-            f"{skill_content}\n\n"
+            f"{body}\n\n"
             f"## Task Parameters\n\n"
-            f"{param_lines}\n"
+            f"{param_lines}\n\n"
             f"output_path: {output_path}"
         )
+        env = {k: os.environ[k] for k in _ENV_ALLOWLIST if k in os.environ}
+        env["ANTHROPIC_API_KEY"] = self.api_key
+        env["HOME"] = "/home/worker"
         try:
             proc = subprocess.run(
                 [
@@ -106,14 +157,14 @@ class ClaudeCodeRunner:
                     "--dangerously-skip-permissions",
                     "--output-format", "json",
                     "--model", model or self.default_model,
-                    "--allowedTools", "Read,Bash,Grep,Write",
+                    "--allowedTools", "Read,Grep,Glob,Write",
                 ],
                 input=task,
                 cwd=repo_path,
-                env={**os.environ, "ANTHROPIC_API_KEY": self.api_key, "HOME": "/home/worker"},
+                env=env,
                 capture_output=True,
                 text=True,
-                timeout=900,
+                timeout=_SUBPROCESS_TIMEOUT,
             )
             if proc.returncode != 0:
                 raise _exit_to_error(proc.returncode, proc.stderr or proc.stdout)
@@ -130,10 +181,24 @@ class ClaudeCodeRunner:
                     f"Claude wrote invalid JSON to {output_path}: {exc}"
                 ) from exc
 
+            usage: dict = {}
+            total_cost_usd = 0.0
+            try:
+                result_json = json.loads(proc.stdout)
+                usage = result_json.get("usage") or {}
+                total_cost_usd = float(result_json.get("total_cost_usd") or 0.0)
+            except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
+                pass
+
             return ClaudeResponse(
                 model=model or self.default_model,
                 stop_reason="tool_use",
                 tool_use_input=tool_use_input,
+                input_tokens=int(usage.get("input_tokens", 0)),
+                output_tokens=int(usage.get("output_tokens", 0)),
+                cache_read_tokens=int(usage.get("cache_read_input_tokens", 0)),
+                cache_creation_tokens=int(usage.get("cache_creation_input_tokens", 0)),
+                total_cost_usd=total_cost_usd,
             )
         finally:
             Path(output_path).unlink(missing_ok=True)
@@ -145,6 +210,26 @@ class ClaudeCodeRunner:
         os.close(fd)
         return path
 
+    # Shared governance (path-agnostic) + Odoo rules, prepended to every skill.
+    _PREAMBLE_FILES = ("review_guidance.md", "odoo19.md")
+
+    def _build_preamble(self) -> str:
+        """Concatenate the shared review-guidance + Odoo-rules files.
+
+        Best-effort: a missing file degrades the review (logged) but never
+        breaks it, so reviews keep working if the prompt set is incomplete.
+        """
+        if not self.prompts_dir:
+            return ""
+        parts: list[str] = []
+        for fname in self._PREAMBLE_FILES:
+            try:
+                with open(os.path.join(self.prompts_dir, fname)) as f:
+                    parts.append(f.read())
+            except FileNotFoundError:
+                pass
+        return "\n\n".join(parts)
+
     def _read_skill(self, skill: str) -> str:
         path = os.path.join(self.skills_dir, f"{skill}.md")
         try:
@@ -155,34 +240,48 @@ class ClaudeCodeRunner:
 
     @staticmethod
     def _git_subcommand(args: list[str]) -> str:
-        """Extract the git subcommand from an args list, skipping -C <path> pairs."""
+        """Extract the git subcommand, skipping `-C <path>` / `-c <key=val>` pairs.
+
+        `-c` is skipped as a pair so a secret-bearing value (e.g. the auth
+        extraHeader) is never returned and surfaced in an error message/log.
+        """
         i = 0
         while i < len(args):
-            if args[i] == "-C":
-                i += 2  # skip flag and its value
+            if args[i] in ("-C", "-c"):
+                i += 2
             elif args[i].startswith("-"):
                 i += 1
             else:
                 return args[i]
         return args[0]
 
-    def _run_git_transient(self, args: list[str]) -> None:
-        """Run a git command; raises TransientError on failure."""
-        result = subprocess.run(
-            ["git"] + args, capture_output=True, text=True
-        )
+    def _run_git(self, args: list[str], error_class: type[Exception]) -> None:
+        result = subprocess.run(["git"] + args, capture_output=True, text=True)
         if result.returncode != 0:
             cmd = self._git_subcommand(args)
-            raise TransientError(f"git {cmd} failed: {result.stderr[:200]}")
+            raise error_class(f"git {cmd} failed: {result.stderr[:200]}")
+
+    def evict_stale_repos(self, ttl_days: int) -> None:
+        """Remove repo directories not accessed within ttl_days."""
+        cache = Path(self.repo_cache_dir)
+        if not cache.exists():
+            return
+        cutoff = time.time() - ttl_days * 86400
+        for owner_dir in cache.iterdir():
+            if not owner_dir.is_dir():
+                continue
+            for repo_dir in owner_dir.iterdir():
+                if repo_dir.is_dir() and repo_dir.stat().st_mtime < cutoff:
+                    # Hold the per-repo lock so we never rmtree a tree a
+                    # concurrent worker is mid-review on.
+                    with self.repo_lock(owner_dir.name, repo_dir.name):
+                        shutil.rmtree(repo_dir)
+
+    def _run_git_transient(self, args: list[str]) -> None:
+        self._run_git(args, TransientError)
 
     def _run_git_permanent(self, args: list[str]) -> None:
-        """Run a git command; raises PermanentError on failure."""
-        result = subprocess.run(
-            ["git"] + args, capture_output=True, text=True
-        )
-        if result.returncode != 0:
-            cmd = self._git_subcommand(args)
-            raise PermanentError(f"git {cmd} failed: {result.stderr[:200]}")
+        self._run_git(args, PermanentError)
 
 
 # ---------------------------------------------------------------------- module

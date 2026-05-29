@@ -40,6 +40,6 @@ def get_review(review_run_id: int, db: Database = Depends(get_db)) -> ReviewDeta
 def requeue_review(review_run_id: int, db: Database = Depends(get_db)) -> dict:
     ok = q.requeue_review(db, review_run_id)
     if not ok:
-        raise HTTPException(status_code=404, detail="Review not found or not in a failed/stale state")
+        raise HTTPException(status_code=409, detail="Review not found or not in a requeable state (failed/stale/completed)")
     logger.info("review_requeued", review_run_id=review_run_id)
     return {"status": "queued"}

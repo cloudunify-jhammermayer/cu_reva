@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 from app.dependencies import get_db, get_settings
 from app.security import verify_signature
@@ -46,11 +47,28 @@ async def receive_webhook(
         repo=payload.get("repository", {}).get("full_name"),
     )
 
+    # The handlers do blocking SQLAlchemy / Redis I/O. Run them in the
+    # threadpool so they don't stall the event loop (and serialize all other
+    # in-flight webhook deliveries) for the duration of each DB round-trip.
+    rq_queue = getattr(request.app.state, "rq_queue", None)
+    github = getattr(request.app.state, "github", None)
+    return await run_in_threadpool(
+        _process_delivery,
+        db, settings, rq_queue, github,
+        x_github_event, x_github_delivery, payload, log,
+    )
+
+
+def _process_delivery(
+    db: Database, settings: Settings, rq_queue, github, event: str,
+    delivery_id: str, payload: dict, log,
+) -> dict:
+    """Synchronous event persistence + dispatch. Runs in the threadpool."""
     # Idempotent: record_github_event returns None if delivery_id already exists.
     recorded = writers.record_github_event(
         db,
-        delivery_id=x_github_delivery,
-        event_type=x_github_event,
+        delivery_id=delivery_id,
+        event_type=event,
         action=payload.get("action"),
         repository_full_name=payload.get("repository", {}).get("full_name"),
         sender_login=payload.get("sender", {}).get("login"),
@@ -60,14 +78,14 @@ async def receive_webhook(
         log.info("webhook_duplicate")
         return {"status": "duplicate"}
 
-    if x_github_event == "pull_request":
+    if event == "pull_request":
         _handle_pull_request(db, payload, settings)
 
-    if x_github_event == "issue_comment":
-        _handle_issue_comment(db, payload, settings)
+    if event == "issue_comment":
+        _handle_issue_comment(db, payload, settings, github)
 
-    if x_github_event == "pull_request_review_comment":
-        _handle_review_comment(payload, settings, request.app.state.rq_queue)
+    if event == "pull_request_review_comment":
+        _handle_review_comment(payload, settings, rq_queue)
 
     log.info("webhook_accepted")
     return {"status": "accepted"}
@@ -185,26 +203,76 @@ def _handle_review_comment(payload: dict, settings: Settings, rq_queue) -> None:
 
 _COMMENT_COMMANDS: dict[str, str] = {
     "/review": "diff",
-    "/deep-review": "full",
+    "/full-review": "full",
+    "/deep-review": "deep",  # full repo exploration + Opus model
+}
+
+# Only commenters with write-equivalent standing may trigger a (paid) review.
+_TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+
+
+_ACK_LABEL: dict[str, str] = {
+    "diff": "a standard review",
+    "full": "a full repository-aware review",
+    "deep": "a deep review (this one takes a little longer)",
 }
 
 
-def _handle_issue_comment(db: Database, payload: dict, settings: Settings) -> None:
+def _post_ack_comment(github, installation_id: int, owner: str, repo: str,
+                      pr_number: int, review_mode: str) -> None:
+    """Best-effort 'on it' comment so the developer knows the review is queued.
+
+    Never let a failed ack break webhook processing — the review still runs.
+    """
+    if github is None:
+        return
+    try:
+        token = github.get_installation_token(installation_id)
+        github.create_issue_comment(
+            token=token, owner=owner, repo=repo, pr_number=pr_number,
+            body=(
+                f"👀 **REVA** is on it — running {_ACK_LABEL.get(review_mode, 'a review')}. "
+                f"I'll post my findings on this PR shortly."
+            ),
+        )
+    except Exception:
+        logger.warning("comment_ack_post_failed", repo=f"{owner}/{repo}", pr=pr_number, exc_info=True)
+
+
+def _handle_issue_comment(db: Database, payload: dict, settings: Settings, github=None) -> None:
     if payload.get("action") != "created":
         return
     # Only PR comments, not plain issue comments
     if not payload.get("issue", {}).get("pull_request"):
         return
 
-    body = (payload.get("comment", {}).get("body") or "").strip()
+    # Never act on a bot's comment — prevents REVA triggering itself (cost loop).
+    if payload.get("sender", {}).get("type") == "Bot":
+        return
+
+    comment = payload.get("comment", {})
+    body = (comment.get("body") or "").strip()
     command = body.split()[0].lower() if body else ""
     review_mode = _COMMENT_COMMANDS.get(command)
     if review_mode is None:
         return
 
-    repo_data = payload["repository"]
-    installation_id = payload["installation"]["id"]
-    pr_number = payload["issue"]["number"]
+    # Authorization: only repo owners/members/collaborators may spend on reviews.
+    if comment.get("author_association") not in _TRUSTED_ASSOCIATIONS:
+        logger.warning(
+            "comment_trigger_unauthorized",
+            repo=payload.get("repository", {}).get("full_name"),
+            association=comment.get("author_association"),
+            sender=payload.get("sender", {}).get("login"),
+        )
+        return
+
+    repo_data = payload.get("repository")
+    installation = payload.get("installation") or {}
+    pr_number = payload.get("issue", {}).get("number")
+    if not repo_data or not installation.get("id") or not pr_number:
+        return
+    installation_id = installation["id"]
 
     repo_id = writers.upsert_repository(
         db,
@@ -242,4 +310,10 @@ def _handle_issue_comment(db: Database, payload: dict, settings: Settings) -> No
         pr=pr_number,
         mode=review_mode,
         command=command,
+    )
+
+    # Immediate acknowledgement so the developer sees REVA picked up the request.
+    _post_ack_comment(
+        github, installation_id, repo_data["owner"]["login"], repo_data["name"],
+        pr_number, review_mode,
     )

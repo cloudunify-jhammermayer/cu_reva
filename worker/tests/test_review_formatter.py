@@ -91,6 +91,19 @@ def test_split_findings_inline_vs_unmapped():
     assert unmapped == [f_out_of_range, f_no_file]
 
 
+def test_split_findings_multiline_range_must_be_fully_in_hunk():
+    """A finding whose line_end escapes the hunk is unmapped (GitHub 422 otherwise)."""
+    hunks = [DiffHunk(file_path="x.py", new_start=10, new_count=5)]  # lines 10-14
+    spanning = Finding(
+        severity="major", category="bug", file="x.py",
+        line_start=12, line_end=99,  # start in hunk, end outside
+        title="t", body="b", confidence=0.8, is_odoo_specific=False,
+    )
+    inline, unmapped = split_findings([spanning], hunks)
+    assert inline == []
+    assert unmapped == [spanning]
+
+
 # --- check run output --------------------------------------------------------
 
 

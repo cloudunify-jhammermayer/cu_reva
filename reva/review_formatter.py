@@ -75,7 +75,15 @@ def split_findings(
     inline: list[Finding] = []
     unmapped: list[Finding] = []
     for f in findings:
-        if f.file and f.line_start and find_line_in_hunks(f.file, f.line_start, hunks):
+        # Multi-line comments post a start_line..line range; GitHub rejects the
+        # whole review if either endpoint isn't in the diff, so require both.
+        end = f.line_end or f.line_start
+        if (
+            f.file
+            and f.line_start
+            and find_line_in_hunks(f.file, f.line_start, hunks)
+            and find_line_in_hunks(f.file, end, hunks)
+        ):
             inline.append(f)
         else:
             unmapped.append(f)

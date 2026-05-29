@@ -96,24 +96,31 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return a, tea.Quit
 		case "1":
+			a.clearStatusMsgs()
 			a.active = viewDashboard
 			return a, nil
 		case "2":
+			a.clearStatusMsgs()
 			a.active = viewReviews
 			return a, nil
 		case "3":
+			a.clearStatusMsgs()
 			a.active = viewFindings
 			return a, nil
 		case "4":
+			a.clearStatusMsgs()
 			a.active = viewFailures
 			return a, nil
 		case "5":
+			a.clearStatusMsgs()
 			a.active = viewRepos
 			return a, nil
 		case "6":
+			a.clearStatusMsgs()
 			a.active = viewPending
 			return a, nil
 		case "7":
+			a.clearStatusMsgs()
 			a.active = viewTickets
 			return a, nil
 		}
@@ -285,6 +292,12 @@ func (a *App) tabBar() string {
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderBottomForeground(colorBorder).
 		Render(bar)
+}
+
+func (a *App) clearStatusMsgs() {
+	a.reviews.statusMsg = ""
+	a.failures.statusMsg = ""
+	a.tickets.statusMsg = ""
 }
 
 func (a *App) statusBar() string {

@@ -12,9 +12,9 @@
       "input": {
         "summary": "The ticket describes a basic feature request to add a button to the helpdesk form view. The description is clear but missing several key details required before development can begin.",
         "missing_info": [
-          {"text": "User role that should see the button is not specified", "confidence": "inferred"},
-          {"text": "Expected behaviour after button click is not described", "confidence": "inferred"},
-          {"text": "No mention of which Odoo module or view is affected", "confidence": "inferred"}
+          {"text": "User role that should see the button is not specified", "confidence": "likely"},
+          {"text": "Expected behaviour after button click is not described", "confidence": "certain"},
+          {"text": "No mention of which Odoo module or view is affected", "confidence": "possible"}
         ],
         "acceptance_criteria": [
           {

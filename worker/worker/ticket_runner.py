@@ -9,7 +9,7 @@ import structlog
 
 from reva.db import writers
 from reva.errors import PermanentError, TransientError
-from reva.ticket_analyzer import format_ticket_html
+from reva.ticket_formatter import format_ticket_html
 from reva.types import TicketJobParams
 from worker.runner import get_context
 

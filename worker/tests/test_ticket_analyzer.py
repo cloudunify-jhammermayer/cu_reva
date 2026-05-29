@@ -13,10 +13,12 @@ import pytest
 
 from reva.claude_client import ClaudeClient
 from reva.errors import PermanentError
-from reva.ticket_analyzer import TicketAnalyzer, format_ticket_html
+from reva.ticket_analyzer import TicketAnalyzer
+from reva.ticket_formatter import format_ticket_html
 from reva.ticket_tool import TICKET_TOOL_NAME
 from reva.types import (
     AcceptanceCriterion,
+    MissingInfoItem,
     SourcedItem,
     TicketAnalysisResult,
     TicketJobParams,
@@ -134,7 +136,7 @@ def test_analyze_bad_tool_input():
 def _full_result() -> TicketAnalysisResult:
     return TicketAnalysisResult(
         summary="The ticket is clear.",
-        missing_info=[SourcedItem(text="User role not specified")],
+        missing_info=[MissingInfoItem(text="User role not specified")],
         acceptance_criteria=[
             AcceptanceCriterion(
                 given="a logged-in user",
@@ -178,7 +180,7 @@ def test_format_html_empty_lists():
 def test_format_html_escapes_html():
     result = TicketAnalysisResult(
         summary='<script>alert("xss")</script>',
-        missing_info=[SourcedItem(text='<b>bold</b>')],
+        missing_info=[MissingInfoItem(text='<b>bold</b>')],
     )
     html = format_ticket_html(result)
     assert "<script>" not in html

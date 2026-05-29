@@ -7,6 +7,7 @@ from reva.diff_utils import (
     count_diff_lines,
     estimate_diff_tokens,
     extract_file_paths,
+    filter_diff,
     filter_diff_by_paths,
     find_line_in_hunks,
     iter_diff_files,
@@ -125,3 +126,19 @@ def test_extract_file_paths_returns_set_of_touched_files():
 
 def test_extract_file_paths_empty_diff_returns_empty_set():
     assert extract_file_paths("") == set()
+
+
+def test_filter_diff_reviews_both_custom_addons_spellings():
+    """Both custom_addons/ and custom-addons/ are reviewable; other paths dropped."""
+    diff = (
+        "diff --git a/custom_addons/a.py b/custom_addons/a.py\n"
+        "--- a/custom_addons/a.py\n+++ b/custom_addons/a.py\n@@ -1 +1 @@\n-x\n+y\n"
+        "diff --git a/custom-addons/b.py b/custom-addons/b.py\n"
+        "--- a/custom-addons/b.py\n+++ b/custom-addons/b.py\n@@ -1 +1 @@\n-x\n+y\n"
+        "diff --git a/oca_modules/c.py b/oca_modules/c.py\n"
+        "--- a/oca_modules/c.py\n+++ b/oca_modules/c.py\n@@ -1 +1 @@\n-x\n+y\n"
+    )
+    result = filter_diff(diff)
+    assert "custom_addons/a.py" in result
+    assert "custom-addons/b.py" in result
+    assert "oca_modules/c.py" not in result

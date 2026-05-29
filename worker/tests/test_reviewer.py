@@ -108,6 +108,10 @@ class FakeRunner:
     last_params: dict | None = None
     repo_path_returned: str = "/fake/repos/acme/widgets"
 
+    def repo_lock(self, owner: str, name: str):
+        import contextlib
+        return contextlib.nullcontext()
+
     def ensure_repo(self, owner: str, name: str, head_sha: str | None, token: str) -> str:
         return self.repo_path_returned
 

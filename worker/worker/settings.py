@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from reva.config import env_or_file, required_env_or_file
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -28,6 +30,9 @@ class Settings:
     repo_cache_dir: str = "/repos"
     repo_cache_ttl_days: int = 30
     skills_dir: str = "/app/prompts/skills"
+    # Rolling 24-hour Anthropic spend cap (USD). None = no cap. When trailing
+    # 24-hour spend reaches this, new reviews are declined instead of run.
+    daily_budget_usd: float | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -43,9 +48,9 @@ class Settings:
         with open(os.environ["GITHUB_PRIVATE_KEY_PATH"]) as fp:
             private_key = fp.read()
         return cls(
-            redis_url=os.environ["REDIS_URL"],
-            database_url=os.environ["DATABASE_URL"],
-            anthropic_api_key=os.environ["ANTHROPIC_API_KEY"],
+            redis_url=required_env_or_file("REDIS_URL"),
+            database_url=required_env_or_file("DATABASE_URL"),
+            anthropic_api_key=required_env_or_file("ANTHROPIC_API_KEY"),
             github_app_id=int(os.environ["GITHUB_APP_ID"]),
             github_private_key=private_key,
             github_base_url=os.environ.get("GITHUB_BASE_URL", "https://api.github.com"),
@@ -54,8 +59,13 @@ class Settings:
             queue_name=os.environ.get("REVA_QUEUE_NAME", "reviews"),
             google_chat_webhook_url=os.environ.get("GOOGLE_CHAT_WEBHOOK_URL", ""),
             odoo_callback_url=os.environ.get("ODOO_CALLBACK_URL", ""),
-            odoo_callback_api_key=os.environ.get("ODOO_CALLBACK_API_KEY", ""),
+            odoo_callback_api_key=env_or_file("ODOO_CALLBACK_API_KEY", "") or "",
             repo_cache_dir=os.environ.get("REVA_REPO_CACHE_DIR", "/repos"),
             repo_cache_ttl_days=int(os.environ.get("REVA_REPO_CACHE_TTL_DAYS", "30")),
             skills_dir=os.environ.get("REVA_SKILLS_DIR", "/app/prompts/skills"),
+            daily_budget_usd=(
+                float(os.environ["REVA_DAILY_BUDGET_USD"])
+                if os.environ.get("REVA_DAILY_BUDGET_USD")
+                else None
+            ),
         )

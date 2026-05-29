@@ -146,28 +146,20 @@ func (r Reviews) update(msg tea.Msg) (Reviews, tea.Cmd) {
 				_ = exec.Command("xdg-open", url).Start()
 			}
 		case "j", "down":
-			if r.cursor < len(r.items)-1 {
-				r.cursor++
-				if r.cursor >= r.offset+visibleRows {
-					r.offset++
-				}
-				if r.cursor < len(r.items) {
-					r.loadingDetail = true
-					r.detail = nil
-					return r, r.loadDetail(r.items[r.cursor].ID)
-				}
+			prev := r.cursor
+			r.cursor, r.offset = moveCursor(r.cursor, r.offset, len(r.items), visibleRows, true)
+			if r.cursor != prev && r.cursor < len(r.items) {
+				r.loadingDetail = true
+				r.detail = nil
+				return r, r.loadDetail(r.items[r.cursor].ID)
 			}
 		case "k", "up":
-			if r.cursor > 0 {
-				r.cursor--
-				if r.cursor < r.offset {
-					r.offset--
-				}
-				if r.cursor < len(r.items) {
-					r.loadingDetail = true
-					r.detail = nil
-					return r, r.loadDetail(r.items[r.cursor].ID)
-				}
+			prev := r.cursor
+			r.cursor, r.offset = moveCursor(r.cursor, r.offset, len(r.items), visibleRows, false)
+			if r.cursor != prev && r.cursor < len(r.items) {
+				r.loadingDetail = true
+				r.detail = nil
+				return r, r.loadDetail(r.items[r.cursor].ID)
 			}
 		case "r":
 			r.loadingList = true
@@ -177,7 +169,12 @@ func (r Reviews) update(msg tea.Msg) (Reviews, tea.Cmd) {
 			return r, r.loadList()
 		case "e":
 			if r.cursor < len(r.items) {
-				id := r.items[r.cursor].ID
+				item := r.items[r.cursor]
+				if item.Status != "failed" && item.Status != "stale" && item.Status != "completed" && item.Status != "declined" {
+					r.statusMsg = styleStatusFailed.Render("only failed, stale, declined, or completed reviews can be requeued")
+					return r, nil
+				}
+				id := item.ID
 				client := r.client
 				return r, func() tea.Msg {
 					err := client.Requeue(id)

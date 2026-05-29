@@ -238,6 +238,110 @@ def test_missing_signature_header_returns_422(client_and_db):
     assert resp.status_code == 422
 
 
+# --- comment trigger authorization --------------------------------------------
+
+
+def _comment_payload(body: str, *, association: str = "OWNER",
+                     sender_type: str = "User") -> dict:
+    return {
+        "action": "created",
+        "installation": {"id": 99},
+        "repository": {
+            "id": 1001,
+            "name": "widgets",
+            "full_name": "acme/widgets",
+            "default_branch": "main",
+            "owner": {"login": "acme"},
+        },
+        "issue": {"number": 42, "pull_request": {"url": "https://api/pr/42"}},
+        "comment": {"body": body, "author_association": association},
+        "sender": {"login": "bob", "type": sender_type},
+    }
+
+
+def _seed_pr(client) -> None:
+    _post(client, _pr_payload("opened"), delivery="seed")
+
+
+def test_comment_review_by_owner_creates_pending(client_and_db):
+    client, db = client_and_db
+    _seed_pr(client)
+    resp = _post(client, _comment_payload("/review"), event="issue_comment",
+                 delivery="c1")
+    assert resp.status_code == 202
+    with db.session() as s:
+        pending = s.query(PendingReview).all()
+        assert any(p.trigger_event == "comment" and p.review_mode == "diff"
+                   for p in pending)
+
+
+def test_comment_review_by_outsider_is_ignored(client_and_db):
+    client, db = client_and_db
+    _seed_pr(client)
+    _post(client, _comment_payload("/review", association="NONE"),
+          event="issue_comment", delivery="c1")
+    with db.session() as s:
+        # Only the debounced pending from the seed PR — no comment trigger.
+        assert all(p.trigger_event != "comment"
+                   for p in s.query(PendingReview).all())
+
+
+class _FakeGitHub:
+    def __init__(self):
+        self.comments = []
+
+    def get_installation_token(self, installation_id):
+        return "tok"
+
+    def create_issue_comment(self, token, owner, repo, pr_number, body):
+        self.comments.append({"owner": owner, "repo": repo, "pr": pr_number, "body": body})
+        return 1
+
+
+def test_comment_trigger_posts_ack_comment(client_and_db):
+    client, _ = client_and_db
+    _seed_pr(client)
+    fake = _FakeGitHub()
+    app.state.github = fake
+    try:
+        _post(client, _comment_payload("/deep-review"), event="issue_comment", delivery="ack1")
+    finally:
+        app.state.github = None
+    assert len(fake.comments) == 1
+    c = fake.comments[0]
+    assert c["pr"] == 42 and c["owner"] == "acme" and c["repo"] == "widgets"
+    assert "REVA" in c["body"] and "deep review" in c["body"]
+
+
+def test_comment_trigger_ack_failure_does_not_break_webhook(client_and_db):
+    client, db = client_and_db
+    _seed_pr(client)
+
+    class Boom(_FakeGitHub):
+        def get_installation_token(self, installation_id):
+            raise RuntimeError("github down")
+
+    app.state.github = Boom()
+    try:
+        resp = _post(client, _comment_payload("/review"), event="issue_comment", delivery="ack2")
+    finally:
+        app.state.github = None
+    assert resp.status_code == 202  # webhook still succeeds
+    with db.session() as s:
+        # the review was still queued despite the ack failing
+        assert any(p.trigger_event == "comment" for p in s.query(PendingReview).all())
+
+
+def test_comment_review_by_bot_is_ignored(client_and_db):
+    client, db = client_and_db
+    _seed_pr(client)
+    _post(client, _comment_payload("/review", sender_type="Bot"),
+          event="issue_comment", delivery="c1")
+    with db.session() as s:
+        assert all(p.trigger_event != "comment"
+                   for p in s.query(PendingReview).all())
+
+
 # --- health -------------------------------------------------------------------
 
 

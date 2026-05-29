@@ -57,19 +57,9 @@ func (p Pending) update(msg tea.Msg) (Pending, tea.Cmd) {
 		}
 		switch m.String() {
 		case "j", "down":
-			if p.cursor < len(p.items)-1 {
-				p.cursor++
-				if p.cursor >= p.offset+visibleRows {
-					p.offset++
-				}
-			}
+			p.cursor, p.offset = moveCursor(p.cursor, p.offset, len(p.items), visibleRows, true)
 		case "k", "up":
-			if p.cursor > 0 {
-				p.cursor--
-				if p.cursor < p.offset {
-					p.offset--
-				}
-			}
+			p.cursor, p.offset = moveCursor(p.cursor, p.offset, len(p.items), visibleRows, false)
 		case "r":
 			p.loading = true
 			return p, p.load()
@@ -79,7 +69,7 @@ func (p Pending) update(msg tea.Msg) (Pending, tea.Cmd) {
 }
 
 func (p Pending) view(w, h int) string {
-	header := styleTitle.Padding(0, 1).Render(fmt.Sprintf("Pending  (%d)", p.total))
+	header := styleTitle.Padding(0, 1).Render(fmt.Sprintf("Pending / Running  (%d)", p.total))
 
 	if p.loading && len(p.items) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
@@ -93,7 +83,7 @@ func (p Pending) view(w, h int) string {
 	if len(p.items) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
 			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
-				styleSubtitle.Render("No pending reviews")))
+				styleSubtitle.Render("No pending or running reviews")))
 	}
 
 	visibleRows := h - 5
@@ -101,17 +91,19 @@ func (p Pending) view(w, h int) string {
 		visibleRows = 1
 	}
 
-	colRepo := 28
+	colStatus := 9
+	colRepo := 26
 	colPR := 6
 	colEvent := 12
-	colWhen := w - colRepo - colPR - colEvent - 8
+	colWhen := w - colStatus - colRepo - colPR - colEvent - 10
 
 	hdr := lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
-		fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s",
+		fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s",
+			colStatus, "Status",
 			colRepo, "Repository",
 			colPR, "PR#",
 			colEvent, "Trigger",
-			colWhen, "Fires"),
+			colWhen, "When"),
 	)
 
 	var rows []string
@@ -129,18 +121,20 @@ func (p Pending) view(w, h int) string {
 
 		var line string
 		if i == p.cursor {
-			line = styleSelected.Width(w - 2).Render(fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s",
+			line = styleSelected.Width(w - 2).Render(fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s",
+				colStatus, item.Status,
 				colRepo, repo,
 				colPR, prNum,
 				colEvent, event,
-				colWhen, formatScheduledPlain(item.ScheduledAt),
+				colWhen, formatPendingTimePlain(item),
 			))
 		} else {
-			line = fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s",
+			line = fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s",
+				colStatus, pendingStatusStyle(item.Status).Render(item.Status),
 				colRepo, repo,
 				colPR, prNum,
 				colEvent, event,
-				colWhen, formatScheduled(item.ScheduledAt),
+				colWhen, formatPendingTime(item),
 			)
 		}
 		rows = append(rows, line)
@@ -164,7 +158,11 @@ func (p Pending) renderDetail(item api.PendingReview, w int) string {
 	b.WriteString(fmt.Sprintf("  SHA      %s\n", styleSubtitle.Render(item.HeadSHA[:8])))
 	b.WriteString(fmt.Sprintf("  Trigger  %s\n", styleSubtitle.Render(item.TriggerEvent)))
 	b.WriteString(fmt.Sprintf("  Mode     %s\n", styleSubtitle.Render(item.ReviewMode)))
-	b.WriteString(fmt.Sprintf("  Fires    %s\n", formatScheduled(item.ScheduledAt)))
+	timeLabel := "Fires"
+	if item.Status == "running" {
+		timeLabel = "Started"
+	}
+	b.WriteString(fmt.Sprintf("  %-7s  %s\n", timeLabel, formatPendingTime(item)))
 	return styleBorder.Width(w - 2).Height(6).Render(b.String())
 }
 
@@ -184,6 +182,31 @@ func formatScheduledPlain(t time.Time) string {
 		return "in " + fmtDuration(d)
 	}
 	return "due now"
+}
+
+func formatPendingTime(item api.PendingReview) string {
+	if item.Status == "running" {
+		d := time.Since(item.ScheduledAt).Round(time.Second)
+		return styleStatusStale.Render(fmtDuration(d) + " ago")
+	}
+	return formatScheduled(item.ScheduledAt)
+}
+
+func formatPendingTimePlain(item api.PendingReview) string {
+	if item.Status == "running" {
+		d := time.Since(item.ScheduledAt).Round(time.Second)
+		return fmtDuration(d) + " ago"
+	}
+	return formatScheduledPlain(item.ScheduledAt)
+}
+
+func pendingStatusStyle(status string) lipgloss.Style {
+	switch status {
+	case "running":
+		return styleStatusStale
+	default:
+		return styleSubtitle
+	}
 }
 
 func fmtDuration(d time.Duration) string {

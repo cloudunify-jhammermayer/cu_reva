@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 
-from app.dependencies import get_db
+from app.dependencies import get_db, get_settings
 from app.queries import metrics as q
 from app.schemas.metrics import (
     CostEntry,
@@ -10,6 +10,7 @@ from app.schemas.metrics import (
     DeveloperStat,
     FeedbackEntry,
 )
+from app.settings import Settings
 from reva.db.engine import Database
 
 router = APIRouter()
@@ -18,9 +19,11 @@ _VALID_PERIODS = {"week", "month", "quarter"}
 
 
 @router.get("/metrics/dashboard", response_model=DashboardMetrics)
-def dashboard(request: Request, db: Database = Depends(get_db)) -> dict:
-    redis_url = request.app.state.settings.redis_url
-    return q.dashboard_metrics(db, redis_url)
+def dashboard(
+    db: Database = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    return q.dashboard_metrics(db, settings.redis_url)
 
 
 @router.get("/metrics/developers", response_model=list[DeveloperStat])

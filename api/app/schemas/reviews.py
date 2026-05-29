@@ -82,6 +82,7 @@ class PendingReview(BaseModel):
     scheduled_at: datetime
     trigger_event: str
     review_mode: str
+    status: str = "pending"
 
 
 class PendingPage(BaseModel):
