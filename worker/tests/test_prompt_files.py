@@ -64,8 +64,8 @@ def test_system_blocks_full_set(builder):
     assert any("currency_id" in t for t in texts)
 
 
-def test_get_version_returns_v1_0(builder):
-    assert builder.get_version() == "v1.0"
+def test_get_version_returns_current_version(builder):
+    assert builder.get_version() == "v1.1"
 
 
 def test_diff_review_template_renders(builder):
