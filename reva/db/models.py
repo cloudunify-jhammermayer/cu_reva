@@ -183,9 +183,9 @@ class ReviewRun(Base):
             "review_mode",
             name="uq_review_runs_idempotency",
         ),
-        Index("idx_review_runs_repo_created", "repository_id", "created_at"),
+        Index("idx_review_runs_repo_created", "repository_id", text("created_at DESC")),
         Index("idx_review_runs_status", "status"),
-        Index("idx_review_runs_pr", "pull_request_id", "created_at"),
+        Index("idx_review_runs_pr", "pull_request_id", text("created_at DESC")),
     )
 
 
@@ -220,6 +220,13 @@ class ReviewFinding(Base):
         Index("idx_findings_severity", "severity"),
         Index("idx_findings_category", "category"),
         Index("idx_findings_file", "file_path"),
+        # Partial index (migration 004) for matching reply webhooks to findings.
+        Index(
+            "idx_findings_github_comment_id",
+            "github_comment_id",
+            postgresql_where=text("github_comment_id IS NOT NULL"),
+            sqlite_where=text("github_comment_id IS NOT NULL"),
+        ),
     )
 
 
@@ -243,8 +250,8 @@ class GithubEvent(Base):
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
-        Index("idx_events_received", "received_at"),
-        Index("idx_events_repo", "repository_full_name", "received_at"),
+        Index("idx_events_received", text("received_at DESC")),
+        Index("idx_events_repo", "repository_full_name", text("received_at DESC")),
     )
 
 
@@ -317,7 +324,7 @@ class TicketAnalysis(Base):
     __tablename__ = "ticket_analyses"
 
     id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
-    job_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    job_id: Mapped[str | None] = mapped_column(Text)
     ticket_id: Mapped[int] = mapped_column(Integer, nullable=False)
     model_name: Mapped[str] = mapped_column(Text, nullable=False)
     field_name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -337,6 +344,14 @@ class TicketAnalysis(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
+        # Partial UNIQUE index (migration 006): job_id is unique only when set.
+        Index(
+            "idx_ticket_analyses_job_id",
+            "job_id",
+            unique=True,
+            postgresql_where=text("job_id IS NOT NULL"),
+            sqlite_where=text("job_id IS NOT NULL"),
+        ),
         Index("idx_ticket_analyses_status", "status"),
         Index("idx_ticket_analyses_ticket_id", "ticket_id"),
     )
@@ -369,6 +384,25 @@ class AuditRun(Base):
         Index("idx_audit_runs_repository_id", "repository_id"),
         Index("idx_audit_runs_status", "status"),
     )
+
+
+# ------------------------------------------------------------- weekly_reports
+
+
+class WeeklyReport(Base):
+    """Mirrors db/migrations/005_weekly_reports.sql. The scheduler reads/writes
+    this via raw SQL; the model exists so the table is part of the schema
+    source of truth and is created in `create_all()`-based test DBs."""
+
+    __tablename__ = "weekly_reports"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    enqueued_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    period_days: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
+
+    __table_args__ = (Index("idx_weekly_reports_enqueued", "enqueued_at"),)
 
 
 # ----------------------------------------------------------- prompt_versions

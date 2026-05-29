@@ -15,6 +15,7 @@ longer transaction can use `Database.session()` directly.
 
 from __future__ import annotations
 
+import functools
 from datetime import datetime, timezone
 
 import structlog
@@ -22,6 +23,26 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 logger = structlog.get_logger()
+
+
+def _retry_on_conflict(fn):
+    """Re-run a SELECT-then-INSERT upsert once if a concurrent writer wins the race.
+
+    These upserts have a TOCTOU window: two transactions can both see no row
+    and both INSERT, with the loser raising IntegrityError on the unique
+    constraint. session() rolls the loser back; the retry's SELECT now finds
+    the row and takes the UPDATE branch. Upserts are pure w.r.t. their args, so
+    re-running is safe.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except IntegrityError:
+            return fn(*args, **kwargs)
+
+    return wrapper
 
 from reva.cost import estimate_cost
 from reva.db.engine import Database
@@ -40,6 +61,7 @@ from reva.types import ClaudeResponse, Finding, JobParams, ReviewResult, TicketJ
 # --- review_runs writers -----------------------------------------------------
 
 
+@_retry_on_conflict
 def record_review_started(db: Database, params: JobParams) -> int:
     """Insert/UPDATE a review_runs row in `running` status.
 
@@ -51,6 +73,22 @@ def record_review_started(db: Database, params: JobParams) -> int:
         run.started_at = datetime.now(timezone.utc)
         s.flush()
         return run.id
+
+
+def reset_review_run_post_state(db: Database, review_run_id: int) -> None:
+    """Clear a run's posted GitHub IDs + prior outcome so an explicit re-review
+    (a /review comment or a manual requeue) posts a fresh review instead of
+    reusing the stale Check Run / PR Review IDs from the earlier attempt."""
+    with db.session() as s:
+        run = s.get(ReviewRun, review_run_id)
+        if run is None:
+            return
+        run.check_run_id = None
+        run.review_id = None
+        run.completed_at = None
+        run.decline_reason = None
+        run.error_class = None
+        run.error_message = None
 
 
 def record_review_completed(db: Database, params: JobParams, result: ReviewResult) -> int:
@@ -119,21 +157,58 @@ def record_review_failed(
 
 
 def is_already_posted(db: Database, params: JobParams) -> bool:
-    """Return True iff a review_runs row for these params has check_run_id set.
+    """Return True iff a *successfully posted* run for these params exists.
 
-    Used for RQ-retry idempotency: skip the post step if a prior attempt
-    already created the Check Run.
+    Used for RQ-retry idempotency: skip the whole job if a prior attempt
+    already created the Check Run. A `failed` run is excluded — its
+    check_run_id is the failure notice, not a real review, so a requeue/retry
+    must be allowed to produce a genuine review.
     """
     with db.session() as s:
         row = s.execute(
-            select(ReviewRun.check_run_id).where(
+            select(ReviewRun.check_run_id, ReviewRun.status).where(
                 (ReviewRun.repository_id == params.repository_id)
                 & (ReviewRun.pull_request_id == params.pull_request_id)
                 & (ReviewRun.head_sha == params.head_sha)
                 & (ReviewRun.review_mode == params.review_mode)
             )
         ).first()
-    return bool(row and row[0] is not None)
+    return bool(row and row[0] is not None and row[1] != "failed")
+
+
+def sum_estimated_cost_since(db: Database, since: datetime) -> float:
+    """Total estimated USD cost of review_runs created at/after `since`.
+
+    Used by the worker's rolling spend cap. Counts every run that incurred
+    cost (completed reviews); declined/stale rows have NULL cost and don't add.
+    """
+    from sqlalchemy import func as _func
+
+    with db.session() as s:
+        total = s.execute(
+            select(_func.coalesce(_func.sum(ReviewRun.estimated_cost_usd), 0.0)).where(
+                ReviewRun.created_at >= since
+            )
+        ).scalar_one()
+    return float(total or 0.0)
+
+
+def get_posted_github_ids(db: Database, review_run_id: int) -> tuple[int | None, int | None]:
+    """Return (check_run_id, review_id) currently stored for a run.
+
+    Lets the post path skip a GitHub call whose ID is already persisted, so a
+    retry after a partial post (e.g. PR review created but Check Run failed)
+    does not create a duplicate PR review.
+    """
+    with db.session() as s:
+        row = s.execute(
+            select(ReviewRun.check_run_id, ReviewRun.review_id).where(
+                ReviewRun.id == review_run_id
+            )
+        ).first()
+    if row is None:
+        return None, None
+    return row[0], row[1]
 
 
 def attach_github_ids(
@@ -156,6 +231,7 @@ def attach_github_ids(
 # --- repositories / pull_requests / pending_reviews / events -----------------
 
 
+@_retry_on_conflict
 def upsert_repository(
     db: Database,
     github_repository_id: int,
@@ -190,6 +266,7 @@ def upsert_repository(
         return repo.id
 
 
+@_retry_on_conflict
 def upsert_pull_request(
     db: Database,
     repository_id: int,
@@ -237,6 +314,7 @@ def upsert_pull_request(
         return pr.id
 
 
+@_retry_on_conflict
 def upsert_pending_review(
     db: Database,
     repository_id: int,

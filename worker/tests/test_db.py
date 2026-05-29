@@ -511,6 +511,37 @@ def test_migration_runner_is_idempotent(tmp_path):
     assert migrate(engine, mdir) == []  # nothing left to apply
 
 
+def test_retry_on_conflict_retries_once_then_succeeds():
+    from sqlalchemy.exc import IntegrityError
+
+    from reva.db.writers import _retry_on_conflict
+
+    calls = []
+
+    @_retry_on_conflict
+    def upsert():
+        calls.append(1)
+        if len(calls) == 1:
+            raise IntegrityError("INSERT", None, Exception("duplicate key"))
+        return "updated"
+
+    assert upsert() == "updated"
+    assert len(calls) == 2  # first INSERT lost the race, retry took UPDATE branch
+
+
+def test_retry_on_conflict_reraises_if_still_conflicting():
+    from sqlalchemy.exc import IntegrityError
+
+    from reva.db.writers import _retry_on_conflict
+
+    @_retry_on_conflict
+    def upsert():
+        raise IntegrityError("INSERT", None, Exception("duplicate key"))
+
+    with pytest.raises(IntegrityError):
+        upsert()
+
+
 def test_migration_runner_rejects_unnamed_files(tmp_path):
     engine = create_engine_from_url("sqlite:///:memory:")
     mdir = tmp_path / "m"

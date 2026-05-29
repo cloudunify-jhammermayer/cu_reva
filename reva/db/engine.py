@@ -23,12 +23,16 @@ from pathlib import Path
 
 import structlog
 from sqlalchemy import Engine, create_engine, text
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
 
 logger = structlog.get_logger()
 
 _VERSION_RE = re.compile(r"^(\d+)_")
+
+# Arbitrary constant key for the Postgres advisory lock that serializes
+# concurrent process startups running migrate() against the same database.
+_MIGRATION_LOCK_KEY = 982_374_001
 
 
 def create_engine_from_url(url: str, **kwargs) -> Engine:
@@ -51,56 +55,72 @@ def migrate(engine: Engine, migrations_dir: str | Path) -> list[int]:
     if not migrations_dir.is_dir():
         raise FileNotFoundError(f"migrations_dir not found: {migrations_dir}")
 
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                "CREATE TABLE IF NOT EXISTS schema_migrations ("
-                "version INTEGER PRIMARY KEY, "
-                "applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+    # On Postgres, hold a session-level advisory lock for the whole run so two
+    # processes starting at once cannot race to apply the same DDL. SQLite
+    # (tests) is single-writer, so no lock is needed there.
+    lock_conn = None
+    if engine.dialect.name == "postgresql":
+        lock_conn = engine.connect()
+        lock_conn.exec_driver_sql(f"SELECT pg_advisory_lock({_MIGRATION_LOCK_KEY})")
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS schema_migrations ("
+                    "version INTEGER PRIMARY KEY, "
+                    "applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+                )
             )
+
+        with engine.connect() as conn:
+            applied = {
+                row[0]
+                for row in conn.execute(text("SELECT version FROM schema_migrations")).fetchall()
+            }
+
+        files = sorted(
+            (p for p in migrations_dir.glob("*.sql")),
+            key=lambda p: _parse_version(p.name),
         )
 
-    with engine.connect() as conn:
-        applied = {
-            row[0]
-            for row in conn.execute(text("SELECT version FROM schema_migrations")).fetchall()
-        }
-
-    files = sorted(
-        (p for p in migrations_dir.glob("*.sql")),
-        key=lambda p: _parse_version(p.name),
-    )
-
-    newly_applied: list[int] = []
-    for path in files:
-        version = _parse_version(path.name)
-        if version in applied:
-            continue
-        sql = path.read_text()
-        logger.info("migration_applying", version=version, file=path.name)
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(sql))
-                conn.execute(
-                    text("INSERT INTO schema_migrations (version) VALUES (:v)"),
-                    {"v": version},
-                )
-        except (IntegrityError, OperationalError):
-            # Another process applied this migration concurrently (IntegrityError on
-            # the schema_migrations INSERT, or DDL "already exists" OperationalError).
-            # Verify by re-reading the applied set; skip only if confirmed applied.
-            with engine.connect() as c:
-                confirmed = c.execute(
-                    text("SELECT 1 FROM schema_migrations WHERE version = :v"),
-                    {"v": version},
-                ).first()
-            if confirmed:
-                logger.info("migration_applied_by_peer", version=version, file=path.name)
+        newly_applied: list[int] = []
+        for path in files:
+            version = _parse_version(path.name)
+            if version in applied:
                 continue
-            raise
-        newly_applied.append(version)
+            sql = path.read_text()
+            logger.info("migration_applying", version=version, file=path.name)
+            try:
+                with engine.begin() as conn:
+                    # exec_driver_sql sends the file verbatim to the driver: it
+                    # runs multi-statement DDL and does not treat ':' as a bind
+                    # parameter (which text() would).
+                    conn.exec_driver_sql(sql)
+                    conn.execute(
+                        text("INSERT INTO schema_migrations (version) VALUES (:v)"),
+                        {"v": version},
+                    )
+            except (IntegrityError, OperationalError, ProgrammingError):
+                # A peer applied this migration concurrently: IntegrityError on the
+                # schema_migrations INSERT, or DDL "already exists" (psycopg raises
+                # ProgrammingError/DuplicateTable; some drivers OperationalError).
+                # Verify by re-reading the applied set; skip only if confirmed.
+                with engine.connect() as c:
+                    confirmed = c.execute(
+                        text("SELECT 1 FROM schema_migrations WHERE version = :v"),
+                        {"v": version},
+                    ).first()
+                if confirmed:
+                    logger.info("migration_applied_by_peer", version=version, file=path.name)
+                    continue
+                raise
+            newly_applied.append(version)
 
-    return newly_applied
+        return newly_applied
+    finally:
+        if lock_conn is not None:
+            lock_conn.exec_driver_sql(f"SELECT pg_advisory_unlock({_MIGRATION_LOCK_KEY})")
+            lock_conn.close()
 
 
 def _parse_version(filename: str) -> int:
