@@ -1,8 +1,17 @@
-# doc/ — Architecture and Design Documents
+# doc/ — Architecture and Design Documents (LEGACY)
 
-Authoritative reference for how REVA is meant to work. New code should follow
-these docs; when reality diverges, **update the doc** as part of the same
-change rather than letting drift accumulate.
+> ⚠️ **Historical reference, not current.** These numbered docs describe REVA's
+> *original* design, where reviews ran entirely through the Claude **Messages
+> API** against a raw diff. REVA has since moved PR reviews and audits to a
+> **headless Claude Code CLI** against a local repo clone (Messages API kept
+> only for ticket analysis + comment replies), and added ticket analysis, repo
+> audit, delta reviews, and a Vue frontend.
+>
+> **Authoritative now:** the per-module `README.md` files, the top-level
+> [`README.md`](../README.md), and the design specs in
+> [`docs/superpowers/`](../docs). Use the docs below for background only.
+
+Originally the authoritative reference for how REVA was meant to work.
 
 ## Reading order
 

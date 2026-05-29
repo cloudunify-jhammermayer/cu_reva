@@ -1,22 +1,35 @@
 # REVA — Review & Evaluation Agent
 
-Automatic GitHub PR review platform powered by the Claude Messages API.
+Automatic GitHub PR review platform built on Claude.
 
-REVA listens for `pull_request`, `issue_comment`, and `pull_request_review_comment` webhook events, waits 10 minutes for the developer to settle on a head SHA (debounce), runs Claude against the diff under a strict tool-use contract, and posts a Check Run + PR Review (with inline comments) back to GitHub. All review data is persisted to Postgres for analytics, cost tracking, and developer feedback loops.
+REVA listens for `pull_request`, `issue_comment`, and `pull_request_review_comment` webhook events, waits 10 minutes for the developer to settle on a head SHA (debounce), then reviews the change and posts a Check Run + PR Review (with inline comments) back to GitHub. All review data is persisted to Postgres for analytics, cost tracking, and developer feedback loops.
+
+REVA uses **two Claude clients** (see `docs/superpowers/specs/2026-05-25-headless-claude-design.md`):
+
+- **Headless Claude Code CLI** (`reva/claude_code_runner.py`) — runs against a *locally cloned copy of the repo* at the head SHA, so Claude can read connected files, not just the diff. Used for all PR review modes (diff / full / deep) and repo audits. Output is the `submit_review` tool schema written to a temp JSON file.
+- **Direct Messages API** (`reva/claude_client.py`) — used for the structured/fast paths: Odoo ticket analysis and inline-comment reply answers.
+
+> **Doc status:** the design specs under `docs/superpowers/` and the code are authoritative. The numbered design docs in `doc/` and `HANDOFF.md` describe the *original* Messages-API-only design and are kept as history — don't treat them as current.
 
 ## What's here
 
+Each directory has its own `README.md` explaining how it works and why.
+
 ```
 .
-├── reva/                 Shared library — types, errors, clients, formatters, db
+├── reva/                 Shared library — types, clients (API + CLI), formatters, db, notifications
 ├── api/                  FastAPI webhook receiver + internal REST API
-├── worker/               RQ-based review worker — Reviewer + orchestration
-├── scheduler/            Debounce poller + weekly report scheduler
+├── worker/               RQ worker — review / audit / ticket / comment-reply jobs
+├── scheduler/            Debounce poller + weekly-report scheduler
 ├── tui/                  Go / Bubble Tea ops dashboard
-├── doc/                  Architecture, schemas, and decision docs
-├── prompts/              REVA's prompt content; versioned via CHANGELOG.md
+├── frontend/             Vue 3 web dashboard — RETIRED (decommissioned from the stack; TUI is the dashboard)
+├── prompts/              API-path prompt templates + headless-CLI skills (prompts/skills/)
 ├── db/migrations/        Plain-SQL migrations applied at startup
-├── secrets/              GitHub App private key (not committed)
+├── nginx/                Reverse proxy (TLS, rate limiting) for production
+├── scripts/              deploy.sh, setup-letsencrypt.sh, fake-webhook.py
+├── secrets/              GitHub App private key (gitignored, not committed)
+├── docs/                 Current design specs & plans (docs/superpowers/)
+├── doc/                  Legacy numbered design docs (original Messages-API design)
 ├── docker-compose.yml    Local development stack
 └── .env                  Environment secrets (copy from .env.example)
 ```
@@ -27,11 +40,12 @@ REVA listens for `pull_request`, `issue_comment`, and `pull_request_review_comme
 |---|---|
 | Webhook + Internal API | Python / FastAPI |
 | Job queue | Redis + RQ |
-| Review engine | Claude Messages API (Sonnet 4.6 default, Opus 4.7 for `/deep-review`) |
+| PR review / audit engine | Headless **Claude Code CLI** against a local repo clone (Sonnet 4.6 default, Opus for deep) |
+| Ticket analysis / comment replies | Claude **Messages API** (`reva/claude_client.py`) |
 | Database | PostgreSQL 16 |
-| TUI | Go / Bubble Tea |
+| Dashboard | Go / Bubble Tea TUI (the Vue web frontend is retired) |
 | Notifications | Google Chat incoming webhook |
-| Container runtime | Docker Compose |
+| Container runtime | Docker Compose (nginx + TLS in production) |
 
 ## Quick start
 
@@ -58,17 +72,18 @@ Required **webhook events**:
 | Event | Purpose |
 |---|---|
 | `pull_request` | Auto-trigger on push / open / reopen |
-| `issue_comment` | `/review` and `/deep-review` commands |
+| `issue_comment` | `/review`, `/full-review`, `/deep-review` commands |
 | `pull_request_review_comment` | REVA replies to developer questions on inline comments |
 
 ## Triggering reviews
 
-| Trigger | How |
-|---|---|
-| Automatic | Push to an open PR (`opened`, `synchronize`, `reopened`, `ready_for_review`) |
-| Manual (standard) | Comment `/review` on any PR |
-| Manual (deep) | Comment `/deep-review` on any PR — uses Opus 4.7 |
-| Requeue failed | Press `e` in the TUI Failures tab |
+| Trigger | How | Mode / model |
+|---|---|---|
+| Automatic | Push to an open PR (`opened`, `synchronize`, `reopened`, `ready_for_review`) | `REVA_DEFAULT_REVIEW_MODE` (default `diff`), Sonnet |
+| Manual (diff) | Comment `/review` | diff review, Sonnet |
+| Manual (full) | Comment `/full-review` | full repo-aware review, Sonnet |
+| Manual (deep) | Comment `/deep-review` | full repo-aware review, **Opus** |
+| Requeue failed | Press `e` in the TUI Failures tab | re-runs the original mode |
 
 Automatic triggers have a 10-minute debounce so rapid pushes don't waste API calls. Comment triggers are immediate (no debounce).
 
@@ -80,9 +95,9 @@ Anti-loop: REVA ignores any reply sent by a Bot account, so it never replies to 
 
 ## What gets reviewed
 
-Only `.py` and other code files under `custom_addons/` are sent to Claude. The following are stripped from the diff before any size check or token count:
+Only `.py` and other code files under `custom_addons/` or `custom-addons/` are sent to Claude. The following are stripped from the diff before any size check or token count:
 
-- Files outside `custom_addons/` (CI configs, root scripts, OCA modules, etc.)
+- Files outside `custom_addons/` / `custom-addons/` (CI configs, root scripts, OCA modules, etc.)
 - `.xml` files (Odoo views — can be very large)
 - `.po` / `.pot` files (translation catalogs)
 
@@ -123,8 +138,10 @@ The `days` parameter controls how far back the report looks (default: 7).
 ```bash
 cd tui
 go run . --demo          # demo mode, no live server needed
-go run .                 # connects to http://localhost:8080/api/v1
+REVA_API_URL=http://localhost:8080/api/v1 REVA_API_KEY=<key> go run .
 ```
+
+`REVA_API_KEY` is sent as `Authorization: Bearer`; set it whenever the API has auth enabled (always in production). See [`tui/README.md`](tui/README.md).
 
 | Tab | Key | Contents |
 |---|---|---|
@@ -134,6 +151,7 @@ go run .                 # connects to http://localhost:8080/api/v1
 | Failures | `4` | Failed / stale reviews — requeue with `e` · badge shows count |
 | Repos | `5` | Registered repos — open on GitHub with `o` |
 | Pending | `6` | Reviews waiting in the debounce queue · badge shows count |
+| Tickets | `7` | Odoo ticket analyses — requeue `e`, open in Odoo `o` |
 
 Global keys: `1–6` switch tabs · `r` refresh · `q` quit.
 
@@ -190,9 +208,17 @@ Notifications fire on `PermanentError` and unexpected exceptions. Transient erro
 | `GITHUB_WEBHOOK_SECRET` | ✅ | — | HMAC secret set in GitHub App webhook settings |
 | `ANTHROPIC_API_KEY` | ✅ | — | Anthropic API key (console.anthropic.com) |
 | `REVA_DOMAIN` | prod | — | Public hostname for Nginx + Let's Encrypt |
+| `REVA_API_KEY` | prod | — | Bearer token protecting `/api/v1/*` (the TUI sends it). Required in production |
+| `REVA_REQUIRE_API_KEY` | — | `false` | When `true`, the API refuses to start unless `REVA_API_KEY` is set (prod compose sets this) |
 | `GOOGLE_CHAT_WEBHOOK_URL` | — | _(off)_ | Incoming webhook URL for error notifications and weekly report |
 | `REVA_DEBOUNCE_SECONDS` | — | `600` | Debounce window in seconds |
 | `REVA_DEFAULT_REVIEW_MODE` | — | `diff` | `diff` or `full` |
+| `REVA_REPO_CACHE_DIR` | — | `/repos` | Root path where the worker clones repos for the headless CLI |
+| `REVA_REPO_CACHE_TTL_DAYS` | — | `30` | Days before an unused cloned repo is pruned |
+| `REVA_DAILY_BUDGET_USD` | — | _(off)_ | Rolling 24-hour spend cap; reviews are declined (not run) once trailing spend reaches it |
+| `REVA_QUEUE_DEPTH_ALERT` / `REVA_FAILED_JOBS_ALERT` / `REVA_REPO_CACHE_DISK_PCT_ALERT` | — | `50` / `10` / `90` | Scheduler operational-alert thresholds (need `GOOGLE_CHAT_WEBHOOK_URL`) |
+| `ODOO_CALLBACK_URL` | — | _(off)_ | Odoo endpoint REVA writes ticket-analysis results back to |
+| `ODOO_CALLBACK_API_KEY` | — | — | Auth key for the Odoo callback |
 | `REVA_REPORT_WEEKDAY` | — | `0` | Day to send weekly report (0 = Monday, 6 = Sunday) |
 | `REVA_REPORT_HOUR_UTC` | — | `8` | Hour (UTC) to send weekly report (0–23) |
 
@@ -207,11 +233,17 @@ No manual log cleanup required.
 
 ## Running the tests
 
+Each Python service has its own venv (all install the shared `reva` package as editable). Python 3.14.
+
 ```bash
-cd worker
-python3 -m venv .venv
-.venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/
+cd worker && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/        # worker: 197
+
+cd ../api && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/        # api: 57
+
+cd ../scheduler && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/        # scheduler: 10
 ```
 
-Tests use SQLite in-memory and httpx MockTransport; no Docker required.
+Tests use SQLite in-memory, `httpx` MockTransport, and subprocess mocks for the Claude CLI; no Docker or network required. The Go TUI: `cd tui && go test ./...`.

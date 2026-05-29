@@ -1,50 +1,58 @@
-# worker/ — REVA review worker
+# worker/ — REVA job worker
 
-RQ-backed worker that consumes review jobs and produces Check Runs +
-PR Reviews on GitHub plus persisted `review_runs` / `review_findings` rows
-in Postgres.
+RQ-backed worker that consumes jobs from Redis and produces the side effects:
+GitHub Check Runs + PR Reviews, Postgres `review_runs` / `review_findings`
+rows, Odoo ticket write-backs, and Google Chat alerts.
 
-After the shared-library extraction (slice 9a), this directory only
-contains worker-specific orchestration glue. The reusable building blocks
-— types, errors, clients, formatters, DB layer — live in [`../shared/reva/`](../shared/README.md).
+The reusable building blocks — types, errors, the two Claude clients, the
+GitHub client, formatters, and the DB layer — live in the installable
+[`reva/`](../reva) package (imported as `from reva.X import ...`). This
+directory holds only worker-specific orchestration glue.
 
-## Modules in this package
+## Modules
 
 | Module | Role |
 |---|---|
-| `worker/reviewer.py` | **Pure** orchestration. Defines the `GitHubReader` + `RepoLookup` Protocols. Reads diffs, calls Claude under the `submit_review` tool contract, validates findings, caps to 15 by severity × confidence, recomputes risk_level. Returns a `ReviewResult` — no side effects. |
-| `worker/runner.py` | End-to-end side-effectful orchestration: `WorkerContext`, `build_worker_context(settings)`, `run_review(job_params)`. Idempotent on RQ retry. Posts Check Run + PR Review (or issue comment, for declines). |
-| `worker/tasks.py` | Stable RQ enqueue path — re-exports `run_review` so `worker.tasks.run_review` stays valid even if internal layout changes. |
-| `worker/settings.py` | Frozen `Settings` dataclass loaded from environment in `main.py`. |
-| `worker/main.py` | Process entry point: load Settings → build context (runs DB migrations) → start RQ Worker on the `reviews` queue. |
+| `worker/reviewer.py` | **Pure** PR-review orchestration. Defines the `GitHubReader` + `RepoLookup` Protocols. Fetches the diff (or the *compare* diff vs the last completed review, for delta reviews), applies size/skip guards, clones the repo via `ClaudeCodeRunner`, runs the headless CLI under a per-repo lock, validates findings, caps to 15 by severity × confidence, recomputes `risk_level`. Returns a `ReviewResult` — no DB writes, no GitHub posts. |
+| `worker/auditor.py` | **Pure** full-repo audit orchestration. Clones the default branch and runs the `reva-repo-audit` skill. Returns an `AuditResult`. |
+| `worker/runner.py` | All the **side effects**: `WorkerContext`, `build_worker_context(settings)`, and the RQ entry points `run_review`, `run_comment_reply`. Idempotent on retry: persists each GitHub ID immediately after posting so a retry never duplicates a PR review, and skips a job whose Check Run already posted (excluding `failed` runs). Also runs the delta-review finding-resolution pass. |
+| `worker/ticket_runner.py` | `run_ticket_analysis` — Odoo ticket analysis via the Messages API (`TicketAnalyzer`), then write-back to Odoo. |
+| `worker/audit_tasks.py` | `run_audit` — persists audit lifecycle rows and invokes `Auditor`. |
+| `worker/tasks.py`, `worker/ticket_tasks.py` | **Stable enqueue paths** — thin re-exports so `worker.tasks.run_review` / `worker.ticket_tasks.run_ticket_analysis` stay valid even if internal layout changes. |
+| `worker/settings.py` | Frozen `Settings` dataclass; `Settings.from_env()`. |
+| `worker/main.py` | Process entry: load settings → `build_worker_context` (runs DB migrations + prunes stale repo clones) → start the RQ `Worker` on the configured queue. |
 
-## What you import from where
+## Job types (all on one queue)
 
-- `from reva.X import ...` — shared library: types, errors, claude_client, github_client, db.\*, review_formatter, prompt_builder, diff_utils, cost, review_tool.
-- `from worker.X import ...` — worker-internal: reviewer, runner, tasks, settings.
+| Enqueue path | Enqueued by | Client used |
+|---|---|---|
+| `worker.tasks.run_review` | scheduler poller (after debounce) | headless Claude Code CLI |
+| `worker.runner.run_comment_reply` | api `pull_request_review_comment` webhook | Messages API |
+| `worker.ticket_tasks.run_ticket_analysis` | Odoo / ticket trigger | Messages API |
+| `worker.audit_tasks.run_audit` | api `POST /repos/{id}/audit`, TUI | headless Claude Code CLI |
 
-The two are intentionally distinct: anything that another process (api, scheduler) might need lives in `shared/`. Anything specific to the RQ-worker lifecycle stays here.
+## Why it's built this way
+
+- **Pure `Reviewer` / `Auditor`.** Keeping the LLM orchestration free of DB and
+  GitHub side effects makes it fast to unit-test with fakes and lets the same
+  code run outside the worker. Side effects are concentrated in `runner.py`.
+- **Idempotent on natural keys.** RQ retries and webhook redeliveries must not
+  duplicate Check Runs, PR reviews, or rows. See [`../reva/db/README.md`](../reva/db/README.md).
+- **Retries belong to RQ, not the clients.** Clients raise `TransientError` /
+  `PermanentError`; RQ decides what to retry (`Retry(max=3, interval=[30,120,300])`).
+- **Stable enqueue paths.** Producers (api, scheduler) reference fixed import
+  strings; internal modules can be reorganized without breaking in-flight jobs.
 
 ## Running locally
 
 ```bash
-brew install python@3.14
 cd worker
-/opt/homebrew/bin/python3.14 -m venv .venv
-.venv/bin/pip install -r requirements-dev.txt    # installs shared/ as editable + pytest
-.venv/bin/python -m pytest tests/                  # 116 passing
+python3 -m venv .venv          # Python 3.14
+.venv/bin/pip install -r requirements-dev.txt   # installs ../reva editable + pytest
+.venv/bin/python -m pytest tests/               # 197 passing
 ```
 
-Running the worker itself against real services requires the environment variables listed in `worker/settings.py` (`Settings.from_env`), plus a Redis and a Postgres reachable at the URLs you pass in. There is currently no Compose file at the repo root that wires this up — that's a future slice.
-
-## Tests
-
-See `tests/README.md`. All tests use fakes / `httpx.MockTransport` /
-SQLite in-memory; no network or Docker required.
-
-## Design constraints
-
-- **`Reviewer` is pure.** Tests stay fast and Reviewer can be reused outside the worker context.
-- **All writes are idempotent on natural keys.** RQ retries and webhook redeliveries can't duplicate.
-- **`tasks.run_review` is the stable enqueue path.** Implementation can be reorganized without breaking in-flight jobs.
-- **Retries belong to RQ, not the clients.** Clients raise `TransientError` / `PermanentError`; RQ decides what to retry.
+Running the worker against real services needs the env vars in
+`worker/settings.py` plus a reachable Redis + Postgres, the `claude` CLI on
+`PATH`, and `git`. Use the repo-root `docker-compose.yml`, which wires all of
+that up. Tests need none of it — see `tests/README.md`.
