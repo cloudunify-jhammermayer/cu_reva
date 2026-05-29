@@ -47,14 +47,24 @@ services:
     build:
       context: .
       dockerfile: api/Dockerfile
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       DATABASE_URL: postgresql://review:${POSTGRES_PASSWORD}@postgres:5432/reviews
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       GITHUB_APP_ID: ${GITHUB_APP_ID}
-      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
       GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_private_key
+      # Secrets injected as files (tmpfs), not env — see secrets: below.
+      GITHUB_WEBHOOK_SECRET_FILE: /run/secrets/github_webhook_secret
+      REVA_API_KEY_FILE: /run/secrets/reva_api_key
+      # Production fails closed: the API refuses to start without REVA_API_KEY.
+      REVA_REQUIRE_API_KEY: "true"
     secrets:
       - github_private_key
+      - github_webhook_secret
+      - reva_api_key
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,9 +83,15 @@ services:
     build:
       context: .
       dockerfile: scheduler/Dockerfile
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       DATABASE_URL: postgresql://review:${POSTGRES_PASSWORD}@postgres:5432/reviews
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      # Operational alerts (queue depth, failed jobs, repo-cache disk).
+      GOOGLE_CHAT_WEBHOOK_URL: ${GOOGLE_CHAT_WEBHOOK_URL:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -94,17 +110,34 @@ services:
     build:
       context: .
       dockerfile: worker/Dockerfile
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # The entrypoint chowns the /repos volume as root, then drops to the
+    # unprivileged 'worker' user via gosu. These are the only capabilities
+    # that sequence needs; the review CLI itself runs without them.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETUID
+      - SETGID
     environment:
       DATABASE_URL: postgresql://review:${POSTGRES_PASSWORD}@postgres:5432/reviews
-      REDIS_URL: redis://redis:6379/0
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       GITHUB_APP_ID: ${GITHUB_APP_ID}
       GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_private_key
+      ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
+      GOOGLE_CHAT_WEBHOOK_URL: ${GOOGLE_CHAT_WEBHOOK_URL:-}
       REVA_REPO_CACHE_DIR: /repos
+      # Optional rolling 24-hour spend cap (USD); unset = no cap.
+      REVA_DAILY_BUDGET_USD: ${REVA_DAILY_BUDGET_USD:-}
     volumes:
       - repo_cache:/repos
     secrets:
       - github_private_key
+      - anthropic_api_key
     depends_on:
       postgres:
         condition: service_healthy
@@ -151,7 +184,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD}
     networks:
       - reva-net
     restart: unless-stopped
@@ -169,3 +202,9 @@ networks:
 secrets:
   github_private_key:
     file: ./secrets/github-app-private-key.pem
+  github_webhook_secret:
+    file: ./secrets/github_webhook_secret
+  reva_api_key:
+    file: ./secrets/reva_api_key
+  anthropic_api_key:
+    file: ./secrets/anthropic_api_key
