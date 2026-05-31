@@ -1,0 +1,47 @@
+# Dependabot — free on GitHub Team (private repos included).
+# Version-update PRs are driven by this file; the *alerts* and *security
+# (auto-fix) updates* are toggles you enable in repo Settings — see
+# docs/security-scanning-setup.md.
+#
+# Updates are grouped (one PR per ecosystem per week) to keep noise low.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /worker
+    schedule:
+      interval: weekly
+    groups:
+      worker-deps:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /api
+    schedule:
+      interval: weekly
+    groups:
+      api-deps:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /scheduler
+    schedule:
+      interval: weekly
+    groups:
+      scheduler-deps:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /tui
+    schedule:
+      interval: weekly
+    groups:
+      tui-deps:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
