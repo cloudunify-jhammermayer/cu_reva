@@ -92,6 +92,20 @@ def test_admin_review_queues_pending_review(client_and_db):
         assert pending.consumed is False
 
 
+def test_admin_review_is_audit_logged(client_and_db):
+    client, db = client_and_db
+    client.post(
+        "/api/v1/admin/review",
+        json={"owner": "acme", "repo": "widgets", "pr_number": 42, "installation_id": 99},
+    )
+    from reva.db.models import AdminAudit
+    with db.session() as s:
+        row = s.query(AdminAudit).one()
+        assert row.action == "manual_review"
+        assert "widgets" in (row.target or "") and "42" in (row.target or "")
+        assert row.actor  # caller identity recorded
+
+
 def test_admin_review_respects_review_mode(client_and_db):
     client, _ = client_and_db
     resp = client.post(

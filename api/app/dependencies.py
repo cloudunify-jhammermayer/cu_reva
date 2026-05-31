@@ -31,6 +31,17 @@ def get_redis(request: Request):
     return request.app.state.rq_queue.connection
 
 
+def actor_from_request(request: Request) -> str:
+    """Best-effort caller identity for the admin audit log: the real client IP
+    from nginx's forwarding headers, falling back to the socket peer."""
+    fwd = request.headers.get("X-Forwarded-For", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.headers.get("X-Real-IP") or (
+        request.client.host if request.client else "unknown"
+    )
+
+
 def get_github_client(request: Request):
     return request.app.state.github
 

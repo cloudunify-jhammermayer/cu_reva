@@ -419,3 +419,24 @@ class PromptVersion(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+# --------------------------------------------------------------- admin_audit
+
+
+class AdminAudit(Base):
+    """Mirrors db/migrations/008_admin_audit.sql — who/what/when for privileged
+    /api/v1 admin actions (requeue, manual review, trigger audit, weekly report)."""
+
+    __tablename__ = "admin_audit"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    target: Mapped[str | None] = mapped_column(Text)
+    actor: Mapped[str | None] = mapped_column(Text)
+    detail: Mapped[Any | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("idx_admin_audit_created", text("created_at DESC")),)

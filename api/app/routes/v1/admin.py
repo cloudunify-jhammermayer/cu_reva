@@ -8,7 +8,13 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from app.dependencies import get_db, get_github_client, get_settings, require_api_key
+from app.dependencies import (
+    actor_from_request,
+    get_db,
+    get_github_client,
+    get_settings,
+    require_api_key,
+)
 from app.settings import Settings
 from reva._github_http import NotFound
 from reva.db import writers
@@ -22,6 +28,7 @@ logger = structlog.get_logger()
 async def trigger_weekly_report(
     request: Request,
     days: int = 7,
+    db: Database = Depends(get_db),
 ) -> dict:
     """Manually enqueue a weekly report for the last `days` days.
 
@@ -30,6 +37,10 @@ async def trigger_weekly_report(
     """
     rq_queue = request.app.state.rq_queue
     job = rq_queue.enqueue("worker.runner.run_weekly_report", {"since_days": days})
+    writers.record_admin_action(
+        db, action="weekly_report", actor=actor_from_request(request),
+        target=f"days={days}", detail={"job_id": job.id},
+    )
     return {"status": "queued", "job_id": job.id, "since_days": days}
 
 
@@ -96,6 +107,11 @@ def trigger_review(
         scheduled_at=datetime.now(timezone.utc),
     )
 
+    writers.record_admin_action(
+        db, action="manual_review", actor=actor_from_request(request),
+        target=f"{body.owner}/{body.repo}#{body.pr_number}",
+        detail={"mode": body.review_mode, "head_sha": head_sha},
+    )
     logger.info(
         "admin_review_queued",
         owner=body.owner,

@@ -198,6 +198,22 @@ def test_record_review_failed_stores_error_class(db, seeded):
         assert run.error_message == "bad json"
 
 
+def test_record_admin_action_writes_row(db):
+    from reva.db.models import AdminAudit
+
+    writers.record_admin_action(
+        db, action="requeue", actor="10.0.0.5", target="review_run_id=7",
+        detail={"mode": "diff"},
+    )
+    with db.session() as s:
+        row = s.query(AdminAudit).one()
+        assert row.action == "requeue"
+        assert row.actor == "10.0.0.5"
+        assert row.target == "review_run_id=7"
+        assert row.detail == {"mode": "diff"}
+        assert row.created_at is not None
+
+
 def _age_running_run(db: Database, run_id: int, seconds: int) -> None:
     """Backdate a running run's started_at to simulate a long-dead worker."""
     with db.session() as s:

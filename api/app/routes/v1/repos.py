@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from rq import Queue
 
-from app.dependencies import get_db, get_queue
+from app.dependencies import actor_from_request, get_db, get_queue
 from app.queries import repos as q
 from app.schemas.repos import RepoPage, RepoSummary
 from reva.claude_code_runner import REVIEW_JOB_TIMEOUT
+from reva.db import writers
 from reva.db.engine import Database
 from reva.db.repo_lookup import get_repo_meta
 
@@ -22,6 +23,7 @@ def list_repos(db: Database = Depends(get_db)) -> dict:
 @router.post("/repos/{repository_id}/audit", status_code=202)
 def trigger_audit(
     repository_id: int,
+    request: Request,
     db: Database = Depends(get_db),
     queue: Queue = Depends(get_queue),
 ) -> dict:
@@ -40,5 +42,9 @@ def trigger_audit(
             "installation_id": meta["installation_id"],
         },
         job_timeout=REVIEW_JOB_TIMEOUT,
+    )
+    writers.record_admin_action(
+        db, action="audit", actor=actor_from_request(request),
+        target=f"repository_id={repository_id}", detail={"job_id": job.id},
     )
     return {"job_id": job.id, "repository_id": repository_id}

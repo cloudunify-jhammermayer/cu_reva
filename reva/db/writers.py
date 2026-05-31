@@ -25,6 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from reva.cost import estimate_cost
 from reva.db.engine import Database
 from reva.db.models import (
+    AdminAudit,
     GithubEvent,
     PendingReview,
     PullRequest,
@@ -456,6 +457,26 @@ def record_github_event(
     except IntegrityError:
         # Concurrent request inserted the same delivery_id between our SELECT and INSERT.
         return None
+
+
+def record_admin_action(
+    db: Database,
+    *,
+    action: str,
+    actor: str | None = None,
+    target: str | None = None,
+    detail: dict | None = None,
+) -> int:
+    """Append an audit-log row for a privileged /api/v1 admin action.
+
+    `action` is the verb (e.g. "requeue"), `target` what it acted on, `actor`
+    the caller identity (source IP / proxy header), `detail` any extras.
+    """
+    with db.session() as s:
+        row = AdminAudit(action=action, actor=actor, target=target, detail=detail)
+        s.add(row)
+        s.flush()
+        return row.id
 
 
 def mark_event_processed(db: Database, event_id: int) -> None:

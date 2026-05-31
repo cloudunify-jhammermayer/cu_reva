@@ -42,10 +42,10 @@ Ranked by my recommended order. **A** and **B1** are the highest-leverage.
 - **Why:** injected/hallucinated findings tend to cite nonexistent locations — cheap output-side guardrail that improves precision *and* limits what an injection can put on the PR.
 - **Verify:** tests — ungrounded + path-traversal findings dropped when the clone is present; nothing dropped when it's absent. Worker suite green (244).
 
-### A4 — Audit-log admin actions — **S–M**
-- **How:** record who/what/when for the privileged `/api/v1` actions (requeue, manual review, trigger audit, weekly-report) — a small `admin_audit` table written from the route handlers, plus the caller identity (API key id / source).
-- **Why:** forensics + accountability for the actions that spend money and post to GitHub; today they're only in transient logs.
-- **Verify:** each admin action writes one audit row; visible via API/TUI.
+### A4 — Audit-log admin actions — **S–M**  ✅ *done*
+- **What shipped:** new `admin_audit` table (migration `008` + model) and `writers.record_admin_action`. The four privileged `/api/v1` actions — `requeue`, `manual_review`, `audit`, `weekly_report` — each write a row with action, target, `detail`, and the caller's IP (`actor_from_request`, via nginx's `X-Forwarded-For`/`X-Real-IP`).
+- **Why:** forensics + accountability for actions that spend money and post to GitHub; previously only in transient logs. (Actor is the source IP — the API has one shared key, so per-user identity isn't available.)
+- **Verify:** writer unit test + API test (a `/admin/review` POST writes a `manual_review` row with target+actor). Suites green (api 69, worker 245).
 
 ---
 

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.dependencies import get_db
+from app.dependencies import actor_from_request, get_db
 from app.pagination import clamp_limit, clamp_offset
 from app.queries import reviews as q
+from reva.db import writers
 from app.schemas.reviews import ReviewDetail, ReviewPage, ReviewSummary
 from reva.db.engine import Database
 
@@ -39,9 +40,15 @@ def get_review(review_run_id: int, db: Database = Depends(get_db)) -> ReviewDeta
 
 
 @router.post("/reviews/{review_run_id}/requeue", status_code=202)
-def requeue_review(review_run_id: int, db: Database = Depends(get_db)) -> dict:
+def requeue_review(
+    review_run_id: int, request: Request, db: Database = Depends(get_db)
+) -> dict:
     ok = q.requeue_review(db, review_run_id)
     if not ok:
         raise HTTPException(status_code=409, detail="Review not found or not in a requeable state (failed/stale/completed)")
+    writers.record_admin_action(
+        db, action="requeue", actor=actor_from_request(request),
+        target=f"review_run_id={review_run_id}",
+    )
     logger.info("review_requeued", review_run_id=review_run_id)
     return {"status": "queued"}
