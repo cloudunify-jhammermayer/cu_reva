@@ -53,11 +53,16 @@ REVIEW_JOB_TIMEOUT = SUBPROCESS_TIMEOUT + JOB_TIMEOUT_BUFFER  # 1800s
 # for that repo until a container restart.
 _GIT_TIMEOUT = 300  # seconds
 
-# Only these host env vars are forwarded to the Claude CLI subprocess. The CLI
-# runs repo-directed tools with --dangerously-skip-permissions, so the worker's
-# other secrets (DATABASE_URL, REDIS_URL, GITHUB_*, ODOO_*) must NOT leak into
+# Only these host env vars are forwarded to the Claude CLI subprocess. The
+# worker's secrets (DATABASE_URL, REDIS_URL, GITHUB_*, ODOO_*) must NOT leak into
 # its environment. ANTHROPIC_API_KEY and HOME are injected explicitly below.
-_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR")
+# The *_PROXY vars are forwarded so the subprocess's Anthropic traffic routes
+# through the egress allowlist proxy when one is configured (A2 egress lock).
+_ENV_ALLOWLIST = (
+    "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "no_proxy",
+)
 
 
 class ClaudeCodeRunner:

@@ -1,0 +1,36 @@
+# Opt-in egress lockdown for the worker (Phase-2 A2). Layer on top of prod:
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.egress.yml up -d
+#
+# Validate in STAGING first — see docs/egress-lockdown.md. This overlay routes
+# the worker's outbound through an allowlisting proxy (the `*_PROXY` env vars,
+# which the worker's httpx/git AND the headless `claude` subprocess all honour).
+# That confines outbound to the allowlist for compliant clients. For a HARD
+# block that a hijacked process can't bypass, see the "Enforcing" section of the
+# doc (a dedicated internal network / DOCKER-USER rule).
+services:
+  egress-proxy:
+    build: ./egress-proxy
+    networks:
+      - reva-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  worker:
+    environment:
+      HTTP_PROXY: http://egress-proxy:8888
+      HTTPS_PROXY: http://egress-proxy:8888
+      # Internal services must NOT go through the proxy.
+      NO_PROXY: postgres,redis,localhost,127.0.0.1
+    depends_on:
+      egress-proxy:
+        condition: service_started

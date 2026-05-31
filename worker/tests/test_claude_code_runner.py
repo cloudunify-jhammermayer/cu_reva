@@ -266,6 +266,32 @@ def test_review_env_excludes_worker_secrets(runner_with_skill, tmp_path, monkeyp
     assert env["ANTHROPIC_API_KEY"] == "test-key"
 
 
+def test_review_env_forwards_proxy_vars(runner_with_skill, tmp_path, monkeypatch):
+    """A2 egress lock: the CLI subprocess must inherit the proxy env so its
+    Anthropic traffic routes through the allowlisting egress proxy."""
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+    monkeypatch.setenv("HTTPS_PROXY", "http://egress-proxy:8888")
+    monkeypatch.setenv("HTTP_PROXY", "http://egress-proxy:8888")
+    monkeypatch.setenv("NO_PROXY", "postgres,redis,localhost")
+    captured: dict = {}
+
+    def fake_run(args, **kwargs):
+        captured["env"] = kwargs["env"]
+        out = _extract_output_path(kwargs["input"])
+        with open(out, "w") as f:
+            json.dump({"summary": "ok", "findings": []}, f)
+        return _ok()
+
+    with patch("subprocess.run", side_effect=fake_run):
+        runner_with_skill.review(repo_path=repo_path, skill="reva-diff-review", params={})
+
+    env = captured["env"]
+    assert env["HTTPS_PROXY"] == "http://egress-proxy:8888"
+    assert env["HTTP_PROXY"] == "http://egress-proxy:8888"
+    assert env["NO_PROXY"] == "postgres,redis,localhost"
+
+
 def test_review_prepends_shared_preamble(tmp_path):
     """review_guidance.md + odoo19.md are prepended ahead of the skill body."""
     skills_dir = tmp_path / "skills"

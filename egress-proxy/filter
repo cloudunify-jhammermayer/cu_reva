@@ -1,0 +1,19 @@
+# Egress allowlist (POSIX extended regex, matched against the destination host).
+# With FilterDefaultDeny=Yes, ONLY hosts matching a line here are reachable.
+
+# Claude inference (the headless CLI + the Messages-API client).
+^api\.anthropic\.com$
+
+# GitHub: REST API + git clone/fetch over HTTPS (git uses github.com, large
+# objects come from codeload).
+^api\.github\.com$
+^github\.com$
+^codeload\.github\.com$
+
+# Google Chat notifications (error alerts + weekly report).
+^chat\.googleapis\.com$
+
+# Odoo ticket-analysis callback (ODOO_CALLBACK_URL). NOT used by PR reviews, but
+# the ticket-analysis tool runs in this same worker container, so if you enable
+# it, add your Odoo host here or its callbacks will be blocked, e.g.:
+# ^odoo\.yourcompany\.com$

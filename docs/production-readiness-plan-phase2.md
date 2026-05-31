@@ -31,11 +31,14 @@ Ranked by my recommended order. **A** and **B1** are the highest-leverage.
 - **Net effect:** an injected instruction can read the tree and write only within the throwaway, never-pushed clone — no Bash, no writes outside the clone, no network.
 - **Verify:** unit test pins no-skip-permissions + `Read,Grep,Glob,Write` + output-inside-cwd. Live CLI: `PASS (bare)`.
 
-### A2 — Restrict the review subprocess's network egress — **M**
-- **How:** run the `claude` subprocess so it can reach **only** `api.anthropic.com` (what it needs) and nothing else — via a locked-down container/network namespace or an egress proxy allowlist on the worker. (The worker itself still needs GitHub/Chat; scope the restriction to the subprocess, or split the clone+review into an egress-restricted step.)
-- **Why:** even if an injection slips past A1, it can't exfiltrate repo contents or secrets to an attacker host. This is the "secret isolation + sandboxed execution" half of the consensus defense.
-- **Verify:** from inside the subprocess sandbox, a request to an arbitrary host fails while Anthropic succeeds; reviews unaffected.
-- **Decided:** **Docker network policy** (chosen over a forward-proxy). Implementation: run the review subprocess on a restricted Docker network whose egress is limited to `api.anthropic.com` (e.g. a dedicated network + iptables/`--internal` with an allowlisted resolver, or a sidecar). Compose-level change; validate in the rebuilt container. *Note:* CodeGraph (E), if adopted, is local-only and needs no egress, so it composes with this.
+### A2 — Restrict the worker's network egress to an allowlist — **M**  ✅ *code done; infra delivered, pending staging validation*
+- **Approach (decided):** allowlisting **proxy sidecar** — robust domain-based egress (plain iptables can't, since Anthropic's IPs rotate and would break reviews). Smoke test confirmed the `claude` CLI honours `HTTPS_PROXY`.
+- **What shipped:**
+  - *Code (tested):* `_ENV_ALLOWLIST` now forwards `HTTP(S)_PROXY`/`NO_PROXY` into the CLI subprocess — without this the subprocess wouldn't route through the proxy and inference would break under a hard block.
+  - *Infra (validate in staging):* `egress-proxy/` (alpine + tinyproxy, default-deny + allowlist filter), `docker-compose.egress.yml` overlay (worker `*_PROXY` env), `docs/egress-lockdown.md`.
+- **Allowlist:** anthropic, github.com / api.github.com / codeload, chat.googleapis.com; Odoo host is a documented opt-in (ticket analysis only — *not* PR reviews).
+- **Advisory vs enforcing:** the overlay routes via the proxy (compliant clients); the doc covers the hard-block step (internal network) for when you want it. A1 already closes the primary vector, so advisory is a reasonable first layer.
+- **Verify:** unit test (proxy env forwarded) + the staging checklist in the doc (allowed host works, disallowed blocked, a real review still completes). Can't be CI-validated (needs a live Docker host).
 
 ### A3 — Ground-check findings against the clone — **M**  ✅ *done*
 - **What shipped:** `reviewer._ground_findings` drops any finding whose `file` doesn't exist in the cloned repo (or escapes it via `../`), before capping. Works for all modes (the CLI can read any repo file, so grounding is against the clone, not the diff). General (no-file) findings are kept; **fail-open** if the clone path is absent (drop nothing rather than nuke all).
