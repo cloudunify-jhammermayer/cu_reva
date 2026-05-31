@@ -252,8 +252,10 @@ class Reviewer:
         # 12. Validate and parse findings.
         summary, findings = _parse_tool_use(response.tool_use_input)
 
-        # 13. Cap findings by severity * confidence, then recompute risk_level.
-        capped = _cap_findings(findings, MAX_FINDINGS)
+        # 13. Drop findings citing files absent from the clone (hallucinated or
+        # injection-fabricated), then cap by severity * confidence and recompute risk.
+        grounded = _ground_findings(findings, repo_path)
+        capped = _cap_findings(grounded, MAX_FINDINGS)
         risk_level = _recompute_risk_level(capped)
 
         # 14. Cost: prefer the CLI's authoritative total_cost_usd; fall back to
@@ -360,6 +362,36 @@ def _parse_tool_use(tool_use_input: dict | None) -> tuple[str, list[Finding]]:
     except ValidationError as exc:
         raise PermanentError(f"Claude finding failed schema validation: {exc}") from exc
     return summary, findings
+
+
+def _ground_findings(findings: list[Finding], repo_path: str) -> list[Finding]:
+    """Drop findings that cite a file not present in the cloned repo.
+
+    A finding pointing at a nonexistent path (or one escaping the clone via
+    `../`) is almost always a hallucination or an injection-fabricated location;
+    dropping it improves precision and limits a prompt injection's ability to put
+    attacker-chosen text on the PR. Findings with no file (general findings) are
+    kept. Fail-open: if the clone path is absent we can't verify, so we drop
+    nothing rather than nuking every finding.
+    """
+    if not os.path.isdir(repo_path):
+        return findings
+    root = os.path.realpath(repo_path)
+    kept: list[Finding] = []
+    dropped: list[str] = []
+    for f in findings:
+        if not f.file:
+            kept.append(f)
+            continue
+        resolved = os.path.realpath(os.path.join(root, f.file))
+        within = resolved == root or resolved.startswith(root + os.sep)
+        if within and os.path.isfile(resolved):
+            kept.append(f)
+        else:
+            dropped.append(f.file)
+    if dropped:
+        logger.warning("findings_dropped_ungrounded", count=len(dropped), files=dropped)
+    return kept
 
 
 def _cap_findings(findings: list[Finding], max_count: int) -> list[Finding]:

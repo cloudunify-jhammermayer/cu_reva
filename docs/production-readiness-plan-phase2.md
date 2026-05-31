@@ -37,10 +37,10 @@ Ranked by my recommended order. **A** and **B1** are the highest-leverage.
 - **Verify:** from inside the subprocess sandbox, a request to an arbitrary host fails while Anthropic succeeds; reviews unaffected.
 - **Decided:** **Docker network policy** (chosen over a forward-proxy). Implementation: run the review subprocess on a restricted Docker network whose egress is limited to `api.anthropic.com` (e.g. a dedicated network + iptables/`--internal` with an allowlisted resolver, or a sidecar). Compose-level change; validate in the rebuilt container. *Note:* CodeGraph (E), if adopted, is local-only and needs no egress, so it composes with this.
 
-### A3 — Ground-check findings against the diff/repo — **M**
-- **How:** before posting, validate each finding's `file_path`/`line_start` actually exist in the changed files (full-review: in the repo). Drop or down-rank findings that reference nonexistent locations; log them.
-- **Why:** an injected instruction that tries to make REVA emit attacker-chosen text, and ordinary hallucinations, both tend to cite locations that don't exist. Cheap output-side guardrail that also improves precision.
-- **Verify:** a finding citing a missing file/line is dropped; valid findings pass through.
+### A3 — Ground-check findings against the clone — **M**  ✅ *done*
+- **What shipped:** `reviewer._ground_findings` drops any finding whose `file` doesn't exist in the cloned repo (or escapes it via `../`), before capping. Works for all modes (the CLI can read any repo file, so grounding is against the clone, not the diff). General (no-file) findings are kept; **fail-open** if the clone path is absent (drop nothing rather than nuke all).
+- **Why:** injected/hallucinated findings tend to cite nonexistent locations — cheap output-side guardrail that improves precision *and* limits what an injection can put on the PR.
+- **Verify:** tests — ungrounded + path-traversal findings dropped when the clone is present; nothing dropped when it's absent. Worker suite green (244).
 
 ### A4 — Audit-log admin actions — **S–M**
 - **How:** record who/what/when for the privileged `/api/v1` actions (requeue, manual review, trigger audit, weekly-report) — a small `admin_audit` table written from the route handlers, plus the caller identity (API key id / source).
@@ -111,7 +111,8 @@ CodeGraph (github.com/colbymchenry/codegraph) is a **local, pre-indexed code kno
 - **(E3-a) Code-intelligence layer for reviews/audits** — run CodeGraph to index the cloned repo and expose its MCP to the headless `claude` run, so **full/deep reviews + audits** are cheaper and more cross-file-aware (the repo-aware modes benefit most; the diff path may not need it). *Composes with A1/A2:* CodeGraph is local-only (no egress), but its MCP tools must be added to the `--allowedTools` allowlist.
 - **(E3-b) Feed E2's overview** — use CodeGraph's structural data (module/symbol/route inventory) as input to the periodic per-repo summary, complementing REVA's LLM audit.
 - **Caveats:** CodeGraph is **pre-1.0** (v0.9.5, Jan-2026 launch) — for the critical review path I'd pin a version and gate it behind a flag, starting on the audit/full-review path only, not the hot diff path. Also adds an indexer step + MCP server (local, but ops weight).
-- **Open question:** which did you mean — (a) make REVA's reviews/audits cheaper & more repo-aware via CodeGraph's MCP, or (b) a periodic human overview of `custom_addons` (E1/E2, optionally fed by CodeGraph)? (Or both — (a) for the engine, (b) for the dashboard.)
+- **Decided: (a) engine layer.** Index the clone with CodeGraph and expose its MCP to the headless `claude` run so **full/deep reviews + audits** are cheaper and more cross-file-aware. Version-pinned, flag-gated, repo-aware paths only (not the hot diff path). E1/E2 (human overview) are **not** in scope for now.
+- **Design-first:** this is a new feature touching the just-hardened review path (A1/A2) and a pre-1.0 dependency — it gets its own spec (brainstorm → design → plan) before code, and live-CLI/MCP validation like A1 had. Larger than the other Phase-2 items.
 
 ---
 

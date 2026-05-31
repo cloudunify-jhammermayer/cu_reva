@@ -230,6 +230,51 @@ def test_default_mode_uses_sonnet_model():
     assert runner.last_model == "claude-sonnet-4-6"
 
 
+# --- finding grounding (A3) ---------------------------------------------------
+
+
+def _finding(title: str, file: str | None, confidence: float = 0.9) -> dict:
+    return {
+        "severity": "major", "category": "bug", "file": file,
+        "line_start": 1 if file else None, "line_end": 1 if file else None,
+        "title": title, "body": "b", "suggestion": None,
+        "confidence": confidence, "is_odoo_specific": False,
+    }
+
+
+def test_ungrounded_findings_dropped_when_clone_present(tmp_path):
+    """Findings citing a file that doesn't exist in the clone (hallucinated or
+    injection-fabricated, incl. path traversal) are dropped; real-file and
+    general (no-file) findings are kept."""
+    (tmp_path / "custom_addons").mkdir()
+    (tmp_path / "custom_addons" / "real.py").write_text("x = 1\n")
+    findings = [
+        _finding("real", "custom_addons/real.py"),
+        _finding("ghost", "custom_addons/nope.py"),
+        _finding("escape", "../../etc/passwd"),
+        _finding("general", None),
+    ]
+    runner = FakeRunner(
+        response=_claude_response_with_findings(findings),
+        repo_path_returned=str(tmp_path),
+    )
+    reviewer, *_ = _make_reviewer(runner=runner)
+
+    titles = {f.title for f in reviewer.execute(_params()).findings}
+    assert titles == {"real", "general"}
+
+
+def test_findings_not_dropped_when_clone_absent():
+    """Fail-open: if the clone path isn't present we can't verify, so keep
+    findings rather than nuking all of them."""
+    runner = FakeRunner(
+        response=_claude_response_with_findings([_finding("keep-me", "any/where.py")]),
+        repo_path_returned="/fake/does/not/exist",
+    )
+    reviewer, *_ = _make_reviewer(runner=runner)
+    assert any(f.title == "keep-me" for f in reviewer.execute(_params()).findings)
+
+
 # --- stale --------------------------------------------------------------------
 
 
