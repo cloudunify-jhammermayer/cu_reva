@@ -35,7 +35,7 @@ Ranked by my recommended order. **A** and **B1** are the highest-leverage.
 - **How:** run the `claude` subprocess so it can reach **only** `api.anthropic.com` (what it needs) and nothing else — via a locked-down container/network namespace or an egress proxy allowlist on the worker. (The worker itself still needs GitHub/Chat; scope the restriction to the subprocess, or split the clone+review into an egress-restricted step.)
 - **Why:** even if an injection slips past A1, it can't exfiltrate repo contents or secrets to an attacker host. This is the "secret isolation + sandboxed execution" half of the consensus defense.
 - **Verify:** from inside the subprocess sandbox, a request to an arbitrary host fails while Anthropic succeeds; reviews unaffected.
-- **Open decision:** egress mechanism — Docker network policy vs a forward-proxy with an allowlist. I'll recommend one after a quick spike on the odoo.sh/host network setup.
+- **Decided:** **Docker network policy** (chosen over a forward-proxy). Implementation: run the review subprocess on a restricted Docker network whose egress is limited to `api.anthropic.com` (e.g. a dedicated network + iptables/`--internal` with an allowlisted resolver, or a sidecar). Compose-level change; validate in the rebuilt container. *Note:* CodeGraph (E), if adopted, is local-only and needs no egress, so it composes with this.
 
 ### A3 — Ground-check findings against the diff/repo — **M**
 - **How:** before posting, validate each finding's `file_path`/`line_start` actually exist in the changed files (full-review: in the repo). Drop or down-rank findings that reference nonexistent locations; log them.
@@ -53,10 +53,8 @@ Ranked by my recommended order. **A** and **B1** are the highest-leverage.
 
 Today: `structlog` JSON logs + Google Chat alerts + a TUI reading Postgres. Missing the standard production-LLM-app pillars (errors, traces, metrics).
 
-### B1 — Error tracking (Sentry / self-hosted GlitchTip) — **S–M**  *(do first in this section)*
-- **How:** add the Sentry SDK to api, worker, scheduler; capture unhandled exceptions + `PermanentError`s with request/job context (repo, PR, run_id). Keep Google Chat for human-facing alerts.
-- **Why:** grouped, de-duplicated exceptions with stack + context turn "something failed, grep the logs" into a triage queue. Highest debugging ROI for the least work.
-- **Verify:** a deliberately-raised exception appears in Sentry with run context attached.
+### B1 — Error tracking (Sentry / self-hosted GlitchTip) — **S–M**  ⏸️ *BACKLOG (parked by decision)*
+- Parked for now — revisit later. (When picked up: self-hosted GlitchTip, Sentry SDK in api/worker/scheduler, capture unhandled exceptions + `PermanentError`s with run context; Google Chat stays for human alerts.)
 
 ### B2 — Distributed tracing (OpenTelemetry) — **M–L**
 - **How:** instrument the span chain api(webhook) → enqueue → worker(job) → Claude CLI → GitHub posts, propagating a trace id (reuse the GitHub `delivery_id` as the correlation root). Export to Tempo/Jaeger (or Sentry tracing). Use the GenAI semantic conventions for the LLM span (tokens, cost, model, latency).
@@ -94,23 +92,26 @@ Today: `structlog` JSON logs + Google Chat alerts + a TUI reading Postgres. Miss
 
 ---
 
-## E — Periodic `custom_addons` repo overview / audit  *(you requested this)*
+## E — Periodic `custom_addons` audit + CodeGraph  *(you requested this; E3 = CodeGraph)*
 
-**Why (whole section):** per-PR review catches what's *changing*; it never assesses the *standing* health of `custom_addons`. You want a periodic, branch-specific overview. REVA already has the engine for this — the `Auditor` + `reva-repo-audit` skill + `run_audit` job — but it only runs **manually** (TUI / `POST /repos/{id}/audit`) and clones the **default branch**.
+**Why (whole section):** per-PR review catches what's *changing*; it never assesses the *standing* state of `custom_addons`. REVA already has the audit engine — `Auditor` + `reva-repo-audit` skill + `run_audit` — but it only runs **manually** (TUI / `POST /repos/{id}/audit`) and clones the **default branch**.
 
 ### E1 — Scheduled, branch-specific audits — **M**
 - **How:** let an audit target a specific branch (thread a `ref` through `Auditor`/`ensure_repo`, which already accepts a SHA), and have the **scheduler** enqueue audits on a cadence from config (`repo → [branches], interval`). Reuses the existing enqueue→worker path.
-- **Why:** continuous visibility into debt/drift on the branches you care about (e.g. per-customer odoo.sh branches), without someone remembering to click.
+- **Why:** continuous visibility into debt/drift on the branches you care about (per-customer odoo.sh branches), without someone remembering to click.
 - **Verify:** a configured repo/branch gets an audit enqueued on schedule; results land in `audit_runs`.
 
 ### E2 — Repo overview / health view in the TUI — **M**
-- **How:** aggregate `audit_runs` over time into a per-repo health summary (finding counts by severity/category, trend) and add a TUI view (new tab or a Repos drill-in).
+- **How:** aggregate `audit_runs` over time into a per-repo summary (finding counts by severity/category, trend); add a TUI view (new tab or a Repos drill-in).
 - **Why:** turns individual audits into a trend you can act on.
 - **Verify:** the view renders current + trend for an audited repo.
 
-### E3 — Engine choice — **decision needed**
-- **What I recommend:** build on REVA's **own** LLM audit first (E1/E2) — it's repo-aware and already integrated — and optionally add **`pylint-odoo`** (OCA's Odoo-specific static linter) as a cheap, deterministic complement whose results feed the same overview.
-- **Open question for you:** you mentioned **"codeify or a similar tool"** — I'm not sure which product that is. Candidates do quite different things: **CodeScene** (behavioral hotspots / health score), **SonarQube/Sonar** (quality gates), **Codacy/Code Climate** (maintainability dashboards), **pylint-odoo** (Odoo rules). Tell me which "codeify" is (or which capability you actually want — *health score*, *quality gate*, or *Odoo-lint*) and I'll fold the right one into E.
+### E3 — CodeGraph — **clarify intent first**
+CodeGraph (github.com/colbymchenry/codegraph) is a **local, pre-indexed code knowledge graph for AI coding agents** (Claude Code included). It indexes a repo with tree-sitter into a SQLite graph and serves it over MCP, so the agent queries structure instead of grepping — ~25–35% cheaper, ~57–70% fewer tool calls. It is **not** a human-facing health dashboard. Two ways it could serve the goal:
+- **(E3-a) Code-intelligence layer for reviews/audits** — run CodeGraph to index the cloned repo and expose its MCP to the headless `claude` run, so **full/deep reviews + audits** are cheaper and more cross-file-aware (the repo-aware modes benefit most; the diff path may not need it). *Composes with A1/A2:* CodeGraph is local-only (no egress), but its MCP tools must be added to the `--allowedTools` allowlist.
+- **(E3-b) Feed E2's overview** — use CodeGraph's structural data (module/symbol/route inventory) as input to the periodic per-repo summary, complementing REVA's LLM audit.
+- **Caveats:** CodeGraph is **pre-1.0** (v0.9.5, Jan-2026 launch) — for the critical review path I'd pin a version and gate it behind a flag, starting on the audit/full-review path only, not the hot diff path. Also adds an indexer step + MCP server (local, but ops weight).
+- **Open question:** which did you mean — (a) make REVA's reviews/audits cheaper & more repo-aware via CodeGraph's MCP, or (b) a periodic human overview of `custom_addons` (E1/E2, optionally fed by CodeGraph)? (Or both — (a) for the engine, (b) for the dashboard.)
 
 ---
 
@@ -122,13 +123,13 @@ Today: `structlog` JSON logs + Google Chat alerts + a TUI reading Postgres. Miss
 ---
 
 ## Suggested sequence
-1. **C1–C3** (security scanning) — $0 on Team, no new infra/keys, no runtime behaviour change. Safest first PR. *(C4 Trivy is an easy optional add — kept lean to start, per "few tools.")*
-2. **A1** (scope the `Write` tool) — small, but needs the (i)/(ii) decision + a check against the live `claude` CLI first.
-3. **A2** (lock subprocess egress) — pending the egress-mechanism decision.
-4. **B1** (error tracking — GlitchTip self-hosted) — biggest debugging ROI, once you're ready to run one extra service.
-5. **A3, A4** (grounding check, admin audit log).
+1. ✅ **C1–C3** (security scanning) — shipped (`5ae6a09`). *(C4 Trivy optional, deferred.)*
+2. ✅ **A1** (drop skip-permissions, output in clone) — shipped & live-CLI-verified (`a2e9030`).
+3. **A2** (lock subprocess egress — **Docker network policy**, decided). Compose change; validate in container.
+4. **A3, A4** (grounding check, admin audit log) — self-contained, no decisions/infra needed.
 5. **D1–D2** (integration + e2e — close the Postgres-only coverage hole).
-6. **E** (periodic audit + overview) — pending your "codeify" answer.
+6. **E1/E2 + E3 CodeGraph** — pending the E3-a/E3-b intent answer.
 7. **B2/B3** (tracing, metrics), **D3/D4**, **F** — as capacity allows.
+8. ⏸️ **B1** (error tracking) — **backlog**, parked by decision.
 
-**Decisions I need from you while reviewing:** (1) A2 egress mechanism, (2) E3 "codeify"/external-tool choice, (3) error-tracking target — hosted **Sentry** vs self-hosted **GlitchTip**.
+**Open decision:** E3 — CodeGraph for (a) cheaper/repo-aware reviews+audits, (b) a periodic human overview, or both. (A2 decided: Docker network policy. B1: backlogged.)
