@@ -423,6 +423,60 @@ def test_create_issue_comment_posts_body(rsa_key_pair):
     assert captured["body"]["body"] == "## hi"
 
 
+def test_find_pr_review_id_matches_marker(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        captured["path"] = req.url.path
+        return httpx.Response(200, json=[
+            {"id": 1, "body": "someone else's review"},
+            {"id": 2, "body": "REVA summary\n*REVA · Run #77*"},
+        ])
+
+    client = _make_client(handler, private_pem)
+    rid = client.find_pr_review_id("tok", "acme", "widgets", 42, marker="Run #77")
+    assert rid == 2
+    assert captured["path"] == "/repos/acme/widgets/pulls/42/reviews"
+
+
+def test_find_pr_review_id_returns_none_when_absent(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    client = _make_client(
+        lambda req: httpx.Response(200, json=[{"id": 1, "body": "other"}]),
+        private_pem,
+    )
+    assert client.find_pr_review_id("tok", "a", "b", 1, marker="Run #77") is None
+
+
+def test_find_check_run_id_returns_matching_run(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        captured["path"] = req.url.path
+        captured["check_name"] = req.url.params.get("check_name")
+        return httpx.Response(200, json={
+            "total_count": 1,
+            "check_runs": [{"id": 4242, "name": "REVA Review"}],
+        })
+
+    client = _make_client(handler, private_pem)
+    cr_id = client.find_check_run_id("tok", "acme", "widgets", "abc123", "REVA Review")
+    assert cr_id == 4242
+    assert captured["path"] == "/repos/acme/widgets/commits/abc123/check-runs"
+    assert captured["check_name"] == "REVA Review"
+
+
+def test_find_check_run_id_returns_none_when_absent(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    client = _make_client(
+        lambda req: httpx.Response(200, json={"total_count": 0, "check_runs": []}),
+        private_pem,
+    )
+    assert client.find_check_run_id("tok", "a", "b", "sha", "REVA Review") is None
+
+
 def test_post_422_maps_to_permanent(rsa_key_pair):
     private_pem, _ = rsa_key_pair
     client = _make_client(

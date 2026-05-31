@@ -8,8 +8,18 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from reva.claude_code_runner import ClaudeCodeRunner
+from reva.claude_code_runner import (
+    REVIEW_JOB_TIMEOUT,
+    SUBPROCESS_TIMEOUT,
+    ClaudeCodeRunner,
+)
 from reva.errors import PermanentError, TransientError
+
+
+def test_review_job_timeout_exceeds_subprocess_timeout():
+    """The RQ job timeout must outlive the CLI subprocess so a running review
+    is never SIGKILLed by RQ before the subprocess can finish."""
+    assert REVIEW_JOB_TIMEOUT > SUBPROCESS_TIMEOUT
 
 
 @pytest.fixture
@@ -84,6 +94,46 @@ def test_ensure_repo_no_sha_resets_to_fetch_head(runner, tmp_path):
 def test_ensure_repo_clone_failure_raises_transient(runner):
     with patch("subprocess.run", return_value=_fail(code=128, stderr="network error")):
         with pytest.raises(TransientError, match="clone failed"):
+            runner.ensure_repo("acme", "widgets", "abc123", "tok")
+
+
+@pytest.mark.parametrize("owner,name", [
+    ("../etc", "widgets"),
+    ("acme", "../../escape"),
+    ("acme", ".."),
+    ("acme", "a/b"),
+    ("acme", ".hidden"),
+    ("", "widgets"),
+])
+def test_ensure_repo_rejects_unsafe_owner_name(runner, owner, name):
+    """owner/name compose a filesystem path; reject traversal/separators before
+    any git op runs (defense-in-depth against a bad/forged repo identity)."""
+    with patch("subprocess.run") as mock_run:
+        with pytest.raises(PermanentError):
+            runner.ensure_repo(owner, name, "abc123", "tok")
+    mock_run.assert_not_called()
+
+
+def test_git_calls_pass_a_timeout(runner):
+    """Every git op must be bounded; an unbounded clone/fetch under the per-repo
+    lock would stall every job for that repo until a container restart."""
+    with patch("subprocess.run", return_value=_ok()) as mock_run:
+        runner.ensure_repo("acme", "widgets", "abc123", "tok")
+
+    assert mock_run.call_args_list  # sanity: git actually ran
+    for call in mock_run.call_args_list:
+        assert call.kwargs.get("timeout"), f"git call missing timeout: {call.args[0]}"
+
+
+def test_git_timeout_raises_transient(runner):
+    """A timed-out git op is transient (network/load), so RQ should retry it."""
+    import subprocess
+
+    with patch(
+        "subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd="git clone", timeout=1),
+    ):
+        with pytest.raises(TransientError, match="timed out"):
             runner.ensure_repo("acme", "widgets", "abc123", "tok")
 
 

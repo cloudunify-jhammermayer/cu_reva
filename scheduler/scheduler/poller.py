@@ -14,6 +14,7 @@ from redis import Redis
 from rq import Queue, Retry
 from sqlalchemy import select
 
+from reva.claude_code_runner import REVIEW_JOB_TIMEOUT
 from reva.db.engine import Database
 from reva.db.models import PendingReview, ReviewRun
 from scheduler.settings import Settings
@@ -22,7 +23,23 @@ logger = structlog.get_logger()
 
 # Matches rq.Retry config locked in HANDOFF.md.
 _RETRY = Retry(max=3, interval=[30, 120, 300])
-_JOB_TIMEOUT = 900  # 15 minutes
+# Derived from the CLI subprocess timeout so RQ never SIGKILLs a running review.
+_JOB_TIMEOUT = REVIEW_JOB_TIMEOUT
+
+
+def _claim_stmt(pending_id: int):
+    """Select one pending review FOR UPDATE SKIP LOCKED.
+
+    With multiple scheduler replicas, this row-level lock ensures a pending
+    review is claimed by exactly one poller: a second poller skips a row another
+    is mid-consuming rather than blocking or double-enqueuing. On SQLite the
+    clause is a no-op (single-writer), so behaviour is unchanged in tests.
+    """
+    return (
+        select(PendingReview)
+        .where(PendingReview.id == pending_id)
+        .with_for_update(skip_locked=True)
+    )
 
 
 class Poller:
@@ -69,7 +86,9 @@ class Poller:
         Returns True if a job was enqueued.
         """
         with self._db.session() as s:
-            pending = s.get(PendingReview, pending_id)
+            pending = s.execute(_claim_stmt(pending_id)).scalar_one_or_none()
+            # None when the row is gone or another poller holds its lock
+            # (SKIP LOCKED) — either way this poller leaves it alone.
             if pending is None or pending.consumed:
                 return False
 

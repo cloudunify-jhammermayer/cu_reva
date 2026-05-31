@@ -5,7 +5,12 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from reva.claude_code_runner import REVIEW_JOB_TIMEOUT
 from reva.config import required_env_or_file
+
+# Reap runs stuck in 'running' past 2× the job timeout — far beyond any legit
+# (possibly retried) review, so only crashed/SIGKILLed workers get swept.
+_DEFAULT_STALE_RUNNING_SECONDS = 2 * REVIEW_JOB_TIMEOUT
 
 
 @dataclass(frozen=True)
@@ -15,6 +20,10 @@ class Settings:
     migrations_dir: str = "/app/db/migrations"
     queue_name: str = "reviews"
     poll_interval_seconds: int = 30
+    stale_running_seconds: int = _DEFAULT_STALE_RUNNING_SECONDS
+    # Touched each loop iteration; the container healthcheck checks its freshness
+    # to detect a hung scheduler.
+    heartbeat_path: str = "/tmp/reva-scheduler-heartbeat"
     report_weekday: int = 0      # 0=Monday
     report_hour_utc: int = 8     # hour to fire the weekly report (UTC)
     # Operational alerting (Google Chat). Empty webhook = alerts disabled.
@@ -32,6 +41,12 @@ class Settings:
             migrations_dir=os.environ.get("REVA_MIGRATIONS_DIR", "/app/db/migrations"),
             queue_name=os.environ.get("REVA_QUEUE_NAME", "reviews"),
             poll_interval_seconds=int(os.environ.get("REVA_POLL_INTERVAL_SECONDS", "30")),
+            stale_running_seconds=int(
+                os.environ.get("REVA_STALE_RUNNING_SECONDS", str(_DEFAULT_STALE_RUNNING_SECONDS))
+            ),
+            heartbeat_path=os.environ.get(
+                "REVA_SCHEDULER_HEARTBEAT_PATH", "/tmp/reva-scheduler-heartbeat"
+            ),
             report_weekday=int(os.environ.get("REVA_REPORT_WEEKDAY", "0")),
             report_hour_utc=int(os.environ.get("REVA_REPORT_HOUR_UTC", "8")),
             google_chat_webhook_url=os.environ.get("GOOGLE_CHAT_WEBHOOK_URL", ""),

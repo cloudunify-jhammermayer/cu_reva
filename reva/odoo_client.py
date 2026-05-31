@@ -30,6 +30,8 @@ import structlog
 
 import httpx
 
+from reva.url_safety import assert_safe_url
+
 from reva.errors import PermanentError, TransientError
 
 logger = structlog.get_logger()
@@ -44,6 +46,10 @@ class OdooCallbackClient:
             self._base_url = callback_url[: -len("/write-field")]
         else:
             self._base_url = callback_url.rstrip("/")
+        # Fail fast on a malformed/dangerous callback URL. Internal/RFC1918 hosts
+        # are allowed (Odoo is often internal); only bad schemes + metadata are
+        # rejected. See reva.url_safety.
+        assert_safe_url(self._base_url + "/write-field")
         self._callback_url = self._base_url + "/write-field"
         self._api_key = api_key
 

@@ -10,6 +10,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.dependencies import get_db
+from app.pagination import clamp_limit, clamp_offset
 from app.queries import ticket_analyses as q
 from app.schemas.ticket_analyses import (
     TicketAnalysisCreated,
@@ -93,6 +94,8 @@ def list_ticket_analyses(
     db: Database = Depends(get_db),
 ) -> dict:
     """Return a paginated list of ticket analyses."""
+    limit = clamp_limit(limit, 200)
+    offset = clamp_offset(offset)
     items, total = q.list_ticket_analyses(db, status=status, limit=limit, offset=offset)
     return {
         "items": [TicketAnalysisSummary.model_validate(i) for i in items],

@@ -64,8 +64,12 @@ def _process_delivery(
     delivery_id: str, payload: dict, log,
 ) -> dict:
     """Synchronous event persistence + dispatch. Runs in the threadpool."""
-    # Idempotent: record_github_event returns None if delivery_id already exists.
-    recorded = writers.record_github_event(
+    # record_github_event returns None only when this delivery was already
+    # fully processed; a recorded-but-unfinished delivery (prior crash) is
+    # returned for reprocessing. We mark it processed only after all the
+    # downstream writes below have committed, so a failure mid-handling leaves
+    # the event reprocessable instead of silently dropping the review.
+    event_id = writers.record_github_event(
         db,
         delivery_id=delivery_id,
         event_type=event,
@@ -74,7 +78,7 @@ def _process_delivery(
         sender_login=payload.get("sender", {}).get("login"),
         payload=payload,
     )
-    if recorded is None:
+    if event_id is None:
         log.info("webhook_duplicate")
         return {"status": "duplicate"}
 
@@ -87,6 +91,7 @@ def _process_delivery(
     if event == "pull_request_review_comment":
         _handle_review_comment(payload, settings, rq_queue)
 
+    writers.mark_event_processed(db, event_id)
     log.info("webhook_accepted")
     return {"status": "accepted"}
 

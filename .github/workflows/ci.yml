@@ -6,6 +6,22 @@ on:
   pull_request:
 
 jobs:
+  lint-python:
+    name: ruff + mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install linters
+        run: pip install ruff mypy
+      - name: ruff (blocking)
+        run: ruff check reva worker/worker api/app scheduler/scheduler
+      - name: mypy (advisory — not yet gating; see docs/production-readiness-plan.md R9)
+        continue-on-error: true
+        run: mypy reva worker/worker api/app scheduler/scheduler --ignore-missing-imports
+
   python:
     name: pytest (${{ matrix.service }})
     runs-on: ubuntu-latest
@@ -22,10 +38,10 @@ jobs:
         working-directory: ${{ matrix.service }}
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-      - name: Run tests
+          pip install -r requirements-dev.txt pytest-cov
+      - name: Run tests with coverage
         working-directory: ${{ matrix.service }}
-        run: python -m pytest tests/ -q
+        run: python -m pytest tests/ -q --cov --cov-report=term-missing
 
   go:
     name: go (tui)
@@ -41,3 +57,9 @@ jobs:
           go build ./...
           go vet ./...
           go test ./...
+      - name: golangci-lint (advisory — not yet gating; see docs/production-readiness-plan.md R9)
+        continue-on-error: true
+        uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: tui
+          version: latest

@@ -23,6 +23,9 @@ class Settings:
     odoo_callback_api_key: str = ""
     api_key: str = ""
     require_api_key: bool = False
+    # Per-client (API key / IP) request cap for /api/v1 over a rolling minute.
+    # 0 disables. Per-instance (not shared across API replicas).
+    rate_limit_per_minute: int = 0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -51,4 +54,5 @@ class Settings:
             odoo_callback_api_key=env_or_file("ODOO_CALLBACK_API_KEY", "") or "",
             api_key=api_key,
             require_api_key=require_api_key,
+            rate_limit_per_minute=int(os.environ.get("REVA_API_RATE_LIMIT_PER_MINUTE", "0")),
         )

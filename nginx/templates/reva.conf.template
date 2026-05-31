@@ -17,6 +17,12 @@ server {
         root /var/www/certbot;
     }
 
+    # Container self-healthcheck (no TLS, not proxied) — see compose healthcheck.
+    location = /nginx-health {
+        access_log off;
+        return 200 "ok\n";
+    }
+
     location / {
         return 301 https://$host$request_uri;
     }

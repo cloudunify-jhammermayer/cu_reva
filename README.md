@@ -215,7 +215,9 @@ Notifications fire on `PermanentError` and unexpected exceptions. Transient erro
 | `REVA_DEFAULT_REVIEW_MODE` | — | `diff` | `diff` or `full` |
 | `REVA_REPO_CACHE_DIR` | — | `/repos` | Root path where the worker clones repos for the headless CLI |
 | `REVA_REPO_CACHE_TTL_DAYS` | — | `30` | Days before an unused cloned repo is pruned |
-| `REVA_DAILY_BUDGET_USD` | — | _(off)_ | Rolling 24-hour spend cap; reviews are declined (not run) once trailing spend reaches it |
+| `REVA_DAILY_BUDGET_USD` | — | _(off)_ | Rolling 24-hour spend cap; reviews are declined (not run) once trailing spend reaches it. The check is serialized (Postgres advisory lock); residual overshoot is bounded by concurrent workers (≤ one in-flight review each) |
+| `REVA_STALE_RUNNING_SECONDS` | — | `2 × job timeout` (3600) | Scheduler reaps `review_runs` stuck in `running` longer than this (worker killed mid-review) and marks them failed |
+| `REVA_API_RATE_LIMIT_PER_MINUTE` | — | `0` (off) | Per-client (API key / IP) request cap on `/api/v1` over a rolling minute; per-instance, in addition to nginx's limit |
 | `REVA_QUEUE_DEPTH_ALERT` / `REVA_FAILED_JOBS_ALERT` / `REVA_REPO_CACHE_DISK_PCT_ALERT` | — | `50` / `10` / `90` | Scheduler operational-alert thresholds (need `GOOGLE_CHAT_WEBHOOK_URL`) |
 | `ODOO_CALLBACK_URL` | — | _(off)_ | Odoo endpoint REVA writes ticket-analysis results back to |
 | `ODOO_CALLBACK_API_KEY` | — | — | Auth key for the Odoo callback |

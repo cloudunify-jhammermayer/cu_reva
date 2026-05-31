@@ -7,7 +7,25 @@ import re
 
 import structlog
 
+from reva.url_safety import assert_safe_url
+
 logger = structlog.get_logger()
+
+# Google Chat incoming webhooks always live on this host. Restricting to it
+# stops a mistyped/tampered GOOGLE_CHAT_WEBHOOK_URL from being used to POST to
+# an arbitrary internal service (SSRF).
+_CHAT_ALLOWED_HOSTS = frozenset({"chat.googleapis.com"})
+
+
+def _post_to_chat(webhook_url: str, text: str) -> None:
+    """Best-effort POST to the Google Chat webhook. Validates the host first and
+    swallows all errors so notifications never mask the original failure."""
+    try:
+        assert_safe_url(webhook_url, allowed_hosts=_CHAT_ALLOWED_HOSTS)
+        import httpx
+        httpx.post(webhook_url, json={"text": text}, timeout=5)
+    except Exception as exc:
+        logger.warning("google_chat_notify_failed", error=str(exc))
 
 # ---------------------------------------------------------------------------
 # Error pattern matchers
@@ -244,12 +262,7 @@ def notify_worker_error(
         f"\n"
         f"{detail}"
     )
-
-    try:
-        import httpx
-        httpx.post(webhook_url, json={"text": text}, timeout=5)
-    except Exception as exc:
-        logger.warning("google_chat_notify_failed", error=str(exc))
+    _post_to_chat(webhook_url, text)
 
 
 def notify_operational_alert(webhook_url: str, title: str, detail: str) -> None:
@@ -259,9 +272,4 @@ def notify_operational_alert(webhook_url: str, title: str, detail: str) -> None:
     """
     if not webhook_url:
         return
-    text = f"⚠️ *{title}*\n{detail}"
-    try:
-        import httpx
-        httpx.post(webhook_url, json={"text": text}, timeout=5)
-    except Exception as exc:
-        logger.warning("google_chat_notify_failed", error=str(exc))
+    _post_to_chat(webhook_url, f"⚠️ *{title}*\n{detail}")

@@ -210,6 +210,45 @@ def test_event_stored_in_github_events(client_and_db):
         assert ev.sender_login == "alice"
 
 
+def test_successful_delivery_is_marked_processed(client_and_db):
+    client, db = client_and_db
+    _post(client, _pr_payload("opened"))
+    with db.session() as s:
+        assert s.query(GithubEvent).one().processed is True
+
+
+def test_downstream_failure_leaves_delivery_reprocessable(client_and_db, monkeypatch):
+    """A DB failure after the event is recorded must NOT mark it processed, so a
+    GitHub redelivery reprocesses it instead of silently dropping the review."""
+    client, db = client_and_db
+    from reva.db import writers as w
+
+    real = w.upsert_pending_review
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient db blip")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(w, "upsert_pending_review", flaky)
+
+    # First delivery: downstream write fails. Event recorded but not processed.
+    with pytest.raises(RuntimeError):
+        _post(client, _pr_payload("opened", sha="aabb"), delivery="retry-me")
+    with db.session() as s:
+        assert s.query(GithubEvent).one().processed is False
+        assert s.query(PendingReview).count() == 0
+
+    # GitHub redelivers the same id: now it completes.
+    resp = _post(client, _pr_payload("opened", sha="aabb"), delivery="retry-me")
+    assert resp.json() == {"status": "accepted"}
+    with db.session() as s:
+        assert s.query(PendingReview).count() == 1
+        assert s.query(GithubEvent).one().processed is True
+
+
 def test_unknown_event_type_accepted_and_stored(client_and_db):
     client, db = client_and_db
     resp = _post(client, {"action": "labeled"}, event="issues")
@@ -345,8 +384,32 @@ def test_comment_review_by_bot_is_ignored(client_and_db):
 # --- health -------------------------------------------------------------------
 
 
+class _FakeRedis:
+    def __init__(self, ok=True):
+        self._ok = ok
+
+    def ping(self):
+        if not self._ok:
+            raise RuntimeError("redis down")
+        return True
+
+
 def test_health_returns_ok(client_and_db):
     client, _ = client_and_db
+    from app.dependencies import get_redis
+    app.dependency_overrides[get_redis] = lambda: _FakeRedis(ok=True)
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok", "db": True}
+    assert resp.json() == {"status": "ok", "db": True, "redis": True}
+
+
+def test_health_degraded_when_redis_down(client_and_db):
+    client, _ = client_and_db
+    from app.dependencies import get_redis
+    app.dependency_overrides[get_redis] = lambda: _FakeRedis(ok=False)
+    resp = client.get("/health")
+    assert resp.status_code == 503
+    body = resp.json()
+    assert body["status"] == "degraded"
+    assert body["db"] is True
+    assert body["redis"] is False

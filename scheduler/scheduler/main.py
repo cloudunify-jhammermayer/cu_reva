@@ -12,11 +12,13 @@ from __future__ import annotations
 import signal
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import structlog
 from redis import Redis
 from rq import Queue
 
+from reva.db import writers
 from reva.db.engine import Database, create_engine_from_url
 from scheduler.monitor import Monitor
 from scheduler.poller import Poller
@@ -86,6 +88,17 @@ def main() -> None:
             monitor.check()
         except Exception:
             logger.exception("scheduler_monitor_error")
+
+        try:
+            writers.reap_stale_running_reviews(db, settings.stale_running_seconds)
+        except Exception:
+            logger.exception("scheduler_reaper_error")
+
+        # Liveness heartbeat — the container healthcheck checks its freshness.
+        try:
+            Path(settings.heartbeat_path).touch()
+        except OSError:
+            logger.warning("scheduler_heartbeat_write_failed", path=settings.heartbeat_path)
 
         for _ in range(settings.poll_interval_seconds):
             if stop:

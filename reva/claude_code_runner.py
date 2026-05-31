@@ -14,6 +14,7 @@ import base64
 import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -24,10 +25,33 @@ from pathlib import Path
 from reva.errors import PermanentError, TransientError
 from reva.types import ClaudeResponse
 
+# owner/name become path segments under the repo cache; constrain them to safe
+# GitHub-style identifiers (must start alphanumeric; no separators or "..") so a
+# malformed/forged repo identity can never escape the cache dir.
+_SAFE_REPO_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _validate_repo_component(value: str, kind: str) -> None:
+    if not _SAFE_REPO_COMPONENT.match(value or "") or ".." in value:
+        raise PermanentError(f"unsafe repo {kind}: {value!r}")
+
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEEP_MODEL = "claude-opus-4-7"
 _CLAUDE_BIN = "claude"
-_SUBPROCESS_TIMEOUT = 1500  # seconds; large PRs can take 10–15 minutes
+SUBPROCESS_TIMEOUT = 1500  # seconds; large PRs can take 10–15 minutes
+
+# Headroom for git clone/fetch + GitHub posting that bracket the subprocess
+# inside one RQ job. The RQ job_timeout MUST exceed SUBPROCESS_TIMEOUT, or the
+# work-horse is SIGKILLed mid-review (wasting spend, losing the result). Every
+# enqueue of a review/audit job derives its timeout from REVIEW_JOB_TIMEOUT so
+# the two can never drift apart again.
+JOB_TIMEOUT_BUFFER = 300
+REVIEW_JOB_TIMEOUT = SUBPROCESS_TIMEOUT + JOB_TIMEOUT_BUFFER  # 1800s
+
+# Bound every git op (clone/fetch/checkout/reset). Held under the per-repo
+# flock, so an unbounded git that hangs on the network would stall every job
+# for that repo until a container restart.
+_GIT_TIMEOUT = 300  # seconds
 
 # Only these host env vars are forwarded to the Claude CLI subprocess. The CLI
 # runs repo-directed tools with --dangerously-skip-permissions, so the worker's
@@ -67,6 +91,8 @@ class ClaudeCodeRunner:
         a flock on a sibling lock file so it works across worker processes
         sharing the repo-cache volume. Different repos never block each other.
         """
+        _validate_repo_component(owner, "owner")
+        _validate_repo_component(name, "name")
         lock_dir = os.path.join(self.repo_cache_dir, owner)
         os.makedirs(lock_dir, exist_ok=True)
         lock_path = os.path.join(lock_dir, f".{name}.lock")
@@ -93,6 +119,8 @@ class ClaudeCodeRunner:
             TransientError: git clone/fetch failure (network, auth expiry).
             PermanentError: git checkout failure (SHA not found in repo).
         """
+        _validate_repo_component(owner, "owner")
+        _validate_repo_component(name, "name")
         repo_path = os.path.join(self.repo_cache_dir, owner, name)
         # Authenticate via a transient http.extraHeader instead of embedding the
         # token in the remote URL, so it is never written to <repo>/.git/config
@@ -164,7 +192,7 @@ class ClaudeCodeRunner:
                 env=env,
                 capture_output=True,
                 text=True,
-                timeout=_SUBPROCESS_TIMEOUT,
+                timeout=SUBPROCESS_TIMEOUT,
             )
             if proc.returncode != 0:
                 raise _exit_to_error(proc.returncode, proc.stderr or proc.stdout)
@@ -256,9 +284,22 @@ class ClaudeCodeRunner:
         return args[0]
 
     def _run_git(self, args: list[str], error_class: type[Exception]) -> None:
-        result = subprocess.run(["git"] + args, capture_output=True, text=True)
+        cmd = self._git_subcommand(args)
+        try:
+            result = subprocess.run(
+                ["git"] + args,
+                capture_output=True,
+                text=True,
+                timeout=_GIT_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired as exc:
+            # A timeout is always transient (network/load), regardless of the
+            # caller's error_class — retrying is the right move, and it must not
+            # be allowed to hang forever under the per-repo lock.
+            raise TransientError(
+                f"git {cmd} timed out after {_GIT_TIMEOUT}s"
+            ) from exc
         if result.returncode != 0:
-            cmd = self._git_subcommand(args)
             raise error_class(f"git {cmd} failed: {result.stderr[:200]}")
 
     def evict_stale_repos(self, ttl_days: int) -> None:

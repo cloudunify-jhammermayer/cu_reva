@@ -212,7 +212,7 @@ def _budget_decline_if_exceeded(ctx: WorkerContext, log) -> ReviewResult | None:
     if ctx.daily_budget_usd is None:
         return None
     spent = writers.sum_estimated_cost_since(
-        ctx.db, datetime.now(timezone.utc) - timedelta(days=1)
+        ctx.db, datetime.now(timezone.utc) - timedelta(days=1), serialize=True
     )
     if spent < ctx.daily_budget_usd:
         return None
@@ -280,26 +280,42 @@ def _post_result_to_github(
 
         if result.status == "completed":
             # Persist each GitHub ID immediately so a retry after a partial post
-            # reuses the existing PR review instead of creating a duplicate.
+            # reuses the existing PR review instead of creating a duplicate. If
+            # a prior attempt crashed *between* the GitHub create and the DB
+            # write, the id is on GitHub but not in our row — recover it before
+            # posting so the retry doesn't duplicate.
             existing_check_id, existing_review_id = writers.get_posted_github_ids(ctx.db, run_id)
             review_id = existing_review_id
             if review_id is None:
-                review_id = _post_completed_review(
-                    ctx, params, result, run_id, token, owner, name, pr_number
+                review_id = ctx.github.find_pr_review_id(
+                    token, owner, name, pr_number, marker=f"Run #{run_id}"
                 )
+                if review_id is None:
+                    review_id = _post_completed_review(
+                        ctx, params, result, run_id, token, owner, name, pr_number
+                    )
                 writers.attach_github_ids(ctx.db, run_id, review_id=review_id)
             if existing_check_id is None:
-                check_run_id = _post_completed_check(ctx, params, result, run_id, token, owner, name)
+                check_run_id = _check_run_id_or_recover(
+                    ctx, token, owner, name, params.head_sha,
+                    lambda: _post_completed_check(ctx, params, result, run_id, token, owner, name),
+                )
                 writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id)
             _backfill_comment_ids(ctx, run_id, token, owner, name, pr_number, review_id)
             if result.delta_base_sha:
                 _verify_and_resolve_findings(ctx, params, result, token, owner, name, pr_number, run_id)
         elif result.status == "declined":
-            check_run_id = _post_declined(ctx, params, result, run_id, token, owner, name, pr_number)
+            check_run_id = _check_run_id_or_recover(
+                ctx, token, owner, name, params.head_sha,
+                lambda: _post_declined(ctx, params, result, run_id, token, owner, name, pr_number),
+            )
             writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id)
         elif result.status == "stale":
-            check_run_id = _post_simple_check_run(
-                ctx, params, result, run_id, token, owner, name, conclusion="skipped"
+            check_run_id = _check_run_id_or_recover(
+                ctx, token, owner, name, params.head_sha,
+                lambda: _post_simple_check_run(
+                    ctx, params, result, run_id, token, owner, name, conclusion="skipped"
+                ),
             )
             writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id)
     except TransientError:
@@ -311,6 +327,17 @@ def _post_result_to_github(
 
 
 # ---------------------------------------------------------------- post paths
+
+
+def _check_run_id_or_recover(ctx, token, owner, name, head_sha, create):
+    """Return our existing Check Run id on this SHA, else create one.
+
+    Recovers from a crash between a prior attempt's GitHub create and the DB
+    write of its id, so a retry reuses the existing Check Run rather than
+    posting a duplicate red/green check.
+    """
+    found = ctx.github.find_check_run_id(token, owner, name, head_sha, CHECK_RUN_NAME)
+    return found if found is not None else create()
 
 
 def _post_completed_review(

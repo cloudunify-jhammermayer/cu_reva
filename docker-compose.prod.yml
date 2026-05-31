@@ -21,6 +21,16 @@ services:
       - certbot_www:/var/www/certbot:ro
     depends_on:
       - api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/nginx-health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
     networks:
       - reva-net
     restart: unless-stopped
@@ -31,7 +41,7 @@ services:
         max-file: "3"
 
   certbot:
-    image: certbot/certbot
+    image: certbot/certbot:v2.11.0
     volumes:
       - letsencrypt_data:/etc/letsencrypt
       - certbot_www:/var/www/certbot
@@ -39,6 +49,11 @@ services:
       /bin/sh -c 'trap exit TERM;
       while :; do certbot renew --webroot -w /var/www/certbot --quiet;
       sleep 12h; done'
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
     networks:
       - reva-net
     restart: unless-stopped
@@ -70,6 +85,20 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.urlopen('http://localhost:8080/health', timeout=3)\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
     networks:
       - reva-net
     restart: unless-stopped
@@ -97,6 +126,18 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+    healthcheck:
+      # Liveness via the heartbeat file the loop touches each tick (see main.py).
+      test: ["CMD-SHELL", "find /tmp/reva-scheduler-heartbeat -mmin -2 | grep -q ."]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
     networks:
       - reva-net
     restart: unless-stopped
@@ -138,6 +179,11 @@ services:
     secrets:
       - github_private_key
       - anthropic_api_key
+    # On deploy/stop, give RQ's warm shutdown time to finish an in-flight review
+    # before Docker SIGKILLs it. Matches the review job timeout (1800s) plus a
+    # small margin. A review still in flight past this is SIGKILLed and then
+    # swept by the scheduler's stale-running reaper (REVA_STALE_RUNNING_SECONDS).
+    stop_grace_period: 1830s
     depends_on:
       postgres:
         condition: service_healthy
@@ -161,7 +207,7 @@ services:
         max-file: "5"
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.4-alpine
     environment:
       POSTGRES_DB: reviews
       POSTGRES_USER: review
@@ -173,6 +219,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 256M
     networks:
       - reva-net
     restart: unless-stopped
@@ -183,8 +237,18 @@ services:
         max-file: "3"
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 320M
     networks:
       - reva-net
     restart: unless-stopped

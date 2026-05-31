@@ -133,3 +133,25 @@ def test_admin_review_requires_api_key_when_set(client_and_db):
         json={"owner": "acme", "repo": "widgets", "pr_number": 42, "installation_id": 99},
     )
     assert resp.status_code == 401
+
+
+def test_auth_fails_closed_when_required_but_key_missing(client_and_db):
+    """If auth is required but no key is configured, the API must NOT serve the
+    request (fail closed), rather than silently allowing it through."""
+    client, _ = client_and_db
+    settings = Settings(
+        database_url="sqlite:///:memory:",
+        github_app_id=1,
+        github_webhook_secret="x",
+        github_private_key="x",
+        redis_url="redis://localhost:6379/0",
+        api_key="",
+        require_api_key=True,
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
+
+    resp = client.post(
+        "/api/v1/admin/review",
+        json={"owner": "acme", "repo": "widgets", "pr_number": 42, "installation_id": 99},
+    )
+    assert resp.status_code == 503

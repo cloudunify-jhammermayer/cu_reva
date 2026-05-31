@@ -218,6 +218,34 @@ def test_enqueue_uses_retry_config(db_and_ids):
     assert retry.intervals == [30, 120, 300]
 
 
+def test_claim_locks_row_with_skip_locked_on_postgres():
+    """Two schedulers must not both claim the same pending review. The claim
+    fetches the row FOR UPDATE SKIP LOCKED so a second poller skips a row another
+    is mid-consuming. (SQLite ignores the clause; this asserts the PG SQL.)"""
+    from sqlalchemy.dialects import postgresql
+
+    from scheduler.poller import _claim_stmt
+
+    sql = str(_claim_stmt(1).compile(dialect=postgresql.dialect())).upper()
+    assert "FOR UPDATE" in sql
+    assert "SKIP LOCKED" in sql
+
+
+def test_review_job_timeout_exceeds_subprocess_timeout(db_and_ids):
+    """RQ must not SIGKILL the work-horse while the CLI subprocess is still
+    allowed to run. The enqueued job_timeout must exceed the subprocess timeout
+    (plus headroom for git + GitHub posting)."""
+    from reva.claude_code_runner import SUBPROCESS_TIMEOUT
+
+    db, repo_id, pr_id = db_and_ids
+    _seed_pending(db, repo_id, pr_id)
+    poller, queue = _poller(db)
+    poller.poll()
+
+    job_timeout = queue.enqueued[0]["kwargs"]["job_timeout"]
+    assert job_timeout > SUBPROCESS_TIMEOUT
+
+
 def test_multiple_due_reviews_all_enqueued(db_and_ids):
     db, repo_id, _ = db_and_ids
     # Add a second PR

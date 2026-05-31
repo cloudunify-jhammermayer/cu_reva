@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Engine, case, func, select, text
+from sqlalchemy import Engine, case, func, select
 
 from reva.db.engine import Database
 from reva.db.models import PullRequest, Repository, ReviewFeedback, ReviewFinding, ReviewRun

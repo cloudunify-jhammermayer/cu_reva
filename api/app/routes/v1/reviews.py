@@ -4,8 +4,9 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.dependencies import get_db
+from app.pagination import clamp_limit, clamp_offset
 from app.queries import reviews as q
-from app.schemas.reviews import FindingPage, ReviewDetail, ReviewPage, ReviewSummary
+from app.schemas.reviews import ReviewDetail, ReviewPage, ReviewSummary
 from reva.db.engine import Database
 
 router = APIRouter()
@@ -21,7 +22,8 @@ def list_reviews(
     offset: int = 0,
     db: Database = Depends(get_db),
 ) -> dict:
-    limit = min(limit, 200)
+    limit = clamp_limit(limit, 200)
+    offset = clamp_offset(offset)
     statuses = [s.strip() for s in status.split(",")] if status else None
     items, total = q.list_reviews(db, repo=repo, statuses=statuses, author=author,
                                   limit=limit, offset=offset)

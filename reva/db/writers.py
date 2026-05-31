@@ -16,11 +16,24 @@ longer transaction can use `Database.session()` directly.
 from __future__ import annotations
 
 import functools
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
+
+from reva.cost import estimate_cost
+from reva.db.engine import Database
+from reva.db.models import (
+    GithubEvent,
+    PendingReview,
+    PullRequest,
+    Repository,
+    ReviewFinding,
+    ReviewRun,
+    TicketAnalysis,
+)
+from reva.types import ClaudeResponse, Finding, JobParams, ReviewResult, TicketJobParams
 
 logger = structlog.get_logger()
 
@@ -43,19 +56,6 @@ def _retry_on_conflict(fn):
             return fn(*args, **kwargs)
 
     return wrapper
-
-from reva.cost import estimate_cost
-from reva.db.engine import Database
-from reva.db.models import (
-    GithubEvent,
-    PendingReview,
-    PullRequest,
-    Repository,
-    ReviewFinding,
-    ReviewRun,
-    TicketAnalysis,
-)
-from reva.types import ClaudeResponse, Finding, JobParams, ReviewResult, TicketJobParams
 
 
 # --- review_runs writers -----------------------------------------------------
@@ -137,6 +137,37 @@ def record_review_stale(db: Database, params: JobParams) -> int:
         return run.id
 
 
+def reap_stale_running_reviews(db: Database, older_than_seconds: int) -> int:
+    """Fail review_runs stuck in `running` longer than older_than_seconds.
+
+    A worker SIGKILLed mid-review (forced container stop, OOM, crash) leaves its
+    row in `running` forever — no terminal write ever lands. Called periodically
+    by the scheduler with a threshold well above the job timeout, so only truly
+    dead runs are swept (never a live, long-running review).
+
+    Returns the number of rows reaped.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=older_than_seconds)
+    with db.session() as s:
+        stale = s.execute(
+            select(ReviewRun).where(
+                ReviewRun.status == "running",
+                ReviewRun.started_at < cutoff,
+            )
+        ).scalars().all()
+        for run in stale:
+            run.status = "failed"
+            run.error_class = "stale"
+            run.error_message = (
+                f"Reaped: stuck in 'running' >{older_than_seconds}s "
+                "(worker likely died mid-review)."
+            )
+            run.completed_at = datetime.now(timezone.utc)
+        if stale:
+            logger.warning("review_runs_reaped", count=len(stale))
+        return len(stale)
+
+
 def record_review_failed(
     db: Database, params: JobParams, error_class: str, message: str
 ) -> int:
@@ -176,15 +207,30 @@ def is_already_posted(db: Database, params: JobParams) -> bool:
     return bool(row and row[0] is not None and row[1] != "failed")
 
 
-def sum_estimated_cost_since(db: Database, since: datetime) -> float:
+# Arbitrary fixed key for the budget advisory lock ("REVB" as an int).
+_BUDGET_ADVISORY_LOCK_KEY = 0x52455642
+
+
+def sum_estimated_cost_since(db: Database, since: datetime, *, serialize: bool = False) -> float:
     """Total estimated USD cost of review_runs created at/after `since`.
 
     Used by the worker's rolling spend cap. Counts every run that incurred
     cost (completed reviews); declined/stale rows have NULL cost and don't add.
+
+    With serialize=True the read is taken under a transaction-level advisory
+    lock on Postgres, so concurrent workers evaluate the cap one at a time
+    rather than racing on interleaved reads. (No-op on SQLite.) Residual
+    overshoot is still bounded by the number of concurrent workers — at most one
+    in-flight review each — which is accepted; the cap is a rolling guardrail.
     """
     from sqlalchemy import func as _func
 
     with db.session() as s:
+        if serialize and s.get_bind().dialect.name == "postgresql":
+            s.execute(
+                text("SELECT pg_advisory_xact_lock(:k)"),
+                {"k": _BUDGET_ADVISORY_LOCK_KEY},
+            )
         total = s.execute(
             select(_func.coalesce(_func.sum(ReviewRun.estimated_cost_usd), 0.0)).where(
                 ReviewRun.created_at >= since
@@ -373,20 +419,29 @@ def record_github_event(
     sender_login: str | None,
     payload: dict,
 ) -> int | None:
-    """Idempotent insert keyed on delivery_id. Returns the row id, or None
-    if a row with this delivery_id already existed (including concurrent inserts)."""
+    """Record a delivery and return the row id to process, or None to skip.
+
+    Idempotent on delivery_id, but keyed on the `processed` flag rather than
+    mere existence: a delivery that was recorded but never marked processed
+    (a prior handler crashed mid-way) is handed back so a GitHub redelivery can
+    finish it. Only a *fully processed* delivery is skipped as a duplicate.
+    Call mark_event_processed() once handling succeeds.
+    """
     try:
         with db.session() as s:
             existing = s.execute(
-                select(GithubEvent.id).where(GithubEvent.delivery_id == delivery_id)
-            ).first()
-            if existing:
-                logger.info(
-                    "github_event_duplicate",
-                    delivery_id=delivery_id,
-                    event_type=event_type,
-                )
-                return None
+                select(GithubEvent).where(GithubEvent.delivery_id == delivery_id)
+            ).scalar_one_or_none()
+            if existing is not None:
+                if existing.processed:
+                    logger.info(
+                        "github_event_duplicate",
+                        delivery_id=delivery_id,
+                        event_type=event_type,
+                    )
+                    return None
+                # Recorded but never finished — let the caller reprocess it.
+                return existing.id
             ev = GithubEvent(
                 delivery_id=delivery_id,
                 event_type=event_type,
@@ -401,6 +456,19 @@ def record_github_event(
     except IntegrityError:
         # Concurrent request inserted the same delivery_id between our SELECT and INSERT.
         return None
+
+
+def mark_event_processed(db: Database, event_id: int) -> None:
+    """Mark a github_events row fully processed so redeliveries are skipped.
+
+    Called only after all downstream work (upserts, enqueue) for the delivery
+    has committed — so a crash before this leaves the event reprocessable.
+    """
+    with db.session() as s:
+        ev = s.get(GithubEvent, event_id)
+        if ev is not None:
+            ev.processed = True
+            ev.processed_at = datetime.now(timezone.utc)
 
 
 def lookup_pull_request(

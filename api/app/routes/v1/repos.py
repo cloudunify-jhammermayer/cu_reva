@@ -6,6 +6,7 @@ from rq import Queue
 from app.dependencies import get_db, get_queue
 from app.queries import repos as q
 from app.schemas.repos import RepoPage, RepoSummary
+from reva.claude_code_runner import REVIEW_JOB_TIMEOUT
 from reva.db.engine import Database
 from reva.db.repo_lookup import get_repo_meta
 
@@ -38,5 +39,6 @@ def trigger_audit(
             "repository_id": repository_id,
             "installation_id": meta["installation_id"],
         },
+        job_timeout=REVIEW_JOB_TIMEOUT,
     )
     return {"job_id": job.id, "repository_id": repository_id}

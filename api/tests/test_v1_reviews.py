@@ -242,3 +242,31 @@ def test_reviews_limit_capped_at_200(client_and_db):
     client, _ = client_and_db
     resp = client.get("/api/v1/reviews?limit=9999")
     assert resp.status_code == 200  # capped internally, doesn't error
+
+
+def test_reviews_offset_and_limit_are_clamped(client_and_db, monkeypatch):
+    """A huge offset would otherwise trigger an expensive deep-offset scan."""
+    client, _ = client_and_db
+    from app.routes.v1 import reviews as r
+
+    captured: dict = {}
+
+    def fake_list(db, **kwargs):
+        captured.update(kwargs)
+        return [], 0
+
+    monkeypatch.setattr(r.q, "list_reviews", fake_list)
+    client.get("/api/v1/reviews?offset=999999999&limit=99999")
+    assert captured["offset"] == 100_000  # clamped to max
+    assert captured["limit"] == 200       # clamped to max
+
+
+def test_reviews_negative_pagination_is_floored(client_and_db, monkeypatch):
+    client, _ = client_and_db
+    from app.routes.v1 import reviews as r
+
+    captured: dict = {}
+    monkeypatch.setattr(r.q, "list_reviews", lambda db, **kw: (captured.update(kw), ([], 0))[1])
+    client.get("/api/v1/reviews?offset=-5&limit=0")
+    assert captured["offset"] == 0
+    assert captured["limit"] == 1

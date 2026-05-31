@@ -61,8 +61,19 @@ class FakeGitHub:
     created_issue_comments: list[dict] = field(default_factory=list)
     diff_fetch_count: int = 0
 
+    # Simulate a review/check already on GitHub from a prior attempt that
+    # crashed before persisting the id (None = nothing recoverable).
+    recoverable_review_id: int | None = None
+    recoverable_check_run_id: int | None = None
+
     def get_installation_token(self, installation_id: int) -> str:
         return self.installation_token
+
+    def find_pr_review_id(self, token, owner, repo, pr_number, marker) -> int | None:
+        return self.recoverable_review_id
+
+    def find_check_run_id(self, token, owner, repo, head_sha, name) -> int | None:
+        return self.recoverable_check_run_id
 
     def get_pull_request_diff(self, token, owner, repo, pr_number) -> str:
         self.diff_fetch_count += 1
@@ -344,6 +355,42 @@ def test_retry_after_check_run_failure_does_not_duplicate_pr_review(ctx_and_fake
     run_review(_params(s))
     assert len(gh.created_pr_reviews) == 1  # still exactly one
     assert len(gh.created_check_runs) == 1
+
+
+def test_recovers_orphaned_pr_review_from_github(ctx_and_fakes):
+    """Crash between create_pr_review (GitHub) and attach_github_ids (DB) leaves
+    the id unpersisted. A retry must find the existing review on GitHub and
+    reuse it rather than posting a duplicate."""
+    s = ctx_and_fakes
+    s["reviewer"].result = _completed_result()
+    gh = s["github"]
+    gh.recoverable_review_id = 999  # already on GitHub from the crashed attempt
+
+    run_review(_params(s))
+
+    # No new PR review created — the orphaned one was reused...
+    assert gh.created_pr_reviews == []
+    # ...and its id was persisted so future retries short-circuit.
+    with s["db"].session() as session:
+        from reva.db.models import ReviewRun
+        run = session.query(ReviewRun).one()
+        assert run.review_id == 999
+
+
+def test_recovers_orphaned_check_run_from_github(ctx_and_fakes):
+    """Same create->persist window for the Check Run: reuse, don't duplicate."""
+    s = ctx_and_fakes
+    s["reviewer"].result = _completed_result()
+    gh = s["github"]
+    gh.recoverable_check_run_id = 888
+
+    run_review(_params(s))
+
+    assert gh.created_check_runs == []
+    with s["db"].session() as session:
+        from reva.db.models import ReviewRun
+        run = session.query(ReviewRun).one()
+        assert run.check_run_id == 888
 
 
 def test_requeue_of_failed_run_is_not_skipped(ctx_and_fakes):

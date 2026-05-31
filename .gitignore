@@ -4,6 +4,9 @@ secrets/
 *.pem
 *.key
 
+# Database backups (scripts/backup.sh)
+backups/
+
 # Python
 __pycache__/
 *.py[cod]

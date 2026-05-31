@@ -198,6 +198,52 @@ def test_record_review_failed_stores_error_class(db, seeded):
         assert run.error_message == "bad json"
 
 
+def _age_running_run(db: Database, run_id: int, seconds: int) -> None:
+    """Backdate a running run's started_at to simulate a long-dead worker."""
+    with db.session() as s:
+        run = s.get(ReviewRun, run_id)
+        run.started_at = datetime.now(timezone.utc) - timedelta(seconds=seconds)
+
+
+def test_reap_stale_running_marks_old_running_as_failed(db, seeded):
+    rid = writers.record_review_started(db, _params(seeded))
+    _age_running_run(db, rid, seconds=4000)
+
+    reaped = writers.reap_stale_running_reviews(db, older_than_seconds=3600)
+
+    assert reaped == 1
+    with db.session() as s:
+        run = s.get(ReviewRun, rid)
+        assert run.status == "failed"
+        assert run.error_class == "stale"
+        assert run.completed_at is not None
+
+
+def test_reap_stale_running_leaves_recent_running_untouched(db, seeded):
+    rid = writers.record_review_started(db, _params(seeded))
+    _age_running_run(db, rid, seconds=60)
+
+    reaped = writers.reap_stale_running_reviews(db, older_than_seconds=3600)
+
+    assert reaped == 0
+    with db.session() as s:
+        assert s.get(ReviewRun, rid).status == "running"
+
+
+def test_reap_stale_running_ignores_completed_runs(db, seeded):
+    rid = writers.record_review_completed(
+        db, _params(seeded),
+        ReviewResult(status="completed", summary="ok", risk_level="low"),
+    )
+    _age_running_run(db, rid, seconds=99999)  # old, but not 'running'
+
+    reaped = writers.reap_stale_running_reviews(db, older_than_seconds=3600)
+
+    assert reaped == 0
+    with db.session() as s:
+        assert s.get(ReviewRun, rid).status == "completed"
+
+
 def test_attach_github_ids(db, seeded):
     rid = writers.record_review_completed(
         db,
@@ -209,6 +255,19 @@ def test_attach_github_ids(db, seeded):
         run = s.get(ReviewRun, rid)
         assert run.check_run_id == 111
         assert run.review_id == 222
+
+
+def test_sum_estimated_cost_since_serialize_is_safe_on_sqlite(db, seeded):
+    """The serialized spend read (used by the budget guard to make the check
+    non-interleaving on Postgres) must still return the correct total on
+    SQLite, where the advisory lock is a no-op."""
+    writers.record_review_completed(
+        db, _params(seeded),
+        ReviewResult(status="completed", summary="s", risk_level="low",
+                     estimated_cost_usd=1.25),
+    )
+    since = datetime.now(timezone.utc) - timedelta(days=1)
+    assert writers.sum_estimated_cost_since(db, since, serialize=True) == pytest.approx(1.25)
 
 
 # --- upserts -----------------------------------------------------------------
@@ -263,29 +322,36 @@ def test_upsert_pending_review_overwrites_scheduled_at(db, seeded):
         assert row.scheduled_at.replace(tzinfo=None) == t2.replace(tzinfo=None)
 
 
-def test_record_github_event_is_idempotent_on_delivery_id(db):
-    eid1 = writers.record_github_event(
-        db,
-        delivery_id="abc-123",
-        event_type="pull_request",
-        action="opened",
-        repository_full_name="acme/widgets",
-        sender_login="alice",
-        payload={"hello": "world"},
+def _record_event(db, delivery_id="abc-123", **overrides):
+    base = dict(
+        delivery_id=delivery_id, event_type="pull_request", action="opened",
+        repository_full_name="acme/widgets", sender_login="alice", payload={},
     )
-    eid2 = writers.record_github_event(
-        db,
-        delivery_id="abc-123",
-        event_type="pull_request",
-        action="synchronize",
-        repository_full_name="acme/widgets",
-        sender_login="bob",
-        payload={"hello": "different"},
-    )
+    base.update(overrides)
+    return writers.record_github_event(db, **base)
+
+
+def test_record_github_event_stores_one_row_per_delivery(db):
+    eid1 = _record_event(db)
+    _record_event(db, action="synchronize")
     assert eid1 is not None
-    assert eid2 is None  # duplicate skipped
     with db.session() as s:
         assert s.query(GithubEvent).count() == 1
+
+
+def test_unprocessed_redelivery_is_reprocessable(db):
+    """A delivery recorded but not yet marked processed (prior attempt crashed
+    mid-handling) must be handed back for reprocessing, not skipped."""
+    eid1 = _record_event(db)
+    eid2 = _record_event(db)
+    assert eid2 == eid1  # same row, returned again so the retry can finish
+
+
+def test_processed_redelivery_is_skipped(db):
+    eid1 = _record_event(db)
+    writers.mark_event_processed(db, eid1)
+    eid2 = _record_event(db)
+    assert eid2 is None  # genuine duplicate of fully-processed work
 
 
 # --- structured logging in writers -------------------------------------------
@@ -317,10 +383,11 @@ def test_upsert_repository_no_log_on_update(db):
 
 
 def test_record_github_event_logs_duplicate(db):
-    writers.record_github_event(
+    eid = writers.record_github_event(
         db, delivery_id="dup-001", event_type="pull_request", action="opened",
         repository_full_name="acme/widgets", sender_login="alice", payload={},
     )
+    writers.mark_event_processed(db, eid)
     with structlog.testing.capture_logs() as logs:
         writers.record_github_event(
             db, delivery_id="dup-001", event_type="pull_request", action="opened",

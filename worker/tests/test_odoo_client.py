@@ -39,6 +39,16 @@ def _mock_post(status: int = 200, body: str = '{"ok":true}', exc=None):
     return post
 
 
+def test_rejects_cloud_metadata_callback_url():
+    with pytest.raises(ValueError):
+        OdooCallbackClient(callback_url="http://169.254.169.254/write-field", api_key=_KEY)
+
+
+def test_allows_internal_callback_url():
+    # Odoo is commonly on an internal network — must be permitted.
+    OdooCallbackClient(callback_url="http://10.0.0.9:8069/api/reva/write-field", api_key=_KEY)
+
+
 def test_write_field_success(monkeypatch):
     monkeypatch.setattr("reva.odoo_client.httpx.post", _mock_post(200))
     _client().write_field(**_kwargs())  # no exception

@@ -159,6 +159,38 @@ class GitHubClient:
         )
         return response.text
 
+    def find_pr_review_id(
+        self, token: str, owner: str, repo: str, pr_number: int, marker: str
+    ) -> int | None:
+        """Return the id of our PR review whose body contains `marker`, else None.
+
+        Used to recover from a crash between posting a review and persisting its
+        id, so a retry reuses the existing review instead of duplicating it. The
+        marker is the run footer (e.g. "Run #77"), unique per review run.
+        """
+        response = self._get(token, f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews")
+        match = None
+        for review in response.json():
+            if marker in (review.get("body") or ""):
+                match = review["id"]  # keep the last (newest) match
+        return match
+
+    def find_check_run_id(
+        self, token: str, owner: str, repo: str, head_sha: str, name: str
+    ) -> int | None:
+        """Return the id of our Check Run named `name` on `head_sha`, else None.
+
+        Recovers a Check Run posted by a prior attempt that crashed before its
+        id was persisted, so a retry reuses it instead of posting a duplicate.
+        """
+        response = self._get(
+            token,
+            f"/repos/{owner}/{repo}/commits/{head_sha}/check-runs",
+            params={"check_name": name},
+        )
+        runs = response.json().get("check_runs") or []
+        return runs[0]["id"] if runs else None
+
     # --- Writes -------------------------------------------------------------
 
     def create_check_run(
