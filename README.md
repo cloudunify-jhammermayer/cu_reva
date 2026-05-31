@@ -9,7 +9,7 @@ REVA uses **two Claude clients** (see `docs/superpowers/specs/2026-05-25-headles
 - **Headless Claude Code CLI** (`reva/claude_code_runner.py`) — runs against a *locally cloned copy of the repo* at the head SHA, so Claude can read connected files, not just the diff. Used for all PR review modes (diff / full / deep) and repo audits. Output is the `submit_review` tool schema written to a temp JSON file.
 - **Direct Messages API** (`reva/claude_client.py`) — used for the structured/fast paths: Odoo ticket analysis and inline-comment reply answers.
 
-> **Doc status:** the design specs under `docs/superpowers/` and the code are authoritative. The numbered design docs in `doc/` and `HANDOFF.md` describe the *original* Messages-API-only design and are kept as history — don't treat them as current.
+> **Doc status:** the design specs under `docs/superpowers/` and the code are authoritative. The numbered design docs in `doc/` describe the *original* Messages-API-only design and are kept as history — don't treat them as current. `HANDOFF.md` is the current work handoff / resume point.
 
 ## What's here
 
