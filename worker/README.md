@@ -15,7 +15,7 @@ directory holds only worker-specific orchestration glue.
 |---|---|
 | `worker/reviewer.py` | **Pure** PR-review orchestration. Defines the `GitHubReader` + `RepoLookup` Protocols. Fetches the diff (or the *compare* diff vs the last completed review, for delta reviews), applies size/skip guards, clones the repo via `ClaudeCodeRunner`, runs the headless CLI under a per-repo lock, validates findings, caps to 15 by severity × confidence, recomputes `risk_level`. Returns a `ReviewResult` — no DB writes, no GitHub posts. |
 | `worker/auditor.py` | **Pure** full-repo audit orchestration. Clones the default branch and runs the `reva-repo-audit` skill. Returns an `AuditResult`. |
-| `worker/runner.py` | All the **side effects**: `WorkerContext`, `build_worker_context(settings)`, and the RQ entry points `run_review`, `run_comment_reply`. Idempotent on retry: persists each GitHub ID immediately after posting so a retry never duplicates a PR review, and skips a job whose Check Run already posted (excluding `failed` runs). Also runs the delta-review finding-resolution pass. |
+| `worker/runner.py` | All the **side effects**: `WorkerContext`, `build_worker_context(settings)`, and the RQ entry points `run_review`, `run_comment_reply`. Idempotent on retry: persists each GitHub ID immediately after posting, and if a prior attempt crashed *between* the GitHub create and that DB write, recovers the existing PR review (by `Run #<id>` marker) / Check Run (by name on the head SHA) from GitHub instead of duplicating; skips a job whose Check Run already posted (excluding `failed` runs). Enforces the rolling daily spend cap (serialized via a Postgres advisory lock). Also runs the delta-review finding-resolution pass. |
 | `worker/ticket_runner.py` | `run_ticket_analysis` — Odoo ticket analysis via the Messages API (`TicketAnalyzer`), then write-back to Odoo. |
 | `worker/audit_tasks.py` | `run_audit` — persists audit lifecycle rows and invokes `Auditor`. |
 | `worker/tasks.py`, `worker/ticket_tasks.py` | **Stable enqueue paths** — thin re-exports so `worker.tasks.run_review` / `worker.ticket_tasks.run_ticket_analysis` stay valid even if internal layout changes. |
@@ -37,7 +37,13 @@ directory holds only worker-specific orchestration glue.
   GitHub side effects makes it fast to unit-test with fakes and lets the same
   code run outside the worker. Side effects are concentrated in `runner.py`.
 - **Idempotent on natural keys.** RQ retries and webhook redeliveries must not
-  duplicate Check Runs, PR reviews, or rows. See [`../reva/db/README.md`](../reva/db/README.md).
+  duplicate Check Runs, PR reviews, or rows. The create→persist crash window is
+  closed by recovering the existing object from GitHub on retry. See
+  [`../reva/db/README.md`](../reva/db/README.md).
+- **Bounded work.** The headless CLI subprocess and every `git` clone/fetch run
+  under timeouts, and the RQ job timeout is derived from the subprocess timeout
+  (always larger), so a long review is never SIGKILLed mid-run. A worker killed
+  anyway leaves a `running` row that the scheduler's reaper later fails.
 - **Retries belong to RQ, not the clients.** Clients raise `TransientError` /
   `PermanentError`; RQ decides what to retry (`Retry(max=3, interval=[30,120,300])`).
 - **Stable enqueue paths.** Producers (api, scheduler) reference fixed import
@@ -49,7 +55,7 @@ directory holds only worker-specific orchestration glue.
 cd worker
 python3 -m venv .venv          # Python 3.14
 .venv/bin/pip install -r requirements-dev.txt   # installs ../reva editable + pytest
-.venv/bin/python -m pytest tests/               # 197 passing
+.venv/bin/python -m pytest tests/               # 241 passing
 ```
 
 Running the worker against real services needs the env vars in

@@ -21,10 +21,12 @@ comment so the developer gets instant feedback while the review is queued.
 | `app/main.py` | Lifespan: load settings, run DB migrations, build the Redis queue + GitHub client onto `app.state`. Mounts routers. |
 | `app/settings.py` | Frozen `Settings`; `from_env()`. Fails closed when `REVA_REQUIRE_API_KEY=true` but `REVA_API_KEY` is empty. |
 | `app/security.py` | `verify_signature` — constant-time HMAC-SHA256 over the **raw** request body. |
-| `app/dependencies.py` | DI providers (`get_db`, `get_settings`, `get_queue`, `get_github_client`) and `require_api_key` (Bearer-token gate on `/api/v1`). |
-| `app/routes/webhooks.py` | Signature check → record event → dispatch. Blocking DB work runs in the threadpool so it never stalls the event loop. PR pushes upsert a debounced `pending_review`; `/review` & `/deep-review` comments trigger immediately (gated to OWNER/MEMBER/COLLABORATOR, bots skipped); inline-comment replies enqueue `run_comment_reply`. |
-| `app/routes/health.py` | `GET /health` — `SELECT 1` liveness. |
-| `app/routes/v1/*` | One router per resource: metrics, reviews, findings, failures, repos, pending, ticket_analyses, admin. |
+| `app/dependencies.py` | DI providers (`get_db`, `get_settings`, `get_queue`, `get_github_client`, `get_redis`) plus `require_api_key` (fail-closed Bearer-token gate on `/api/v1`). |
+| `app/ratelimit.py` | In-memory per-client (API key / IP) rolling-minute cap on `/api/v1`. Off when `REVA_API_RATE_LIMIT_PER_MINUTE=0`; per-instance, so it complements nginx's limit. |
+| `app/pagination.py` | `clamp_limit` / `clamp_offset` — bound list-endpoint paging so a huge `offset` can't trigger a deep-offset table scan. |
+| `app/routes/webhooks.py` | Signature check → record event → dispatch. Blocking DB work runs in the threadpool so it never stalls the event loop. Idempotency is keyed on a `processed` flag set only after all downstream writes commit, so a mid-handling failure leaves the delivery reprocessable on GitHub's retry instead of silently dropped. PR pushes upsert a debounced `pending_review`; `/review` & `/deep-review` comments trigger immediately (gated to OWNER/MEMBER/COLLABORATOR, bots skipped); inline-comment replies enqueue `run_comment_reply`. |
+| `app/routes/health.py` | `GET /health` — checks Postgres **and** the Redis broker; returns `503` (`{"status":"degraded"}`) if either is down so orchestration/the TUI see it. |
+| `app/routes/v1/*` | One router per resource: metrics, reviews, findings, failures, repos, pending, ticket_analyses, admin. Gated by `require_api_key` + the rate limiter; list endpoints clamp `limit`/`offset`. |
 | `app/queries/*` | Read-side SQL (kept out of the route handlers). |
 | `app/schemas/*` | Pydantic response models. |
 
@@ -32,17 +34,19 @@ comment so the developer gets instant feedback while the review is queued.
 
 `/api/v1` exposes operational data and admin actions (requeue, audit), and in
 production it's reachable through nginx. `require_api_key` enforces an
-`Authorization: Bearer <REVA_API_KEY>`. It is a **no-op when the key is unset**
-(convenient for local dev), so production sets `REVA_REQUIRE_API_KEY=true`,
-which makes the app refuse to start without a key — fail closed, not open.
-`/webhooks/github` is authenticated separately by the GitHub HMAC signature.
+`Authorization: Bearer <REVA_API_KEY>` and **fails closed**: with
+`REVA_REQUIRE_API_KEY=true` an unset key both refuses startup *and* makes the
+dependency reject requests with `503` — it never serves `/api/v1` unauthenticated.
+The key is only optional in explicit local-dev mode (`REVA_REQUIRE_API_KEY`
+unset/false and no key). `/webhooks/github` is authenticated separately by the
+GitHub HMAC signature.
 
 ## Tests
 
 ```bash
 cd api && python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/     # 57
+.venv/bin/python -m pytest tests/     # 68
 ```
 
 `TestClient` + SQLite in-memory (`StaticPool`, `check_same_thread=False` so the

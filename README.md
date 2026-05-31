@@ -239,13 +239,13 @@ Each Python service has its own venv (all install the shared `reva` package as e
 
 ```bash
 cd worker && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/        # worker: 197
+.venv/bin/python -m pytest tests/        # worker: 241
 
 cd ../api && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/        # api: 57
+.venv/bin/python -m pytest tests/        # api: 68
 
 cd ../scheduler && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/        # scheduler: 10
+.venv/bin/python -m pytest tests/        # scheduler: 16
 ```
 
 Tests use SQLite in-memory, `httpx` MockTransport, and subprocess mocks for the Claude CLI; no Docker or network required. The Go TUI: `cd tui && go test ./...`.

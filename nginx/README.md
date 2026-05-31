@@ -15,7 +15,9 @@ exposes the API port directly.
 - **TLS** for `${REVA_DOMAIN}` (Let's Encrypt certs from `scripts/setup-letsencrypt.sh`).
 - **`/webhooks/`** → API, rate-limited, with an IP allowlist for GitHub.
 - **`/api/`** → API, rate-limited (the internal dashboard API).
-- **`/health`** → API liveness.
+- **`/health`** → API readiness (proxied; reports DB + Redis).
+- **`/nginx-health`** → served by nginx itself (no TLS, not proxied) for the
+  container healthcheck in `docker-compose.prod.yml`.
 
 ## Why a template, not a baked config
 
@@ -24,6 +26,7 @@ Keeping the domain in an env var means the image is stateless — changing
 runtime variables aren't clobbered by substitution.
 
 > Hardening notes tracked in review: the `/api/` block has no IP allowlist (rely
-> on `REVA_API_KEY`), HSTS/OCSP stapling aren't set, and the API rate-limit zone
-> keys on `$http_x_api_key` while the app authenticates via `Authorization:
-> Bearer` — revisit when tightening prod.
+> on `REVA_API_KEY`); HSTS is set but OCSP stapling isn't. The nginx API
+> rate-limit zone keys on source IP (`$binary_remote_addr`); per-API-key limiting
+> is enforced at the app layer instead (`REVA_API_RATE_LIMIT_PER_MINUTE`), so a
+> shared egress IP doesn't lump every caller into one bucket.

@@ -16,9 +16,10 @@ helpers that more than one process needs.
 | `errors.py` | `WorkerError` → `TransientError` (RQ retries) / `PermanentError` (RQ fails). |
 | `config.py` | `env_or_file` / `required_env_or_file` — read a setting from an env var or, if `{NAME}_FILE` is set, from that file (Docker-secrets convention). |
 | `claude_client.py` | Direct **Messages API** client (httpx). Used for ticket analysis + comment replies. Prompt caching, tool_use parse, status→error mapping. |
-| `claude_code_runner.py` | **Headless Claude Code CLI** runner. Manages the repo clone cache, per-repo `flock`, runs `claude --print` under a skill, reads the `submit_review` JSON. Used for all PR reviews + audits. |
-| `github_client.py`, `_github_http.py` | GitHub App client (JWT auth, installation-token cache, PR/diff/file reads + Check Run / PR Review / comment writes) and shared status→error mapping. |
-| `odoo_client.py` | Odoo JSON-RPC client for ticket field write-back. |
+| `claude_code_runner.py` | **Headless Claude Code CLI** runner. Manages the repo clone cache, per-repo `flock`, runs `claude --print` under a skill, reads the `submit_review` JSON. Used for all PR reviews + audits. Bounds the CLI subprocess and every `git` op with timeouts, validates `owner`/`name` before building cache paths, and exports `REVIEW_JOB_TIMEOUT` (derived from the subprocess timeout) so enqueuers can't set a too-small RQ job timeout. |
+| `github_client.py`, `_github_http.py` | GitHub App client (JWT auth, installation-token cache, PR/diff/file reads + Check Run / PR Review / comment writes; `find_pr_review_id` / `find_check_run_id` for retry recovery) and shared status→error mapping. |
+| `odoo_client.py` | Odoo JSON-RPC client for ticket field write-back. Validates the callback URL via `url_safety` at construction. |
+| `url_safety.py` | `assert_safe_url` — rejects non-HTTP schemes and cloud-metadata/link-local hosts (and enforces an optional host allowlist) for operator-configured outbound URLs (Google Chat, Odoo). |
 | `review_tool.py`, `ticket_tool.py` | Tool-input JSON schemas derived from the pydantic models. |
 | `prompt_builder.py` | Assembles cache-tagged system blocks for the Messages-API paths; exposes the prompt `version`. |
 | `review_formatter.py` | Pure formatters: Check Run conclusion matrix, PR review body, inline-comment payloads, decline templates, diff-hunk → inline split. |
@@ -26,7 +27,7 @@ helpers that more than one process needs.
 | `diff_utils.py` | Diff filtering (reviewable prefixes / excluded extensions / skip paths), line + token estimates, hunk parsing. |
 | `finding_verifier.py` | Asks Claude whether a prior finding is resolved — used by the delta-review resolution pass. |
 | `cost.py` | Token-count → USD pricing table + `estimate_cost`. |
-| `notifications.py` | Google Chat error-alert formatting + classification. |
+| `notifications.py` | Google Chat error-alert formatting + classification; posts only to the `chat.googleapis.com` host (allowlisted via `url_safety`). |
 | `weekly_report.py` | Builds the weekly summary card from DB aggregates. |
 | `db/` | Postgres layer — see [`db/README.md`](db/README.md). |
 
