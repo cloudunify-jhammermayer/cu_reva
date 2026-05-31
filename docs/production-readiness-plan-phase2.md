@@ -23,14 +23,13 @@ Ranked by my recommended order. **A** and **B1** are the highest-leverage.
 
 **Why (whole section):** REVA feeds attacker-controllable text (PR title, body, diff, and now the *cloned repo's own files/comments*) into a headless `claude` CLI running with `--dangerously-skip-permissions`. An April-2026 disclosure showed exactly this surface — a crafted PR title — hijacking Claude Code's security-review agent, Gemini CLI Action, and Copilot's coding agent. Injection can't be fully *prevented* at the model layer, so the accepted practice is defense-in-depth: shrink what the agent can *do* and what it can *reach*. REVA already does several things right (token-less clone, env allowlist, no host secrets in the subprocess, XML-delimited params) — these close the remaining holes.
 
-### A1 — Constrain the `Write` tool to the output file (do NOT remove it) — **S–M**
-- **Reality check:** `Write` is load-bearing. Every skill (`prompts/skills/*.md`) instructs Claude to use `Write` to emit the `submit_review` JSON to `output_path`, and `claude_code_runner.py` reads that file back. Removing `Write` would break all reviews/audits. So we *narrow* it, not drop it.
-- **How — two options:**
-  - **(i) Path-scope `Write`** to the temp `output_path` only (a Claude Code permission rule limiting writes to that file), so an injection can't write into the cloned repo or elsewhere. Smallest change — *pending verification of the CLI's `allowedTools` path-scoping syntax against the installed `claude` version.*
-  - **(ii) Move output to stdout** — have the skills return the JSON as their final message and parse it from `proc.stdout` (already captured), dropping `Write` entirely. Cleaner (no filesystem write at all) but touches all four skills + the runner's parse path, and needs testing against the real CLI.
-- **Why:** `Write` is the one capability an injected instruction could use to plant or modify files in the working tree. Scoping/removing it closes that path while keeping result capture working.
-- **Verify:** a review still produces valid output; an instruction attempting to write outside the output path fails.
-- **Decision needed:** (i) vs (ii) — I lean (i) if the CLI supports path-scoped `Write`, else (ii). Either way needs the `claude` CLI to verify (can't from this sandbox).
+### A1 — Drop `--dangerously-skip-permissions`; write output inside the clone — **S**  ✅ *done & verified against the live CLI*
+- **What shipped:** `reva/claude_code_runner.py` runs the review/audit CLI **without** `--dangerously-skip-permissions`, with `--allowedTools "Read,Grep,Glob,Write"`, and writes the output JSON **inside the cloned repo (cwd)** instead of `/tmp`.
+- **Two boundaries, both confirmed by live-CLI smoke tests:**
+  1. *No skip-permissions ⇒ the allowlist is enforced.* In a smoke test the model's fall-back `Bash` call was **denied** (`permission_denials`), so Bash/Edit/network are genuinely blocked.
+  2. *Claude Code confines writes to the cwd workspace.* The first smoke test (output in `/tmp`) was blocked — "the session only permits writes within the working dir" — which is also why the old code needed skip-permissions. Moving the output into the clone fixes it. A scoped `Write(<path>)` rule was tried but **this CLI ignores it in `--print` mode** (write was denied pending approval), so **bare `Write` + the cwd boundary** is the working config.
+- **Net effect:** an injected instruction can read the tree and write only within the throwaway, never-pushed clone — no Bash, no writes outside the clone, no network.
+- **Verify:** unit test pins no-skip-permissions + `Read,Grep,Glob,Write` + output-inside-cwd. Live CLI: `PASS (bare)`.
 
 ### A2 — Restrict the review subprocess's network egress — **M**
 - **How:** run the `claude` subprocess so it can reach **only** `api.anthropic.com` (what it needs) and nothing else — via a locked-down container/network namespace or an egress proxy allowlist on the worker. (The worker itself still needs GitHub/Chat; scope the restriction to the subprocess, or split the clone+review into an egress-restricted step.)

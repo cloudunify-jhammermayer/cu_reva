@@ -215,6 +215,33 @@ def test_review_passes_correct_subprocess_args(runner_with_skill, tmp_path):
     assert call_args.kwargs["env"]["ANTHROPIC_API_KEY"] == "test-key"
 
 
+def test_review_does_not_bypass_permissions_and_writes_in_cwd(runner_with_skill, tmp_path):
+    """Prompt-injection hardening: no --dangerously-skip-permissions (so Bash/
+    Edit/network stay denied and the allowlist is the real boundary), and the
+    output file is created inside the repo cwd — the only place Claude Code's
+    workspace boundary permits writes (verified against the live CLI)."""
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+    captured: dict = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured["out"] = _extract_output_path(kwargs["input"])
+        captured["cwd"] = kwargs["cwd"]
+        with open(captured["out"], "w") as f:
+            json.dump({"summary": "ok", "findings": []}, f)
+        return _ok()
+
+    with patch("subprocess.run", side_effect=fake_run):
+        runner_with_skill.review(repo_path=repo_path, skill="reva-diff-review", params={})
+
+    args = captured["args"]
+    assert "--dangerously-skip-permissions" not in args
+    assert args[args.index("--allowedTools") + 1] == "Read,Grep,Glob,Write"
+    # the output must be written inside the cwd (the clone) — the workspace boundary
+    assert captured["out"].startswith(captured["cwd"])
+
+
 def test_review_env_excludes_worker_secrets(runner_with_skill, tmp_path, monkeypatch):
     """The CLI subprocess must not inherit the worker's other secrets."""
     repo_path = str(tmp_path / "repo")

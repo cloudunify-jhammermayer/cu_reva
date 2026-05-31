@@ -162,7 +162,7 @@ class ClaudeCodeRunner:
             PermanentError: non-zero exit code 1, or Claude wrote no valid JSON.
             TransientError: non-zero exit code other than 1 (killed, OOM, etc.).
         """
-        output_path = self._create_output_path()
+        output_path = self._create_output_path(repo_path)
         preamble = self._build_preamble()
         skill_content = self._read_skill(skill)
         body = f"{preamble}\n\n{skill_content}" if preamble else skill_content
@@ -182,9 +182,18 @@ class ClaudeCodeRunner:
             proc = subprocess.run(
                 [
                     _CLAUDE_BIN, "--print",
-                    "--dangerously-skip-permissions",
                     "--output-format", "json",
                     "--model", model or self.default_model,
+                    # The allowlist IS the security boundary — note there is NO
+                    # --dangerously-skip-permissions (which would bypass it). In
+                    # --print mode any tool not pre-allowed is denied (nothing to
+                    # prompt), so an injected instruction in the diff/repo can
+                    # only Read/Grep/Glob and Write — never Bash or the network.
+                    # Write is unscoped because this CLI ignores a Write(<path>)
+                    # rule in --print mode; instead Claude Code's workspace
+                    # boundary confines writes to the cwd (the clone), where the
+                    # output file is created. The clone is ephemeral and never
+                    # pushed, so that is a safe sandbox.
                     "--allowedTools", "Read,Grep,Glob,Write",
                 ],
                 input=task,
@@ -233,8 +242,12 @@ class ClaudeCodeRunner:
 
     # ----------------------------------------------------------------- helpers
 
-    def _create_output_path(self) -> str:
-        fd, path = tempfile.mkstemp(suffix=".json", prefix="reva_review_")
+    def _create_output_path(self, dir_: str) -> str:
+        # Created INSIDE the cloned repo (the CLI's cwd). Claude Code confines
+        # writes to its working directory, so without --dangerously-skip-permissions
+        # the output must live under cwd. The clone is ephemeral and never pushed,
+        # so a REVA-owned temp file here is harmless; it's removed after the run.
+        fd, path = tempfile.mkstemp(suffix=".json", prefix=".reva_review_", dir=dir_)
         os.close(fd)
         return path
 
