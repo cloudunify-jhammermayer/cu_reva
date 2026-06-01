@@ -462,3 +462,15 @@ def test_health_degraded_when_redis_down(client_and_db):
     assert body["status"] == "degraded"
     assert body["db"] is True
     assert body["redis"] is False
+
+
+def test_review_all_command_queues_diff_all_mode(client_and_db):
+    client, db = client_and_db
+    _seed_pr(client)
+    resp = _post(client, _comment_payload("/review-all"), event="issue_comment",
+                 delivery="reviewall")
+    assert resp.status_code == 202
+    with db.session() as s:
+        pending = s.query(PendingReview).all()
+        assert any(p.trigger_event == "comment" and p.review_mode == "diff-all"
+                   for p in pending)

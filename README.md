@@ -72,7 +72,7 @@ Required **webhook events**:
 | Event | Purpose |
 |---|---|
 | `pull_request` | Auto-trigger on push / open / reopen |
-| `issue_comment` | `/review`, `/full-review`, `/deep-review` commands |
+| `issue_comment` | `/review`, `/review-all`, `/full-review`, `/deep-review` commands |
 | `pull_request_review_comment` | REVA replies to developer questions on inline comments |
 
 ## Triggering reviews
@@ -80,7 +80,8 @@ Required **webhook events**:
 | Trigger | How | Mode / model |
 |---|---|---|
 | Automatic | Push to an open PR (`opened`, `synchronize`, `reopened`, `ready_for_review`) | `REVA_DEFAULT_REVIEW_MODE` (default `diff`), Sonnet |
-| Manual (diff) | Comment `/review` | diff review, Sonnet |
+| Manual (diff) | Comment `/review` | diff review (custom_addons only), Sonnet |
+| Manual (diff, all paths) | Comment `/review-all` | diff review of **every** changed file, not just custom_addons, Sonnet |
 | Manual (full) | Comment `/full-review` | full repo-aware review, Sonnet |
 | Manual (deep) | Comment `/deep-review` | full repo-aware review, **Opus** |
 | Requeue failed | Press `e` in the TUI Failures tab | re-runs the original mode |

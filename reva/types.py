@@ -27,7 +27,9 @@ Category = Literal[
     "odoo",
 ]
 RiskLevel = Literal["low", "medium", "high", "critical"]
-ReviewMode = Literal["diff", "full", "deep"]
+# "diff-all" = diff-depth review (like "diff") but over ALL changed paths, not
+# just the custom_addons prefixes — triggered by the /review-all comment.
+ReviewMode = Literal["diff", "full", "deep", "diff-all"]
 TriggerEvent = Literal[
     "opened", "synchronize", "reopened", "ready_for_review",
     "comment", "manual", "manual_requeue",

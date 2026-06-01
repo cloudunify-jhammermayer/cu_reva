@@ -39,7 +39,7 @@ from reva.types import (
 
 logger = structlog.get_logger()
 
-DEFAULT_MAX_DIFF_LINES = 1000
+DEFAULT_MAX_DIFF_LINES = 2000
 DEFAULT_MAX_DIFF_TOKENS = 60_000
 MAX_FINDINGS = 15
 
@@ -141,13 +141,16 @@ class Reviewer:
             )
 
         # 5. Fetch diff + changed files.
+        # The /review-all command ("diff-all" mode) reviews every changed path;
+        # all other modes restrict to the custom_addons prefixes.
+        review_prefixes = () if params.review_mode == "diff-all" else DEFAULT_REVIEW_PREFIXES
         # Delta detection: if a prior completed review exists, use the compare diff.
         last_review = self.repos.get_last_completed_review(params.pull_request_id)
         if last_review:
             raw_diff = self.github.get_compare_diff(
                 token, owner, name, last_review["head_sha"], params.head_sha
             )
-            diff = filter_diff(raw_diff)
+            diff = filter_diff(raw_diff, include_prefixes=review_prefixes)
             if not diff.strip():
                 return ReviewResult(
                     status="stale",
@@ -158,9 +161,14 @@ class Reviewer:
             delta_base_sha: str | None = last_review["head_sha"]
         else:
             raw_diff = self.github.get_pull_request_diff(token, owner, name, pr_number)
-            diff = filter_diff(raw_diff)
+            diff = filter_diff(raw_diff, include_prefixes=review_prefixes)
             # deep == full repo exploration (like full) but on the Opus model.
-            skill = "reva-diff-review" if params.review_mode == "diff" else "reva-full-review"
+            # diff/diff-all stay on the cheap diff skill; only full/deep explore.
+            skill = (
+                "reva-diff-review"
+                if params.review_mode in ("diff", "diff-all")
+                else "reva-full-review"
+            )
             delta_base_sha = None
 
         if len(diff) < len(raw_diff):
@@ -168,20 +176,25 @@ class Reviewer:
                 "diff_filtered",
                 owner=owner, repo=name, pr=pr_number,
                 raw_bytes=len(raw_diff), filtered_bytes=len(diff),
-                review_prefixes=DEFAULT_REVIEW_PREFIXES,
+                review_prefixes=review_prefixes,
                 excluded_extensions=sorted(DEFAULT_EXCLUDE_EXTENSIONS),
             )
         if not diff.strip():
-            prefixes = ", ".join(f"`{p}`" for p in DEFAULT_REVIEW_PREFIXES)
+            if review_prefixes:
+                prefixes = ", ".join(f"`{p}`" for p in review_prefixes)
+                return _decline(
+                    f"No reviewable files found. Only changes under {prefixes} "
+                    f"are reviewed (excluding {', '.join(sorted(DEFAULT_EXCLUDE_EXTENSIONS))})."
+                )
             return _decline(
-                f"No reviewable files found. Only changes under {prefixes} "
-                f"are reviewed (excluding {', '.join(sorted(DEFAULT_EXCLUDE_EXTENSIONS))})."
+                f"No reviewable files found (excluding "
+                f"{', '.join(sorted(DEFAULT_EXCLUDE_EXTENSIONS))})."
             )
 
         changed_files_payload = self.github.get_changed_files(token, owner, name, pr_number)
         changed_files = [
             f["filename"] for f in changed_files_payload
-            if any(f["filename"].startswith(p) for p in DEFAULT_REVIEW_PREFIXES)
+            if (not review_prefixes or any(f["filename"].startswith(p) for p in review_prefixes))
             and os.path.splitext(f["filename"])[1].lower() not in DEFAULT_EXCLUDE_EXTENSIONS
         ]
 

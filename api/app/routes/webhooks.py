@@ -219,6 +219,7 @@ def _handle_review_comment(payload: dict, settings: Settings, rq_queue) -> None:
 
 _COMMENT_COMMANDS: dict[str, str] = {
     "/review": "diff",
+    "/review-all": "diff-all",  # diff review over ALL paths, not just custom_addons
     "/full-review": "full",
     "/deep-review": "deep",  # full repo exploration + Opus model
 }

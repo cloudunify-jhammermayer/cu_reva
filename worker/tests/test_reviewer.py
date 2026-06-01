@@ -315,7 +315,7 @@ def test_per_repo_config_tightens_max_diff_lines():
         diff=diff,
         file_contents={".claude-review.yml": "max_diff_lines: 100\n"},
     )
-    reviewer, *_ = _make_reviewer(github=github)  # default cap is 1000
+    reviewer, *_ = _make_reviewer(github=github)  # default cap is 2000
     result = reviewer.execute(_params())
     assert result.status == "declined"
     assert "100" in (result.decline_reason or "")
@@ -574,3 +574,63 @@ def test_delta_empty_returns_stale():
 
     assert result.status == "stale"
     assert runner.last_skill is None  # Claude never called
+
+
+# --- /review-all (diff-all: diff depth, all paths) ----------------------------
+
+_OUTSIDE_DIFF = (
+    "diff --git a/scripts/deploy.py b/scripts/deploy.py\n"
+    "+++ b/scripts/deploy.py\n"
+    "+ added\n"
+    "- removed\n"
+)
+
+
+def _outside_github():
+    return FakeGitHub(diff=_OUTSIDE_DIFF, files=[{"filename": "scripts/deploy.py"}])
+
+
+def test_diff_mode_declines_changes_outside_custom_addons():
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=_outside_github(), runner=runner)
+    result = reviewer.execute(_params(review_mode="diff"))
+    assert result.status == "declined"  # custom_addons prefix filter drops it
+
+
+def test_review_all_reviews_changes_outside_custom_addons():
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=_outside_github(), runner=runner)
+    result = reviewer.execute(_params(review_mode="diff-all"))
+    assert result.status == "completed"
+    assert "scripts/deploy.py" in runner.last_params["diff"]
+    assert "scripts/deploy.py" in runner.last_params["changed_files"]
+
+
+def test_review_all_uses_diff_skill_not_full():
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=_outside_github(), runner=runner)
+    reviewer.execute(_params(review_mode="diff-all"))
+    assert runner.last_skill == "reva-diff-review"
+
+
+def test_review_all_uses_default_model():
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=_outside_github(), runner=runner)
+    reviewer.execute(_params(review_mode="diff-all"))
+    assert runner.last_model == "claude-sonnet-4-6"
+
+
+def test_diff_between_1000_and_2000_lines_is_reviewed():
+    # 1500 added lines under custom_addons — over the old 1000 cap, under the
+    # current 2000 default. Should be reviewed, not declined.
+    body = "\n".join(f"+line {i}" for i in range(1500))
+    diff = (
+        "diff --git a/custom_addons/big.py b/custom_addons/big.py\n"
+        "+++ b/custom_addons/big.py\n"
+        f"{body}\n"
+    )
+    github = FakeGitHub(diff=diff, files=[{"filename": "custom_addons/big.py"}])
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert result.status == "completed"
