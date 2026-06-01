@@ -381,6 +381,55 @@ def test_comment_review_by_bot_is_ignored(client_and_db):
                    for p in s.query(PendingReview).all())
 
 
+# --- auto-review (PR event) ack ----------------------------------------------
+
+
+def _post_pr_with_github(client, action, *, draft=False, delivery="prack"):
+    fake = _FakeGitHub()
+    app.state.github = fake
+    try:
+        payload = _pr_payload(action, draft=draft)
+        if action == "ready_for_review":
+            payload["pull_request"]["draft"] = False
+        _post(client, payload, delivery=delivery)
+    finally:
+        app.state.github = None
+    return fake
+
+
+def test_pr_opened_posts_ack_comment(client_and_db):
+    client, _ = client_and_db
+    fake = _post_pr_with_github(client, "opened")
+    assert len(fake.comments) == 1
+    c = fake.comments[0]
+    assert c["pr"] == 42 and c["owner"] == "acme" and c["repo"] == "widgets"
+    assert "REVA" in c["body"] and "standard review" in c["body"]
+
+
+def test_pr_reopened_posts_ack_comment(client_and_db):
+    client, _ = client_and_db
+    fake = _post_pr_with_github(client, "reopened")
+    assert len(fake.comments) == 1
+
+
+def test_pr_ready_for_review_posts_ack_comment(client_and_db):
+    client, _ = client_and_db
+    fake = _post_pr_with_github(client, "ready_for_review")
+    assert len(fake.comments) == 1
+
+
+def test_pr_synchronize_does_not_post_ack(client_and_db):
+    client, _ = client_and_db
+    fake = _post_pr_with_github(client, "synchronize")
+    assert fake.comments == []
+
+
+def test_draft_pr_opened_does_not_post_ack(client_and_db):
+    client, _ = client_and_db
+    fake = _post_pr_with_github(client, "opened", draft=True)
+    assert fake.comments == []
+
+
 # --- health -------------------------------------------------------------------
 
 

@@ -20,6 +20,10 @@ logger = structlog.get_logger()
 
 # Actions that warrant a review; all others are stored but ignored.
 _REVIEWABLE_ACTIONS = frozenset({"opened", "synchronize", "reopened", "ready_for_review"})
+# Actions that newly bring a PR into review — worth an 'on it' ack. Deliberately
+# excludes 'synchronize' (fires on every push) so active PRs don't get spammed;
+# the debounced review coalesces those pushes into one run anyway.
+_ACK_PR_ACTIONS = frozenset({"opened", "reopened", "ready_for_review"})
 
 
 @router.post("/webhooks/github", status_code=202)
@@ -83,7 +87,7 @@ def _process_delivery(
         return {"status": "duplicate"}
 
     if event == "pull_request":
-        _handle_pull_request(db, payload, settings)
+        _handle_pull_request(db, payload, settings, github)
 
     if event == "issue_comment":
         _handle_issue_comment(db, payload, settings, github)
@@ -96,7 +100,7 @@ def _process_delivery(
     return {"status": "accepted"}
 
 
-def _handle_pull_request(db: Database, payload: dict, settings: Settings) -> None:
+def _handle_pull_request(db: Database, payload: dict, settings: Settings, github=None) -> None:
     action = payload.get("action", "")
     if action not in _REVIEWABLE_ACTIONS:
         return
@@ -151,6 +155,13 @@ def _handle_pull_request(db: Database, payload: dict, settings: Settings) -> Non
         sha=pr_data["head"]["sha"][:8],
         scheduled_in_s=settings.debounce_seconds,
     )
+
+    # Immediate acknowledgement when a PR newly enters review (not on every push).
+    if action in _ACK_PR_ACTIONS:
+        _post_ack_comment(
+            github, installation_id, repo_data["owner"]["login"], repo_data["name"],
+            pr_data["number"], settings.default_review_mode,
+        )
 
 
 def _handle_review_comment(payload: dict, settings: Settings, rq_queue) -> None:
