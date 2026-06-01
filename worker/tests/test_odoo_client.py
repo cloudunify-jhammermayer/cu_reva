@@ -39,6 +39,24 @@ def _mock_post(status: int = 200, body: str = '{"ok":true}', exc=None):
     return post
 
 
+def test_empty_callback_url_constructs_disabled():
+    # Empty URL = Odoo callback disabled (settings contract). Constructing must
+    # NOT validate or raise — the worker boots without Odoo configured.
+    OdooCallbackClient(callback_url="", api_key="")
+
+
+def test_disabled_client_write_field_raises_permanent():
+    client = OdooCallbackClient(callback_url="", api_key="")
+    with pytest.raises(PermanentError):
+        client.write_field(**_kwargs())
+
+
+def test_disabled_client_reset_status_raises_permanent():
+    client = OdooCallbackClient(callback_url="", api_key="")
+    with pytest.raises(PermanentError):
+        client.reset_status(ticket_id=123, model_name="helpdesk.ticket")
+
+
 def test_rejects_cloud_metadata_callback_url():
     with pytest.raises(ValueError):
         OdooCallbackClient(callback_url="http://169.254.169.254/write-field", api_key=_KEY)

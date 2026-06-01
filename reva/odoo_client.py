@@ -41,6 +41,15 @@ _TIMEOUT = 15.0
 
 class OdooCallbackClient:
     def __init__(self, callback_url: str, api_key: str) -> None:
+        # Empty callback_url = Odoo write-back disabled (see worker Settings).
+        # Construct without validating so the worker boots without Odoo configured;
+        # any method call then raises PermanentError instead of silently no-opping.
+        self._enabled = bool(callback_url.strip())
+        if not self._enabled:
+            self._base_url = ""
+            self._callback_url = ""
+            self._api_key = api_key
+            return
         # callback_url is the write-field endpoint; derive base for sibling endpoints
         if callback_url.endswith("/write-field"):
             self._base_url = callback_url[: -len("/write-field")]
@@ -55,6 +64,10 @@ class OdooCallbackClient:
 
     def _post(self, path: str, payload: dict) -> None:
         """POST to a REVA callback endpoint; raises TransientError or PermanentError."""
+        if not self._enabled:
+            raise PermanentError(
+                "Odoo callback is disabled (ODOO_CALLBACK_URL is unset)"
+            )
         url = self._base_url + path
         headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
         try:
