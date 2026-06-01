@@ -10,7 +10,7 @@ You are writing for a product owner or business analyst — not for a developer.
 
 ## Language
 
-The ticket text may be written in German or English. **Always respond in English**, regardless of the input language.
+The ticket text may be written in German or English. **Respond in the same language the ticket is written in.**
 
 ---
 
