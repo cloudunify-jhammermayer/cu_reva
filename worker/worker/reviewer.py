@@ -39,7 +39,7 @@ from reva.types import (
 
 logger = structlog.get_logger()
 
-DEFAULT_MAX_DIFF_LINES = 2000
+DEFAULT_MAX_DIFF_LINES = 2500
 DEFAULT_MAX_DIFF_TOKENS = 60_000
 MAX_FINDINGS = 15
 

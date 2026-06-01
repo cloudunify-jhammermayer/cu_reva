@@ -290,7 +290,7 @@ def test_stale_head_returns_stale_without_fetching_diff():
 
 
 def test_decline_when_diff_too_many_lines():
-    big_diff = "\n".join(f"+line {i}" for i in range(2001))
+    big_diff = "\n".join(f"+line {i}" for i in range(2501))
     github = FakeGitHub(diff=big_diff)
     reviewer, *_ = _make_reviewer(github=github)
     result = reviewer.execute(_params())
@@ -315,7 +315,7 @@ def test_per_repo_config_tightens_max_diff_lines():
         diff=diff,
         file_contents={".claude-review.yml": "max_diff_lines: 100\n"},
     )
-    reviewer, *_ = _make_reviewer(github=github)  # default cap is 2000
+    reviewer, *_ = _make_reviewer(github=github)  # default cap is 2500
     result = reviewer.execute(_params())
     assert result.status == "declined"
     assert "100" in (result.decline_reason or "")
@@ -620,10 +620,10 @@ def test_review_all_uses_default_model():
     assert runner.last_model == "claude-sonnet-4-6"
 
 
-def test_diff_between_1000_and_2000_lines_is_reviewed():
-    # 1500 added lines under custom_addons — over the old 1000 cap, under the
-    # current 2000 default. Should be reviewed, not declined.
-    body = "\n".join(f"+line {i}" for i in range(1500))
+def test_diff_under_2500_line_cap_is_reviewed():
+    # 2400 added lines under custom_addons — over the old 2000 cap, under the
+    # current 2500 default. Should be reviewed, not declined.
+    body = "\n".join(f"+line {i}" for i in range(2400))
     diff = (
         "diff --git a/custom_addons/big.py b/custom_addons/big.py\n"
         "+++ b/custom_addons/big.py\n"
