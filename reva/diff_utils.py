@@ -18,6 +18,11 @@ DEFAULT_EXCLUDE_EXTENSIONS: frozenset[str] = frozenset({".xml", ".po", ".pot", "
 # underscore and hyphen spellings of the custom-addons directory are accepted.
 DEFAULT_REVIEW_PREFIXES: tuple[str, ...] = ("custom_addons/", "custom-addons/")
 
+# Path globs always dropped on repo-aware reviews (full/deep): test directories
+# add noise/cost and the agent explores the repo for coverage anyway. The cheap
+# diff path keeps them, so test changes are still reviewed there.
+DEFAULT_SKIP_PATH_GLOBS: tuple[str, ...] = ("*/tests/*", "tests/*")
+
 # Matches a hunk header: `@@ -old_start,old_count +new_start,new_count @@`
 # Counts are optional and default to 1.
 _HUNK_RE = re.compile(
@@ -87,12 +92,17 @@ def filter_diff(
     return "".join(kept)
 
 
+def path_matches_globs(path: str, patterns) -> bool:
+    """True if `path` matches any fnmatch glob in `patterns`."""
+    return any(fnmatch.fnmatch(path, p) for p in patterns)
+
+
 def filter_diff_by_paths(diff: str, patterns: list[str]) -> str:
     """Strip file sections whose path matches any glob in patterns.
 
     Unlike filter_diff (which strips fixed extensions/prefixes), this uses
-    caller-supplied globs from .claude-review.yml skip_paths for per-file
-    filtering without discarding the rest of the diff.
+    caller-supplied globs (e.g. .claude-review.yml skip_paths, or the default
+    test-dir globs) for per-file filtering without discarding the rest of the diff.
     """
     if not patterns:
         return diff
@@ -102,7 +112,7 @@ def filter_diff_by_paths(diff: str, patterns: list[str]) -> str:
         if not section:
             continue
         m = re.search(r"^\+\+\+ b/(.+)$", section, re.MULTILINE)
-        if m and any(fnmatch.fnmatch(m.group(1), p) for p in patterns):
+        if m and path_matches_globs(m.group(1), patterns):
             continue
         kept.append(section)
     return "".join(kept)
