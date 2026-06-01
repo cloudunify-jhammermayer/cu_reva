@@ -41,32 +41,38 @@ Full detail: **`docs/production-readiness-plan.md`** (every item marked ✅).
 | **A4** audit-log admin actions (`admin_audit` table) | ✅ done (`7b51e78`) |
 | **A2** worker egress allowlist (proxy sidecar) | ✅ code done & tested; **infra (`egress-proxy/` + `docker-compose.egress.yml`) needs STAGING validation** (`43097b6`) — see `docs/egress-lockdown.md` |
 | **C1–C3** free $0 security scanning (Dependabot/gitleaks/Semgrep) | ✅ done (`5ae6a09`); advisory until first run reviewed — see `docs/security-scanning-setup.md` |
-| **E** CodeGraph engine layer | 📋 **spec done** (`d9824d9`, `docs/superpowers/specs/2026-05-31-codegraph-engine-design.md`); **next = spike (below)** |
+| **E** CodeGraph engine layer | ✅ **spiked + implemented behind flag** (`REVA_CODEGRAPH_ENABLED`, default off); spec updated with live results. **Next = staging validation on a real PR** (below) |
 | **D1–D2** integration/e2e (testcontainers) | 📋 not started — closes the Postgres-only coverage gap (SKIP-LOCKED/advisory-lock untested on SQLite) |
 | **B2/B3** OTel tracing, Prometheus/Grafana · **D3/D4** · **F** data governance | 📋 later |
 | **B1** error tracking (GlitchTip/Sentry) | ⏸️ backlog (parked by decision) |
 | **E1/E2** human repo-overview, feedback/eval capture | ⏸️ out of scope / deferred |
 
-Test counts after Phase 2: **worker 246 · api 69 · scheduler 16**, ruff clean.
+Test counts: **worker 262 · api 74 · scheduler 16**, ruff clean.
 
 ---
 
-## 👉 Next session: CodeGraph spike (do FIRST, before any E code)
+## CodeGraph (Phase-2 E) — spiked + implemented (2026-06-01)
 
-I don't yet know CodeGraph's exact CLI/MCP invocation for the installed `claude`
-version, so guessing it = rework. Spike in the **worker container** (`docker exec -it cu_reva-worker-1 bash`):
+**Spike done** in the worker container. Results (full detail in the spec's "Spike
+results" section): pinned **0.9.8** (npm `@colbymchenry/codegraph`); on a real
+Odoo repo (OCA/server-tools, 464 Py files) indexing took **4s**; a steered review
+was **~26% cheaper / ~72% fewer tool calls** than grep-only. Corrected the spec's
+wrong guesses — it's `codegraph init`/`sync` + `codegraph serve --mcp` (not
+`codegraph mcp`). **Key finding: steering is mandatory** — without a prompt note
+the model ignores the tools and greps.
 
-1. Install/locate the pinned `codegraph` binary; note version.
-2. `codegraph index <a cloned custom_addons repo>` — confirm it builds; **time it**.
-3. Start its MCP server (`codegraph mcp …`) and capture the exact `--mcp-config`
-   JSON schema the `claude` CLI expects.
-4. Run a real review with `claude --print … --mcp-config <file> --allowedTools "Read,Grep,Glob,Write,mcp__codegraph__*"` and confirm the model actually calls
-   `mcp__codegraph__*`; capture the **token / tool-call delta** vs off.
-5. Sanity-check Odoo-Python coverage.
+**Implemented (behind `REVA_CODEGRAPH_ENABLED`, default off):** `_codegraph_prepare`
++ gating in `reva/claude_code_runner.py` (repo-aware skills only: `reva-full-review`,
+`reva-repo-audit`; diff/delta excluded; fall back on any index/setup failure);
+settings (`worker/worker/settings.py`); Dockerfile pin; steering notes in the two
+repo-aware skills; `.env.example`. Unit tests cover the gating matrix + fallback.
 
-Then implement per the spec (flag `REVA_CODEGRAPH_ENABLED` default off, version-pinned,
-repo-aware paths only, fall-back on failure). Unit tests for gating + fall-back can
-be written here; the spike resolves the live unknowns.
+**👉 Next = staging validation on a real PR:** set `REVA_CODEGRAPH_ENABLED=true`
+on a staging worker, run a `full`/`deep` review on one repo, confirm the model
+calls `mcp__codegraph__*` and the review still completes; then enable for `deep`
+first, then `full`/`audit`. Keep `diff` off CodeGraph. (Same live-CLI gate as A1/A2.)
+If you also run reviews under the A2 egress lock, the codegraph MCP server is a
+local stdio subprocess (no egress) — nothing to allowlist.
 
 ---
 

@@ -5,6 +5,13 @@ Perform a comprehensive audit of the repository in the Task Parameters. This is
 The severity, category, confidence, and conduct rules in the guidance above
 apply. You have the Read, Grep, and Glob tools (no shell).
 
+**If CodeGraph tools are available** (`mcp__codegraph__*`), use them to map and
+reason about structure cheaply: `codegraph_files` for the module/file inventory,
+`codegraph_context` to survey an area, `codegraph_callers`/`codegraph_impact` to
+trace coupling and blast radius. They query a prebuilt index. Keep using Grep for
+regex anti-pattern sweeps (e.g. `sudo\(`, `cr\.execute`) — that is what Grep is
+for — and Read to confirm every candidate.
+
 ## Audit process
 
 1. Use **Glob** to map the module structure: `**/__manifest__.py`

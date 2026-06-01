@@ -4,12 +4,20 @@ Perform a thorough review of the pull request in the Task Parameters. Unlike a
 diff-only review, you have the full repository — use it. The severity, category,
 confidence, and conduct rules in the guidance above apply.
 
+**If CodeGraph tools are available** (`mcp__codegraph__*`), prefer them for
+structural questions over grepping: `codegraph_context` to understand an area,
+`codegraph_callers`/`codegraph_callees` to trace usage, `codegraph_impact` to
+gauge a change's blast radius. They query a prebuilt index, so they are cheaper
+and more complete than a grep/read sweep. Use Read/Grep for details the graph
+doesn't cover.
+
 ## Review process
 
 1. Read the diff to understand what changed.
 2. For each changed file, use Read to examine the full file, not just the changed lines.
 3. Trace relationships: imports, base classes, computed fields, related models, XML views, test files.
-4. Use Grep to find all callers of changed APIs across the addons directory.
+4. Find all callers of changed APIs across the addons directory (prefer
+   `codegraph_callers` when available; otherwise Grep).
 5. Check whether tests exist for the changed behaviour; flag missing coverage.
 6. Write your findings as JSON to `output_path`.
 

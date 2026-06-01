@@ -22,8 +22,12 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+import structlog
+
 from reva.errors import PermanentError, TransientError
 from reva.types import ClaudeResponse
+
+logger = structlog.get_logger()
 
 # owner/name become path segments under the repo cache; constrain them to safe
 # GitHub-style identifiers (must start alphanumeric; no separators or "..") so a
@@ -38,6 +42,19 @@ def _validate_repo_component(value: str, kind: str) -> None:
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEEP_MODEL = "claude-opus-4-7"
 _CLAUDE_BIN = "claude"
+
+# Repo-aware skills that benefit from a pre-indexed code graph (full/deep reviews
+# and audits reason across files). The diff/delta paths are cost-sensitive and
+# don't traverse the repo, so they stay off CodeGraph. See the engine-layer spec.
+_CODEGRAPH_SKILLS = frozenset({"reva-full-review", "reva-repo-audit"})
+_CODEGRAPH_INDEX_TIMEOUT = 180  # seconds; bound the index step like a git op
+# Stdio MCP server config handed to the Claude CLI via --mcp-config. The server
+# runs in the CLI's cwd (the clone) and finds .codegraph/codegraph.db there.
+_CODEGRAPH_MCP_CONFIG = {
+    "mcpServers": {
+        "codegraph": {"type": "stdio", "command": "codegraph", "args": ["serve", "--mcp"]}
+    }
+}
 SUBPROCESS_TIMEOUT = 1500  # seconds; large PRs can take 10–15 minutes
 
 # Headroom for git clone/fetch + GitHub posting that bracket the subprocess
@@ -74,6 +91,8 @@ class ClaudeCodeRunner:
         prompts_dir: str | None = None,
         default_model: str = DEFAULT_MODEL,
         deep_model: str = DEEP_MODEL,
+        codegraph_enabled: bool = False,
+        codegraph_index_timeout: int = _CODEGRAPH_INDEX_TIMEOUT,
     ) -> None:
         self.repo_cache_dir = repo_cache_dir
         self.api_key = api_key
@@ -83,6 +102,10 @@ class ClaudeCodeRunner:
         self.prompts_dir = prompts_dir
         self.default_model = default_model
         self.deep_model = deep_model
+        # When enabled, repo-aware reviews get a pre-indexed CodeGraph exposed via
+        # MCP (cheaper, more cross-file-aware). Default off; pinned/validated first.
+        self.codegraph_enabled = codegraph_enabled
+        self.codegraph_index_timeout = codegraph_index_timeout
 
     # ------------------------------------------------------------------ public
 
@@ -183,23 +206,35 @@ class ClaudeCodeRunner:
         env = {k: os.environ[k] for k in _ENV_ALLOWLIST if k in os.environ}
         env["ANTHROPIC_API_KEY"] = self.api_key
         env["HOME"] = "/home/worker"
+        # Repo-aware reviews get the CodeGraph MCP server when enabled. Returns
+        # None (and we run a plain review) if disabled, not repo-aware, or the
+        # index/setup failed — the accelerator is never allowed to block a review.
+        mcp_config_path = None
+        if self.codegraph_enabled and skill in _CODEGRAPH_SKILLS:
+            mcp_config_path = self._codegraph_prepare(repo_path)
+        # The allowlist IS the security boundary — note there is NO
+        # --dangerously-skip-permissions (which would bypass it). In --print mode
+        # any tool not pre-allowed is denied (nothing to prompt), so an injected
+        # instruction in the diff/repo can only Read/Grep/Glob and Write — never
+        # Bash or the network. Write is unscoped because this CLI ignores a
+        # Write(<path>) rule in --print mode; instead Claude Code's workspace
+        # boundary confines writes to the cwd (the clone), where the output file
+        # is created. The clone is ephemeral and never pushed, so that is a safe
+        # sandbox. The mcp__codegraph__* tools are read-only graph queries against
+        # a local stdio subprocess — no new write/exec/network capability.
+        allowed_tools = "Read,Grep,Glob,Write"
+        mcp_args: list[str] = []
+        if mcp_config_path:
+            mcp_args = ["--mcp-config", mcp_config_path]
+            allowed_tools = "Read,Grep,Glob,Write,mcp__codegraph__*"
         try:
             proc = subprocess.run(
                 [
                     _CLAUDE_BIN, "--print",
                     "--output-format", "json",
                     "--model", model or self.default_model,
-                    # The allowlist IS the security boundary — note there is NO
-                    # --dangerously-skip-permissions (which would bypass it). In
-                    # --print mode any tool not pre-allowed is denied (nothing to
-                    # prompt), so an injected instruction in the diff/repo can
-                    # only Read/Grep/Glob and Write — never Bash or the network.
-                    # Write is unscoped because this CLI ignores a Write(<path>)
-                    # rule in --print mode; instead Claude Code's workspace
-                    # boundary confines writes to the cwd (the clone), where the
-                    # output file is created. The clone is ephemeral and never
-                    # pushed, so that is a safe sandbox.
-                    "--allowedTools", "Read,Grep,Glob,Write",
+                    *mcp_args,
+                    "--allowedTools", allowed_tools,
                 ],
                 input=task,
                 cwd=repo_path,
@@ -244,8 +279,42 @@ class ClaudeCodeRunner:
             )
         finally:
             Path(output_path).unlink(missing_ok=True)
+            if mcp_config_path:
+                Path(mcp_config_path).unlink(missing_ok=True)
 
     # ----------------------------------------------------------------- helpers
+
+    def _codegraph_prepare(self, repo_path: str) -> str | None:
+        """Index the clone with CodeGraph and write an MCP config for the CLI.
+
+        `init` builds the graph the first time; `sync` refreshes an existing
+        `.codegraph/` index incrementally. Bounded by codegraph_index_timeout
+        (held under repo_lock, like a git op). Any failure — missing binary,
+        non-zero exit, timeout — logs a warning and returns None so the review
+        runs without CodeGraph rather than failing.
+        """
+        subcommand = "sync" if os.path.isdir(os.path.join(repo_path, ".codegraph")) else "init"
+        try:
+            result = subprocess.run(
+                ["codegraph", subcommand, repo_path],
+                capture_output=True,
+                text=True,
+                timeout=self.codegraph_index_timeout,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+            logger.warning("codegraph_index_skipped", repo=repo_path, error=str(exc))
+            return None
+        if result.returncode != 0:
+            logger.warning(
+                "codegraph_index_failed", repo=repo_path, stderr=(result.stderr or "")[:200]
+            )
+            return None
+        # Written inside the clone (cwd) like the output file — ephemeral, removed
+        # after the run. The CLI passes it via --mcp-config.
+        fd, path = tempfile.mkstemp(suffix=".json", prefix=".reva_mcp_", dir=repo_path)
+        with os.fdopen(fd, "w") as f:
+            json.dump(_CODEGRAPH_MCP_CONFIG, f)
+        return path
 
     def _create_output_path(self, dir_: str) -> str:
         # Created INSIDE the cloned repo (the CLI's cwd). Claude Code confines

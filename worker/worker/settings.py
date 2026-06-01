@@ -33,6 +33,11 @@ class Settings:
     # Rolling 24-hour Anthropic spend cap (USD). None = no cap. When trailing
     # 24-hour spend reaches this, new reviews are declined instead of run.
     daily_budget_usd: float | None = None
+    # CodeGraph engine layer (repo-aware reviews/audits). Default off; pinned and
+    # validated against the live CLI before enabling. See the engine-layer spec.
+    codegraph_enabled: bool = False
+    codegraph_version: str = "0.9.8"
+    codegraph_index_timeout: int = 180
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -68,4 +73,8 @@ class Settings:
                 if os.environ.get("REVA_DAILY_BUDGET_USD")
                 else None
             ),
+            codegraph_enabled=os.environ.get("REVA_CODEGRAPH_ENABLED", "false").lower()
+            in ("1", "true", "yes"),
+            codegraph_version=os.environ.get("REVA_CODEGRAPH_VERSION", "0.9.8"),
+            codegraph_index_timeout=int(os.environ.get("REVA_CODEGRAPH_INDEX_TIMEOUT", "180")),
         )

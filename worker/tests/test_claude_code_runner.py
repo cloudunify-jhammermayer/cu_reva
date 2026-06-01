@@ -568,3 +568,150 @@ def test_review_extracts_total_cost_usd_from_stdout(runner_with_skill, tmp_path)
         resp = runner_with_skill.review(repo_path=repo_path, skill="reva-diff-review", params={})
 
     assert resp.total_cost_usd == 0.0421
+
+
+# ---- CodeGraph engine layer (Phase-2 E) ----
+
+_CG_OUTPUT = {"summary": "ok", "findings": []}
+
+
+@pytest.fixture
+def cg_runner(tmp_path):
+    """Runner with CodeGraph enabled and the repo-aware + diff/delta skills present."""
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    for name in ("reva-full-review", "reva-repo-audit", "reva-diff-review", "reva-delta-review"):
+        (skills_dir / f"{name}.md").write_text("You are REVA. Write JSON to output_path.")
+    return ClaudeCodeRunner(
+        repo_cache_dir=str(tmp_path / "repos"),
+        api_key="test-key",
+        skills_dir=str(skills_dir),
+        codegraph_enabled=True,
+    )
+
+
+def _cg_fake_run(record=None, codegraph_result=None):
+    """subprocess.run fake: configurable result for `codegraph`, writes review JSON for `claude`."""
+    def run(args, **kwargs):
+        if args and args[0] == "codegraph":
+            if record is not None:
+                record.append(list(args))
+            if isinstance(codegraph_result, Exception):
+                raise codegraph_result
+            return codegraph_result or _ok()
+        out_path = _extract_output_path(kwargs["input"])
+        with open(out_path, "w") as f:
+            json.dump(_CG_OUTPUT, f)
+        return _ok()
+    return run
+
+
+def _claude_argv(mock_run):
+    for c in mock_run.call_args_list:
+        if c.args[0] and c.args[0][0] == "claude":
+            return c.args[0]
+    raise AssertionError("claude was not invoked")
+
+
+def _allowed_tools(argv):
+    return argv[argv.index("--allowedTools") + 1]
+
+
+def _repo(tmp_path):
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+    return repo_path
+
+
+@pytest.mark.parametrize("skill", ["reva-full-review", "reva-repo-audit"])
+def test_review_engages_codegraph_for_repo_aware_skills(cg_runner, tmp_path, skill):
+    repo_path = _repo(tmp_path)
+    cg_calls = []
+    with patch("subprocess.run", side_effect=_cg_fake_run(cg_calls)) as mock_run:
+        cg_runner.review(repo_path=repo_path, skill=skill, params={})
+    argv = _claude_argv(mock_run)
+    assert "--mcp-config" in argv
+    assert "mcp__codegraph__*" in _allowed_tools(argv)
+    assert cg_calls and cg_calls[0][0] == "codegraph"  # index step actually ran
+
+
+@pytest.mark.parametrize("skill", ["reva-diff-review", "reva-delta-review"])
+def test_review_skips_codegraph_for_diff_paths(cg_runner, tmp_path, skill):
+    repo_path = _repo(tmp_path)
+    with patch("subprocess.run", side_effect=_cg_fake_run()) as mock_run:
+        cg_runner.review(repo_path=repo_path, skill=skill, params={})
+    argv = _claude_argv(mock_run)
+    assert "--mcp-config" not in argv
+    assert _allowed_tools(argv) == "Read,Grep,Glob,Write"
+
+
+def test_review_no_codegraph_when_disabled(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    (skills_dir / "reva-full-review.md").write_text("You are REVA. Write JSON to output_path.")
+    runner = ClaudeCodeRunner(  # codegraph_enabled defaults to False
+        repo_cache_dir=str(tmp_path / "repos"),
+        api_key="test-key",
+        skills_dir=str(skills_dir),
+    )
+    repo_path = _repo(tmp_path)
+    with patch("subprocess.run", side_effect=_cg_fake_run()) as mock_run:
+        runner.review(repo_path=repo_path, skill="reva-full-review", params={})
+    argv = _claude_argv(mock_run)
+    assert "--mcp-config" not in argv
+    assert _allowed_tools(argv) == "Read,Grep,Glob,Write"
+
+
+def test_review_falls_back_when_index_fails(cg_runner, tmp_path):
+    repo_path = _repo(tmp_path)
+    fake = _cg_fake_run(codegraph_result=_fail(code=1, stderr="boom"))
+    with patch("subprocess.run", side_effect=fake) as mock_run:
+        resp = cg_runner.review(repo_path=repo_path, skill="reva-full-review", params={})
+    argv = _claude_argv(mock_run)
+    assert "--mcp-config" not in argv  # fell back to a normal review
+    assert resp.tool_use_input == _CG_OUTPUT  # review still completed
+
+
+def test_review_falls_back_when_codegraph_binary_missing(cg_runner, tmp_path):
+    repo_path = _repo(tmp_path)
+    fake = _cg_fake_run(codegraph_result=FileNotFoundError("codegraph not installed"))
+    with patch("subprocess.run", side_effect=fake) as mock_run:
+        resp = cg_runner.review(repo_path=repo_path, skill="reva-full-review", params={})
+    assert "--mcp-config" not in _claude_argv(mock_run)
+    assert resp.tool_use_input == _CG_OUTPUT
+
+
+def test_review_falls_back_when_index_times_out(cg_runner, tmp_path):
+    import subprocess
+    repo_path = _repo(tmp_path)
+    exc = subprocess.TimeoutExpired(cmd="codegraph init", timeout=1)
+    with patch("subprocess.run", side_effect=_cg_fake_run(codegraph_result=exc)) as mock_run:
+        resp = cg_runner.review(repo_path=repo_path, skill="reva-full-review", params={})
+    assert "--mcp-config" not in _claude_argv(mock_run)
+    assert resp.tool_use_input == _CG_OUTPUT
+
+
+def test_codegraph_init_when_no_index(cg_runner, tmp_path):
+    repo_path = _repo(tmp_path)
+    cg_calls = []
+    with patch("subprocess.run", side_effect=_cg_fake_run(cg_calls)):
+        cg_runner.review(repo_path=repo_path, skill="reva-full-review", params={})
+    assert cg_calls[0][:2] == ["codegraph", "init"]
+
+
+def test_codegraph_sync_when_index_exists(cg_runner, tmp_path):
+    repo_path = _repo(tmp_path)
+    os.makedirs(os.path.join(repo_path, ".codegraph"))
+    cg_calls = []
+    with patch("subprocess.run", side_effect=_cg_fake_run(cg_calls)):
+        cg_runner.review(repo_path=repo_path, skill="reva-full-review", params={})
+    assert cg_calls[0][:2] == ["codegraph", "sync"]
+
+
+def test_codegraph_mcp_config_removed_after_run(cg_runner, tmp_path):
+    repo_path = _repo(tmp_path)
+    with patch("subprocess.run", side_effect=_cg_fake_run()) as mock_run:
+        cg_runner.review(repo_path=repo_path, skill="reva-full-review", params={})
+    argv = _claude_argv(mock_run)
+    cfg = argv[argv.index("--mcp-config") + 1]
+    assert not os.path.exists(cfg)  # temp config cleaned up like the output file

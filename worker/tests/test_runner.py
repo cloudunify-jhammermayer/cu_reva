@@ -522,6 +522,38 @@ def test_settings_from_env_raises_on_missing(monkeypatch):
         Settings.from_env()
 
 
+def _set_required_env(monkeypatch, tmp_path):
+    key = tmp_path / "key.pem"
+    key.write_text("PEM")
+    monkeypatch.setenv("REDIS_URL", "redis://x")
+    monkeypatch.setenv("DATABASE_URL", "postgres://x")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    monkeypatch.setenv("GITHUB_APP_ID", "1")
+    monkeypatch.setenv("GITHUB_PRIVATE_KEY_PATH", str(key))
+
+
+def test_settings_codegraph_disabled_by_default(monkeypatch, tmp_path):
+    _set_required_env(monkeypatch, tmp_path)
+    monkeypatch.delenv("REVA_CODEGRAPH_ENABLED", raising=False)
+    from worker.settings import Settings
+    s = Settings.from_env()
+    assert s.codegraph_enabled is False
+    assert s.codegraph_version == "0.9.8"
+    assert s.codegraph_index_timeout == 180
+
+
+def test_settings_parses_codegraph_overrides(monkeypatch, tmp_path):
+    _set_required_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("REVA_CODEGRAPH_ENABLED", "true")
+    monkeypatch.setenv("REVA_CODEGRAPH_VERSION", "0.9.9")
+    monkeypatch.setenv("REVA_CODEGRAPH_INDEX_TIMEOUT", "240")
+    from worker.settings import Settings
+    s = Settings.from_env()
+    assert s.codegraph_enabled is True
+    assert s.codegraph_version == "0.9.9"
+    assert s.codegraph_index_timeout == 240
+
+
 # --- run_comment_reply -------------------------------------------------------
 
 

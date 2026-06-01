@@ -10,6 +10,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN npm install -g @anthropic-ai/claude-code
 
+# CodeGraph engine layer (repo-aware reviews/audits). Pinned (pre-1.0); keep this
+# in sync with Settings.codegraph_version. The feature stays off unless
+# REVA_CODEGRAPH_ENABLED is set, so installing it here is inert until enabled.
+ARG REVA_CODEGRAPH_VERSION=0.9.8
+RUN npm install -g @colbymchenry/codegraph@${REVA_CODEGRAPH_VERSION}
+
 RUN useradd --create-home --shell /bin/bash worker
 WORKDIR /app
 
