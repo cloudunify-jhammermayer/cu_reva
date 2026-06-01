@@ -22,12 +22,10 @@ from reva.cost import estimate_cost
 from reva.diff_utils import (
     DEFAULT_EXCLUDE_EXTENSIONS,
     DEFAULT_REVIEW_PREFIXES,
-    DEFAULT_SKIP_PATH_GLOBS,
     count_diff_lines,
     estimate_diff_tokens,
     filter_diff,
     filter_diff_by_paths,
-    path_matches_globs,
 )
 from reva.errors import PermanentError
 from reva.prompt_builder import PromptBuilder  # kept for type annotation (prompts param)
@@ -146,10 +144,6 @@ class Reviewer:
         # The /review-all command ("diff-all" mode) reviews every changed path;
         # all other modes restrict to the custom_addons prefixes.
         review_prefixes = () if params.review_mode == "diff-all" else DEFAULT_REVIEW_PREFIXES
-        # Repo-aware reviews (full/deep) drop test directories; diff/diff-all keep them.
-        skip_test_globs = (
-            DEFAULT_SKIP_PATH_GLOBS if params.review_mode in ("full", "deep") else ()
-        )
         # Delta detection: if a prior completed review exists, use the compare diff.
         last_review = self.repos.get_last_completed_review(params.pull_request_id)
         if last_review:
@@ -177,18 +171,12 @@ class Reviewer:
             )
             delta_base_sha = None
 
-        # Drop test directories on full/deep before size-guarding, so large test
-        # files neither trip the cap nor reach the review.
-        if skip_test_globs:
-            diff = filter_diff_by_paths(diff, list(skip_test_globs))
-
         if len(diff) < len(raw_diff):
             logger.info(
                 "diff_filtered",
                 owner=owner, repo=name, pr=pr_number,
                 raw_bytes=len(raw_diff), filtered_bytes=len(diff),
                 review_prefixes=review_prefixes,
-                skip_test_globs=skip_test_globs,
                 excluded_extensions=sorted(DEFAULT_EXCLUDE_EXTENSIONS),
             )
         if not diff.strip():
@@ -208,7 +196,6 @@ class Reviewer:
             f["filename"] for f in changed_files_payload
             if (not review_prefixes or any(f["filename"].startswith(p) for p in review_prefixes))
             and os.path.splitext(f["filename"])[1].lower() not in DEFAULT_EXCLUDE_EXTENSIONS
-            and not (skip_test_globs and path_matches_globs(f["filename"], skip_test_globs))
         ]
 
         # 6. Load .claude-review.yml (CLAUDE.md is picked up automatically by Claude Code).
