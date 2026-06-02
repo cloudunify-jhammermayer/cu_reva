@@ -1,6 +1,6 @@
 # REVA — Work Handoff
 
-**Updated:** 2026-05-31. Resume point for the production-readiness work.
+**Updated:** 2026-06-02. Resume point for the production-readiness work.
 **Replaces** the old slice-by-slice handoff (that described the original
 Messages-API design and is now history in git).
 
@@ -8,16 +8,9 @@ Messages-API design and is now history in git).
 
 ## ⚠️ Read first — resuming on another workstation
 
-All work is on branch **`feature/production-readiness`**, **committed but NOT pushed**
-(9 commits, local only). Before switching machines:
-
-```bash
-git push -u origin feature/production-readiness
-```
-
-Then on the new workstation: clone/fetch, `git checkout feature/production-readiness`,
-recreate the per-service venvs (see "Running tests"). Nothing is merged to `main`
-and no PR is open yet.
+Everything below is **merged to `main` and pushed** (origin in sync at `421b51f`).
+There is no longer a `feature/production-readiness` branch. On a new workstation:
+`git clone`/`git pull`, then recreate the per-service venvs (see "Running tests").
 
 ---
 
@@ -47,7 +40,7 @@ Full detail: **`docs/production-readiness-plan.md`** (every item marked ✅).
 | **B1** error tracking (GlitchTip/Sentry) | ⏸️ backlog (parked by decision) |
 | **E1/E2** human repo-overview, feedback/eval capture | ⏸️ out of scope / deferred |
 
-Test counts: **worker 262 · api 74 · scheduler 16**, ruff clean.
+Test counts: **worker 267 · api 75 · scheduler 16**, ruff clean.
 
 ---
 
@@ -73,6 +66,30 @@ calls `mcp__codegraph__*` and the review still completes; then enable for `deep`
 first, then `full`/`audit`. Keep `diff` off CodeGraph. (Same live-CLI gate as A1/A2.)
 If you also run reviews under the A2 egress lock, the codegraph MCP server is a
 local stdio subprocess (no egress) — nothing to allowlist.
+
+---
+
+## Review scope & triggers (2026-06-02)
+
+Shipped this session (all on `main`):
+
+- **`/review-all`** comment command → `diff-all` mode: a diff-depth review (Sonnet)
+  over **all** changed files, not just `custom_addons/`. Reuses the command →
+  `review_mode` channel; reviewer passes `include_prefixes=()` for that mode.
+- **Default diff cap raised 1000 → 2500 lines** (`DEFAULT_MAX_DIFF_LINES`). Token
+  guard (60k) and per-repo `.claude-review.yml max_diff_lines` override unchanged.
+- **Test-dir exclusion: tried then reverted** (`323b716` → `a21adc9`). Decision:
+  **keep test files in all modes.** Don't re-add a global `tests/` skip; if a repo
+  wants it, use `skip_paths: ["*/tests/*"]` in its `.claude-review.yml`.
+
+**👉 Next step — comment commands on unknown PRs.** Comment commands only act on
+PRs REVA already has a row for (registered from a prior `pull_request` event); a
+PR opened before install logs `comment_trigger_pr_not_found` and is ignored
+(`_handle_issue_comment` only *looks up* the PR — `webhooks.py` → `lookup_pull_request`).
+Planned fix: on a DB miss, fetch the PR from the GitHub API (the handler already
+has a `github` client + installation id), upsert it, then proceed — so
+`/review` / `/review-all` work on any open PR without a reopen/push. Scoped, TDD.
+Until then the workaround is: reopen the PR or push a commit to register it.
 
 ---
 
@@ -115,8 +132,8 @@ analytics; Go/Bubble-Tea `tui` reads the internal `/api/v1`.
 - **Shared lib:** `reva/` (types, clients, db, `claude_code_runner.py`, formatters).
 - **Run tests** (per service, Python 3.14, each installs `reva` editable):
   ```bash
-  cd worker && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest tests/   # 246
-  cd ../api && … pytest tests/        # 69
+  cd worker && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest tests/   # 267
+  cd ../api && … pytest tests/        # 75
   cd ../scheduler && … pytest tests/  # 16
   ```
   Lint: `ruff check reva worker/worker api/app scheduler/scheduler`. Go TUI: `cd tui && go test ./...`.

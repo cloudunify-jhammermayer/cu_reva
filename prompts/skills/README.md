@@ -11,7 +11,7 @@ the `Write` tool. REVA reads that file back and validates it against the
 
 | Skill | Used for | What Claude sees / does |
 |---|---|---|
-| `reva-diff-review.md` | default push / `/review` (diff mode) | The diff + the cloned repo; reads connected files before deciding. |
+| `reva-diff-review.md` | default push / `/review` (diff mode) / `/review-all` (diff, all paths) | The diff + the cloned repo; reads connected files before deciding. |
 | `reva-full-review.md` | `/deep-review` / full mode | Explores the repo freely, not just the diff. |
 | `reva-delta-review.md` | incremental review when a prior completed review exists | Reviews only the *compare* diff since the last reviewed SHA. |
 | `reva-repo-audit.md` | on-demand repo audit (API / TUI) | Audits the whole default branch, produces a structured report. |
