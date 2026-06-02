@@ -20,8 +20,15 @@ from reva.db import (
     migrate,
     writers,
 )
-from reva.db.models import GithubEvent, PendingReview, Repository, ReviewFinding, ReviewRun
-from reva.types import Finding, JobParams, ReviewResult
+from reva.db.models import (
+    GithubEvent,
+    PendingReview,
+    Repository,
+    ReviewFinding,
+    ReviewRun,
+    TicketAnalysis,
+)
+from reva.types import Finding, JobParams, ReviewResult, TicketJobParams
 
 
 # --- fixtures ----------------------------------------------------------------
@@ -284,6 +291,35 @@ def test_sum_estimated_cost_since_serialize_is_safe_on_sqlite(db, seeded):
     )
     since = datetime.now(timezone.utc) - timedelta(days=1)
     assert writers.sum_estimated_cost_since(db, since, serialize=True) == pytest.approx(1.25)
+
+
+def test_purge_old_ticket_text_scrubs_pii_keeps_analysis(db):
+    """F1/SECU-8: raw customer ticket text older than the retention window is
+    scrubbed (data minimisation), but the derived analysis is kept; recent rows
+    are untouched and the purge is idempotent."""
+    def _mk(ticket_id, text_):
+        return writers.record_ticket_analysis_created(
+            db, TicketJobParams(analysis_id=0, ticket_id=ticket_id,
+                                model_name="helpdesk.ticket", field_name="description", text=text_)
+        )
+
+    old_id = _mk(1, "secret customer PII and account details")
+    recent_id = _mk(2, "still within retention")
+    with db.session() as s:
+        old = s.get(TicketAnalysis, old_id)
+        old.created_at = datetime.now(timezone.utc) - timedelta(days=40)
+        old.result_html = "<p>analysis output</p>"
+
+    n = writers.purge_old_ticket_text(db, older_than_days=30)
+
+    assert n == 1
+    with db.session() as s:
+        old = s.get(TicketAnalysis, old_id)
+        assert "secret customer PII" not in old.input_text
+        assert old.result_html == "<p>analysis output</p>"  # analysis retained
+        assert s.get(TicketAnalysis, recent_id).input_text == "still within retention"
+    # idempotent — already-purged rows aren't re-counted
+    assert writers.purge_old_ticket_text(db, older_than_days=30) == 0
 
 
 def test_sum_estimated_cost_counts_all_kinds(db):

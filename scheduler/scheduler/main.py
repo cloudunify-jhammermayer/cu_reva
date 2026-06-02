@@ -42,6 +42,20 @@ def maybe_enqueue_eviction(queue, now, last_eviction, interval_s):
     return now
 
 
+def maybe_purge_ticket_text(db, now, last_purge, interval_s, retention_days):
+    """Scrub raw ticket text past the retention window if a purge is due (F1/SECU-8).
+
+    Pure DB, so the scheduler runs it directly (unlike eviction). Returns the new
+    last-purge timestamp (unchanged if not yet due).
+    """
+    if last_purge is not None and (now - last_purge).total_seconds() < interval_s:
+        return last_purge
+    purged = writers.purge_old_ticket_text(db, retention_days)
+    if purged:
+        logger.info("ticket_text_purged", rows=purged, retention_days=retention_days)
+    return now
+
+
 def main() -> None:
     settings = Settings.from_env()
 
@@ -87,6 +101,8 @@ def main() -> None:
     # The worker evicts at boot too; start the timer now so the scheduler-driven
     # eviction fires one interval out rather than redundantly at startup (INFR-2).
     last_eviction = datetime.now(timezone.utc)
+    # No other trigger drives retention purges, so run one shortly after startup.
+    last_purge = None
 
     while not stop:
         now = datetime.now(timezone.utc)
@@ -118,6 +134,14 @@ def main() -> None:
             )
         except Exception:
             logger.exception("scheduler_eviction_error")
+
+        try:
+            last_purge = maybe_purge_ticket_text(
+                db, now, last_purge, settings.retention_purge_interval_seconds,
+                settings.ticket_text_retention_days,
+            )
+        except Exception:
+            logger.exception("scheduler_retention_purge_error")
 
         # Liveness heartbeat — the container healthcheck checks its freshness.
         try:

@@ -19,7 +19,7 @@ import functools
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from reva.cost import estimate_cost
@@ -769,6 +769,31 @@ def reset_ticket_analysis(db: Database, analysis_id: int) -> None:
         row.error_message = None
         row.completed_at = None
         row.job_id = None
+
+
+PURGED_TICKET_TEXT = "[purged: exceeded retention period]"
+
+
+def purge_old_ticket_text(db: Database, older_than_days: int) -> int:
+    """Scrub raw customer ticket text older than `older_than_days` (F1/SECU-8).
+
+    Replaces `input_text` with a sentinel (the column is NOT NULL) for rows past
+    the retention window, keeping the derived analysis (`result_html`). Raw
+    customer-authored text is PII and shouldn't be retained indefinitely
+    (data-minimisation / erasure). Idempotent — already-purged rows are skipped.
+    Returns the number of rows scrubbed.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+    with db.session() as s:
+        result = s.execute(
+            update(TicketAnalysis)
+            .where(
+                TicketAnalysis.created_at < cutoff,
+                TicketAnalysis.input_text != PURGED_TICKET_TEXT,
+            )
+            .values(input_text=PURGED_TICKET_TEXT)
+        )
+        return result.rowcount
 
 
 def get_pending_ticket_analysis(

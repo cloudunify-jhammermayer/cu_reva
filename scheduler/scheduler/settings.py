@@ -34,6 +34,10 @@ class Settings:
     repo_cache_dir: str = "/repos"
     # How often to enqueue a repo-cache eviction job (INFR-2). Daily by default.
     eviction_interval_seconds: int = 86_400
+    # Data retention (F1/SECU-8): scrub raw customer ticket text older than this,
+    # checked on the same daily cadence.
+    ticket_text_retention_days: int = 30
+    retention_purge_interval_seconds: int = 86_400
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -58,5 +62,11 @@ class Settings:
             repo_cache_dir=os.environ.get("REVA_REPO_CACHE_DIR", "/repos"),
             eviction_interval_seconds=int(
                 os.environ.get("REVA_EVICTION_INTERVAL_SECONDS", "86400")
+            ),
+            ticket_text_retention_days=int(
+                os.environ.get("REVA_TICKET_TEXT_RETENTION_DAYS", "30")
+            ),
+            retention_purge_interval_seconds=int(
+                os.environ.get("REVA_RETENTION_PURGE_INTERVAL_SECONDS", "86400")
             ),
         )
