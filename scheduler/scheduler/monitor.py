@@ -3,6 +3,12 @@
 Runs each scheduler tick. Alerts fire on *transition* into a breach (and a
 recovery note on clearing), tracked in memory, so a sustained problem doesn't
 spam the channel every cycle.
+
+ASSUMES A SINGLE SCHEDULER REPLICA (CONC-10). The breach state (`self._firing`)
+is per-process and in-memory, so running N schedulers would fire/recover each
+alert N times (edge-triggering is local, not global). REVA scales workers, not
+schedulers; if you ever run >1 scheduler, move `_firing` to shared storage
+(Redis/DB keyed by metric) or elect a single monitoring leader first.
 """
 
 from __future__ import annotations

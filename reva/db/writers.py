@@ -201,6 +201,10 @@ def reap_stale_running_reviews(db: Database, older_than_seconds: int) -> int:
     dead runs are swept (never a live, long-running review).
 
     Returns the number of rows reaped.
+
+    CONC-8: the stale rows are locked FOR UPDATE SKIP LOCKED so concurrent
+    scheduler replicas don't double-reap the same row (and can't clobber a row a
+    peer is mid-reaping). On SQLite the clause no-ops (single writer).
     """
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=older_than_seconds)
     with db.session() as s:
@@ -208,7 +212,7 @@ def reap_stale_running_reviews(db: Database, older_than_seconds: int) -> int:
             select(ReviewRun).where(
                 ReviewRun.status == "running",
                 ReviewRun.started_at < cutoff,
-            )
+            ).with_for_update(skip_locked=True)
         ).scalars().all()
         for run in stale:
             run.status = "failed"

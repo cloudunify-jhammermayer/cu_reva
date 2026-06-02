@@ -201,3 +201,33 @@ def test_reaper_fails_stale_running_runs(pg_db):
         run = s.get(ReviewRun, run_id)
         assert run.status == "failed"
         assert run.error_class == "stale"
+
+
+def test_reaper_does_not_double_reap_under_concurrency(pg_db):
+    """CONC-8: two scheduler replicas reaping at once must not both claim the same
+    stale row — SKIP LOCKED gives it to exactly one."""
+    import threading
+
+    params = _seed_repo_pr(pg_db)
+    run_id = writers.record_review_started(pg_db, params)
+    with pg_db.engine.begin() as conn:
+        conn.execute(
+            text("UPDATE review_runs SET started_at = now() - interval '2 hours' WHERE id = :id"),
+            {"id": run_id},
+        )
+
+    barrier = threading.Barrier(2)
+    reaped: list[int] = []
+    lock = threading.Lock()
+
+    def reap():
+        barrier.wait()
+        n = writers.reap_stale_running_reviews(pg_db, older_than_seconds=3600)
+        with lock:
+            reaped.append(n)
+
+    t1 = threading.Thread(target=reap)
+    t2 = threading.Thread(target=reap)
+    t1.start(); t2.start(); t1.join(); t2.join()
+
+    assert sum(reaped) == 1, f"stale row must be reaped exactly once, got {reaped}"
