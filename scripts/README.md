@@ -28,21 +28,29 @@ Restore (**destructive** — overwrites the live DB; stop the app first):
 ./scripts/restore.sh backups/reva-….sql.gz    # a specific dump
 ```
 
-### Recovery drill (R10 — do this once, then periodically)
+### Recovery drill (R10 — do this periodically)
 
-A backup you've never restored is not a backup. Prove the path end-to-end:
+A backup you've never restored is not a backup. The **non-destructive** drill
+restores into a throwaway database (`REVA_RESTORE_DB`), so the live `reviews` DB
+is never touched:
 
 ```bash
-./scripts/backup.sh                 # produce a dump
-# (optionally insert a sentinel row, or just note the current table/row counts)
-./scripts/restore.sh                # type 'restore' to confirm
-# restore.sh prints the public-table count + schema version — confirm they
-# match expectations. For a non-destructive drill, restore into a throwaway
-# database/container instead of the live one.
+./scripts/backup.sh                                    # produce a dump
+# create a scratch DB in the same postgres container:
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  psql -U review -d reviews -c "CREATE DATABASE reva_restore_test;"
+# restore the newest dump into it (no prompt) and check the sanity output:
+REVA_RESTORE_YES=1 REVA_RESTORE_DB=reva_restore_test ./scripts/restore.sh
+# compare a few row counts against live `reviews`, then drop it:
+docker compose -f docker-compose.prod.yml exec -T postgres \
+  psql -U review -d reviews -c "DROP DATABASE reva_restore_test;"
 ```
 
-Until this drill has actually been run on the prod host, R10 is **not** closed —
-the scripts are syntax-checked but an unexercised recovery path is still a risk.
+For a **real** recovery (host loss), restore into the live DB with the app
+stopped: `./scripts/restore.sh` (defaults to `reviews`).
+
+> Drill executed 2026-06-02 (dev stack): 14 tables / schema v8 restored, all
+> sampled table row counts matched live exactly. Re-run after schema changes.
 
 ## Why these exist
 

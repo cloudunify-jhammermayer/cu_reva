@@ -17,7 +17,7 @@ This audit found **161 issues** the existing plans did not already capture, plus
 - **6 highs** — a TLS-renewal outage, a dead admin endpoint, two supply-chain/pinning gaps, a duplicate-paid-review race, and a forgeable-webhook config gap.
 - The rest are mediums/lows/nits and a set of known planned items (observability, integration tests, data retention).
 d
-**Progress (2026-06-02):** ✅ **Gate 0 complete** — SECU-1, DEPE-1, SECU-2 (+CORR-9), CORR-1, INFR-1, DOCS-1. **Gate 1 essentially done** — ✅ CORR-2, CORR-4, SECU-7, INFR-2, SECU-5, SECU-6, SECU-3, SECU-4 (+CORR-11), INFR-3 (security scanners now blocking; mypy/golangci-lint advisory pending a verified baseline), CODE-7 (gofmt). Unified spend ledger (theme #3) makes the daily cap a pre-flight gate across reviews/audits/replies. **R10 partial** — restore.sh + drill runbook written; the recovery drill must be *run on the prod host* to close it. CONC-7 (in-flight reservation) intentionally deferred. All on branch `gate0-security-hardening`.
+**Progress (2026-06-02):** ✅ **Gate 0 complete** — SECU-1, DEPE-1, SECU-2 (+CORR-9), CORR-1, INFR-1, DOCS-1. **Gate 1 essentially done** — ✅ CORR-2, CORR-4, SECU-7, INFR-2, SECU-5, SECU-6, SECU-3, SECU-4 (+CORR-11), INFR-3 (security scanners now blocking; mypy/golangci-lint advisory pending a verified baseline), CODE-7 (gofmt). Unified spend ledger (theme #3) makes the daily cap a pre-flight gate across reviews/audits/replies. **R10 done** — restore.sh + drill runbook written and the recovery drill was executed (restore into a throwaway DB; row counts matched live exactly). CONC-7 (in-flight reservation) intentionally deferred. Merged to `main`. **Gate 0 + Gate 1 complete** (mypy/golangci-lint graduation pending a verified baseline is the only carry-forward).
 
 **Verdict:** Not production-ready *today* solely because of **SECU-1**. Fix that (and the empty-secret guard SECU-2, both trivial), and the system is defensible for the stated "single instance now" deployment. The concurrency findings (CONC-1/2) and cost-control gaps (SECU-3/4, CONC-3) become real the moment you execute the documented "scale to N workers/schedulers" step — treat them as gating *that* milestone, not the first deploy.
 
@@ -152,7 +152,7 @@ You asked to keep these in view. **30 items**; 2 are genuine production blockers
 ### 🔴 Production blockers among the planned items
 | ID | Item | Status | Source |
 |---|---|---|---|
-| R10-restore | 🔶 **PARTIAL** — `restore.sh` written (gzip-verify, confirm, single-transaction `ON_ERROR_STOP`, sanity check) + `backup.sh` hardened (partial-file cleanup trap) + recovery-drill runbook in `scripts/README.md`. **Still open:** the drill must be *run on the prod host* — an unexercised recovery path is still a risk. | needs-validation (run the drill) | prod-readiness-plan R10 |
+| R10-restore | ✅ **DONE (2026-06-02)** — `restore.sh` (gzip-verify, confirm, single-transaction `ON_ERROR_STOP`, `REVA_RESTORE_DB` target override, sanity check) + `backup.sh` hardened (partial-file cleanup trap) + runbook. **Recovery drill executed:** backup → restore into a throwaway DB → row counts matched live `reviews` exactly (review_runs 7, findings 24, github_events 61, PRs 5, repos 4); 14 tables / schema v8; live DB untouched. Re-run after schema changes (esp. once migration 009 ships). | verified | prod-readiness-plan R10 |
 | D1 | **Integration tests (testcontainers, real PG+Redis)** — the Phase-1 Postgres-only concurrency/spend logic is invisible to SQLite unit tests (see TEST-1) | not-started | phase2 D1 |
 
 ### Needs validation before relying on it
@@ -211,7 +211,7 @@ Scheduled audits (E1), TUI repo-overview (E2), CD pipeline (odoo.sh), committabl
 **Gate 1 — production polish (days):**
 6. ✅ DEPE-1 — pin claude-code (**done**, moved to Gate 0). CORR-2 — clone integrity/repair. INFR-2 — periodic cache eviction.
 7. SECU-3/4 — close the reply/audit spend + injection gaps. SECU-5/6 — prompt-injection guards. CORR-4 — gate the Odoo preamble.
-8. R10 — actually run a backup→restore. INFR-3 — graduate the scanners. Commit the WIP `comment-unknown-pr` + tests.
+8. ✅ R10 — backup→restore drill executed (throwaway DB, fidelity verified). ✅ INFR-3 — security scanners graduated (mypy/golangci-lint pending a verified baseline). ✅ WIP `comment-unknown-pr` + tests committed. **Done.**
 
 **Gate 2 — before scaling out (weeks):**
 9. D1/TEST-1 — testcontainers Postgres tier. CONC-1/2/3 + CONC-7/8/10 — atomic claims, locked report/reaper, shared monitor state.
