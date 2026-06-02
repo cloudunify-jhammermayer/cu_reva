@@ -428,6 +428,21 @@ def test_review_declined_when_over_budget(ctx_and_fakes):
     assert len(s["github"].created_issue_comments) == 1  # decline posted
 
 
+def test_review_skipped_when_another_job_holds_the_claim(ctx_and_fakes):
+    """CONC-1: if another worker job already holds this (repo,pr,sha,mode) in
+    'running', run_review must skip — not run a second paid review."""
+    s = ctx_and_fakes
+    params = JobParams.model_validate(_params(s))
+    _, claimed = writers.claim_review_run(s["db"], params, job_id="other-worker-job")
+    assert claimed is True  # the other job owns it
+    s["reviewer"].result = _completed_result()
+
+    out = run_review(_params(s))
+
+    assert out["status"] == "duplicate_in_flight"
+    assert s["reviewer"].call_count == 0  # the paid review never ran
+
+
 def test_run_review_accepts_comment_trigger(ctx_and_fakes):
     """A /review comment enqueues trigger_event='comment'; JobParams must accept it."""
     s = ctx_and_fakes

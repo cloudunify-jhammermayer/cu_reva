@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import structlog
+from rq import get_current_job
 
 from reva.claude_client import ClaudeClient
 from reva.claude_code_runner import ClaudeCodeRunner
@@ -192,7 +193,16 @@ def run_review(job_params: dict) -> dict:
         log.info("review_already_posted")
         return {"status": "already_posted"}
 
-    run_id = writers.record_review_started(ctx.db, params)
+    # CONC-1: atomically claim this (repo,pr,sha,mode) for our RQ job. If another
+    # worker job already holds it in-flight, skip — don't pay for a duplicate
+    # review. A retry of THIS job re-claims, so retries still complete.
+    job = get_current_job()
+    run_id, claimed = writers.claim_review_run(
+        ctx.db, params, job_id=(job.id if job is not None else None)
+    )
+    if not claimed:
+        log.info("review_skipped_duplicate_in_flight")
+        return {"status": "duplicate_in_flight"}
     if explicit:
         # Re-review: wipe the prior attempt's posted IDs/outcome so the post
         # step creates a fresh Check Run + PR Review rather than reusing them.

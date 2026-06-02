@@ -64,17 +64,68 @@ def _retry_on_conflict(fn):
 
 
 @_retry_on_conflict
-def record_review_started(db: Database, params: JobParams) -> int:
-    """Insert/UPDATE a review_runs row in `running` status.
+def claim_review_run(db: Database, params: JobParams, job_id: str | None) -> tuple[int, bool]:
+    """Atomically claim the (repo, pr, head_sha, review_mode) review for `job_id`.
 
-    Idempotent on the unique constraint `(repo, pr, head_sha, review_mode)`:
-    the second call with the same params updates the existing row.
+    Returns (run_id, claimed). `claimed=False` means a **different** worker job
+    already holds this exact review in `running` — the caller MUST NOT run the
+    paid review (CONC-1: prevents two jobs both paying for the same SHA when
+    multiple workers race a push-debounce + /review, a torn poller tick, etc.).
+
+    Retry-safe: a retry of the *same* job_id re-claims (so RQ retries complete),
+    and a non-running row (completed/failed/declined) is re-claimed — that's the
+    explicit re-review path. The row is locked FOR UPDATE so concurrent claimers
+    serialize on Postgres; on SQLite the single writer serializes anyway.
     """
+    now = datetime.now(timezone.utc)
     with db.session() as s:
-        run = _upsert_review_run(s, params, status="running")
-        run.started_at = datetime.now(timezone.utc)
+        existing = s.execute(
+            select(ReviewRun)
+            .where(
+                (ReviewRun.repository_id == params.repository_id)
+                & (ReviewRun.pull_request_id == params.pull_request_id)
+                & (ReviewRun.head_sha == params.head_sha)
+                & (ReviewRun.review_mode == params.review_mode)
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
+
+        if existing is None:
+            run = ReviewRun(
+                repository_id=params.repository_id,
+                pull_request_id=params.pull_request_id,
+                head_sha=params.head_sha,
+                review_mode=params.review_mode,
+                trigger_event=params.trigger_event,
+                status="running",
+                started_at=now,
+                claimed_by_job_id=job_id,
+            )
+            s.add(run)
+            s.flush()
+            return run.id, True
+
+        # A different live job already owns this in-flight review → don't run it.
+        if existing.status == "running" and existing.claimed_by_job_id not in (None, job_id):
+            return existing.id, False
+
+        existing.status = "running"
+        existing.started_at = now
+        existing.claimed_by_job_id = job_id
+        existing.trigger_event = params.trigger_event
         s.flush()
-        return run.id
+        return existing.id, True
+
+
+def record_review_started(db: Database, params: JobParams) -> int:
+    """Start (or re-claim) a review_runs row in `running` status; returns its id.
+
+    Thin convenience over claim_review_run with no job identity — always claims.
+    Used for seeding/tests; the worker uses claim_review_run to honour the
+    duplicate-in-flight guard (CONC-1).
+    """
+    run_id, _ = claim_review_run(db, params, job_id=None)
+    return run_id
 
 
 def reset_review_run_post_state(db: Database, review_run_id: int) -> None:

@@ -100,6 +100,66 @@ def test_skip_locked_makes_a_second_claimer_skip_a_locked_row(pg_db):
         assert conn_c.execute(claim).scalar_one_or_none() == pending_id
 
 
+def _seed_repo_pr(db) -> JobParams:
+    repo_id = writers.upsert_repository(
+        db, github_repository_id=1, owner="acme", name="widgets",
+        default_branch="main", installation_id=500,
+    )
+    pr_id = writers.upsert_pull_request(
+        db, repository_id=repo_id, github_pr_id=9001, pr_number=42, title="t",
+        author_login="alice", base_branch="main", head_branch="feat",
+        head_sha="abc", state="open", draft=False,
+    )
+    return JobParams(
+        repository_id=repo_id, pull_request_id=pr_id, head_sha="abc",
+        installation_id=500, review_mode="diff", trigger_event="opened",
+    )
+
+
+def test_claim_review_run_blocks_a_second_distinct_job(pg_db):
+    """CONC-1: two distinct worker jobs for the same (repo,pr,sha,mode) — only one
+    may claim it. The other must bail (no duplicate paid review). A retry of the
+    same job re-claims; once the run is terminal, a new job may re-claim."""
+    params = _seed_repo_pr(pg_db)
+
+    rid1, claimed1 = writers.claim_review_run(pg_db, params, job_id="job-1")
+    assert claimed1 is True
+
+    rid2, claimed2 = writers.claim_review_run(pg_db, params, job_id="job-2")
+    assert (rid2, claimed2) == (rid1, False), "a second distinct job wrongly claimed an in-flight review"
+
+    # same job retrying (RQ retry) must re-claim and proceed
+    _, claimed_retry = writers.claim_review_run(pg_db, params, job_id="job-1")
+    assert claimed_retry is True
+
+    # terminal run → a new job may re-claim (explicit re-review path)
+    with pg_db.session() as s:
+        s.get(ReviewRun, rid1).status = "completed"
+    _, claimed_after = writers.claim_review_run(pg_db, params, job_id="job-9")
+    assert claimed_after is True
+
+
+def test_claim_review_run_is_atomic_under_concurrency(pg_db):
+    """Two jobs racing the claim at the same instant: exactly ONE wins (FOR UPDATE
+    serializes on real Postgres; SQLite would no-op the lock)."""
+    import threading
+
+    params = _seed_repo_pr(pg_db)
+    barrier = threading.Barrier(2)
+    results: dict[str, bool] = {}
+
+    def claim(job_id: str):
+        barrier.wait()  # line them up to race
+        _, claimed = writers.claim_review_run(pg_db, params, job_id=job_id)
+        results[job_id] = claimed
+
+    t1 = threading.Thread(target=claim, args=("job-a",))
+    t2 = threading.Thread(target=claim, args=("job-b",))
+    t1.start(); t2.start(); t1.join(); t2.join()
+
+    assert sum(results.values()) == 1, f"exactly one job must win the claim, got {results}"
+
+
 def test_budget_advisory_lock_read_returns_correct_total(pg_db):
     """The serialized (advisory-locked) spend read must run for real on Postgres
     and return the correct rolling total across all ledger kinds."""

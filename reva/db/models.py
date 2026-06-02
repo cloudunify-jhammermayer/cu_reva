@@ -171,6 +171,7 @@ class ReviewRun(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     error_class: Mapped[str | None] = mapped_column(Text)
     worker_id: Mapped[str | None] = mapped_column(Text)
+    claimed_by_job_id: Mapped[str | None] = mapped_column(Text)  # CONC-1 atomic claim
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
