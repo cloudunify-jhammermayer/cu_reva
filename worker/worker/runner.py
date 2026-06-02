@@ -74,6 +74,7 @@ class WorkerContext:
     odoo: OdooCallbackClient
     google_chat_webhook_url: str = ""
     daily_budget_usd: float | None = None
+    repo_cache_ttl_days: int = 30
 
 
 # Module-level singleton so RQ task functions (which can't take extra args)
@@ -146,12 +147,26 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         odoo=odoo,
         google_chat_webhook_url=settings.google_chat_webhook_url,
         daily_budget_usd=settings.daily_budget_usd,
+        repo_cache_ttl_days=settings.repo_cache_ttl_days,
     )
     set_context(context)
     return context
 
 
 # ---------------------------------------------------------------- task entry
+
+
+def run_repo_cache_eviction(job_params: dict | None = None) -> dict:
+    """RQ task entry point: evict stale repo clones (INFR-2).
+
+    The scheduler enqueues this on a cadence so the cache TTL is enforced on a
+    long-lived worker — boot-only eviction never fires until a restart.
+    """
+    ctx = get_context()
+    ttl_days = ctx.repo_cache_ttl_days
+    ctx.runner.evict_stale_repos(ttl_days=ttl_days)
+    logger.info("repo_cache_eviction_done", ttl_days=ttl_days)
+    return {"status": "ok", "ttl_days": ttl_days}
 
 
 def run_review(job_params: dict) -> dict:
