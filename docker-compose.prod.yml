@@ -16,6 +16,13 @@ services:
       # Tell the nginx entrypoint to only expand $REVA_DOMAIN in templates,
       # leaving nginx variables like $host and $remote_addr untouched.
       NGINX_ENVSUBST_FILTER: REVA_DOMAIN
+    # INFR-1: nginx caches the TLS cert at startup and the cert volume is :ro, so
+    # after certbot renews it keeps serving the OLD cert until restarted — ~60
+    # days on it serves an EXPIRED cert and GitHub silently stops delivering
+    # webhooks. certbot runs in a separate container and can't signal us, so
+    # reload every 6h to pick up renewed certs. The stock entrypoint still runs
+    # template substitution first, then execs this command.
+    command: ["/bin/sh", "-c", "while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'"]
     volumes:
       - letsencrypt_data:/etc/letsencrypt:ro
       - certbot_www:/var/www/certbot:ro

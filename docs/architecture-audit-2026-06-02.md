@@ -16,8 +16,8 @@ This audit found **161 issues** the existing plans did not already capture, plus
 - **1 confirmed critical** — an unauthenticated **RCE** in the headless-CLI path: a malicious PR can ship `.mcp.json` + `.claude/settings.json` into its branch and execute arbitrary code as the `worker` user when REVA reviews it. **This is the one true blocker; the fix is ~1 line.**
 - **6 highs** — a TLS-renewal outage, a dead admin endpoint, two supply-chain/pinning gaps, a duplicate-paid-review race, and a forgeable-webhook config gap.
 - The rest are mediums/lows/nits and a set of known planned items (observability, integration tests, data retention).
-
-**Progress (2026-06-02):** ✅ SECU-1, DEPE-1, SECU-2 (+CORR-9), CORR-1 fixed. Remaining Gate-0: INFR-1, DOCS-1.
+d
+**Progress (2026-06-02):** ✅ **Gate 0 complete** — SECU-1, DEPE-1, SECU-2 (+CORR-9), CORR-1, INFR-1, DOCS-1 all fixed (working tree). Next up: Gate 1 (DEPE-1 ✅ already done; CORR-2, INFR-2, SECU-3/4/5/6, CORR-4, R10, INFR-3).
 
 **Verdict:** Not production-ready *today* solely because of **SECU-1**. Fix that (and the empty-secret guard SECU-2, both trivial), and the system is defensible for the stated "single instance now" deployment. The concurrency findings (CONC-1/2) and cost-control gaps (SECU-3/4, CONC-3) become real the moment you execute the documented "scale to N workers/schedulers" step — treat them as gating *that* milestone, not the first deploy.
 
@@ -90,6 +90,8 @@ causes the CLI to auto-enable and **spawn** `pwn`, executing `<cmd>` as the `wor
 **api · trivial.** `repos.py:31` does `from worker.audit_tasks import run_audit` inside the handler, but the **api image installs only `reva` + `api/app/`** (`api/Dockerfile:14,22`; `pyproject.toml` packages `reva*` only) — there is no `worker` package in the container, so the first POST raises `ModuleNotFoundError`. Every other api enqueue site uses a **string job path** (`webhooks.py:201`, `admin.py:39`, `ticket_analyses.py:75`). Masked in tests (monorepo dev env makes `worker` importable; no POST test). **Fix:** `queue.enqueue("worker.audit_tasks.run_audit", {...})` and drop the import; add a POST test. *(Confirmed: `grep worker api/Dockerfile` → nothing.)*
 
 ### INFR-1 — Certbot renews but nginx is never reloaded → TLS-expiry outage
+**✅ DONE (2026-06-02, working tree).** certbot and nginx are separate containers, so a `--deploy-hook` can't signal nginx; instead the nginx service now self-reloads every 6h (`command:` wrapping `nginx -s reload` around `nginx -g 'daemon off;'`, the canonical compose pattern), picking up renewed certs without a deploy. The stock entrypoint still runs template substitution first. Validated with `docker compose config`.
+
 **infra · small.** The certbot service loops `certbot renew … ; sleep 12h` (`docker-compose.prod.yml:48-51`) with **no `--deploy-hook`/`--post-hook`**, and a repo-wide grep finds no reload mechanism anywhere. nginx mounts the cert volume `:ro` and caches the cert at startup, so it keeps serving the **old** cert until a manual `deploy.sh` restart. ~60 days after the last nginx restart it serves an **expired** cert while a fresh one sits unused on disk → **GitHub stops delivering webhooks** (TLS failure) and HTTPS API/TUI break, silently until expiry. **Fix:** add a `--deploy-hook` that reloads/SIGHUPs nginx after renewal (or a reload sidecar). *(Confirmed against the compose + nginx template.)*
 
 ### DEPE-1 — The core review engine is npm-installed completely unpinned
@@ -127,7 +129,7 @@ Grouped by theme. All carry an adversarial verdict; full `file:line` in the sour
 - **CORR-4** — `odoo19.md` is **unconditionally prepended to every review** (`claude_code_runner.py:329`), even non-Odoo repos — a regression from the Messages-API path which gated it on `repo_config.odoo`. Non-Odoo repos get ~69 lines of Odoo rules + an "Odoo team" identity → irrelevant findings + wasted tokens. *Fix:* forward the odoo/framework flag into `runner.review`, gate the preamble.
 
 ### Docs / ops (one is nearly a blocker for first deploy)
-- **DOCS-1** — `setup-production.md` **omits the required Docker secret files** (`secrets/github_webhook_secret`, `reva_api_key`, `anthropic_api_key`) and never mentions `REVA_API_KEY`. Following it verbatim → `docker compose up` fails (missing secret sources) and then a `RuntimeError` (require-api-key). Loud failure, info exists in adjacent files. *Fix:* add the secret-file creation steps + `REVA_API_KEY` to the env table.
+- **DOCS-1** — ✅ **DONE (2026-06-02, working tree).** Step 3 no longer lists the file-based secrets as `.env` vars; new step 4 creates all four secret files (`github-app-private-key.pem`, `github_webhook_secret`, `reva_api_key`, `anthropic_api_key`) with non-empty values (matching the SECU-2 fail-closed guard) and the env table documents `REVA_API_KEY`; fixed the now-stale anthropic-key-in-`.env` troubleshooting step. — `setup-production.md` **omits the required Docker secret files** (`secrets/github_webhook_secret`, `reva_api_key`, `anthropic_api_key`) and never mentions `REVA_API_KEY`. Following it verbatim → `docker compose up` fails (missing secret sources) and then a `RuntimeError` (require-api-key). Loud failure, info exists in adjacent files. *Fix:* add the secret-file creation steps + `REVA_API_KEY` to the env table.
 - **INFR-2** — Repo-cache eviction runs **only once at worker boot** (`runner.py:112`); a long-lived worker's `/repos` grows monotonically until the volume fills and **all** reviews fail. The 30-day TTL is effectively never enforced. *Fix:* run `evict_stale_repos` on a scheduler cadence.
 - **INFR-3** — gitleaks + Semgrep are still **advisory** (`continue-on-error: true`, `ci.yml:77,85`) despite HANDOFF saying to graduate them; mypy + golangci-lint likewise. *Fix:* after a clean baseline, delete the `continue-on-error` lines.
 - **MAIN-1** — `submit_ticket_analysis` **requires `odoo_notes`** (`ticket_tool.py:40`) but the prompt never documents it **and** rule 123 forbids exactly the technical detail the field is filled with — a guaranteed prompt-vs-schema contradiction. *Fix:* document+reconcile the section or make the field optional.
@@ -203,8 +205,8 @@ Scheduled audits (E1), TUI repo-overview (E2), CD pipeline (odoo.sh), committabl
 1. ✅ SECU-1 — scrub `.claude/`/`.mcp.json`/`CLAUDE.md`/`AGENTS.md` from the clone + `--setting-sources user` + `--strict-mcp-config`; regression tests; live-CLI confirmed (both MCP and hooks vectors). **Done** — and DEPE-1 (pin claude-code) pulled into this gate since the fix depends on it.
 2. ✅ SECU-2 / CORR-9 — reject empty security-critical secrets at startup (+ `verify_signature` empty-secret backstop). **Done.**
 3. ✅ CORR-1 — string-path enqueue for the audit endpoint. **Done.**
-4. INFR-1 — nginx reload on cert renewal.
-5. DOCS-1 — fix the prod bring-up steps.
+4. ✅ INFR-1 — nginx reload on cert renewal. **Done.**
+5. ✅ DOCS-1 — fix the prod bring-up steps. **Done.**
 
 **Gate 1 — production polish (days):**
 6. ✅ DEPE-1 — pin claude-code (**done**, moved to Gate 0). CORR-2 — clone integrity/repair. INFR-2 — periodic cache eviction.
