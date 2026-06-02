@@ -2,4 +2,4 @@
 # are pulled in transitively by the `reva-shared` package, installed from
 # ../shared (see Dockerfile + dev install).
 rq==2.9.0
-redis==7.4.0
+redis==8.0.0
