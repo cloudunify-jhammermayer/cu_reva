@@ -17,7 +17,7 @@ This audit found **161 issues** the existing plans did not already capture, plus
 - **6 highs** — a TLS-renewal outage, a dead admin endpoint, two supply-chain/pinning gaps, a duplicate-paid-review race, and a forgeable-webhook config gap.
 - The rest are mediums/lows/nits and a set of known planned items (observability, integration tests, data retention).
 
-**Progress (2026-06-02):** ✅ SECU-1, DEPE-1, SECU-2 (+CORR-9) fixed (working tree). Remaining Gate-0: CORR-1, INFR-1, DOCS-1.
+**Progress (2026-06-02):** ✅ SECU-1, DEPE-1, SECU-2 (+CORR-9), CORR-1 fixed. Remaining Gate-0: INFR-1, DOCS-1.
 
 **Verdict:** Not production-ready *today* solely because of **SECU-1**. Fix that (and the empty-secret guard SECU-2, both trivial), and the system is defensible for the stated "single instance now" deployment. The concurrency findings (CONC-1/2) and cost-control gaps (SECU-3/4, CONC-3) become real the moment you execute the documented "scale to N workers/schedulers" step — treat them as gating *that* milestone, not the first deploy.
 
@@ -85,6 +85,8 @@ causes the CLI to auto-enable and **spawn** `pwn`, executing `<cmd>` as the `wor
 **scheduler+worker · medium.** `is_already_posted` is checked **once at the top of `run_review` (`runner.py:174`), before** the serializing `repo_lock` (`reviewer.py:259`) — and it only returns true once `check_run_id` is persisted (i.e. after a full review *and* post). So two jobs for the identical `(repo,pr,sha,mode)` dequeued close together both pass the gate and both invoke the paid `claude` CLI; only the GitHub post is deduped. Triggers: a push-debounce review racing a `/review` comment on the same SHA; an RQ retry (see CONC-3); or the poller's **enqueue-before-commit** (`poller.py:117-139` pushes to Redis *inside* the txn — if the commit then fails, `consumed` reverts and the next tick re-enqueues). `record_review_started` is a plain upsert with no atomic claim. **Fix:** commit `consumed=True` *before* enqueue and/or derive a deterministic RQ `job_id` from the params; make `record_review_started` an atomic claim (`UPDATE … WHERE status<>'running' RETURNING`). Probability/blast-radius rise with the documented multi-worker scaling.
 
 ### CORR-1 — `POST /api/v1/repos/{id}/audit` 500s on first call (dead endpoint)
+**✅ DONE (2026-06-02, working tree).** Reproduced with a new POST test that hit the real `ModuleNotFoundError: No module named 'worker.audit_tasks'`. Fixed via string-path enqueue (`queue.enqueue("worker.audit_tasks.run_audit", …)`), dropping the in-handler import. Note: the report's "masked in tests" was slightly off — `worker` is **not** importable from the api env either; the endpoint simply had no POST test. Added two (`test_v1_repos.py`: success enqueues by string path; unknown repo → 404).
+
 **api · trivial.** `repos.py:31` does `from worker.audit_tasks import run_audit` inside the handler, but the **api image installs only `reva` + `api/app/`** (`api/Dockerfile:14,22`; `pyproject.toml` packages `reva*` only) — there is no `worker` package in the container, so the first POST raises `ModuleNotFoundError`. Every other api enqueue site uses a **string job path** (`webhooks.py:201`, `admin.py:39`, `ticket_analyses.py:75`). Masked in tests (monorepo dev env makes `worker` importable; no POST test). **Fix:** `queue.enqueue("worker.audit_tasks.run_audit", {...})` and drop the import; add a POST test. *(Confirmed: `grep worker api/Dockerfile` → nothing.)*
 
 ### INFR-1 — Certbot renews but nginx is never reloaded → TLS-expiry outage
@@ -200,7 +202,7 @@ Scheduled audits (E1), TUI repo-overview (E2), CD pipeline (odoo.sh), committabl
 **Gate 0 — before any internet-exposed deploy (hours):**
 1. ✅ SECU-1 — scrub `.claude/`/`.mcp.json`/`CLAUDE.md`/`AGENTS.md` from the clone + `--setting-sources user` + `--strict-mcp-config`; regression tests; live-CLI confirmed (both MCP and hooks vectors). **Done** — and DEPE-1 (pin claude-code) pulled into this gate since the fix depends on it.
 2. ✅ SECU-2 / CORR-9 — reject empty security-critical secrets at startup (+ `verify_signature` empty-secret backstop). **Done.**
-3. CORR-1 — string-path enqueue for the audit endpoint.
+3. ✅ CORR-1 — string-path enqueue for the audit endpoint. **Done.**
 4. INFR-1 — nginx reload on cert renewal.
 5. DOCS-1 — fix the prod bring-up steps.
 

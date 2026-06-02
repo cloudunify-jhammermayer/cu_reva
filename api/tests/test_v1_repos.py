@@ -6,7 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 
-from app.dependencies import get_db, get_settings
+from unittest.mock import MagicMock
+
+from app.dependencies import get_db, get_queue, get_settings
 from app.main import app
 from app.settings import Settings
 from reva.db import Base, Database, create_engine_from_url, writers
@@ -90,3 +92,37 @@ def test_repos_no_reviews_has_zero_count(client_and_db):
     item = client.get("/api/v1/repos").json()["items"][0]
     assert item["review_count"] == 0
     assert item["last_review_at"] is None
+
+
+# --- POST /repos/{id}/audit (CORR-1) ------------------------------------------
+
+def test_trigger_audit_enqueues_by_string_path(client_and_db):
+    """CORR-1: the api image installs only reva + api/app (no worker package),
+    so importing worker.audit_tasks in the handler raises ModuleNotFoundError on
+    the first real POST. The job must be enqueued by string path (resolved on the
+    worker), like every other api enqueue site — the api must never import worker."""
+    client, db = client_and_db
+    repo_id = writers.upsert_repository(
+        db, github_repository_id=1001, owner="acme", name="widgets",
+        default_branch="main", installation_id=99,
+    )
+    fake_queue = MagicMock()
+    fake_queue.enqueue.return_value = MagicMock(id="job-123")
+    app.dependency_overrides[get_queue] = lambda: fake_queue
+
+    resp = client.post(f"/api/v1/repos/{repo_id}/audit")
+
+    assert resp.status_code == 202
+    assert resp.json()["job_id"] == "job-123"
+    assert resp.json()["repository_id"] == repo_id
+    # enqueued by string path, never by importing the worker package into the api
+    assert fake_queue.enqueue.call_args.args[0] == "worker.audit_tasks.run_audit"
+    job_params = fake_queue.enqueue.call_args.args[1]
+    assert job_params == {"repository_id": repo_id, "installation_id": 99}
+
+
+def test_trigger_audit_returns_404_for_unknown_repo(client_and_db):
+    client, _ = client_and_db
+    app.dependency_overrides[get_queue] = lambda: MagicMock()
+    resp = client.post("/api/v1/repos/999/audit")
+    assert resp.status_code == 404
