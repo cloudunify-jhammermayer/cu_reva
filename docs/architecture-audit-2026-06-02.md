@@ -405,10 +405,10 @@ _Not adversarially verified — high-signal leads. Grouped by category._
     - Fix: Make review_guidance.md a hard dependency for the review path (raise if missing) rather than best-effort, or have skills not assume an external preamble. At minimum log a warning when the preamble is empty in production.
 ### performance (7)
 
-- **PERF-1** — dashboard_metrics opens a new Redis connection pool per request and never closes it
+- **PERF-1** — ✅ DONE (2026-06-02) — dashboard route now passes the pooled `get_redis` connection into `dashboard_metrics`/`_count_workers`; no per-request pool. — dashboard_metrics opens a new Redis connection pool per request and never closes it
     - `api/app/queries/metrics.py:66-73, api/app/routes/v1/metrics.py:21-27`
     - Fix: Pass the existing pooled Redis connection (get_redis dependency) into the query, or move worker-count retrieval into the route/dependency layer; reuse the connection rather than building a new pool per request.
-- **PERF-2** — trigger_weekly_report is async but does blocking Redis/DB IO directly on the event loop
+- **PERF-2** — ✅ DONE (2026-06-02) — made `trigger_weekly_report` sync (`def`) so FastAPI runs its blocking I/O in the threadpool. — trigger_weekly_report is async but does blocking Redis/DB IO directly on the event loop
     - `api/app/routes/v1/admin.py:27-44`
     - Fix: Change async def trigger_weekly_report to def trigger_weekly_report so FastAPI dispatches it to the threadpool like the sibling handlers (it needs no await).
 - **PERF-3** — Every 30s TUI tick refreshes six tabs concurrently regardless of which tab is visible
@@ -417,7 +417,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **PERF-4** — ✅ DONE (with SECU-11) — periodic `_sweep` drops buckets whose newest hit is older than the window. — In-memory rate-limiter never evicts idle client keys (unbounded growth when keyed by IP)
     - `api/app/ratelimit.py:19,34-45`
     - Fix: Delete a client's entry when its deque becomes empty after pruning (e.g. if not window: del _hits[key]), or periodically sweep empty deques. Document that the limiter is intended to sit behind nginx's own limiting.
-- **PERF-5** — feedback_stats runs an unbounded full-table aggregation with no time window
+- **PERF-5** — ✅ DONE (2026-06-02) — `feedback_stats` now filters to a `since_days` window (default 90) so it doesn't scan the whole findings table each dashboard load. — feedback_stats runs an unbounded full-table aggregation with no time window
     - `api/app/queries/metrics.py:226-242, reva/db/models.py:219-222`
     - Fix: Add a time window (last N weeks) as the other metrics queries do, or precompute/materialize the aggregation. Note a composite (category, severity) index alone would NOT fix it: with no WHERE clause Postgres still scans the whole table, and the LEFT JOIN to feedback prevents an index-only scan.
 - **PERF-6** — No standalone index on review_runs.created_at for the unfiltered /reviews list ordering

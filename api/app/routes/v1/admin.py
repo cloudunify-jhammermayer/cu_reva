@@ -25,12 +25,15 @@ logger = structlog.get_logger()
 
 
 @router.post("/weekly-report")
-async def trigger_weekly_report(
+def trigger_weekly_report(
     request: Request,
     days: int = 7,
     db: Database = Depends(get_db),
 ) -> dict:
     """Manually enqueue a weekly report for the last `days` days.
+
+    Sync (PERF-2): does only blocking Redis/DB I/O and no await, so FastAPI runs
+    it in the threadpool instead of stalling the event loop.
 
     This does NOT record an entry in `weekly_reports`, so it won't delay
     the next scheduled send. Useful for testing the report format.

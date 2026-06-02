@@ -63,17 +63,19 @@ def _period_stats(s, since: datetime) -> dict:
     }
 
 
-def _count_workers(redis_url: str) -> int:
+def _count_workers(redis_conn) -> int:
+    # PERF-1: reuse the app's pooled Redis connection — don't open (and leak) a
+    # fresh connection pool per dashboard request.
+    if redis_conn is None:
+        return 0
     try:
-        import redis as redis_lib
         from rq import Worker
-        conn = redis_lib.from_url(redis_url)
-        return len(Worker.all(connection=conn))
+        return len(Worker.all(connection=redis_conn))
     except Exception:
         return 0
 
 
-def dashboard_metrics(db: Database, redis_url: str = "") -> dict:
+def dashboard_metrics(db: Database, redis_conn=None) -> dict:
     now = datetime.now(timezone.utc)
     since_24h = now - timedelta(hours=24)
     since_7d = now - timedelta(days=7)
@@ -115,7 +117,7 @@ def dashboard_metrics(db: Database, redis_url: str = "") -> dict:
         },
         "total_cost_7d": total_cost,
         "avg_cost_per_review_7d": avg_cost,
-        "active_workers": _count_workers(redis_url) if redis_url else 0,
+        "active_workers": _count_workers(redis_conn),
     }
 
 
@@ -223,7 +225,10 @@ def cost_stats(db: Database, period: str, repo: str | None) -> list[dict]:
     ]
 
 
-def feedback_stats(db: Database) -> list[dict]:
+def feedback_stats(db: Database, since_days: int = 90) -> list[dict]:
+    # PERF-5: bound the aggregation to a recent window so it doesn't scan the
+    # whole (ever-growing) review_findings table on every dashboard load.
+    cutoff = datetime.now(timezone.utc) - timedelta(days=since_days)
     with db.session() as s:
         rows = s.execute(
             select(
@@ -237,6 +242,7 @@ def feedback_stats(db: Database) -> list[dict]:
                 ).label("thumbs_down"),
             )
             .outerjoin(ReviewFeedback, ReviewFeedback.review_finding_id == ReviewFinding.id)
+            .where(ReviewFinding.created_at >= cutoff)
             .group_by(ReviewFinding.category, ReviewFinding.severity)
             .order_by(ReviewFinding.category, ReviewFinding.severity)
         ).all()

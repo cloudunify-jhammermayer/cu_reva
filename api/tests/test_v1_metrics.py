@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 
-from app.dependencies import get_db, get_settings
+from app.dependencies import get_db, get_redis, get_settings
 from app.main import app
 from app.settings import Settings
 from reva.db import Base, Database, create_engine_from_url, writers
@@ -35,6 +35,7 @@ def client_and_db():
     )
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_redis] = lambda: None  # no RQ in tests → 0 workers
     yield TestClient(app), db
     app.dependency_overrides.clear()
 
