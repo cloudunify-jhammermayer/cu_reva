@@ -7,18 +7,18 @@ import (
 )
 
 var (
-	colorAccent   = lipgloss.Color("#4A9EFF")
-	colorMuted    = lipgloss.Color("#6C7086")
-	colorGreen    = lipgloss.Color("#A6E3A1")
-	colorYellow   = lipgloss.Color("#F9E2AF")
-	colorRed      = lipgloss.Color("#F38BA8")
-	colorOrange   = lipgloss.Color("#FAB387")
-	colorBlue     = lipgloss.Color("#89B4FA")
-	colorDim      = lipgloss.Color("#45475A")
-	colorBg       = lipgloss.Color("#1E1E2E")
-	colorBorder   = lipgloss.Color("#313244")
-	colorSelected    = lipgloss.Color("#2A5298")
-	colorSelectedFg  = lipgloss.Color("#CDD6F4")
+	colorAccent     = lipgloss.Color("#4A9EFF")
+	colorMuted      = lipgloss.Color("#6C7086")
+	colorGreen      = lipgloss.Color("#A6E3A1")
+	colorYellow     = lipgloss.Color("#F9E2AF")
+	colorRed        = lipgloss.Color("#F38BA8")
+	colorOrange     = lipgloss.Color("#FAB387")
+	colorBlue       = lipgloss.Color("#89B4FA")
+	colorDim        = lipgloss.Color("#45475A")
+	colorBg         = lipgloss.Color("#1E1E2E")
+	colorBorder     = lipgloss.Color("#313244")
+	colorSelected   = lipgloss.Color("#2A5298")
+	colorSelectedFg = lipgloss.Color("#CDD6F4")
 
 	styleTitle = lipgloss.NewStyle().
 			Bold(true).

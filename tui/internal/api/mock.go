@@ -45,10 +45,10 @@ func (m *MockClient) Reviews(limit int, repo, status, author string) (*ReviewPag
 	items := []ReviewSummary{
 		{
 			ID: 101, RepoFullName: "acme/odoo-modules", PRNumber: 312,
-			PRTitle:          "feat: add stock valuation override",
-			AuthorLogin:      strPtr("alice"),
-			HeadSHA:          "a1b2c3d4",
-			Status:           "completed", ReviewMode: "diff",
+			PRTitle:     "feat: add stock valuation override",
+			AuthorLogin: strPtr("alice"),
+			HeadSHA:     "a1b2c3d4",
+			Status:      "completed", ReviewMode: "diff",
 			Model:            strPtr("claude-opus-4-5"),
 			RiskLevel:        strPtr("high"),
 			FindingCount:     5,
@@ -58,10 +58,10 @@ func (m *MockClient) Reviews(limit int, repo, status, author string) (*ReviewPag
 		},
 		{
 			ID: 100, RepoFullName: "acme/odoo-modules", PRNumber: 311,
-			PRTitle:          "fix: correct account move line rounding",
-			AuthorLogin:      strPtr("bob"),
-			HeadSHA:          "d4e5f6a7",
-			Status:           "completed", ReviewMode: "diff",
+			PRTitle:     "fix: correct account move line rounding",
+			AuthorLogin: strPtr("bob"),
+			HeadSHA:     "d4e5f6a7",
+			Status:      "completed", ReviewMode: "diff",
 			Model:            strPtr("claude-opus-4-5"),
 			RiskLevel:        strPtr("medium"),
 			FindingCount:     2,
@@ -71,10 +71,10 @@ func (m *MockClient) Reviews(limit int, repo, status, author string) (*ReviewPag
 		},
 		{
 			ID: 99, RepoFullName: "acme/integrations", PRNumber: 88,
-			PRTitle:          "chore: bump dependencies",
-			AuthorLogin:      strPtr("carol"),
-			HeadSHA:          "b2c3d4e5",
-			Status:           "completed", ReviewMode: "diff",
+			PRTitle:     "chore: bump dependencies",
+			AuthorLogin: strPtr("carol"),
+			HeadSHA:     "b2c3d4e5",
+			Status:      "completed", ReviewMode: "diff",
 			Model:            strPtr("claude-opus-4-5"),
 			RiskLevel:        strPtr("low"),
 			FindingCount:     0,
@@ -84,10 +84,10 @@ func (m *MockClient) Reviews(limit int, repo, status, author string) (*ReviewPag
 		},
 		{
 			ID: 98, RepoFullName: "acme/odoo-modules", PRNumber: 310,
-			PRTitle:          "refactor: extract invoice validation logic",
-			AuthorLogin:      strPtr("alice"),
-			HeadSHA:          "c3d4e5f6",
-			Status:           "failed", ReviewMode: "diff",
+			PRTitle:     "refactor: extract invoice validation logic",
+			AuthorLogin: strPtr("alice"),
+			HeadSHA:     "c3d4e5f6",
+			Status:      "failed", ReviewMode: "diff",
 			Model:            strPtr("claude-opus-4-5"),
 			RiskLevel:        nil,
 			FindingCount:     0,
@@ -97,10 +97,10 @@ func (m *MockClient) Reviews(limit int, repo, status, author string) (*ReviewPag
 		},
 		{
 			ID: 97, RepoFullName: "acme/backend", PRNumber: 201,
-			PRTitle:          "feat: add webhook retry mechanism",
-			AuthorLogin:      strPtr("dave"),
-			HeadSHA:          "e5f6a7b8",
-			Status:           "completed", ReviewMode: "diff",
+			PRTitle:     "feat: add webhook retry mechanism",
+			AuthorLogin: strPtr("dave"),
+			HeadSHA:     "e5f6a7b8",
+			Status:      "completed", ReviewMode: "diff",
 			Model:            strPtr("claude-opus-4-5"),
 			RiskLevel:        strPtr("medium"),
 			FindingCount:     3,
@@ -110,10 +110,10 @@ func (m *MockClient) Reviews(limit int, repo, status, author string) (*ReviewPag
 		},
 		{
 			ID: 96, RepoFullName: "acme/backend", PRNumber: 200,
-			PRTitle:          "fix: race condition in job queue",
-			AuthorLogin:      strPtr("bob"),
-			HeadSHA:          "f6a7b8c9",
-			Status:           "stale", ReviewMode: "diff",
+			PRTitle:     "fix: race condition in job queue",
+			AuthorLogin: strPtr("bob"),
+			HeadSHA:     "f6a7b8c9",
+			Status:      "stale", ReviewMode: "diff",
 			Model:            nil,
 			RiskLevel:        nil,
 			FindingCount:     0,
@@ -151,7 +151,7 @@ func (m *MockClient) ReviewDetail(id int) (*ReviewDetail, error) {
 		return &ReviewDetail{
 			ReviewSummary: ReviewSummary{
 				ID: 101, RepoFullName: "acme/odoo-modules", PRNumber: 312,
-				PRTitle: "feat: add stock valuation override",
+				PRTitle:     "feat: add stock valuation override",
 				AuthorLogin: strPtr("alice"), HeadSHA: "a1b2c3d4",
 				Status: "completed", ReviewMode: "diff",
 				Model: strPtr("claude-opus-4-5"), RiskLevel: strPtr("high"),
@@ -165,7 +165,7 @@ func (m *MockClient) ReviewDetail(id int) (*ReviewDetail, error) {
 			Findings: []FindingDetail{
 				{
 					ID: 1, Severity: "critical", Category: "security",
-					Title: "Direct SQL execution bypasses ORM access rules",
+					Title:      "Direct SQL execution bypasses ORM access rules",
 					Confidence: f64Ptr(0.95), FilePath: fp("models/stock_valuation.py"), LineStart: intPtr(142),
 					Body:           "The method uses `env.cr.execute()` with unsanitized input, bypassing Odoo's ORM security layer.",
 					Suggestion:     strPtr("Use `env['stock.valuation'].search()` or `env['stock.valuation'].browse()` instead."),
@@ -173,7 +173,7 @@ func (m *MockClient) ReviewDetail(id int) (*ReviewDetail, error) {
 				},
 				{
 					ID: 2, Severity: "major", Category: "access-control",
-					Title: "Missing `@api.model` decorator on public method",
+					Title:      "Missing `@api.model` decorator on public method",
 					Confidence: f64Ptr(0.88), FilePath: fp("models/stock_valuation.py"), LineStart: intPtr(87),
 					Body:           "The method `_compute_value_override` is accessible from RPC but lacks proper decorator.",
 					Suggestion:     strPtr("Add `@api.model` and a `check_access_rights('read')` call."),
@@ -181,21 +181,21 @@ func (m *MockClient) ReviewDetail(id int) (*ReviewDetail, error) {
 				},
 				{
 					ID: 3, Severity: "major", Category: "data-integrity",
-					Title: "Valuation update not wrapped in savepoint",
+					Title:      "Valuation update not wrapped in savepoint",
 					Confidence: f64Ptr(0.82), FilePath: fp("models/stock_valuation.py"), LineStart: intPtr(201),
 					Body:           "Partial failures during batch valuation update can leave data in an inconsistent state.",
 					IsOdooSpecific: false, ThumbsUp: 0, ThumbsDown: 0,
 				},
 				{
 					ID: 4, Severity: "minor", Category: "style",
-					Title: "Magic number 365 should be a constant",
+					Title:      "Magic number 365 should be a constant",
 					Confidence: f64Ptr(0.72), FilePath: fp("models/stock_valuation.py"), LineStart: intPtr(55),
 					Body:           "The value 365 is used for annual depreciation but is not named.",
 					IsOdooSpecific: false, ThumbsUp: 0, ThumbsDown: 1,
 				},
 				{
 					ID: 5, Severity: "info", Category: "performance",
-					Title: "N+1 query in valuation report",
+					Title:      "N+1 query in valuation report",
 					Confidence: f64Ptr(0.65), FilePath: fp("reports/stock_report.py"), LineStart: intPtr(33),
 					Body:           "The report iterates over lines and queries the DB per line. Prefetch or a JOIN would help.",
 					IsOdooSpecific: false, ThumbsUp: 0, ThumbsDown: 0,
@@ -207,7 +207,7 @@ func (m *MockClient) ReviewDetail(id int) (*ReviewDetail, error) {
 		return &ReviewDetail{
 			ReviewSummary: ReviewSummary{
 				ID: 98, RepoFullName: "acme/odoo-modules", PRNumber: 310,
-				PRTitle: "refactor: extract invoice validation logic",
+				PRTitle:     "refactor: extract invoice validation logic",
 				AuthorLogin: strPtr("alice"), HeadSHA: "c3d4e5f6",
 				Status: "failed", ReviewMode: "diff",
 				CreatedAt: time.Now().Add(-3 * time.Hour),
@@ -220,7 +220,7 @@ func (m *MockClient) ReviewDetail(id int) (*ReviewDetail, error) {
 		return &ReviewDetail{
 			ReviewSummary: ReviewSummary{
 				ID: 96, RepoFullName: "acme/backend", PRNumber: 200,
-				PRTitle: "fix: race condition in job queue",
+				PRTitle:     "fix: race condition in job queue",
 				AuthorLogin: strPtr("bob"), HeadSHA: "f6a7b8c9",
 				Status: "stale", ReviewMode: "diff",
 				CreatedAt: time.Now().Add(-8 * time.Hour),
@@ -254,7 +254,7 @@ func (m *MockClient) Failures(limit int) (*FailurePage, error) {
 		{
 			ReviewSummary: ReviewSummary{
 				ID: 98, RepoFullName: "acme/odoo-modules", PRNumber: 310,
-				PRTitle: "refactor: extract invoice validation logic",
+				PRTitle:     "refactor: extract invoice validation logic",
 				AuthorLogin: strPtr("alice"), HeadSHA: "c3d4e5f6",
 				Status: "failed", ReviewMode: "diff",
 				CreatedAt: time.Now().Add(-3 * time.Hour),
@@ -265,7 +265,7 @@ func (m *MockClient) Failures(limit int) (*FailurePage, error) {
 		{
 			ReviewSummary: ReviewSummary{
 				ID: 96, RepoFullName: "acme/backend", PRNumber: 200,
-				PRTitle: "fix: race condition in job queue",
+				PRTitle:     "fix: race condition in job queue",
 				AuthorLogin: strPtr("bob"), HeadSHA: "f6a7b8c9",
 				Status: "stale", ReviewMode: "diff",
 				CreatedAt: time.Now().Add(-8 * time.Hour),
@@ -275,7 +275,7 @@ func (m *MockClient) Failures(limit int) (*FailurePage, error) {
 		{
 			ReviewSummary: ReviewSummary{
 				ID: 91, RepoFullName: "acme/integrations", PRNumber: 77,
-				PRTitle: "feat: Salesforce sync",
+				PRTitle:     "feat: Salesforce sync",
 				AuthorLogin: strPtr("carol"), HeadSHA: "1a2b3c4d",
 				Status: "failed", ReviewMode: "diff",
 				CreatedAt: time.Now().Add(-26 * time.Hour),

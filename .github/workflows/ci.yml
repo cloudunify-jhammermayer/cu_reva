@@ -65,16 +65,15 @@ jobs:
           version: latest
 
   # Free, $0-on-GitHub-Team security scanning (no add-ons, no API keys).
-  # See docs/security-scanning-setup.md. Both steps are ADVISORY for now
-  # (continue-on-error) — review the first runs, then delete the
-  # continue-on-error lines to make them blocking gates.
+  # See docs/security-scanning-setup.md. BLOCKING (INFR-3): security findings
+  # fail the build. (mypy + golangci-lint remain advisory pending a verified
+  # clean baseline — see their continue-on-error notes above.)
   security:
-    name: security scan (advisory)
+    name: security scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: gitleaks — secret scan (working tree)
-        continue-on-error: true
         run: |
           docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:latest \
             dir /repo --no-banner --redact --exit-code 1
@@ -82,7 +81,6 @@ jobs:
         with:
           python-version: "3.14"
       - name: semgrep — SAST (Python + Go)
-        continue-on-error: true
         run: |
           pip install semgrep
           semgrep scan --error \

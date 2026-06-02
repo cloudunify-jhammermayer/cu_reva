@@ -99,10 +99,10 @@ func (r Repos) view(w, h int) string {
 	}
 
 	// enabled column is a single symbol rendered as %s (no width)
-	colName    := 32
-	colBranch  := 14
-	colCount   := 8
-	colWhen    := 12
+	colName := 32
+	colBranch := 14
+	colCount := 8
+	colWhen := 12
 	// enabled=1 + spacings = 2+2+2+2+2 = 11 extra
 	remaining := w - 1 - colBranch - colCount - colWhen - 12
 	if remaining > colName {

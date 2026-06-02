@@ -66,12 +66,12 @@ type FindingDetail struct {
 
 type ReviewDetail struct {
 	ReviewSummary
-	Summary       *string        `json:"summary"`
-	DeclineReason *string        `json:"decline_reason"`
-	ErrorMessage  *string        `json:"error_message"`
-	ErrorClass    *string        `json:"error_class"`
-	InputTokens   *int           `json:"input_tokens"`
-	OutputTokens  *int           `json:"output_tokens"`
+	Summary       *string         `json:"summary"`
+	DeclineReason *string         `json:"decline_reason"`
+	ErrorMessage  *string         `json:"error_message"`
+	ErrorClass    *string         `json:"error_class"`
+	InputTokens   *int            `json:"input_tokens"`
+	OutputTokens  *int            `json:"output_tokens"`
 	Findings      []FindingDetail `json:"findings"`
 }
 
