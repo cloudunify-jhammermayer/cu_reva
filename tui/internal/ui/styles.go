@@ -150,12 +150,24 @@ func moveCursor(cursor, offset, total, visibleRows int, down bool) (int, int) {
 	return cursor, offset
 }
 
+// truncate shortens s to at most n characters, counting by runes so multibyte
+// UTF-8 (e.g. accented or CJK text) isn't sliced mid-codepoint (CORR-16).
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
 	if n <= 3 {
-		return s[:n]
+		return string(r[:n])
 	}
-	return s[:n-3] + "..."
+	return string(r[:n-3]) + "..."
+}
+
+// shortSHA returns the first 8 chars of a git SHA, guarding against a short or
+// empty server-supplied value (CORR-15: a bare s[:8] panics).
+func shortSHA(s string) string {
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
 }

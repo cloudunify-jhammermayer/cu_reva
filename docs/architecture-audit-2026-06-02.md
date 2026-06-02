@@ -235,7 +235,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 
 ### code-quality (2)
 
-- **CODE-1** — List endpoints findings/failures bypass shared clamp helpers — negative limit reaches SQLAlchemy
+- **CODE-1** — ✅ DONE (with CORR-6) — List endpoints findings/failures bypass shared clamp helpers — negative limit reaches SQLAlchemy
     - `api/app/routes/v1/findings.py:21, api/app/routes/v1/failures.py:15`
     - Fix: Call clamp_limit(limit, 500) in findings.py and clamp_limit(limit, 100) in failures.py for uniform lower/upper bounding, matching the other list routes.
 - **CODE-2** — TUI HTTP client discards non-2xx response bodies and can return partially-decoded data on error
@@ -272,7 +272,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **CORR-5** — find_pr_review_id matches an attacker-craftable marker AND reads only the first page of PR reviews
     - `reva/github_client.py:162-176, worker/worker/runner.py:289-299, reva/review_formatter.py:203`
     - Fix: Recover review ids with an unforgeable marker (per-run HMAC in an HTML comment) and/or also filter on REVA's app/bot login, and paginate the reviews listing (per_page=100 + page loop, or request newest-first) until the marker is found or the list is exhausted.
-- **CORR-6** — Negative or zero ?limit on /findings and /failures reaches the SQL LIMIT (Postgres 500 on negative, empty page on zero)
+- **CORR-6** — ✅ DONE (2026-06-02) — routed both through clamp_limit (floors at 1). — Negative or zero ?limit on /findings and /failures reaches the SQL LIMIT (Postgres 500 on negative, empty page on zero)
     - `api/app/routes/v1/findings.py:21, api/app/routes/v1/failures.py:15, api/app/queries/reviews.py:186,220`
     - Fix: Route both endpoints through the existing clamp_limit() helper (clamp_limit(limit, 500) / clamp_limit(limit, 100)), which floors at 1, matching reviews.py and ticket_analyses.py.
 - **CORR-7** — pending_reviews uniqueness on (repository_id, pr_number) lets an intervening push silently downgrade a queued deep/full review to diff
@@ -293,13 +293,13 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **CORR-12** — On a TransientError mid-audit, the AuditRun row is left in status='started' forever and each retry inserts a new orphan row
     - `worker/worker/audit_tasks.py:24-50`
     - Fix: Either update the existing row to a retryable/failed state before re-raising (and reuse it on retry), or add an audit reaper analogous to reap_stale_running_reviews.
-- **CORR-13** — Webhook _handle_pull_request hard-subscripts payload keys; a missing key 500s and re-enters the GitHub redelivery loop
+- **CORR-13** — ✅ DONE (2026-06-02) — dispatch catches shape errors (KeyError/TypeError), marks processed, accepts with a warning; infra errors still redeliver. — Webhook _handle_pull_request hard-subscripts payload keys; a missing key 500s and re-enters the GitHub redelivery loop
     - `api/app/routes/webhooks.py:108-136, reva/db/writers.py:444-445`
     - Fix: Mirror the .get()/early-return style of _handle_issue_comment: validate presence of pull_request/repository/installation and required sub-fields, returning {"status":"accepted"} (so the event is marked processed and not redelivered) with a warning log when the shape is unexpected. Alternatively wrap handler dispatch in a try/except that marks the event processed for non-retryable shape errors.
-- **CORR-15** — Panic on short HeadSHA: item.HeadSHA[:8] is an unchecked fixed-length slice
+- **CORR-15** — ✅ DONE (2026-06-02) — `shortSHA()` helper guards the slice (+ Go test). — Panic on short HeadSHA: item.HeadSHA[:8] is an unchecked fixed-length slice
     - `tui/internal/ui/pending.go:158`
     - Fix: Guard the slice, e.g. `sha := item.HeadSHA; if len(sha) > 8 { sha = sha[:8] }` and render sha. Apply the same defensive check anywhere fixed-length slicing is done on server-supplied strings.
-- **CORR-16** — truncate() byte-slices UTF-8 strings, corrupting multibyte output and miscounting display width
+- **CORR-16** — ✅ DONE (2026-06-02) — truncate() now slices by runes (+ UTF-8-validity Go test); full display-width (CJK) still approximate. — truncate() byte-slices UTF-8 strings, corrupting multibyte output and miscounting display width
     - `tui/internal/ui/styles.go:153-161`
     - Fix: Truncate by runes (convert to []rune) or use the already-vendored ansi.Truncate / uniseg / runewidth utilities for display-width-aware truncation.
 ### dependencies (1)
@@ -440,7 +440,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **SECU-12** — No application-level request body size limit; body-size protection relies solely on nginx
     - `api/app/routes/webhooks.py:38, api/Dockerfile:27`
     - Fix: Add an app-level body cap (small ASGI middleware rejecting Content-Length over a threshold and guarding streamed size for chunked requests) so the limit holds regardless of fronting proxy.
-- **SECU-13** — git checkout/reset of head_sha has no defensive hex-SHA validation or `--` separator
+- **SECU-13** — ✅ DONE (2026-06-02) — `_validate_head_sha` enforces `^[0-9a-fA-F]{7,64}$` before any git op (parametrized test). — git checkout/reset of head_sha has no defensive hex-SHA validation or `--` separator
     - `reva/claude_code_runner.py:169-172`
     - Fix: Validate head_sha against `^[0-9a-fA-F]{7,64}$` before use and/or insert `--` before it in checkout/reset to terminate option parsing.
 - **SECU-14** — Prompt-injection via unescaped XML param delimiters and spoofable output_path in PR diff/body (delimiter break-out; self-DoS)

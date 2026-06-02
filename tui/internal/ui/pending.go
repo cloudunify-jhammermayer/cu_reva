@@ -155,7 +155,7 @@ func (p Pending) renderDetail(item api.PendingReview, w int) string {
 	var b strings.Builder
 	b.WriteString(styleTitle.Render(fmt.Sprintf("#%d  %s", item.PRNumber, truncate(item.PRTitle, w-20))) + "\n")
 	b.WriteString(fmt.Sprintf("  Repo     %s\n", item.RepoFullName))
-	b.WriteString(fmt.Sprintf("  SHA      %s\n", styleSubtitle.Render(item.HeadSHA[:8])))
+	b.WriteString(fmt.Sprintf("  SHA      %s\n", styleSubtitle.Render(shortSHA(item.HeadSHA))))
 	b.WriteString(fmt.Sprintf("  Trigger  %s\n", styleSubtitle.Render(item.TriggerEvent)))
 	b.WriteString(fmt.Sprintf("  Mode     %s\n", styleSubtitle.Render(item.ReviewMode)))
 	timeLabel := "Fires"
