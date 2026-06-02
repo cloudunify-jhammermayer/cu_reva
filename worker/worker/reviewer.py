@@ -260,7 +260,10 @@ class Reviewer:
         started_at = datetime.now(timezone.utc)
         with self.runner.repo_lock(owner, name):
             repo_path = self.runner.ensure_repo(owner, name, params.head_sha, token)
-            response = self.runner.review(repo_path=repo_path, skill=skill, params=skill_params, model=model)
+            response = self.runner.review(
+                repo_path=repo_path, skill=skill, params=skill_params,
+                model=model, odoo=repo_config.odoo,
+            )
         completed_at = datetime.now(timezone.utc)
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 

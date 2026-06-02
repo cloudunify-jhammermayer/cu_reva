@@ -106,6 +106,7 @@ class FakeRunner:
     last_model: str | None = None
     last_skill: str | None = None
     last_params: dict | None = None
+    last_odoo: bool | None = None
     repo_path_returned: str = "/fake/repos/acme/widgets"
 
     def repo_lock(self, owner: str, name: str):
@@ -115,10 +116,12 @@ class FakeRunner:
     def ensure_repo(self, owner: str, name: str, head_sha: str | None, token: str) -> str:
         return self.repo_path_returned
 
-    def review(self, repo_path: str, skill: str, params: dict, model: str | None = None) -> ClaudeResponse:
+    def review(self, repo_path: str, skill: str, params: dict,
+               model: str | None = None, odoo: bool = False) -> ClaudeResponse:
         self.last_model = model
         self.last_skill = skill
         self.last_params = params
+        self.last_odoo = odoo
         if self.raise_exc:
             raise self.raise_exc
         return self.response
@@ -350,6 +353,24 @@ def test_malformed_claude_review_yml_falls_back_to_empty():
     result = reviewer.execute(_params())
     # Did NOT decline — default limits applied since the YAML was unparseable.
     assert result.status == "completed"
+
+
+def test_odoo_flag_forwarded_to_runner_when_set():
+    """CORR-4: `.claude-review.yml` `odoo: true` must reach runner.review(odoo=True)
+    so the Odoo preamble is applied only to Odoo repos."""
+    github = FakeGitHub(file_contents={".claude-review.yml": "odoo: true\n"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    reviewer.execute(_params())
+    assert runner.last_odoo is True
+
+
+def test_odoo_flag_defaults_false_for_non_odoo_repo():
+    github = FakeGitHub(file_contents={})  # no .claude-review.yml
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    reviewer.execute(_params())
+    assert runner.last_odoo is False
 
 
 def test_custom_instructions_appended_as_block():
