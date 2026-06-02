@@ -8,7 +8,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gosu \
     && rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g @anthropic-ai/claude-code
+# The review engine. PINNED: its flag/config-loading semantics ARE the SECU-1
+# trust boundary (--setting-sources/--strict-mcp-config + cwd config scrubbing),
+# so an unpinned `latest` could silently reopen the RCE on the next rebuild.
+# Bump deliberately and re-run the hostile-clone regression test after each bump.
+ARG REVA_CLAUDE_CODE_VERSION=2.1.160
+RUN npm install -g @anthropic-ai/claude-code@${REVA_CLAUDE_CODE_VERSION}
 
 # CodeGraph engine layer (repo-aware reviews/audits). Pinned (pre-1.0); keep this
 # in sync with Settings.codegraph_version. The feature stays off unless

@@ -158,9 +158,23 @@ class ClaudeCodeRunner:
         basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
         auth_args = ["-c", f"http.extraHeader=Authorization: Basic {basic}"]
 
+        # CORR-2: a clone interrupted mid-write (e.g. worker SIGKILL) leaves the
+        # dir present but not a valid git repo. Branching on isdir alone would
+        # then take the fetch path, which fails forever and wedges every future
+        # review for this repo. Detect the corruption and start clean.
+        if os.path.isdir(repo_path) and not self._is_git_repo(repo_path):
+            logger.warning("repo_cache_corrupt_reclone", repo=repo_path)
+            shutil.rmtree(repo_path, ignore_errors=True)
+
         if not os.path.isdir(repo_path):
             os.makedirs(os.path.dirname(repo_path), exist_ok=True)
-            self._run_git_transient(auth_args + ["clone", clean_url, repo_path])
+            try:
+                self._run_git_transient(auth_args + ["clone", clean_url, repo_path])
+            except Exception:
+                # Don't leave a partial clone behind — it would wedge the next
+                # attempt on the fetch path (see above).
+                shutil.rmtree(repo_path, ignore_errors=True)
+                raise
         else:
             # Ensure any token-bearing URL from older clones is scrubbed.
             self._run_git_transient(["-C", repo_path, "remote", "set-url", "origin", clean_url])
@@ -179,6 +193,7 @@ class ClaudeCodeRunner:
         skill: str,
         params: dict,
         model: str | None = None,
+        odoo: bool = False,
     ) -> ClaudeResponse:
         """Run `claude --print` in repo_path using a skill template.
 
@@ -190,8 +205,9 @@ class ClaudeCodeRunner:
             PermanentError: non-zero exit code 1, or Claude wrote no valid JSON.
             TransientError: non-zero exit code other than 1 (killed, OOM, etc.).
         """
+        self._scrub_clone(repo_path)
         output_path = self._create_output_path(repo_path)
-        preamble = self._build_preamble()
+        preamble = self._build_preamble(odoo)
         skill_content = self._read_skill(skill)
         body = f"{preamble}\n\n{skill_content}" if preamble else skill_content
         # XML-delimit each value so user-controlled content (pr_body, diff, etc.)
@@ -203,9 +219,8 @@ class ClaudeCodeRunner:
             f"{param_lines}\n\n"
             f"output_path: {output_path}"
         )
-        env = {k: os.environ[k] for k in _ENV_ALLOWLIST if k in os.environ}
+        env = self._subprocess_env()
         env["ANTHROPIC_API_KEY"] = self.api_key
-        env["HOME"] = "/home/worker"
         # Repo-aware reviews get the CodeGraph MCP server when enabled. Returns
         # None (and we run a plain review) if disabled, not repo-aware, or the
         # index/setup failed — the accelerator is never allowed to block a review.
@@ -233,6 +248,12 @@ class ClaudeCodeRunner:
                     _CLAUDE_BIN, "--print",
                     "--output-format", "json",
                     "--model", model or self.default_model,
+                    # SECU-1 defense-in-depth beside _scrub_clone: ignore the
+                    # clone's project setting sources (blocks .claude/settings.json
+                    # hooks, which execute as the worker user) and honour only
+                    # REVA's own --mcp-config (blocks the clone's .mcp.json).
+                    "--setting-sources", "user",
+                    "--strict-mcp-config",
                     *mcp_args,
                     "--allowedTools", allowed_tools,
                 ],
@@ -284,6 +305,14 @@ class ClaudeCodeRunner:
 
     # ----------------------------------------------------------------- helpers
 
+    def _subprocess_env(self) -> dict:
+        """Minimal allowlisted env for children that touch the untrusted clone
+        (claude CLI, codegraph, git). The worker's DB/Redis/GitHub/Odoo secrets
+        must NOT leak into them (SECU-7); proxy vars are forwarded for egress."""
+        env = {k: os.environ[k] for k in _ENV_ALLOWLIST if k in os.environ}
+        env["HOME"] = "/home/worker"
+        return env
+
     def _codegraph_prepare(self, repo_path: str) -> str | None:
         """Index the clone with CodeGraph and write an MCP config for the CLI.
 
@@ -300,6 +329,7 @@ class ClaudeCodeRunner:
                 capture_output=True,
                 text=True,
                 timeout=self.codegraph_index_timeout,
+                env=self._subprocess_env(),
             )
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
             logger.warning("codegraph_index_skipped", repo=repo_path, error=str(exc))
@@ -316,6 +346,32 @@ class ClaudeCodeRunner:
             json.dump(_CODEGRAPH_MCP_CONFIG, f)
         return path
 
+    # Config files the Claude CLI auto-loads from cwd. The clone is fully
+    # attacker-controlled, so a PR can ship these to gain code execution as the
+    # worker user (.mcp.json MCP servers + .claude/ settings.json hooks). REVA
+    # never relies on repo-supplied versions of these — its own prompt set and
+    # the GitHub-API-loaded .claude-review.yml are the only sanctioned config —
+    # so they are deleted from the clone before every CLI invocation. REVA's own
+    # artifacts (.codegraph index, .reva_* temp files, source) are not listed.
+    _SCRUB_NAMES = (".mcp.json", ".claude", ".claude.json", "CLAUDE.md", "AGENTS.md")
+
+    def _scrub_clone(self, repo_path: str) -> None:
+        """Delete repo-supplied Claude CLI config from the clone (SECU-1).
+
+        Runs every review because the checkout re-materialises the attacker's
+        files at the PR head SHA. Best-effort per entry: a deletion failure is
+        logged but never blocks the review (the CLI flags are the backstop).
+        """
+        for name in self._SCRUB_NAMES:
+            target = os.path.join(repo_path, name)
+            try:
+                if os.path.isdir(target) and not os.path.islink(target):
+                    shutil.rmtree(target)
+                elif os.path.lexists(target):
+                    os.unlink(target)
+            except OSError as exc:
+                logger.warning("scrub_clone_failed", path=target, error=str(exc))
+
     def _create_output_path(self, dir_: str) -> str:
         # Created INSIDE the cloned repo (the CLI's cwd). Claude Code confines
         # writes to its working directory, so without --dangerously-skip-permissions
@@ -325,19 +381,24 @@ class ClaudeCodeRunner:
         os.close(fd)
         return path
 
-    # Shared governance (path-agnostic) + Odoo rules, prepended to every skill.
-    _PREAMBLE_FILES = ("review_guidance.md", "odoo19.md")
+    def _build_preamble(self, odoo: bool = False) -> str:
+        """Concatenate the shared review-guidance + (for Odoo repos) Odoo-rules files.
 
-    def _build_preamble(self) -> str:
-        """Concatenate the shared review-guidance + Odoo-rules files.
+        review_guidance.md is path-agnostic governance and always applies.
+        odoo19.md is domain-specific and only prepended when the repo opts in via
+        `.claude-review.yml`'s `odoo:` flag (CORR-4) — otherwise a non-Odoo repo
+        gets irrelevant Odoo rules + an 'Odoo team' identity and wasted tokens.
 
         Best-effort: a missing file degrades the review (logged) but never
         breaks it, so reviews keep working if the prompt set is incomplete.
         """
         if not self.prompts_dir:
             return ""
+        files = ["review_guidance.md"]
+        if odoo:
+            files.append("odoo19.md")
         parts: list[str] = []
-        for fname in self._PREAMBLE_FILES:
+        for fname in files:
             try:
                 with open(os.path.join(self.prompts_dir, fname)) as f:
                     parts.append(f.read())
@@ -370,6 +431,18 @@ class ClaudeCodeRunner:
                 return args[i]
         return args[0]
 
+    def _is_git_repo(self, repo_path: str) -> bool:
+        """True if repo_path is a valid git working tree (CORR-2 integrity check)."""
+        try:
+            result = subprocess.run(
+                ["git", "-C", repo_path, "rev-parse", "--git-dir"],
+                capture_output=True, text=True, timeout=_GIT_TIMEOUT,
+                env=self._subprocess_env(),
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+        return result.returncode == 0
+
     def _run_git(self, args: list[str], error_class: type[Exception]) -> None:
         cmd = self._git_subcommand(args)
         try:
@@ -378,6 +451,7 @@ class ClaudeCodeRunner:
                 capture_output=True,
                 text=True,
                 timeout=_GIT_TIMEOUT,
+                env=self._subprocess_env(),
             )
         except subprocess.TimeoutExpired as exc:
             # A timeout is always transient (network/load), regardless of the

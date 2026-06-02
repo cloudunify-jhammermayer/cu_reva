@@ -10,16 +10,16 @@ import (
 )
 
 type Findings struct {
-	client          api.ClientIface
-	items           []api.FindingSummary
-	total           int
-	err             error
-	loading         bool
-	cursor          int
-	offset          int
-	width           int
-	height          int
-	severityFilter  string
+	client         api.ClientIface
+	items          []api.FindingSummary
+	total          int
+	err            error
+	loading        bool
+	cursor         int
+	offset         int
+	width          int
+	height         int
+	severityFilter string
 }
 
 func newFindings(client api.ClientIface) Findings {
@@ -120,10 +120,10 @@ func (f Findings) view(w, h int) string {
 	}
 
 	// dot column is just 1 visible char (colored), no width padding needed
-	colTitle    := 40
+	colTitle := 40
 	colCategory := 16
-	colFile     := 28
-	colConf     := 5
+	colFile := 28
+	colConf := 5
 	// dot=1 + spacing=2+2+2+2 = 9 extra chars
 	remaining := w - 1 - colCategory - colFile - colConf - 10
 	if remaining > colTitle {

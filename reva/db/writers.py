@@ -26,6 +26,7 @@ from reva.cost import estimate_cost
 from reva.db.engine import Database
 from reva.db.models import (
     AdminAudit,
+    ClaudeSpend,
     GithubEvent,
     PendingReview,
     PullRequest,
@@ -114,6 +115,8 @@ def record_review_completed(db: Database, params: JobParams, result: ReviewResul
         run.error_class = None
         s.flush()
         _replace_findings(s, run.id, result.findings)
+        # Record spend atomically with the run so the rolling cap counts it.
+        _insert_spend(s, "review", result.estimated_cost_usd)
         return run.id
 
 
@@ -212,17 +215,33 @@ def is_already_posted(db: Database, params: JobParams) -> bool:
 _BUDGET_ADVISORY_LOCK_KEY = 0x52455642
 
 
-def sum_estimated_cost_since(db: Database, since: datetime, *, serialize: bool = False) -> float:
-    """Total estimated USD cost of review_runs created at/after `since`.
+def _insert_spend(s, kind: str, cost_usd: float | None) -> None:
+    """Append a spend-ledger row within an existing session (atomic with caller)."""
+    s.add(ClaudeSpend(kind=kind, cost_usd=cost_usd or 0.0))
 
-    Used by the worker's rolling spend cap. Counts every run that incurred
-    cost (completed reviews); declined/stale rows have NULL cost and don't add.
+
+def record_claude_spend(db: Database, kind: str, cost_usd: float | None) -> None:
+    """Record one paid Claude call in the unified spend ledger (own transaction).
+
+    Used by the audit and comment-reply paths; the review path records its spend
+    atomically inside record_review_completed.
+    """
+    with db.session() as s:
+        _insert_spend(s, kind, cost_usd)
+
+
+def sum_estimated_cost_since(db: Database, since: datetime, *, serialize: bool = False) -> float:
+    """Total estimated USD cost of ALL Claude calls (reviews, audits, replies)
+    recorded in the claude_spend ledger at/after `since`.
+
+    Used by the worker's rolling spend cap — the ledger is the single accounting
+    source so the cap sees every kind of Claude spend, not just reviews.
 
     With serialize=True the read is taken under a transaction-level advisory
     lock on Postgres, so concurrent workers evaluate the cap one at a time
     rather than racing on interleaved reads. (No-op on SQLite.) Residual
     overshoot is still bounded by the number of concurrent workers — at most one
-    in-flight review each — which is accepted; the cap is a rolling guardrail.
+    in-flight call each — which is accepted; the cap is a rolling guardrail.
     """
     from sqlalchemy import func as _func
 
@@ -233,8 +252,8 @@ def sum_estimated_cost_since(db: Database, since: datetime, *, serialize: bool =
                 {"k": _BUDGET_ADVISORY_LOCK_KEY},
             )
         total = s.execute(
-            select(_func.coalesce(_func.sum(ReviewRun.estimated_cost_usd), 0.0)).where(
-                ReviewRun.created_at >= since
+            select(_func.coalesce(_func.sum(ClaudeSpend.cost_usd), 0.0)).where(
+                ClaudeSpend.created_at >= since
             )
         ).scalar_one()
     return float(total or 0.0)

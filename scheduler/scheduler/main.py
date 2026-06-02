@@ -28,6 +28,20 @@ from scheduler.settings import Settings
 logger = structlog.get_logger()
 
 
+def maybe_enqueue_eviction(queue, now, last_eviction, interval_s):
+    """Enqueue a repo-cache eviction job if `interval_s` has elapsed (INFR-2).
+
+    Returns the new last-eviction timestamp (unchanged if not yet due). Only the
+    worker mounts /repos, so the scheduler triggers eviction via the queue rather
+    than running it directly.
+    """
+    if last_eviction is not None and (now - last_eviction).total_seconds() < interval_s:
+        return last_eviction
+    queue.enqueue("worker.runner.run_repo_cache_eviction", {})
+    logger.info("repo_cache_eviction_enqueued")
+    return now
+
+
 def main() -> None:
     settings = Settings.from_env()
 
@@ -70,6 +84,10 @@ def main() -> None:
         report_hour_utc=settings.report_hour_utc,
     )
 
+    # The worker evicts at boot too; start the timer now so the scheduler-driven
+    # eviction fires one interval out rather than redundantly at startup (INFR-2).
+    last_eviction = datetime.now(timezone.utc)
+
     while not stop:
         now = datetime.now(timezone.utc)
         try:
@@ -93,6 +111,13 @@ def main() -> None:
             writers.reap_stale_running_reviews(db, settings.stale_running_seconds)
         except Exception:
             logger.exception("scheduler_reaper_error")
+
+        try:
+            last_eviction = maybe_enqueue_eviction(
+                queue, now, last_eviction, settings.eviction_interval_seconds
+            )
+        except Exception:
+            logger.exception("scheduler_eviction_error")
 
         # Liveness heartbeat — the container healthcheck checks its freshness.
         try:

@@ -415,14 +415,8 @@ def _set_budget(s, budget):
 
 def test_review_declined_when_over_budget(ctx_and_fakes):
     s = ctx_and_fakes
-    # Seed prior spend above the cap.
-    from reva.db.models import ReviewRun
-    with s["db"].session() as session:
-        session.add(ReviewRun(
-            repository_id=s["repo_id"], pull_request_id=s["pr_id"],
-            head_sha="older", status="completed", trigger_event="opened",
-            review_mode="diff", estimated_cost_usd=5.0,
-        ))
+    # Seed prior spend above the cap in the unified ledger (the cap's source).
+    writers.record_claude_spend(s["db"], "review", 5.0)
     _set_budget(s, 1.0)
     s["reviewer"].result = _completed_result()
 
@@ -552,6 +546,26 @@ def test_settings_parses_codegraph_overrides(monkeypatch, tmp_path):
     assert s.codegraph_enabled is True
     assert s.codegraph_version == "0.9.9"
     assert s.codegraph_index_timeout == 240
+
+
+# --- run_repo_cache_eviction (INFR-2) ----------------------------------------
+
+
+def test_run_repo_cache_eviction_calls_evict_with_ttl():
+    """INFR-2: the scheduler enqueues this periodically so the repo-cache TTL is
+    actually enforced on a long-lived worker (boot-only eviction never fired)."""
+    from worker.runner import WorkerContext, run_repo_cache_eviction, set_context
+
+    runner = MagicMock()
+    ctx = WorkerContext(
+        db=None, claude=None, runner=runner, github=None,  # type: ignore[arg-type]
+        reviewer=None, auditor=None, ticket_analyzer=None, verifier=None, odoo=None,  # type: ignore[arg-type]
+        repo_cache_ttl_days=14,
+    )
+    set_context(ctx)
+    result = run_repo_cache_eviction({})
+    runner.evict_stale_repos.assert_called_once_with(ttl_days=14)
+    assert result["ttl_days"] == 14
 
 
 # --- run_comment_reply -------------------------------------------------------

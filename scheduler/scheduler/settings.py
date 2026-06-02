@@ -32,6 +32,8 @@ class Settings:
     failed_jobs_alert: int = 10          # alert when RQ's failed registry exceeds this
     repo_cache_disk_pct_alert: int = 90  # alert when the repo-cache filesystem is this % full
     repo_cache_dir: str = "/repos"
+    # How often to enqueue a repo-cache eviction job (INFR-2). Daily by default.
+    eviction_interval_seconds: int = 86_400
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -54,4 +56,7 @@ class Settings:
             failed_jobs_alert=int(os.environ.get("REVA_FAILED_JOBS_ALERT", "10")),
             repo_cache_disk_pct_alert=int(os.environ.get("REVA_REPO_CACHE_DISK_PCT_ALERT", "90")),
             repo_cache_dir=os.environ.get("REVA_REPO_CACHE_DIR", "/repos"),
+            eviction_interval_seconds=int(
+                os.environ.get("REVA_EVICTION_INTERVAL_SECONDS", "86400")
+            ),
         )

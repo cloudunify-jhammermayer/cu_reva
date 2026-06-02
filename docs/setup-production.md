@@ -66,10 +66,6 @@ REVA_DOMAIN=reviews.your-domain.com
 
 # GitHub App
 GITHUB_APP_ID=<app-id>
-GITHUB_WEBHOOK_SECRET=<webhook-secret>
-
-# Anthropic
-ANTHROPIC_API_KEY=sk-ant-api03-...
 
 # Database
 POSTGRES_PASSWORD=<generate-a-strong-password>
@@ -87,19 +83,45 @@ Generate a strong Postgres password if you need one:
 openssl rand -hex 32
 ```
 
+> The webhook secret, REVA API key, Anthropic key, and GitHub private key are
+> **not** set in `.env` in production — they are injected as Docker secret
+> **files** (see the next step), so they never land in an image layer or
+> `docker inspect`. The `*_FILE` env vars in `docker-compose.prod.yml` point the
+> services at them.
+
 ---
 
-## 4. Add the GitHub App private key
+## 4. Create the secret files
+
+The production compose mounts four Docker secrets from `./secrets/` (see the
+`secrets:` block in `docker-compose.prod.yml`). All four are **required** —
+`docker compose up` fails if a source file is missing, and the API/worker
+**fail closed** (refuse to start) if a secret is empty or whitespace-only. Write
+real, non-empty values:
 
 ```bash
 mkdir -p secrets
-# Copy your downloaded .pem file to:
+
+# 1. GitHub App private key (the .pem you downloaded from the App settings)
 cp /path/to/app-name.YYYY-MM-DD.private-key.pem secrets/github-app-private-key.pem
-chmod 600 secrets/github-app-private-key.pem
+
+# 2. GitHub webhook secret — must match the value you set in the GitHub App
+#    webhook config (step 7). Generate one and reuse it there:
+openssl rand -hex 32 > secrets/github_webhook_secret
+
+# 3. REVA API key — bearer token the TUI and admin/requeue endpoints must send.
+#    Production fails closed without it (REVA_REQUIRE_API_KEY=true).
+openssl rand -hex 32 > secrets/reva_api_key
+
+# 4. Anthropic API key (from console.anthropic.com) — note: NO trailing newline,
+#    so use printf, not echo:
+printf '%s' 'sk-ant-api03-...' > secrets/anthropic_api_key
+
+chmod 600 secrets/*
 ```
 
-The production compose passes this file as a Docker secret (`secrets:` block in
-`docker-compose.prod.yml`) so it is never baked into an image layer.
+Keep `secrets/reva_api_key` — you need it for the TUI and the `/api/v1` admin
+calls (`Authorization: Bearer <that value>`).
 
 ---
 
@@ -261,10 +283,10 @@ with `dig reviews.your-domain.com` and check the cert with
 `openssl s_client -connect reviews.your-domain.com:443`.
 
 ### Worker shows `invalid x-api-key`
-Update `ANTHROPIC_API_KEY` in `.env` then rebuild and recreate the worker:
+Fix the value in `secrets/anthropic_api_key` (no trailing newline — use
+`printf`), then recreate the worker so it re-reads the secret:
 ```bash
-docker compose -f docker-compose.prod.yml build worker
-docker compose -f docker-compose.prod.yml up -d worker
+docker compose -f docker-compose.prod.yml up -d --force-recreate worker
 ```
 
 ### Certbot renewal silently failing
@@ -275,6 +297,12 @@ docker compose -f docker-compose.prod.yml logs certbot
 Make sure port 80 still responds to `/.well-known/acme-challenge/` — the Nginx
 HTTP server block handles this automatically.
 
+nginx reloads itself every 6h to pick up renewed certs (INFR-1), so a fresh cert
+takes effect within 6h without a deploy. If you need it live immediately:
+```bash
+docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
+```
+
 ### New code not picked up after `git pull`
 `docker compose up -d` without `--build` reuses old images. Always run
 `deploy.sh` or explicitly run `build` before `up`.
@@ -283,12 +311,18 @@ HTTP server block handles this automatically.
 
 ## Environment variable reference
 
+In production the four secrets below are supplied as **files** under `secrets/`
+(via the `*_FILE` env vars), not as plain env vars — see step 4. The rest go in
+`.env`.
+
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `REVA_DOMAIN` | yes | — | FQDN for Nginx + Let's Encrypt (e.g. `reviews.example.com`) |
 | `GITHUB_APP_ID` | yes | — | Numeric ID from the GitHub App settings page |
-| `GITHUB_WEBHOOK_SECRET` | yes | — | Random string set in GitHub App webhook config |
-| `ANTHROPIC_API_KEY` | yes | — | API key from console.anthropic.com |
+| `GITHUB_WEBHOOK_SECRET` | yes (file) | — | `secrets/github_webhook_secret`; must match the GitHub App webhook config |
+| `REVA_API_KEY` | yes (file) | — | `secrets/reva_api_key`; bearer token for the TUI + `/api/v1` admin endpoints. Prod fails closed without it (`REVA_REQUIRE_API_KEY=true`) |
+| `ANTHROPIC_API_KEY` | yes (file) | — | `secrets/anthropic_api_key`; key from console.anthropic.com |
+| GitHub private key | yes (file) | — | `secrets/github-app-private-key.pem` (downloaded from the App settings) |
 | `POSTGRES_PASSWORD` | yes | — | Password for the `review` DB user |
 | `REDIS_PASSWORD` | yes | — | Redis `requirepass` value; embedded in all `REDIS_URL` values |
 | `REVA_DEBOUNCE_SECONDS` | no | 600 | Seconds to wait before enqueuing a review after a webhook |

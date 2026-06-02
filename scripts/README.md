@@ -7,6 +7,7 @@ Helper scripts for deploying and exercising REVA. Not imported by any service.
 | `deploy.sh` | Production deploy: `git pull origin main` → build → stop → `up -d` → poll `/health`. Run on the prod host. |
 | `setup-letsencrypt.sh` | One-time, before the first prod deploy: obtains the TLS cert via certbot standalone for `$REVA_DOMAIN`. |
 | `backup.sh` | Gzipped `pg_dump` of the Postgres DB to `REVA_BACKUP_DIR` (default `./backups`), pruning dumps older than `REVA_BACKUP_RETENTION_DAYS` (default 14). Run from a host cron job. |
+| `restore.sh` | Restore the DB from a `backup.sh` dump (newest by default, or a given file). Verifies the gzip, confirms before overwriting, restores in a single transaction with `ON_ERROR_STOP`, and prints a sanity check. |
 | `fake-webhook.py` | Local testing: posts a correctly HMAC-signed GitHub webhook payload to a running API so you can exercise the pipeline without GitHub. |
 
 ## Backups & restore
@@ -23,12 +24,25 @@ off-host** (rsync/S3) — a local-only backup doesn't survive host loss.
 Restore (**destructive** — overwrites the live DB; stop the app first):
 
 ```bash
-gunzip -c backups/reva-YYYYMMDDTHHMMSSZ.sql.gz \
-  | docker compose -f docker-compose.prod.yml exec -T postgres psql -U review -d reviews
+./scripts/restore.sh                          # newest backup
+./scripts/restore.sh backups/reva-….sql.gz    # a specific dump
 ```
 
-Verify a restore into a throwaway DB at least once so you know the dumps are
-usable before you need them.
+### Recovery drill (R10 — do this once, then periodically)
+
+A backup you've never restored is not a backup. Prove the path end-to-end:
+
+```bash
+./scripts/backup.sh                 # produce a dump
+# (optionally insert a sentinel row, or just note the current table/row counts)
+./scripts/restore.sh                # type 'restore' to confirm
+# restore.sh prints the public-table count + schema version — confirm they
+# match expectations. For a non-destructive drill, restore into a throwaway
+# database/container instead of the live one.
+```
+
+Until this drill has actually been run on the prod host, R10 is **not** closed —
+the scripts are syntax-checked but an unexercised recovery path is still a risk.
 
 ## Why these exist
 

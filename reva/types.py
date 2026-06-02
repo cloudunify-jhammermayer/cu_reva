@@ -244,6 +244,7 @@ class AuditResult(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     duration_ms: int = 0
+    estimated_cost_usd: float = 0.0
 
 
 # --- Claude response ----------------------------------------------------------

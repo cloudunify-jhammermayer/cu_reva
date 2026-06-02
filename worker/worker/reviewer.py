@@ -198,7 +198,9 @@ class Reviewer:
             and os.path.splitext(f["filename"])[1].lower() not in DEFAULT_EXCLUDE_EXTENSIONS
         ]
 
-        # 6. Load .claude-review.yml (CLAUDE.md is picked up automatically by Claude Code).
+        # 6. Load .claude-review.yml (the only sanctioned per-repo config; a repo-
+        #    supplied CLAUDE.md/.claude/.mcp.json is scrubbed from the clone before
+        #    the CLI runs — see ClaudeCodeRunner._scrub_clone, SECU-1).
         repo_config = self._load_repo_config(token, owner, name, params.head_sha)
 
         # 7. Resolve per-review limits.
@@ -258,7 +260,10 @@ class Reviewer:
         started_at = datetime.now(timezone.utc)
         with self.runner.repo_lock(owner, name):
             repo_path = self.runner.ensure_repo(owner, name, params.head_sha, token)
-            response = self.runner.review(repo_path=repo_path, skill=skill, params=skill_params, model=model)
+            response = self.runner.review(
+                repo_path=repo_path, skill=skill, params=skill_params,
+                model=model, odoo=repo_config.odoo,
+            )
         completed_at = datetime.now(timezone.utc)
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 

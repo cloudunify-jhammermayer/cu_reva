@@ -32,7 +32,7 @@ class FakeRunner:
     def ensure_repo(self, owner, name, head_sha, token) -> str:
         return f"/fake/repos/{owner}/{name}"
 
-    def review(self, repo_path, skill, params, model=None) -> ClaudeResponse:
+    def review(self, repo_path, skill, params, model=None, odoo=False) -> ClaudeResponse:
         self.last_skill = skill
         self.last_params = params
         if self.raise_exc:

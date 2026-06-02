@@ -28,15 +28,15 @@ def trigger_audit(
     queue: Queue = Depends(get_queue),
 ) -> dict:
     """Enqueue a full repo audit job. Returns the RQ job ID."""
-    from worker.audit_tasks import run_audit
-
     try:
         meta = get_repo_meta(db, repository_id)
     except LookupError:
         raise HTTPException(status_code=404, detail=f"Repository {repository_id} not found")
 
+    # Enqueue by string path (resolved on the worker): the api image ships only
+    # reva + api/app, so importing the worker package here would 500 (CORR-1).
     job = queue.enqueue(
-        run_audit,
+        "worker.audit_tasks.run_audit",
         {
             "repository_id": repository_id,
             "installation_id": meta["installation_id"],
