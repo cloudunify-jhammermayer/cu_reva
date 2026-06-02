@@ -414,7 +414,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **PERF-3** — Every 30s TUI tick refreshes six tabs concurrently regardless of which tab is visible
     - `tui/internal/ui/app.go:158-171`
     - Fix: On tick, refresh only the active tab plus whatever feeds the tab-bar badges (failures.total and pending.total). Alternatively lengthen or stagger the interval and keep badge counts cheap.
-- **PERF-4** — In-memory rate-limiter never evicts idle client keys (unbounded growth when keyed by IP)
+- **PERF-4** — ✅ DONE (with SECU-11) — periodic `_sweep` drops buckets whose newest hit is older than the window. — In-memory rate-limiter never evicts idle client keys (unbounded growth when keyed by IP)
     - `api/app/ratelimit.py:19,34-45`
     - Fix: Delete a client's entry when its deque becomes empty after pruning (e.g. if not window: del _hits[key]), or periodically sweep empty deques. Document that the limiter is intended to sit behind nginx's own limiting.
 - **PERF-5** — feedback_stats runs an unbounded full-table aggregation with no time window
@@ -431,13 +431,13 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **SECU-9** — Redis password passed on the command line (visible in process list / docker inspect) in dev and prod
     - `docker-compose.prod.yml:241,243, docker-compose.yml:129`
     - Fix: Set the password via a config file or env read by a startup wrapper rather than argv; for the healthcheck use `REDISCLI_AUTH=$REDIS_PASSWORD redis-cli ping` instead of `-a`. (Defence-in-depth hygiene; closing the env-var exposure too would be the larger win.)
-- **SECU-10** — Admin audit-log actor taken from the client-controlled, left-most X-Forwarded-For entry (spoofable)
+- **SECU-10** — ✅ DONE (2026-06-02) — `actor_from_request` now prefers nginx's unspoofable `X-Real-IP`, then the right-most XFF hop, never the client-controlled left-most. — Admin audit-log actor taken from the client-controlled, left-most X-Forwarded-For entry (spoofable)
     - `api/app/dependencies.py:34-42, nginx/templates/reva.conf.template:67,78`
     - Fix: Behind a single trusted proxy, take the RIGHT-most XFF entry (or prefer X-Real-IP, which nginx sets to $remote_addr and clients cannot append to). Document the trusted-proxy assumption; optionally record the authenticated API-key identity rather than only an IP.
-- **SECU-11** — In-app rate limiter keys on the full Authorization header and never evicts idle buckets (collapses all key-holders into one bucket; unbounded dict growth in open mode)
+- **SECU-11** — ✅ DONE (2026-06-02) — bucket key is now a SHA-256 of the auth header (no raw bearer token held in memory) + idle buckets swept (PERF-4). — In-app rate limiter keys on the full Authorization header and never evicts idle buckets
     - `api/app/ratelimit.py:19,27-31,34-45`
     - Fix: Hash/normalize the key rather than storing the raw bearer token; periodically drop buckets whose deque is empty after the cutoff sweep; document that with a single shared key the limit is global. For true per-client limiting, derive the key from an authenticated principal.
-- **SECU-12** — No application-level request body size limit; body-size protection relies solely on nginx
+- **SECU-12** — ✅ DONE (2026-06-02) — app-level body-size middleware rejects Content-Length over 26 MB (just above GitHub's 25 MB webhook cap) with 413; chunked/no-CL still bounded by nginx. — No application-level request body size limit; body-size protection relies solely on nginx
     - `api/app/routes/webhooks.py:38, api/Dockerfile:27`
     - Fix: Add an app-level body cap (small ASGI middleware rejecting Content-Length over a threshold and guarding streamed size for chunked requests) so the limit holds regardless of fronting proxy.
 - **SECU-13** — ✅ DONE (2026-06-02) — `_validate_head_sha` enforces `^[0-9a-fA-F]{7,64}$` before any git op (parametrized test). — git checkout/reset of head_sha has no defensive hex-SHA validation or `--` separator
@@ -561,7 +561,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 
 - **SECU-15** — Weekly-report task posts to Google Chat without the SSRF host check used on the alert path  (`worker/worker/runner.py:730-733, reva/notifications.py:20-28`)
 - **SECU-19** — GitHub error mapping embeds up to 200 chars of upstream response body into exceptions that propagate to Google Chat alerts/logs  (`reva/_github_http.py:23-24`)
-- **SECU-20** — url_safety link-local/metadata block is bypassable via obfuscated IP literals (decimal/octal/hex host forms)  (`reva/url_safety.py:22-45`)
+- **SECU-20** — ✅ DONE (2026-06-02) — `_literal_ip` normalizes decimal/hex/octal integer + IPv4-mapped-IPv6 host forms before the link-local/metadata check (parametrized tests). — url_safety link-local/metadata block is bypassable via obfuscated IP literals  (`reva/url_safety.py`)
 - **SECU-21** — Failure Check Run / DB error_message leaks internal repo-cache paths to the PR  (`reva/claude_code_runner.py:253-258, worker/worker/runner.py:248-249, reva/review_formatter.py:134-136`)
 - **SECU-22** — No CORS/TrustedHost middleware and security headers live only at nginx — direct-to-app responses have none  (`api/app/main.py:47-50, nginx/templates/reva.conf.template:46-49`)
 - **SECU-23** — /health is proxied without rate limiting and reports per-dependency status unauthenticated  (`api/app/routes/health.py:20-32, nginx/templates/reva.conf.template:83-85`)

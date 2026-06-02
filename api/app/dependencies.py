@@ -32,14 +32,22 @@ def get_redis(request: Request):
 
 
 def actor_from_request(request: Request) -> str:
-    """Best-effort caller identity for the admin audit log: the real client IP
-    from nginx's forwarding headers, falling back to the socket peer."""
+    """Best-effort caller identity for the admin audit log.
+
+    Assumes a single trusted proxy (nginx). nginx sets X-Real-IP to the real
+    socket peer ($remote_addr) — the client cannot forge it — so prefer that.
+    The LEFT-most X-Forwarded-For entry is client-controlled (nginx only
+    *appends* the real hop), so we never trust it for the audit actor (SECU-10);
+    if X-Real-IP is somehow absent we use the RIGHT-most XFF hop (added by our
+    proxy), then the socket peer.
+    """
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip.strip()
     fwd = request.headers.get("X-Forwarded-For", "")
     if fwd:
-        return fwd.split(",")[0].strip()
-    return request.headers.get("X-Real-IP") or (
-        request.client.host if request.client else "unknown"
-    )
+        return fwd.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
 
 
 def get_github_client(request: Request):

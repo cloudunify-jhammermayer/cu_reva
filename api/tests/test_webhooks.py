@@ -397,6 +397,18 @@ def _review_comment_payload(association: str = "MEMBER", in_reply_to: int = 555)
     }
 
 
+def test_oversized_body_is_rejected_413(client_and_db, monkeypatch):
+    """SECU-12: a body over the app-level cap is rejected with 413 before the
+    handler reads it into memory (defense-in-depth beside nginx)."""
+    import app.main as main
+    monkeypatch.setattr(main, "_MAX_BODY_BYTES", 10)
+    client, _ = client_and_db
+    resp = client.post("/webhooks/github", content=b"x" * 50,
+                       headers={"X-GitHub-Event": "ping", "X-GitHub-Delivery": "d",
+                                "X-Hub-Signature-256": "sha256=x"})
+    assert resp.status_code == 413
+
+
 def test_malformed_pr_payload_is_accepted_not_500(client_and_db):
     """CORR-13: a partial/malformed payload must not 500 (which loops GitHub's
     redelivery). The event is marked processed and accepted with a warning."""

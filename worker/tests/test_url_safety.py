@@ -38,3 +38,15 @@ def test_allows_internal_rfc1918_host_without_allowlist():
     # Odoo legitimately runs on an internal network — must not be blocked.
     assert_safe_url("https://10.0.0.5/odoo/write-field")  # no raise
     assert_safe_url("http://192.168.1.20:8069/reva/write-field")  # no raise
+
+
+@pytest.mark.parametrize("url", [
+    "http://2852039166/latest/meta-data/",         # decimal int form of 169.254.169.254
+    "http://0xA9FEA9FE/latest/meta-data/",          # hex form
+    "http://[::ffff:169.254.169.254]/meta-data/",   # IPv4-mapped IPv6
+])
+def test_rejects_obfuscated_metadata_ip(url):
+    """SECU-20: obfuscated IP-literal forms of the metadata address must still be
+    blocked (resolvers interpret integer/hex hosts)."""
+    with pytest.raises(ValueError, match="blocked"):
+        assert_safe_url(url)

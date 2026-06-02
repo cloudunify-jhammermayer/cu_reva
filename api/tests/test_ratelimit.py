@@ -47,6 +47,28 @@ def test_request_over_limit_returns_429(client_with_limit):
     assert client_with_limit.get("/api/v1/reviews").status_code == 429
 
 
+def test_bucket_key_does_not_store_raw_token(client_with_limit):
+    """SECU-11: the rate-limit bucket key must not be the raw bearer token."""
+    import app.ratelimit as rl
+    client_with_limit.get("/api/v1/reviews", headers={"Authorization": "Bearer supersecret"})
+    assert rl._hits, "a bucket should have been created"
+    assert not any("supersecret" in k for k in rl._hits), "raw token leaked into the bucket key"
+
+
+def test_sweep_evicts_idle_buckets():
+    """PERF-4: idle buckets (newest hit older than the window) are swept so the
+    dict doesn't grow unbounded with one-off clients."""
+    import app.ratelimit as rl
+    from collections import deque
+    rl.reset()
+    rl._hits["ip:1.2.3.4"] = deque([1.0])      # ancient hit
+    rl._hits["ip:5.6.7.8"] = deque([1_000_000.0])  # recent hit
+    rl._sweep(now=1_000_001.0)
+    assert "ip:1.2.3.4" not in rl._hits  # idle → evicted
+    assert "ip:5.6.7.8" in rl._hits      # active → kept
+    rl.reset()
+
+
 def test_limit_disabled_by_default(client_with_limit):
     """With rate_limit_per_minute=0 the limiter is a no-op."""
     import app.ratelimit as rl

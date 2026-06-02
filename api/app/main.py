@@ -5,7 +5,8 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from redis import Redis
 from rq import Queue
 
@@ -45,6 +46,26 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="REVA API", lifespan=lifespan)
+
+# App-level body-size cap (SECU-12), defense-in-depth beside nginx's
+# client_max_body_size. 26 MB sits just above GitHub's 25 MB webhook payload
+# cap so legitimate deliveries pass. Covers Content-Length requests; chunked
+# bodies with no Content-Length are bounded by nginx.
+_MAX_BODY_BYTES = 26 * 1024 * 1024
+
+
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > _MAX_BODY_BYTES:
+                return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+    return await call_next(request)
+
+
 app.include_router(webhooks.router)
 app.include_router(health.router)
 app.include_router(v1_router, prefix="/api/v1")
