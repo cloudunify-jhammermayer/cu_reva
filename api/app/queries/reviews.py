@@ -252,6 +252,21 @@ def list_failures(db: Database, *, limit: int = 20) -> tuple[list[dict], int]:
 
 def list_pending(db: Database) -> tuple[list[dict], int]:
     with db.session() as s:
+        # A consumed pending row whose review_run hasn't been created yet is
+        # enqueued in RQ, waiting for a free worker — it must stay visible (it
+        # used to vanish here). It's "open" until a run exists for its
+        # idempotency key: the same (repo, pr, sha, mode) tuple the scheduler
+        # dedupes on. consumed=False rows are still in the debounce window.
+        run_exists = (
+            select(ReviewRun.id)
+            .where(
+                ReviewRun.repository_id == PendingReview.repository_id,
+                ReviewRun.pull_request_id == PendingReview.pull_request_id,
+                ReviewRun.head_sha == PendingReview.head_sha,
+                ReviewRun.review_mode == PendingReview.review_mode,
+            )
+            .exists()
+        )
         pending_q = (
             select(
                 PendingReview.id,
@@ -262,10 +277,11 @@ def list_pending(db: Database) -> tuple[list[dict], int]:
                 PendingReview.scheduled_at,
                 PendingReview.trigger_event,
                 PendingReview.review_mode,
+                PendingReview.consumed,
             )
             .join(Repository, PendingReview.repository_id == Repository.id)
             .join(PullRequest, PendingReview.pull_request_id == PullRequest.id)
-            .where(PendingReview.consumed == False)  # noqa: E712
+            .where((PendingReview.consumed == False) | ~run_exists)  # noqa: E712
         )
         running_q = (
             select(
@@ -296,7 +312,7 @@ def list_pending(db: Database) -> tuple[list[dict], int]:
                 "scheduled_at": row.scheduled_at,
                 "trigger_event": row.trigger_event,
                 "review_mode": row.review_mode,
-                "status": "pending",
+                "status": "queued" if row.consumed else "pending",
             }
             for row in pending_rows
         ] + [

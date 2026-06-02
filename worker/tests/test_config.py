@@ -32,3 +32,31 @@ def test_required_env_or_file_raises_when_missing(monkeypatch):
     monkeypatch.delenv("NOPE_FILE", raising=False)
     with pytest.raises(KeyError):
         required_env_or_file("NOPE")
+
+
+def test_required_env_or_file_raises_on_empty_file(tmp_path, monkeypatch):
+    """SECU-2/CORR-9: an empty/truncated Docker-secret file must fail loud at
+    startup, not boot the service with secret='' (which makes the webhook HMAC
+    forgeable). 'Present' must mean 'non-empty'."""
+    secret = tmp_path / "secret"
+    secret.write_text("")
+    monkeypatch.delenv("MY_SECRET", raising=False)
+    monkeypatch.setenv("MY_SECRET_FILE", str(secret))
+    with pytest.raises(KeyError):
+        required_env_or_file("MY_SECRET")
+
+
+def test_required_env_or_file_raises_on_whitespace_only_file(tmp_path, monkeypatch):
+    secret = tmp_path / "secret"
+    secret.write_text("   \n")  # strips to empty
+    monkeypatch.delenv("MY_SECRET", raising=False)
+    monkeypatch.setenv("MY_SECRET_FILE", str(secret))
+    with pytest.raises(KeyError):
+        required_env_or_file("MY_SECRET")
+
+
+def test_required_env_or_file_raises_on_empty_env(monkeypatch):
+    monkeypatch.delenv("MY_SECRET_FILE", raising=False)
+    monkeypatch.setenv("MY_SECRET", "")
+    with pytest.raises(KeyError):
+        required_env_or_file("MY_SECRET")

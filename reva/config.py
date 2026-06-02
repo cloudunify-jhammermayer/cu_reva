@@ -24,8 +24,14 @@ def env_or_file(name: str, default: str | None = None) -> str | None:
 
 
 def required_env_or_file(name: str) -> str:
-    """Like `env_or_file` but raises KeyError if neither the var nor its `_FILE` is set."""
+    """Like `env_or_file` but raises KeyError if the value is missing OR empty.
+
+    'Present' must mean 'non-empty': an empty/truncated secret file or blank env
+    var would otherwise boot a broken service — and for the webhook secret that
+    means a forgeable HMAC (`hmac.new(b"", …)`), accepting arbitrary unsigned
+    webhooks (SECU-2/CORR-9). Fail loud at startup instead.
+    """
     value = env_or_file(name)
-    if value is None:
+    if value is None or not value.strip():
         raise KeyError(name)
     return value

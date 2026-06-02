@@ -190,6 +190,7 @@ class ClaudeCodeRunner:
             PermanentError: non-zero exit code 1, or Claude wrote no valid JSON.
             TransientError: non-zero exit code other than 1 (killed, OOM, etc.).
         """
+        self._scrub_clone(repo_path)
         output_path = self._create_output_path(repo_path)
         preamble = self._build_preamble()
         skill_content = self._read_skill(skill)
@@ -233,6 +234,12 @@ class ClaudeCodeRunner:
                     _CLAUDE_BIN, "--print",
                     "--output-format", "json",
                     "--model", model or self.default_model,
+                    # SECU-1 defense-in-depth beside _scrub_clone: ignore the
+                    # clone's project setting sources (blocks .claude/settings.json
+                    # hooks, which execute as the worker user) and honour only
+                    # REVA's own --mcp-config (blocks the clone's .mcp.json).
+                    "--setting-sources", "user",
+                    "--strict-mcp-config",
                     *mcp_args,
                     "--allowedTools", allowed_tools,
                 ],
@@ -315,6 +322,32 @@ class ClaudeCodeRunner:
         with os.fdopen(fd, "w") as f:
             json.dump(_CODEGRAPH_MCP_CONFIG, f)
         return path
+
+    # Config files the Claude CLI auto-loads from cwd. The clone is fully
+    # attacker-controlled, so a PR can ship these to gain code execution as the
+    # worker user (.mcp.json MCP servers + .claude/ settings.json hooks). REVA
+    # never relies on repo-supplied versions of these — its own prompt set and
+    # the GitHub-API-loaded .claude-review.yml are the only sanctioned config —
+    # so they are deleted from the clone before every CLI invocation. REVA's own
+    # artifacts (.codegraph index, .reva_* temp files, source) are not listed.
+    _SCRUB_NAMES = (".mcp.json", ".claude", ".claude.json", "CLAUDE.md", "AGENTS.md")
+
+    def _scrub_clone(self, repo_path: str) -> None:
+        """Delete repo-supplied Claude CLI config from the clone (SECU-1).
+
+        Runs every review because the checkout re-materialises the attacker's
+        files at the PR head SHA. Best-effort per entry: a deletion failure is
+        logged but never blocks the review (the CLI flags are the backstop).
+        """
+        for name in self._SCRUB_NAMES:
+            target = os.path.join(repo_path, name)
+            try:
+                if os.path.isdir(target) and not os.path.islink(target):
+                    shutil.rmtree(target)
+                elif os.path.lexists(target):
+                    os.unlink(target)
+            except OSError as exc:
+                logger.warning("scrub_clone_failed", path=target, error=str(exc))
 
     def _create_output_path(self, dir_: str) -> str:
         # Created INSIDE the cloned repo (the CLI's cwd). Claude Code confines

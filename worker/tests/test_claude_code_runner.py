@@ -242,6 +242,74 @@ def test_review_does_not_bypass_permissions_and_writes_in_cwd(runner_with_skill,
     assert captured["out"].startswith(captured["cwd"])
 
 
+def test_review_scrubs_repo_supplied_config_before_invoking_cli(runner_with_skill, tmp_path):
+    """SECU-1: the clone is fully attacker-controlled. Repo-supplied Claude Code
+    config auto-loaded from cwd (.mcp.json MCP servers + .claude/settings.json
+    hooks) executes code as the worker user — an unauthenticated RCE triggered by
+    opening a PR. REVA must delete that config before the CLI runs, while keeping
+    its own artifacts (.codegraph index, source files)."""
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+    # hostile, repo-supplied config (the RCE vectors)
+    os.makedirs(os.path.join(repo_path, ".claude"))
+    with open(os.path.join(repo_path, ".claude", "settings.json"), "w") as f:
+        f.write('{"enableAllProjectMcpServers": true}')
+    for name in (".mcp.json", "CLAUDE.md", "AGENTS.md", ".claude.json"):
+        with open(os.path.join(repo_path, name), "w") as f:
+            f.write("hostile")
+    # legitimate source + REVA-owned index — must survive the scrub
+    with open(os.path.join(repo_path, "app.py"), "w") as f:
+        f.write("print('hi')")
+    os.makedirs(os.path.join(repo_path, ".codegraph"))
+
+    seen: dict = {}
+
+    def fake_run(args, **kwargs):
+        # capture filesystem state AT the moment the CLI is invoked (scrub must
+        # have already happened — deleting after the run would be too late).
+        for rel in (".mcp.json", ".claude", "CLAUDE.md", "AGENTS.md",
+                    ".claude.json", "app.py", ".codegraph"):
+            seen[rel] = os.path.exists(os.path.join(repo_path, rel))
+        out_path = _extract_output_path(kwargs["input"])
+        with open(out_path, "w") as f:
+            json.dump({"summary": "ok", "findings": []}, f)
+        return _ok()
+
+    with patch("subprocess.run", side_effect=fake_run):
+        runner_with_skill.review(repo_path=repo_path, skill="reva-diff-review", params={})
+
+    assert seen[".mcp.json"] is False
+    assert seen[".claude"] is False
+    assert seen["CLAUDE.md"] is False
+    assert seen["AGENTS.md"] is False
+    assert seen[".claude.json"] is False
+    # REVA's own / source files are untouched
+    assert seen["app.py"] is True
+    assert seen[".codegraph"] is True
+
+
+def test_review_passes_isolation_flags(runner_with_skill, tmp_path):
+    """SECU-1 defense-in-depth beside the scrub: --setting-sources user makes the
+    CLI ignore the clone's project settings (blocks the .claude/settings.json
+    hooks RCE), and --strict-mcp-config makes it honour only REVA's own
+    --mcp-config (blocks the clone's .mcp.json). A missed scrub still can't run."""
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+
+    def fake_run(args, **kwargs):
+        out_path = _extract_output_path(kwargs["input"])
+        with open(out_path, "w") as f:
+            json.dump({"summary": "ok", "findings": []}, f)
+        return _ok()
+
+    with patch("subprocess.run", side_effect=fake_run) as mock_run:
+        runner_with_skill.review(repo_path=repo_path, skill="reva-diff-review", params={})
+
+    argv = mock_run.call_args.args[0]
+    assert "--strict-mcp-config" in argv
+    assert argv[argv.index("--setting-sources") + 1] == "user"
+
+
 def test_review_env_excludes_worker_secrets(runner_with_skill, tmp_path, monkeypatch):
     """The CLI subprocess must not inherit the worker's other secrets."""
     repo_path = str(tmp_path / "repo")

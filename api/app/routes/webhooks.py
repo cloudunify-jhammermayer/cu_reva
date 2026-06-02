@@ -256,6 +256,42 @@ def _post_ack_comment(github, installation_id: int, owner: str, repo: str,
         logger.warning("comment_ack_post_failed", repo=f"{owner}/{repo}", pr=pr_number, exc_info=True)
 
 
+def _fetch_and_upsert_pr(db: Database, github, repo_id: int, installation_id: int,
+                         owner: str, repo: str, pr_number: int) -> dict | None:
+    """Fetch a PR from GitHub and record it; return its lookup dict or None.
+
+    Used when a comment command targets a PR REVA has never seen (e.g. one
+    opened before the app was installed). Best-effort: returns None if the
+    GitHub client is unavailable or the fetch fails.
+    """
+    if github is None:
+        return None
+    try:
+        token = github.get_installation_token(installation_id)
+        pr_data = github.get_pull_request(token, owner, repo, pr_number)
+    except Exception:
+        logger.warning(
+            "comment_trigger_pr_fetch_failed",
+            repo=f"{owner}/{repo}", pr=pr_number, exc_info=True,
+        )
+        return None
+
+    pr_id = writers.upsert_pull_request(
+        db,
+        repository_id=repo_id,
+        github_pr_id=pr_data["id"],
+        pr_number=pr_data["number"],
+        title=pr_data["title"],
+        author_login=(pr_data.get("user") or {}).get("login"),
+        base_branch=pr_data["base"]["ref"],
+        head_branch=pr_data["head"]["ref"],
+        head_sha=pr_data["head"]["sha"],
+        state=pr_data["state"],
+        draft=pr_data.get("draft", False),
+    )
+    return {"id": pr_id, "head_sha": pr_data["head"]["sha"], "installation_id": installation_id}
+
+
 def _handle_issue_comment(db: Database, payload: dict, settings: Settings, github=None) -> None:
     if payload.get("action") != "created":
         return
@@ -301,6 +337,14 @@ def _handle_issue_comment(db: Database, payload: dict, settings: Settings, githu
     )
 
     pr_info = writers.lookup_pull_request(db, repo_id, pr_number)
+    if pr_info is None:
+        # PR predates the installation — GitHub doesn't replay past 'opened'
+        # events, so REVA has no row for it. Fetch it from GitHub and record it
+        # so the comment-triggered review can proceed.
+        pr_info = _fetch_and_upsert_pr(
+            db, github, repo_id, installation_id,
+            repo_data["owner"]["login"], repo_data["name"], pr_number,
+        )
     if pr_info is None:
         logger.warning(
             "comment_trigger_pr_not_found",

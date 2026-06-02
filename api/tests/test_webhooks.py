@@ -314,6 +314,54 @@ def test_comment_review_by_owner_creates_pending(client_and_db):
                    for p in pending)
 
 
+def test_comment_review_on_unseen_pr_fetches_and_queues(client_and_db):
+    # PR predates the installation, so REVA has no row for it. A /review comment
+    # must fetch the PR from GitHub, record it, and still queue the review.
+    client, db = client_and_db
+    fetched_pr = {
+        "id": 5001,
+        "number": 42,
+        "title": "Pre-existing PR",
+        "state": "open",
+        "draft": False,
+        "head": {"sha": "fetchsha", "ref": "feat/foo"},
+        "base": {"ref": "main"},
+        "user": {"login": "alice"},
+    }
+    fake = _FakeGitHub(pr=fetched_pr)
+    app.state.github = fake
+    try:
+        resp = _post(client, _comment_payload("/review"), event="issue_comment",
+                     delivery="unseen1")
+    finally:
+        app.state.github = None
+    assert resp.status_code == 202
+    assert fake.fetched == [{"owner": "acme", "repo": "widgets", "pr": 42}]
+    with db.session() as s:
+        assert s.query(PullRequest).count() == 1
+        pending = s.query(PendingReview).all()
+        assert any(p.trigger_event == "comment" and p.head_sha == "fetchsha"
+                   for p in pending)
+
+
+def test_comment_review_on_unseen_pr_fetch_failure_logs_not_found(client_and_db):
+    client, db = client_and_db
+
+    class Boom(_FakeGitHub):
+        def get_pull_request(self, token, owner, repo, pr_number):
+            raise RuntimeError("github down")
+
+    app.state.github = Boom()
+    try:
+        resp = _post(client, _comment_payload("/review"), event="issue_comment",
+                     delivery="unseen2")
+    finally:
+        app.state.github = None
+    assert resp.status_code == 202  # webhook still succeeds
+    with db.session() as s:
+        assert s.query(PendingReview).count() == 0
+
+
 def test_comment_review_by_outsider_is_ignored(client_and_db):
     client, db = client_and_db
     _seed_pr(client)
@@ -326,8 +374,10 @@ def test_comment_review_by_outsider_is_ignored(client_and_db):
 
 
 class _FakeGitHub:
-    def __init__(self):
+    def __init__(self, pr=None):
         self.comments = []
+        self._pr = pr
+        self.fetched = []
 
     def get_installation_token(self, installation_id):
         return "tok"
@@ -335,6 +385,12 @@ class _FakeGitHub:
     def create_issue_comment(self, token, owner, repo, pr_number, body):
         self.comments.append({"owner": owner, "repo": repo, "pr": pr_number, "body": body})
         return 1
+
+    def get_pull_request(self, token, owner, repo, pr_number):
+        self.fetched.append({"owner": owner, "repo": repo, "pr": pr_number})
+        if self._pr is None:
+            raise AssertionError("get_pull_request called without a configured PR")
+        return self._pr
 
 
 def test_comment_trigger_posts_ack_comment(client_and_db):

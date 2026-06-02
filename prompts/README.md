@@ -26,8 +26,11 @@ REVA's two Claude clients:
 the repo's `CLAUDE.md` (if present) → `custom_instructions` from
 `.claude-review.yml`. Repeated calls hit the cache and cut input cost ~90%.
 
-> On the CLI path, a customer repo's own `CLAUDE.md` is picked up automatically
-> by Claude Code — no manual injection.
+> On the CLI path, a reviewed repo's own `CLAUDE.md` (and `.claude/`, `.mcp.json`,
+> `AGENTS.md`) is **deleted from the clone before the CLI runs** (SECU-1): the
+> clone is attacker-controlled, and the CLI would otherwise auto-load it as an RCE
+> vector. Per-repo customisation goes through `.claude-review.yml`, which REVA
+> fetches via the GitHub API and validates — not through repo-supplied CLI config.
 
 ## Versioning & tuning
 

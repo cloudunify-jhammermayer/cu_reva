@@ -198,7 +198,9 @@ class Reviewer:
             and os.path.splitext(f["filename"])[1].lower() not in DEFAULT_EXCLUDE_EXTENSIONS
         ]
 
-        # 6. Load .claude-review.yml (CLAUDE.md is picked up automatically by Claude Code).
+        # 6. Load .claude-review.yml (the only sanctioned per-repo config; a repo-
+        #    supplied CLAUDE.md/.claude/.mcp.json is scrubbed from the clone before
+        #    the CLI runs — see ClaudeCodeRunner._scrub_clone, SECU-1).
         repo_config = self._load_repo_config(token, owner, name, params.head_sha)
 
         # 7. Resolve per-review limits.
