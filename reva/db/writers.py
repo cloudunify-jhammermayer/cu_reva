@@ -54,10 +54,23 @@ def _retry_on_conflict(fn):
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except IntegrityError:
+        except IntegrityError as exc:
+            # Only a unique-constraint race is fixable by re-running (the retry's
+            # SELECT now finds the row). Re-raise other integrity errors (FK,
+            # NOT NULL, CHECK) immediately — retrying won't help and would mask
+            # the original, more informative error (CORR-17).
+            if not _is_unique_violation(exc):
+                raise
             return fn(*args, **kwargs)
 
     return wrapper
+
+
+def _is_unique_violation(exc: IntegrityError) -> bool:
+    # Postgres (psycopg2): SQLSTATE 23505. SQLite: message "UNIQUE constraint failed".
+    if getattr(getattr(exc, "orig", None), "pgcode", None) == "23505":
+        return True
+    return "unique constraint" in str(exc).lower()
 
 
 # --- review_runs writers -----------------------------------------------------

@@ -9,10 +9,21 @@ Templates mirror `doc/08-github-output.md` and the conclusion matrix in
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from reva.diff_utils import DiffHunk, find_line_in_hunks
 from reva.types import Finding, ReviewResult, Severity
+
+# Internal filesystem roots that must not leak into PR-facing error text (SECU-21):
+# the repo cache, temp dir, worker home, container app dir.
+_INTERNAL_PATH_RE = re.compile(r"/(?:repos|tmp|home|app)(?:/[A-Za-z0-9_.\-]+)*")
+
+
+def _redact_internal_paths(msg: str) -> str:
+    """Replace internal server paths (/repos/…, /tmp/…, …) with a placeholder so a
+    failure message shown on the PR doesn't disclose the server's layout."""
+    return _INTERNAL_PATH_RE.sub("<path>", msg)
 
 AGENT_NAME = "REVA"
 CHECK_RUN_NAME = "REVA Review"
@@ -133,7 +144,7 @@ def format_check_run_output(result: ReviewResult, run_id: int | None = None) -> 
                      "a new review will be scheduled on the latest commit.")
     elif result.status == "failed":
         msg = result.error_message or "An internal error prevented the review from completing."
-        parts.append(f"## Error\n\n{msg}")
+        parts.append(f"## Error\n\n{_redact_internal_paths(msg)}")
 
     footer = _footer(result, run_id)
     if footer:
@@ -270,7 +281,15 @@ def format_inline_comment(finding: Finding) -> str:
 
 
 def format_inline_comment_payload(finding: Finding) -> dict:
-    """Shape the dict the GitHub Reviews API expects in `comments[]`."""
+    """Shape the dict the GitHub Reviews API expects in `comments[]`.
+
+    Requires `line_start` — an inline comment must anchor to a line. Callers
+    route line-less findings to the review body (see `split_findings`); enforce
+    the invariant here so a stray None fails loudly instead of building an
+    invalid payload / TypeError on the line-range check (CORR-20).
+    """
+    if finding.line_start is None:
+        raise ValueError("inline comment requires line_start; route via split_findings")
     payload: dict = {
         "path": finding.file,
         "line": finding.line_start,

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import pytest
+
 from reva.diff_utils import DiffHunk
 from reva.review_formatter import (
     compute_check_conclusion,
     format_check_run_output,
     format_decline_body,
     format_inline_comment,
+    format_inline_comment_payload,
     format_pr_review_body,
     split_findings,
 )
@@ -188,3 +191,20 @@ def test_decline_body_contains_reason_and_footer():
     assert "REVA Review — Declined" in text
     assert "2000 lines" in text
     assert "Run #99" in text
+
+
+def test_failed_check_run_redacts_internal_paths():
+    """SECU-21: the failure Check Run shown on the PR must not leak server paths."""
+    result = ReviewResult(
+        status="failed", summary="", risk_level="low",
+        error_message="Claude did not create output file at /repos/acme/widgets/.reva_review_ab12.json",
+    )
+    summary = format_check_run_output(result, run_id=1)["summary"]
+    assert "/repos/acme/widgets" not in summary
+    assert "<path>" in summary
+
+
+def test_inline_payload_requires_line_start():
+    """CORR-20: an inline comment must anchor to a line; None fails loudly."""
+    with pytest.raises(ValueError, match="line_start"):
+        format_inline_comment_payload(_f("major", file="a.py", line_start=None))

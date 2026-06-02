@@ -651,7 +651,10 @@ def test_retry_on_conflict_retries_once_then_succeeds():
     def upsert():
         calls.append(1)
         if len(calls) == 1:
-            raise IntegrityError("INSERT", None, Exception("duplicate key"))
+            raise IntegrityError(
+                "INSERT", None,
+                Exception('duplicate key value violates unique constraint "foo_key"'),
+            )
         return "updated"
 
     assert upsert() == "updated"
@@ -665,10 +668,35 @@ def test_retry_on_conflict_reraises_if_still_conflicting():
 
     @_retry_on_conflict
     def upsert():
-        raise IntegrityError("INSERT", None, Exception("duplicate key"))
+        raise IntegrityError(
+            "INSERT", None,
+            Exception('duplicate key value violates unique constraint "foo_key"'),
+        )
 
     with pytest.raises(IntegrityError):
         upsert()
+
+
+def test_retry_on_conflict_does_not_retry_non_unique_errors():
+    """CORR-17: only a unique-violation race is retryable. A different integrity
+    error (e.g. FK) must propagate immediately, not trigger a wasteful retry."""
+    from sqlalchemy.exc import IntegrityError
+
+    from reva.db.writers import _retry_on_conflict
+
+    calls = []
+
+    @_retry_on_conflict
+    def insert():
+        calls.append(1)
+        raise IntegrityError(
+            "INSERT", None,
+            Exception('insert violates foreign key constraint "fk_repo"'),
+        )
+
+    with pytest.raises(IntegrityError):
+        insert()
+    assert len(calls) == 1  # re-raised immediately, no retry
 
 
 def test_migration_runner_rejects_unnamed_files(tmp_path):

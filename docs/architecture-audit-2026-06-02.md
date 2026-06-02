@@ -523,10 +523,10 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 ### correctness (6)
 
 - **CORR-14** — Finding body/suggestion are unbounded; one oversized finding fails the whole PR review  (`reva/types.py:64-76, worker/worker/runner.py:381-391, reva/_github_http.py:35-36`)
-- **CORR-17** — _retry_on_conflict retries only once and swallows non-TOCTOU IntegrityErrors  (`reva/db/writers.py:42-59`)
+- **CORR-17** — ✅ DONE (2026-06-02) — `_retry_on_conflict` now retries only on a unique violation (`_is_unique_violation`: PG 23505 / SQLite "unique constraint"); other integrity errors (FK/NOT NULL) re-raise immediately. Tests added. — _retry_on_conflict retries only once and swallows non-TOCTOU IntegrityErrors
 - **CORR-18** — ✅ DONE (2026-06-02) — `get_file_content` URL-encodes the path with `quote(path, safe='/')` (slash preserved, spaces/#/? encoded); test asserts single-encoding. — GitHub API path segments (file path) are interpolated without URL-encoding
 - **CORR-19** — Reaper and budget windows mix the process clock with DB-side timestamps (no skew tolerance)  (`reva/db/writers.py:151,217,237; worker/worker/runner.py:217; reva/db/models.py:174-176`)
-- **CORR-20** — format_inline_comment_payload assumes non-None line_start without enforcing it  (`reva/review_formatter.py:280`)
+- **CORR-20** — ✅ DONE (2026-06-02) — `format_inline_comment_payload` raises if `line_start` is None (split_findings guarantees it; now enforced, fails loud instead of TypeError). Test added. — format_inline_comment_payload assumes non-None line_start without enforcing it
 - **CORR-21** — estimated_cost_usd stored as rounded float into NUMERIC(12,6) then summed and cast back to float  (`reva/cost.py:36-44, reva/db/writers.py:235-240`)
 ### dependencies (1)
 
@@ -562,9 +562,9 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **SECU-15** — Weekly-report task posts to Google Chat without the SSRF host check used on the alert path  (`worker/worker/runner.py:730-733, reva/notifications.py:20-28`)
 - **SECU-19** — GitHub error mapping embeds up to 200 chars of upstream response body into exceptions that propagate to Google Chat alerts/logs  (`reva/_github_http.py:23-24`)
 - **SECU-20** — ✅ DONE (2026-06-02) — `_literal_ip` normalizes decimal/hex/octal integer + IPv4-mapped-IPv6 host forms before the link-local/metadata check (parametrized tests). — url_safety link-local/metadata block is bypassable via obfuscated IP literals  (`reva/url_safety.py`)
-- **SECU-21** — Failure Check Run / DB error_message leaks internal repo-cache paths to the PR  (`reva/claude_code_runner.py:253-258, worker/worker/runner.py:248-249, reva/review_formatter.py:134-136`)
-- **SECU-22** — No CORS/TrustedHost middleware and security headers live only at nginx — direct-to-app responses have none  (`api/app/main.py:47-50, nginx/templates/reva.conf.template:46-49`)
-- **SECU-23** — /health is proxied without rate limiting and reports per-dependency status unauthenticated  (`api/app/routes/health.py:20-32, nginx/templates/reva.conf.template:83-85`)
+- **SECU-21** — ✅ DONE (2026-06-02) — `format_check_run_output` redacts internal roots (`/repos`, `/tmp`, `/home`, `/app`) from the PR-facing failure message via `_redact_internal_paths` (raw message kept in the DB for ops). Test added. — Failure Check Run / DB error_message leaks internal repo-cache paths to the PR
+- **SECU-22** — ⏸️ DEFERRED (2026-06-02, low value/risk) — API is non-browser (TUI + GitHub webhooks) and behind nginx, so CORS/security-headers add ~nothing and `TrustedHostMiddleware` risks breaking prod on a mis-set host list while nginx already validates `Host`. — No CORS/TrustedHost middleware; security headers live only at nginx
+- **SECU-23** — ⏸️ DEFERRED (2026-06-02) — the container/LB healthcheck needs an open, unrated `/health`; auth would break it and the up/down disclosure is negligible. (INFR-11 liveness/readiness split is the real follow-up if wanted.) — /health is proxied without rate limiting and reports per-dependency status unauthenticated
 - **SECU-26** — No explicit guardrail telling the review model it has no shell and must Write only to output_path  (`prompts/review_guidance.md:86, prompts/skills/reva-diff-review.md, prompts/skills/reva-full-review.md`)
 - **SECU-27** — nginx omits server_tokens off and OCSP stapling  (`nginx/nginx.conf:9-33, nginx/templates/reva.conf.template:39-49`)
 - **SECU-28** — GitHub client follows redirects globally with no host re-validation  (`reva/github_client.py:53`)
