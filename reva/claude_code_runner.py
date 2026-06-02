@@ -39,6 +39,16 @@ def _validate_repo_component(value: str, kind: str) -> None:
     if not _SAFE_REPO_COMPONENT.match(value or "") or ".." in value:
         raise PermanentError(f"unsafe repo {kind}: {value!r}")
 
+
+# A git commit SHA is hex, 7–64 chars. Validate before passing to `git checkout`
+# so a value like `--upload-pack=…` can never be parsed as a git option (SECU-13).
+_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
+
+
+def _validate_head_sha(head_sha: str) -> None:
+    if not _SHA_RE.match(head_sha):
+        raise PermanentError(f"unsafe head_sha: {head_sha!r}")
+
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEEP_MODEL = "claude-opus-4-7"
 _CLAUDE_BIN = "claude"
@@ -149,6 +159,8 @@ class ClaudeCodeRunner:
         """
         _validate_repo_component(owner, "owner")
         _validate_repo_component(name, "name")
+        if head_sha is not None:
+            _validate_head_sha(head_sha)
         repo_path = os.path.join(self.repo_cache_dir, owner, name)
         # Authenticate via a transient http.extraHeader instead of embedding the
         # token in the remote URL, so it is never written to <repo>/.git/config

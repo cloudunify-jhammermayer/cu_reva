@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.dependencies import get_db
+from app.pagination import clamp_limit
 from app.queries import reviews as q
 from app.schemas.reviews import FindingPage, FindingSummary
 from reva.db.engine import Database
@@ -18,7 +19,7 @@ def list_findings(
     limit: int = 100,
     db: Database = Depends(get_db),
 ) -> dict:
-    limit = min(limit, 500)
+    limit = clamp_limit(limit, 500)
     severities = [s.strip() for s in severity.split(",")] if severity else None
     items, total = q.list_findings(db, severities=severities, category=category,
                                    repo=repo, limit=limit)

@@ -397,6 +397,20 @@ def _review_comment_payload(association: str = "MEMBER", in_reply_to: int = 555)
     }
 
 
+def test_malformed_pr_payload_is_accepted_not_500(client_and_db):
+    """CORR-13: a partial/malformed payload must not 500 (which loops GitHub's
+    redelivery). The event is marked processed and accepted with a warning."""
+    client, db = client_and_db
+    bad = _pr_payload("opened")
+    del bad["pull_request"]["head"]  # drop a hard-subscripted key
+    resp = _post(client, bad, delivery="malformed1")
+    assert resp.status_code == 202
+    from reva.db.models import GithubEvent
+    with db.session() as s:
+        ev = s.query(GithubEvent).one()
+        assert ev.processed_at is not None  # marked processed → no redelivery loop
+
+
 def test_review_comment_reply_by_member_enqueues(client_and_db):
     """SECU-3: a trusted member replying to a REVA inline comment triggers a reply."""
     client, _ = client_and_db

@@ -51,7 +51,7 @@ def test_ensure_repo_clones_when_missing(runner, tmp_path):
     import base64
 
     with patch("subprocess.run", return_value=_ok()) as mock_run:
-        result = runner.ensure_repo("acme", "widgets", "abc123", "tok")
+        result = runner.ensure_repo("acme", "widgets", "abcd1234", "tok")
 
     assert result.endswith("acme/widgets")
     calls = [c.args[0] for c in mock_run.call_args_list]
@@ -64,7 +64,7 @@ def test_ensure_repo_clones_when_missing(runner, tmp_path):
     expected = base64.b64encode(b"x-access-token:tok").decode()
     assert any(f"Authorization: Basic {expected}" in part for part in clone_call)
     assert any("checkout" in c for c in calls)
-    assert any("abc123" in str(c) for c in calls)
+    assert any("abcd1234" in str(c) for c in calls)
 
 
 def test_ensure_repo_fetches_when_exists(runner, tmp_path):
@@ -72,7 +72,7 @@ def test_ensure_repo_fetches_when_exists(runner, tmp_path):
     repo_path.mkdir(parents=True)
 
     with patch("subprocess.run", return_value=_ok()) as mock_run:
-        runner.ensure_repo("acme", "widgets", "abc123", "tok")
+        runner.ensure_repo("acme", "widgets", "abcd1234", "tok")
 
     calls = [c.args[0] for c in mock_run.call_args_list]
     assert not any(c[1] == "clone" for c in calls)
@@ -94,7 +94,7 @@ def test_ensure_repo_no_sha_resets_to_fetch_head(runner, tmp_path):
 def test_ensure_repo_clone_failure_raises_transient(runner):
     with patch("subprocess.run", return_value=_fail(code=128, stderr="network error")):
         with pytest.raises(TransientError, match="clone failed"):
-            runner.ensure_repo("acme", "widgets", "abc123", "tok")
+            runner.ensure_repo("acme", "widgets", "abcd1234", "tok")
 
 
 @pytest.mark.parametrize("owner,name", [
@@ -110,7 +110,24 @@ def test_ensure_repo_rejects_unsafe_owner_name(runner, owner, name):
     any git op runs (defense-in-depth against a bad/forged repo identity)."""
     with patch("subprocess.run") as mock_run:
         with pytest.raises(PermanentError):
-            runner.ensure_repo(owner, name, "abc123", "tok")
+            runner.ensure_repo(owner, name, "abcd1234", "tok")
+    mock_run.assert_not_called()
+
+
+@pytest.mark.parametrize("bad_sha", [
+    "--upload-pack=/bin/sh",  # option injection
+    "-x",
+    "abc; rm -rf /",          # shell-ish chars
+    "HEAD",                   # not a hex SHA
+    "../../etc",
+    "abc",                    # too short (< 7)
+])
+def test_ensure_repo_rejects_unsafe_head_sha(runner, bad_sha):
+    """SECU-13: head_sha goes to `git checkout`; reject anything that isn't a
+    7–64 char hex SHA before any git op, so it can't be parsed as a git option."""
+    with patch("subprocess.run") as mock_run:
+        with pytest.raises(PermanentError, match="head_sha"):
+            runner.ensure_repo("acme", "widgets", bad_sha, "tok")
     mock_run.assert_not_called()
 
 
@@ -118,7 +135,7 @@ def test_git_calls_pass_a_timeout(runner):
     """Every git op must be bounded; an unbounded clone/fetch under the per-repo
     lock would stall every job for that repo until a container restart."""
     with patch("subprocess.run", return_value=_ok()) as mock_run:
-        runner.ensure_repo("acme", "widgets", "abc123", "tok")
+        runner.ensure_repo("acme", "widgets", "abcd1234", "tok")
 
     assert mock_run.call_args_list  # sanity: git actually ran
     for call in mock_run.call_args_list:
@@ -139,7 +156,7 @@ def test_git_subprocess_excludes_worker_secrets(runner, monkeypatch):
         return _ok()
 
     with patch("subprocess.run", side_effect=fake_run):
-        runner.ensure_repo("acme", "widgets", "abc123", "tok")
+        runner.ensure_repo("acme", "widgets", "abcd1234", "tok")
 
     assert captured  # git actually ran
     for env in captured:
@@ -159,7 +176,7 @@ def test_git_timeout_raises_transient(runner):
         side_effect=subprocess.TimeoutExpired(cmd="git clone", timeout=1),
     ):
         with pytest.raises(TransientError, match="timed out"):
-            runner.ensure_repo("acme", "widgets", "abc123", "tok")
+            runner.ensure_repo("acme", "widgets", "abcd1234", "tok")
 
 
 def test_ensure_repo_repairs_corrupt_clone(runner, tmp_path):
@@ -179,7 +196,7 @@ def test_ensure_repo_repairs_corrupt_clone(runner, tmp_path):
         return _ok()
 
     with patch("subprocess.run", side_effect=fake_run):
-        runner.ensure_repo("acme", "widgets", "abc123", "tok")
+        runner.ensure_repo("acme", "widgets", "abcd1234", "tok")
 
     # The corrupt dir was removed and a fresh clone ran — not a fetch.
     assert any("clone" in c for c in calls)
@@ -203,7 +220,7 @@ def test_ensure_repo_removes_partial_clone_on_failure(runner, tmp_path):
 
     with patch("subprocess.run", side_effect=fake_run):
         with pytest.raises(TransientError, match="clone failed"):
-            runner.ensure_repo("acme", "widgets", "abc123", "tok")
+            runner.ensure_repo("acme", "widgets", "abcd1234", "tok")
 
     assert not repo_path.exists()  # partial clone cleaned up
 
@@ -213,10 +230,10 @@ def test_ensure_repo_checkout_failure_raises_permanent(runner, tmp_path):
     repo_path.mkdir(parents=True)
 
     # git calls in order: rev-parse (integrity check), remote set-url, fetch, checkout.
-    responses = [_ok(), _ok(), _ok(), _fail(code=1, stderr="pathspec 'badsha' not found")]
+    responses = [_ok(), _ok(), _ok(), _fail(code=1, stderr="pathspec 'deadc0de' not found")]
     with patch("subprocess.run", side_effect=responses):
         with pytest.raises(PermanentError, match="checkout failed"):
-            runner.ensure_repo("acme", "widgets", "badsha", "tok")
+            runner.ensure_repo("acme", "widgets", "deadc0de", "tok")
 
 
 # ---- review ----

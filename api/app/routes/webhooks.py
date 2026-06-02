@@ -86,14 +86,21 @@ def _process_delivery(
         log.info("webhook_duplicate")
         return {"status": "duplicate"}
 
-    if event == "pull_request":
-        _handle_pull_request(db, payload, settings, github)
-
-    if event == "issue_comment":
-        _handle_issue_comment(db, payload, settings, github)
-
-    if event == "pull_request_review_comment":
-        _handle_review_comment(payload, settings, rq_queue)
+    try:
+        if event == "pull_request":
+            _handle_pull_request(db, payload, settings, github)
+        elif event == "issue_comment":
+            _handle_issue_comment(db, payload, settings, github)
+        elif event == "pull_request_review_comment":
+            _handle_review_comment(payload, settings, rq_queue)
+    except (KeyError, TypeError) as exc:
+        # A malformed/partial payload shape (missing key, wrong type) is not
+        # fixable by redelivery — mark it processed so GitHub doesn't loop the
+        # redelivery on a permanent 500 (CORR-13). Infra errors (DB/Redis) are
+        # NOT caught here, so they still propagate → 5xx → legitimate redelivery.
+        log.warning("webhook_malformed_payload", error=str(exc))
+        writers.mark_event_processed(db, event_id)
+        return {"status": "accepted", "warning": "malformed payload"}
 
     writers.mark_event_processed(db, event_id)
     log.info("webhook_accepted")
