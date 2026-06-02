@@ -25,10 +25,13 @@ def reset() -> None:
 
 
 def _client_key(request: Request) -> str:
+    # nosemgrep rationale: the Flask "directly-returned-format-string" rule treats
+    # a returned f-string as an HTTP response body (reflected XSS). This is FastAPI
+    # and the value is an internal rate-limit dict key, never a response — false positive.
     auth = request.headers.get("Authorization", "")
     if auth:
-        return f"key:{auth}"
-    return f"ip:{request.client.host if request.client else 'unknown'}"
+        return f"key:{auth}"  # nosemgrep: python.flask.security.audit.directly-returned-format-string.directly-returned-format-string
+    return f"ip:{request.client.host if request.client else 'unknown'}"  # nosemgrep: python.flask.security.audit.directly-returned-format-string.directly-returned-format-string
 
 
 def rate_limit(request: Request, settings: Settings = Depends(get_settings)) -> None:
