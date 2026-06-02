@@ -40,17 +40,41 @@ def test_enqueues_on_configured_weekday_and_hour(db):
     assert q.enqueued == ["worker.runner.run_weekly_report"]
 
 
-def test_skips_on_wrong_weekday(db):
+def test_skips_on_wrong_weekday_when_not_overdue(db):
     q = FakeQueue()
-    tuesday = _MONDAY_8 + timedelta(days=1)
-    assert _reporter(db, q).check_and_send(tuesday) is False
+    r = _reporter(db, q)
+    r.check_and_send(_MONDAY_8)               # send this week's report
+    tuesday = _MONDAY_8 + timedelta(days=1)   # wrong weekday, recent report
+    assert r.check_and_send(tuesday) is False  # not overdue → skip
+    assert q.enqueued == ["worker.runner.run_weekly_report"]
+
+
+def test_skips_before_configured_hour(db):
+    q = FakeQueue()
+    # On the right weekday but before the hour → not due.
+    assert _reporter(db, q).check_and_send(_MONDAY_8.replace(hour=7)) is False
     assert q.enqueued == []
 
 
-def test_skips_on_wrong_hour(db):
+def test_fires_later_same_day_if_window_missed(db):
+    """CORR-10/INFR-18: a tick after the configured hour on the right weekday
+    still fires (no exact-hour requirement)."""
     q = FakeQueue()
-    assert _reporter(db, q).check_and_send(_MONDAY_8.replace(hour=9)) is False
-    assert q.enqueued == []
+    assert _reporter(db, q).check_and_send(_MONDAY_8.replace(hour=20)) is True
+    assert q.enqueued == ["worker.runner.run_weekly_report"]
+
+
+def test_catches_up_when_overdue_on_wrong_weekday(db):
+    """CORR-10/INFR-18: if the whole configured weekday was missed, a later day
+    still catches up once the report is overdue (≥7 days)."""
+    q = FakeQueue()
+    r = _reporter(db, q)
+    r.check_and_send(_MONDAY_8)  # baseline send
+    # 8 days later, a Tuesday, past the hour → overdue → catch up.
+    later = _MONDAY_8 + timedelta(days=8)
+    assert later.weekday() != 0
+    assert r.check_and_send(later) is True
+    assert q.enqueued == ["worker.runner.run_weekly_report"] * 2
 
 
 def test_skips_within_min_interval(db):

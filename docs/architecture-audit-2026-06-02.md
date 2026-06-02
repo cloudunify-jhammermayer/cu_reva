@@ -284,7 +284,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **CORR-9** — ✅ DONE (fixed with SECU-2) — env_or_file treats an empty secret file as a present value; required_env_or_file passes and defers failure to runtime
     - `reva/config.py:14-31`
     - Fix: In required_env_or_file, treat an empty/whitespace value as missing and raise KeyError(name) with a clear message.
-- **CORR-10** — Weekly report is silently skipped for the week if the scheduler is down during its single eligible hour (no catch-up)
+- **CORR-10** — ✅ DONE (2026-06-02, with INFR-18) — `_is_due` fires on the configured weekday at/after the hour, or when overdue (≥7d) past the hour; `_claim_period` still caps to one/week. Tests added. — Weekly report is silently skipped for the week if the scheduler is down during its single eligible hour (no catch-up)
     - `scheduler/scheduler/reporter.py:35-49`
     - Fix: Trigger when overdue rather than only at an exact hour: fire if it's at/after the configured weekday+hour AND the last enqueued report is older than ~6 days, so a late tick still catches up within the day.
 - **CORR-11** — ✅ DONE (with SECU-4) — recorded via the spend ledger rather than a new `AuditRun` column (the ledger is the accounting source; an `AuditRun.estimated_cost_usd` would be display-only and nothing renders it). — AuditResult carries no token/cost fields, so audit spend can never be recorded
@@ -377,7 +377,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **INFR-17** — Egress proxy is reachable by every container on reva-net and leaks internal Via headers
     - `egress-proxy/tinyproxy.conf:4,14,19,24, docker-compose.egress.yml, docker-compose.prod.yml:263-264`
     - Fix: When the egress overlay is enforced, restrict `Allow` to the worker subnet/host (or use a dedicated internal network as the doc's 'Enforcing' section suggests) and add `DisableViaHeader Yes` to the tinyproxy conf.
-- **INFR-18** — Weekly report only fires within one exact UTC hour; a missed scheduler window skips the report for the whole week
+- **INFR-18** — ✅ DONE (with CORR-10) — same `_is_due` catch-up fix. — Weekly report only fires within one exact UTC hour; a missed scheduler window skips the report for the whole week
     - `scheduler/scheduler/reporter.py:35-49`
     - Fix: Fire when (a) it's the configured weekday/hour OR (b) the last enqueue is older than ~7 days and it is past the configured hour today, so a missed window self-heals on the next tick.
 ### maintainability (7)
@@ -524,7 +524,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 
 - **CORR-14** — Finding body/suggestion are unbounded; one oversized finding fails the whole PR review  (`reva/types.py:64-76, worker/worker/runner.py:381-391, reva/_github_http.py:35-36`)
 - **CORR-17** — _retry_on_conflict retries only once and swallows non-TOCTOU IntegrityErrors  (`reva/db/writers.py:42-59`)
-- **CORR-18** — GitHub API path segments (file path) are interpolated without URL-encoding  (`reva/github_client.py:136-149,347-374`)
+- **CORR-18** — ✅ DONE (2026-06-02) — `get_file_content` URL-encodes the path with `quote(path, safe='/')` (slash preserved, spaces/#/? encoded); test asserts single-encoding. — GitHub API path segments (file path) are interpolated without URL-encoding
 - **CORR-19** — Reaper and budget windows mix the process clock with DB-side timestamps (no skew tolerance)  (`reva/db/writers.py:151,217,237; worker/worker/runner.py:217; reva/db/models.py:174-176`)
 - **CORR-20** — format_inline_comment_payload assumes non-None line_start without enforcing it  (`reva/review_formatter.py:280`)
 - **CORR-21** — estimated_cost_usd stored as rounded float into NUMERIC(12,6) then summed and cast back to float  (`reva/cost.py:36-44, reva/db/writers.py:235-240`)

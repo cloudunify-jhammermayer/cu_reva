@@ -45,9 +45,7 @@ class WeeklyReporter:
         scheduler replicas in the same hour can't both send. The committed row is
         the dedup token; the second replica re-reads it under the lock and skips.
         """
-        if now.weekday() != self._report_weekday:
-            return False
-        if now.hour != self._report_hour_utc:
+        if not self._is_due(now):
             return False
 
         if not self._claim_period(now):
@@ -58,6 +56,32 @@ class WeeklyReporter:
         self._queue.enqueue("worker.runner.run_weekly_report", {})
         logger.info("weekly_report_enqueued", weekday=now.weekday(), hour=now.hour)
         return True
+
+    def _is_due(self, now: datetime) -> bool:
+        """Whether to attempt a report now (CORR-10/INFR-18 catch-up).
+
+        Fires on the configured weekday at/after the hour, OR when it's simply
+        overdue (last report ≥7 days ago) and past the configured hour today —
+        so a scheduler that was down during the window doesn't skip the whole
+        week. `_claim_period`'s 6-day interval still allows only one send/week.
+        """
+        if now.hour < self._report_hour_utc:
+            return False
+        if now.weekday() == self._report_weekday:
+            return True
+        last = self._last_enqueued_at()
+        return last is None or (now - last) >= timedelta(days=7)
+
+    def _last_enqueued_at(self) -> datetime | None:
+        with self._db.session() as s:
+            last = s.execute(
+                select(WeeklyReport.enqueued_at)
+                .order_by(WeeklyReport.enqueued_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+        if last is not None and last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        return last
 
     def _claim_period(self, now: datetime) -> bool:
         """Record this report period if no recent one exists; True if claimed.

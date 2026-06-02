@@ -14,6 +14,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 import httpx
 import jwt
@@ -139,7 +140,10 @@ class GitHubClient:
         try:
             response = self._get(
                 token,
-                f"/repos/{owner}/{repo}/contents/{path}",
+                # URL-encode the file path (CORR-18) — keep `/` as the path
+                # separator but encode spaces/#/?/etc. so a filename with special
+                # chars produces a valid URL rather than a malformed request.
+                f"/repos/{owner}/{repo}/contents/{quote(path, safe='/')}",
                 params={"ref": ref},
                 extra_headers={"Accept": "application/vnd.github.raw"},
                 allow_404=True,

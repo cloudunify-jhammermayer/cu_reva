@@ -129,6 +129,23 @@ def test_token_cache_remints_when_expired(rsa_key_pair):
 # --- Pull request reads -----------------------------------------------------
 
 
+def test_get_file_content_url_encodes_path(rsa_key_pair):
+    """CORR-18: a file path with spaces/# must be URL-encoded (slash preserved)
+    so the request URL is valid rather than malformed."""
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        captured["raw"] = req.url.raw_path.decode()
+        return httpx.Response(200, text="file body")
+
+    client = _make_client(handler, private_pem)
+    client.get_file_content("tok", "acme", "widgets", "custom addons/foo#bar.py", "deadbeef")
+
+    assert "/repos/acme/widgets/contents/custom%20addons/foo%23bar.py" in captured["raw"]
+    assert " " not in captured["raw"]  # no raw space leaked into the URL
+
+
 def test_get_pull_request_returns_json(rsa_key_pair):
     private_pem, _ = rsa_key_pair
     captured: dict = {}
