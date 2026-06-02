@@ -373,6 +373,59 @@ def test_comment_review_by_outsider_is_ignored(client_and_db):
                    for p in s.query(PendingReview).all())
 
 
+class _FakeQueue:
+    def __init__(self):
+        self.enqueued = []
+
+    def enqueue(self, func_name, *args, **kwargs):
+        self.enqueued.append({"func": func_name, "args": args})
+        return type("Job", (), {"id": "job-1"})()
+
+
+def _review_comment_payload(association: str = "MEMBER", in_reply_to: int = 555) -> dict:
+    return {
+        "action": "created",
+        "installation": {"id": 99},
+        "repository": {"name": "widgets", "owner": {"login": "acme"}},
+        "pull_request": {"number": 42},
+        "comment": {
+            "in_reply_to_id": in_reply_to,
+            "author_association": association,
+            "body": "Why is this a problem?",
+        },
+        "sender": {"login": "alice", "type": "User"},
+    }
+
+
+def test_review_comment_reply_by_member_enqueues(client_and_db):
+    """SECU-3: a trusted member replying to a REVA inline comment triggers a reply."""
+    client, _ = client_and_db
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    try:
+        resp = _post(client, _review_comment_payload(association="MEMBER"),
+                     event="pull_request_review_comment", delivery="rc1")
+    finally:
+        app.state.rq_queue = None
+    assert resp.status_code == 202
+    assert [e["func"] for e in q.enqueued] == ["worker.runner.run_comment_reply"]
+
+
+def test_review_comment_reply_by_outsider_is_ignored(client_and_db):
+    """SECU-3: an untrusted commenter (e.g. external PR author) must NOT be able
+    to trigger a paid reply by replying to REVA's inline comment."""
+    client, _ = client_and_db
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    try:
+        resp = _post(client, _review_comment_payload(association="NONE"),
+                     event="pull_request_review_comment", delivery="rc2")
+    finally:
+        app.state.rq_queue = None
+    assert resp.status_code == 202  # event accepted/stored, but no reply enqueued
+    assert q.enqueued == []
+
+
 class _FakeGitHub:
     def __init__(self, pr=None):
         self.comments = []

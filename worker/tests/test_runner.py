@@ -415,14 +415,8 @@ def _set_budget(s, budget):
 
 def test_review_declined_when_over_budget(ctx_and_fakes):
     s = ctx_and_fakes
-    # Seed prior spend above the cap.
-    from reva.db.models import ReviewRun
-    with s["db"].session() as session:
-        session.add(ReviewRun(
-            repository_id=s["repo_id"], pull_request_id=s["pr_id"],
-            head_sha="older", status="completed", trigger_event="opened",
-            review_mode="diff", estimated_cost_usd=5.0,
-        ))
+    # Seed prior spend above the cap in the unified ledger (the cap's source).
+    writers.record_claude_spend(s["db"], "review", 5.0)
     _set_budget(s, 1.0)
     s["reviewer"].result = _completed_result()
 

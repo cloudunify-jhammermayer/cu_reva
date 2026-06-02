@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import structlog
 
+from reva.db import writers
 from reva.errors import TransientError
 from reva.types import AuditJobParams
-from worker.runner import get_context
+from worker.runner import budget_exceeded, get_context
 
 logger = structlog.get_logger()
 
@@ -20,6 +21,15 @@ def run_audit(job_params: dict) -> dict:
     params = AuditJobParams.model_validate(job_params)
     log = logger.bind(repository_id=params.repository_id)
     log.info("audit_job_start")
+
+    # SECU-4: the audit is the most expensive Claude path — respect the rolling
+    # cap. Decline a NEW audit when over budget (no row created); in-flight
+    # audits are never interrupted.
+    spent = budget_exceeded(ctx)
+    if spent is not None:
+        log.warning("audit_over_budget", spent_usd=round(spent, 2),
+                    budget_usd=ctx.daily_budget_usd)
+        return {"audit_id": None, "status": "declined", "reason": "over_budget"}
 
     with ctx.db.session() as s:
         result_row = s.execute(
@@ -65,5 +75,9 @@ def run_audit(job_params: dict) -> dict:
         )
         s.commit()
 
-    log.info("audit_job_done", findings=len(result.findings))
+    # CORR-11/SECU-4: record audit spend in the unified ledger so the cap counts it.
+    writers.record_claude_spend(ctx.db, "audit", result.estimated_cost_usd)
+
+    log.info("audit_job_done", findings=len(result.findings),
+             cost_usd=result.estimated_cost_usd)
     return {"audit_id": audit_id, "status": "completed", "findings": len(result.findings)}

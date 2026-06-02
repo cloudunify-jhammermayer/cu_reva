@@ -15,6 +15,7 @@ import structlog
 from pydantic import ValidationError
 
 from reva.claude_code_runner import ClaudeCodeRunner
+from reva.cost import estimate_cost
 from reva.errors import PermanentError
 from reva.types import AuditJobParams, AuditResult, Finding
 
@@ -76,6 +77,16 @@ class Auditor:
         except ValidationError as exc:
             raise PermanentError(f"Audit finding failed schema validation: {exc}") from exc
 
+        # Cost (CORR-11): prefer the CLI's authoritative total, fall back to the
+        # token estimate — same as the review path, so audits feed the spend cap.
+        cost = response.total_cost_usd or estimate_cost(
+            response.model or "",
+            response.input_tokens,
+            response.output_tokens,
+            response.cache_read_tokens,
+            response.cache_creation_tokens,
+        )
+
         return AuditResult(
             status="completed",
             summary=summary,
@@ -84,4 +95,5 @@ class Auditor:
             started_at=started_at,
             completed_at=completed_at,
             duration_ms=duration_ms,
+            estimated_cost_usd=cost,
         )

@@ -178,6 +178,18 @@ def _handle_review_comment(payload: dict, settings: Settings, rq_queue) -> None:
     if payload.get("sender", {}).get("type") == "Bot":
         return
 
+    # SECU-3: a reply drives a paid Claude call, so only commenters with
+    # write-equivalent standing may trigger one — same gate as slash commands.
+    # Without this, any non-bot user (e.g. an external PR author) could rack up
+    # spend by replying to REVA's inline comments.
+    if comment.get("author_association") not in _TRUSTED_ASSOCIATIONS:
+        logger.info(
+            "comment_reply_ignored_untrusted",
+            association=comment.get("author_association"),
+            sender=payload.get("sender", {}).get("login"),
+        )
+        return
+
     question = (comment.get("body") or "").strip()
     if not question:
         return

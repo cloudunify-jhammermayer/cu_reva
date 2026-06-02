@@ -386,6 +386,26 @@ class AuditRun(Base):
     )
 
 
+# ------------------------------------------------------------- claude_spend
+
+
+class ClaudeSpend(Base):
+    """Mirrors db/migrations/009_claude_spend.sql. One row per paid Claude call
+    (review/audit/reply); the single accounting source for the rolling budget
+    cap (sum_estimated_cost_since)."""
+
+    __tablename__ = "claude_spend"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    cost_usd: Mapped[float] = mapped_column(Numeric(12, 6), nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("idx_claude_spend_created", "created_at"),)
+
+
 # ------------------------------------------------------------- weekly_reports
 
 

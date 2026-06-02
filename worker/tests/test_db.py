@@ -286,6 +286,16 @@ def test_sum_estimated_cost_since_serialize_is_safe_on_sqlite(db, seeded):
     assert writers.sum_estimated_cost_since(db, since, serialize=True) == pytest.approx(1.25)
 
 
+def test_sum_estimated_cost_counts_all_kinds(db):
+    """The rolling cap counts every Claude call via the ledger — not just reviews
+    (SECU-3/SECU-4): audits and replies record spend through record_claude_spend."""
+    writers.record_claude_spend(db, "audit", 2.0)
+    writers.record_claude_spend(db, "reply", 0.5)
+    writers.record_claude_spend(db, "review", None)  # None cost is treated as 0
+    since = datetime.now(timezone.utc) - timedelta(days=1)
+    assert writers.sum_estimated_cost_since(db, since) == pytest.approx(2.5)
+
+
 # --- upserts -----------------------------------------------------------------
 
 
