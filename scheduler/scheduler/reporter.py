@@ -10,13 +10,18 @@ from datetime import datetime, timedelta, timezone
 
 import structlog
 from rq import Queue
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from reva.db.engine import Database
+from reva.db.models import WeeklyReport
 
 logger = structlog.get_logger()
 
 _MIN_INTERVAL = timedelta(days=6)
+# Transaction-level advisory lock so concurrent scheduler replicas evaluate the
+# "send the weekly report?" decision one at a time (CONC-2). Distinct from the
+# budget cap's key. No-op on SQLite.
+_REPORT_ADVISORY_LOCK_KEY = 0x52455750  # "REWP"
 
 
 class WeeklyReporter:
@@ -33,36 +38,50 @@ class WeeklyReporter:
         self._report_hour_utc = report_hour_utc
 
     def check_and_send(self, now: datetime) -> bool:
-        """Enqueue a weekly report if it's time. Returns True if enqueued."""
+        """Enqueue a weekly report if it's time. Returns True if enqueued.
+
+        CONC-2: the read-check-record step runs under a transaction-level advisory
+        lock and commits the `weekly_reports` row BEFORE enqueuing, so concurrent
+        scheduler replicas in the same hour can't both send. The committed row is
+        the dedup token; the second replica re-reads it under the lock and skips.
+        """
         if now.weekday() != self._report_weekday:
             return False
         if now.hour != self._report_hour_utc:
             return False
 
-        last = self._last_enqueued_at()
-        if last is not None and (now - last) < _MIN_INTERVAL:
+        if not self._claim_period(now):
             return False
 
+        # Enqueue only after the dedup row is committed: a crash here means a
+        # missed report (recoverable next tick), never a duplicate.
         self._queue.enqueue("worker.runner.run_weekly_report", {})
-        self._record_enqueued(now)
         logger.info("weekly_report_enqueued", weekday=now.weekday(), hour=now.hour)
         return True
 
-    def _last_enqueued_at(self) -> datetime | None:
-        with self._db.session() as s:
-            row = s.execute(
-                text("SELECT enqueued_at FROM weekly_reports ORDER BY enqueued_at DESC LIMIT 1")
-            ).first()
-        if row is None:
-            return None
-        t = row[0]
-        if t.tzinfo is None:
-            t = t.replace(tzinfo=timezone.utc)
-        return t
+    def _claim_period(self, now: datetime) -> bool:
+        """Record this report period if no recent one exists; True if claimed.
 
-    def _record_enqueued(self, now: datetime) -> None:
+        Atomic across replicas: the advisory lock serializes the read+insert, so
+        only the first replica in the window inserts and returns True.
+        """
         with self._db.session() as s:
-            s.execute(
-                text("INSERT INTO weekly_reports (enqueued_at) VALUES (:t)"),
-                {"t": now},
-            )
+            if s.get_bind().dialect.name == "postgresql":
+                s.execute(
+                    text("SELECT pg_advisory_xact_lock(:k)"),
+                    {"k": _REPORT_ADVISORY_LOCK_KEY},
+                )
+            # ORM read/insert so SQLAlchemy coerces enqueued_at to a datetime and
+            # applies the period_days default on both dialects (raw SQL did not).
+            last = s.execute(
+                select(WeeklyReport.enqueued_at)
+                .order_by(WeeklyReport.enqueued_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if last is not None:
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=timezone.utc)
+                if (now - last) < _MIN_INTERVAL:
+                    return False
+            s.add(WeeklyReport(enqueued_at=now))
+        return True

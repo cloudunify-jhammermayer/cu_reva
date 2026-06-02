@@ -70,6 +70,8 @@ test-integration:
 	@for i in $$(seq 1 30); do docker exec reva_pg_test pg_isready -U review -d reviews >/dev/null 2>&1 && break; sleep 1; done
 	-cd worker && REVA_TEST_POSTGRES_URL=postgresql://review:test@localhost:55433/reviews \
 		.venv/bin/python -m pytest tests/test_pg_integration.py -q
+	-cd scheduler && REVA_TEST_POSTGRES_URL=postgresql://review:test@localhost:55433/reviews \
+		.venv/bin/python -m pytest tests/test_pg_integration.py -q
 	docker rm -f reva_pg_test >/dev/null 2>&1 || true
 
 # ── Ops ───────────────────────────────────────────────────────────────────────

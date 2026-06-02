@@ -66,13 +66,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
-      - name: Install worker deps
-        working-directory: worker
+      - name: Install worker + scheduler deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-      - name: Run Postgres integration tests
+          pip install -r worker/requirements-dev.txt -r scheduler/requirements-dev.txt
+      - name: Run worker Postgres integration tests
         working-directory: worker
+        env:
+          REVA_TEST_POSTGRES_URL: postgresql://review:test@localhost:5432/reviews
+        run: python -m pytest tests/test_pg_integration.py -q
+      - name: Run scheduler Postgres integration tests
+        working-directory: scheduler
         env:
           REVA_TEST_POSTGRES_URL: postgresql://review:test@localhost:5432/reviews
         run: python -m pytest tests/test_pg_integration.py -q
