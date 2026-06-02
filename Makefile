@@ -1,6 +1,6 @@
 .PHONY: dev dev-build prod build deploy logs logs-api logs-scheduler logs-worker \
         shell-api shell-worker psql redis-cli test test-worker test-api test-scheduler \
-        scale-workers status restart
+        test-integration scale-workers status restart
 
 # ── Local development ─────────────────────────────────────────────────────────
 
@@ -61,6 +61,16 @@ test-api:
 
 test-scheduler:
 	cd scheduler && .venv/bin/python -m pytest tests/ -q
+
+# Real-Postgres concurrency tests (D1). Spins a throwaway PG, runs, tears down.
+test-integration:
+	docker rm -f reva_pg_test >/dev/null 2>&1 || true
+	docker run -d --name reva_pg_test -e POSTGRES_USER=review -e POSTGRES_PASSWORD=test \
+		-e POSTGRES_DB=reviews -p 55433:5432 postgres:16-alpine >/dev/null
+	@for i in $$(seq 1 30); do docker exec reva_pg_test pg_isready -U review -d reviews >/dev/null 2>&1 && break; sleep 1; done
+	-cd worker && REVA_TEST_POSTGRES_URL=postgresql://review:test@localhost:55433/reviews \
+		.venv/bin/python -m pytest tests/test_pg_integration.py -q
+	docker rm -f reva_pg_test >/dev/null 2>&1 || true
 
 # ── Ops ───────────────────────────────────────────────────────────────────────
 

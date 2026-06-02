@@ -137,7 +137,7 @@ Grouped by theme. All carry an adversarial verdict; full `file:line` in the sour
 - **SECU-24** — **No `.dockerignore`**: ~506 MB of `.venv` + real `secrets/` + `.env` stream into the build context on every build (selective `COPY` keeps them out of *layers*, so bounded to local-daemon + a future-`COPY .` footgun). *Fix:* add a root `.dockerignore`.
 
 ### Testing (regression-exposure, several high-value)
-- **TEST-1** — The **Postgres-only concurrency guards** (advisory-lock budget, `FOR UPDATE SKIP LOCKED`) are **never tested on real Postgres** — SQLite no-ops them and the poller test is a SQL-text grep. The exact races they prevent are untested. *Fix:* a testcontainers/CI-Postgres tier (this is planned item **D1**).
+- **TEST-1** — ✅ **DONE (2026-06-02, working tree).** Real-Postgres tier added (`worker/tests/test_pg_integration.py`, gated on `REVA_TEST_POSTGRES_URL`): tests `FOR UPDATE SKIP LOCKED` (a second claimer skips a locked row), the advisory-locked budget read, and the stale reaper on real timestamptz. CI job `integration (postgres)` with a postgres service + `make test-integration` (throwaway PG). — The **Postgres-only concurrency guards** are **never tested on real Postgres** — SQLite no-ops them.
 - **TEST-2** — **No test exercises API bearer-token auth** on read endpoints (positive or negative); fixtures set no `api_key`, so auth is effectively open in tests. A regression in `compare_digest`/router wiring would ship green. *Fix:* add auth tests across sub-routers.
 - **TEST-3** — TUI **API client + all UI packages have zero tests** (`go test ./...` → `[no test files]`), including auth-header injection, error propagation, query escaping, and the byte-slicing `truncate` (mangles UTF-8). *Fix:* httptest-based client tests + cursor/truncate unit tests.
 - **TEST-4** — Mutating/enqueuing endpoints (**review requeue, the whole ticket-analyses router, repo audit, weekly-report**) are untested — the conditional status-gating/dedup/audit logic that breaks silently. *Fix:* route tests injecting a fake `rq_queue` via `app.state`.
@@ -153,7 +153,7 @@ You asked to keep these in view. **30 items**; 2 are genuine production blockers
 | ID | Item | Status | Source |
 |---|---|---|---|
 | R10-restore | ✅ **DONE (2026-06-02)** — `restore.sh` (gzip-verify, confirm, single-transaction `ON_ERROR_STOP`, `REVA_RESTORE_DB` target override, sanity check) + `backup.sh` hardened (partial-file cleanup trap) + runbook. **Recovery drill executed:** backup → restore into a throwaway DB → row counts matched live `reviews` exactly (review_runs 7, findings 24, github_events 61, PRs 5, repos 4); 14 tables / schema v8; live DB untouched. Re-run after schema changes (esp. once migration 009 ships). | verified | prod-readiness-plan R10 |
-| D1 | **Integration tests (testcontainers, real PG+Redis)** — the Phase-1 Postgres-only concurrency/spend logic is invisible to SQLite unit tests (see TEST-1) | not-started | phase2 D1 |
+| D1 | ✅ **DONE** — real-Postgres integration tier (`test_pg_integration.py` + CI `integration (postgres)` job + `make test-integration`); covers the concurrency guards (TEST-1). Redis-backed paths still use a fake queue. | done | phase2 D1 |
 
 ### Needs validation before relying on it
 | ID | Item | Note |
