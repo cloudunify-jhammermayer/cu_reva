@@ -180,7 +180,7 @@ services:
       GOOGLE_CHAT_WEBHOOK_URL: ${GOOGLE_CHAT_WEBHOOK_URL:-}
       REVA_REPO_CACHE_DIR: /repos
       REVA_DEFAULT_MODEL: ${REVA_DEFAULT_MODEL:-claude-sonnet-4-6}
-      REVA_DEEP_MODEL: ${REVA_DEEP_MODEL:-claude-opus-4-7}
+      REVA_DEEP_MODEL: ${REVA_DEEP_MODEL:-claude-opus-4-8}
       REVA_CODEGRAPH_ENABLED: ${REVA_CODEGRAPH_ENABLED:-false}
       REVA_CODEGRAPH_INDEX_TIMEOUT: ${REVA_CODEGRAPH_INDEX_TIMEOUT:-180}
       # Optional rolling 24-hour spend cap (USD); unset = no cap.

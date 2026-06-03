@@ -15,7 +15,7 @@ import os
 # always use the same models. Override per-deployment via env; the defaults are
 # the pinned production models.
 DEFAULT_MODEL = os.environ.get("REVA_DEFAULT_MODEL", "claude-sonnet-4-6")
-DEEP_MODEL = os.environ.get("REVA_DEEP_MODEL", "claude-opus-4-7")
+DEEP_MODEL = os.environ.get("REVA_DEEP_MODEL", "claude-opus-4-8")
 
 
 def env_or_file(name: str, default: str | None = None) -> str | None:

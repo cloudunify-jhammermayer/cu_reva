@@ -208,9 +208,9 @@ def test_review_passes_overridden_model():
         return httpx.Response(200, json=payload)
 
     client = _make_client(handler)
-    client.review(**_review_args(), model="claude-opus-4-7", max_tokens=4096)
+    client.review(**_review_args(), model="claude-opus-4-8", max_tokens=4096)
 
-    assert captured["body"]["model"] == "claude-opus-4-7"
+    assert captured["body"]["model"] == "claude-opus-4-8"
     assert captured["body"]["max_tokens"] == 4096
 
 

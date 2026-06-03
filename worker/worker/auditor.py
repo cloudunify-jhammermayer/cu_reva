@@ -59,6 +59,9 @@ class Auditor:
             response = self.runner.review(
                 repo_path=repo_path,
                 skill="reva-repo-audit",
+                # Audits always use the higher (deep) model — a whole-repo audit
+                # is worth the stronger reasoning, unlike cost-sensitive reviews.
+                model=self.runner.deep_model,
                 params={"repo": f"{owner}/{name}", "default_branch": meta["default_branch"]},
             )
         completed_at = datetime.now(timezone.utc)

@@ -102,7 +102,7 @@ class FakeRunner:
     response: ClaudeResponse | None = None
     raise_exc: Exception | None = None
     default_model: str = "claude-sonnet-4-6"
-    deep_model: str = "claude-opus-4-7"
+    deep_model: str = "claude-opus-4-8"
     last_model: str | None = None
     last_skill: str | None = None
     last_params: dict | None = None
@@ -223,7 +223,7 @@ def test_deep_mode_uses_opus_model():
     runner = FakeRunner(response=_claude_response_with_findings([]))
     reviewer, *_ = _make_reviewer(runner=runner)
     reviewer.execute(_params(review_mode="deep"))
-    assert runner.last_model == "claude-opus-4-7"
+    assert runner.last_model == "claude-opus-4-8"
 
 
 def test_default_mode_uses_sonnet_model():

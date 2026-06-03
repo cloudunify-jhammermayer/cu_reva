@@ -1,6 +1,6 @@
 """Cost estimation for Claude API calls.
 
-Rates reflect Anthropic public pricing for Sonnet 4.6 and Opus 4.7 as of
+Rates reflect Anthropic public pricing for Sonnet 4.6 and Opus 4.8 as of
 May 2026. Verify against https://www.anthropic.com/pricing if billing
 accuracy matters.
 """
@@ -15,7 +15,7 @@ PRICING: dict[str, dict[str, float]] = {
         "cache_read": 0.30 / 1_000_000,
         "cache_write_5m": 3.75 / 1_000_000,
     },
-    "claude-opus-4-7": {
+    "claude-opus-4-8": {
         "input": 15.00 / 1_000_000,
         "output": 75.00 / 1_000_000,
         "cache_read": 1.50 / 1_000_000,

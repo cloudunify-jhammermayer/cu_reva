@@ -40,4 +40,4 @@ def test_models_default_when_env_unset():
     import reva.config as config
 
     assert config.DEFAULT_MODEL == "claude-sonnet-4-6"
-    assert config.DEEP_MODEL == "claude-opus-4-7"
+    assert config.DEEP_MODEL == "claude-opus-4-8"

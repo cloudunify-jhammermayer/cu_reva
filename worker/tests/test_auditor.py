@@ -21,9 +21,10 @@ class FakeRunner:
     response: ClaudeResponse | None = None
     raise_exc: Exception | None = None
     default_model: str = "claude-sonnet-4-6"
-    deep_model: str = "claude-opus-4-7"
+    deep_model: str = "claude-opus-4-8"
     last_skill: str | None = None
     last_params: dict | None = None
+    last_model: str | None = None
 
     def repo_lock(self, owner, name):
         import contextlib
@@ -35,6 +36,7 @@ class FakeRunner:
     def review(self, repo_path, skill, params, model=None, odoo=False) -> ClaudeResponse:
         self.last_skill = skill
         self.last_params = params
+        self.last_model = model
         if self.raise_exc:
             raise self.raise_exc
         return self.response
@@ -89,6 +91,13 @@ def test_audit_uses_reva_repo_audit_skill():
     auditor, runner, _, _ = _make_auditor()
     auditor.execute(_params())
     assert runner.last_skill == "reva-repo-audit"
+
+
+def test_audit_uses_deep_model():
+    """Audits always run on the higher (deep) model, not the default."""
+    auditor, runner, _, _ = _make_auditor()
+    auditor.execute(_params())
+    assert runner.last_model == runner.deep_model
 
 
 def test_audit_ensure_repo_called_with_none_sha():
