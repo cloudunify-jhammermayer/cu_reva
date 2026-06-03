@@ -364,6 +364,10 @@ class ClaudeCodeRunner:
                 "codegraph_index_failed", repo=repo_path, stderr=(result.stderr or "")[:200]
             )
             return None
+        # Positive signal: the index built and the MCP server will be exposed to
+        # the CLI. The failure paths above log warnings; success was otherwise
+        # silent, leaving "did this review use CodeGraph?" unobservable.
+        logger.info("codegraph_index_ready", repo=repo_path, mode=subcommand)
         # Written inside the clone (cwd) like the output file — ephemeral, removed
         # after the run. The CLI passes it via --mcp-config.
         fd, path = tempfile.mkstemp(suffix=".json", prefix=".reva_mcp_", dir=repo_path)

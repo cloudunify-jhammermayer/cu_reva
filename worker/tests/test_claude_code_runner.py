@@ -938,6 +938,22 @@ def test_codegraph_init_when_no_index(cg_runner, tmp_path):
     assert cg_calls[0][:2] == ["codegraph", "init"]
 
 
+def test_codegraph_logs_index_ready_on_success(cg_runner, tmp_path):
+    """A successful index emits a positive `codegraph_index_ready` log so a run
+    that used CodeGraph is observable (the failure paths log warnings; success
+    was previously silent)."""
+    import structlog
+
+    repo_path = _repo(tmp_path)
+    with structlog.testing.capture_logs() as logs:
+        with patch("subprocess.run", side_effect=_cg_fake_run()):
+            cg_runner.review(repo_path=repo_path, skill="reva-full-review", params={})
+
+    ready = [e for e in logs if e["event"] == "codegraph_index_ready"]
+    assert ready, "expected codegraph_index_ready on a successful index"
+    assert ready[0]["mode"] == "init"  # no .codegraph/ in a fresh clone
+
+
 def test_codegraph_sync_when_index_exists(cg_runner, tmp_path):
     repo_path = _repo(tmp_path)
     os.makedirs(os.path.join(repo_path, ".codegraph"))
