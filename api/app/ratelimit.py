@@ -30,13 +30,17 @@ def reset() -> None:
 
 
 def _client_key(request: Request) -> str:
+    # nosemgrep rationale: semgrep's Flask "directly-returned-format-string" rule
+    # treats a returned request-derived string as an HTTP response body (reflected
+    # XSS). This is FastAPI and the value is an internal rate-limit dict key, never
+    # a response — false positive.
     auth = request.headers.get("Authorization", "")
     if auth:
         # Hash the token so raw bearer credentials aren't held in process memory
         # (SECU-11); the digest is a stable per-client bucket key.
-        return "key:" + hashlib.sha256(auth.encode()).hexdigest()
+        return "key:" + hashlib.sha256(auth.encode()).hexdigest()  # nosemgrep: python.flask.security.audit.directly-returned-format-string.directly-returned-format-string
     host = request.client.host if request.client else "unknown"
-    return "ip:" + host
+    return "ip:" + host  # nosemgrep: python.flask.security.audit.directly-returned-format-string.directly-returned-format-string
 
 
 def _sweep(now: float) -> None:
