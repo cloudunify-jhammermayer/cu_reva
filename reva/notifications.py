@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 
+import httpx
 import structlog
 
 from reva.url_safety import assert_safe_url
@@ -26,7 +27,6 @@ def post_to_chat(webhook_url: str, text: str, *, timeout: float = 5) -> bool:
     applied uniformly."""
     try:
         assert_safe_url(webhook_url, allowed_hosts=_CHAT_ALLOWED_HOSTS)
-        import httpx
         httpx.post(webhook_url, json={"text": text}, timeout=timeout)
         return True
     except Exception as exc:

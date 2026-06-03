@@ -202,12 +202,15 @@ def _fmt_cost(usd: float | None) -> str:
 
 def build_weekly_report(db: Database, since: datetime | None = None) -> str:
     """Return a formatted Google Chat message for the weekly report."""
+    # CODE-8: read the clock once so the window start (when defaulted) and the
+    # displayed period end are consistent.
+    now = datetime.now(timezone.utc)
     if since is None:
-        since = datetime.now(timezone.utc) - timedelta(days=7)
+        since = now - timedelta(days=7)
 
     stats = weekly_report_stats(db, since)
 
-    period_end = datetime.now(timezone.utc)
+    period_end = now
     period_start = since
     date_range = (
         f"{period_start.strftime('%d %b')} – {period_end.strftime('%d %b %Y')}"
@@ -226,7 +229,7 @@ def build_weekly_report(db: Database, since: datetime | None = None) -> str:
         f"Failed: {stats['failed']}   "
         f"Stale/Declined: {stats['stale'] + stats['declined']}"
     )
-    lines.append(f"  Success rate: {sr:.0%}")
+    lines.append(f"  Success rate: {sr:.1%}")
     lines.append("")
 
     # --- Findings ---

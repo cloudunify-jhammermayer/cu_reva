@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reva-shared"
-version = "0.1.0"
+version = "0.2.0"
 description = "Shared library for REVA — types, DB, clients, formatters, diff utils"
 requires-python = ">=3.14"
 # Pinned for reproducible images (DEPE-2): same git SHA → same dependency tree.

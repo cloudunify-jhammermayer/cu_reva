@@ -511,8 +511,8 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **CODE-5** — parse_retry_after duplicated near byte-for-byte in claude_client and _github_http  (`reva/claude_client.py:144-151, reva/_github_http.py:45-52`)
 - **CODE-6** — '+++ b/' diff-header parsing implemented two ways across four sites in diff_utils  (`reva/diff_utils.py:50-51, 79, 99-108, 141-142`)
 - **CODE-7** — ✅ DONE (2026-06-02, gofmt -w) — Six TUI source files are not gofmt-clean; formatting not enforced in CI  (`tui/internal/api/mock.go, internal/api/types.go, internal/ui/findings.go, internal/ui/messages.go, internal/ui/repos.go, internal/ui/styles.go`)
-- **CODE-8** — weekly_report success_rate rounded to 4 places but rendered at 0 decimals; two separate now() reads for report range  (`reva/weekly_report.py:159, 206-211, 229`)
-- **CODE-9** — Inconsistent import placement and asymmetric logging between notifications/odoo_client  (`reva/notifications.py:25, reva/odoo_client.py:86-88,104, reva/types.py:214`)
+- **CODE-8** — ✅ DONE (2026-06-03) — clock read once for the window/period; success rate rendered at 1 decimal (uses the stored precision). — weekly_report success_rate rounded to 4 places but rendered at 0 decimals; two separate now() reads for report range  (`reva/weekly_report.py:159, 206-211, 229`)
+- **CODE-9** — ✅ DONE (2026-06-03, import) — lifted the lazy `import httpx` to the module top in notifications.py (httpx is a core dep). The subjective 'asymmetric logging' part left as-is. — Inconsistent import placement and asymmetric logging between notifications/odoo_client  (`reva/notifications.py:25, reva/odoo_client.py:86-88,104, reva/types.py:214`)
 - **CODE-10** — ✅ DONE (2026-06-03) — `DatabaseRepoLookup` built once and shared by reviewer+auditor; `AuditRun`/`AdminAudit` exported from `reva.db`. — DatabaseRepoLookup constructed twice in build_worker_context; AuditRun/AdminAudit not exported from reva.db  (`worker/worker/runner.py:123,129, reva/db/__init__.py:11-41`)
 - **CODE-11** — Anti-leak prompt rule may conflict with the instruction to report embedded injection attempts  (`prompts/review_guidance.md:30-32,89, prompts/system.md:30-31,111`)
 - **CODE-12** — Scheduler inter-tick wait drifts: fixed sleep loop ignores variable work time  (`scheduler/scheduler/main.py:103-106`)
@@ -527,10 +527,10 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **CORR-18** — ✅ DONE (2026-06-02) — `get_file_content` URL-encodes the path with `quote(path, safe='/')` (slash preserved, spaces/#/? encoded); test asserts single-encoding. — GitHub API path segments (file path) are interpolated without URL-encoding
 - **CORR-19** — Reaper and budget windows mix the process clock with DB-side timestamps (no skew tolerance)  (`reva/db/writers.py:151,217,237; worker/worker/runner.py:217; reva/db/models.py:174-176`)
 - **CORR-20** — ✅ DONE (2026-06-02) — `format_inline_comment_payload` raises if `line_start` is None (split_findings guarantees it; now enforced, fails loud instead of TypeError). Test added. — format_inline_comment_payload assumes non-None line_start without enforcing it
-- **CORR-21** — estimated_cost_usd stored as rounded float into NUMERIC(12,6) then summed and cast back to float  (`reva/cost.py:36-44, reva/db/writers.py:235-240`)
+- **CORR-21** — ⏸️ NO-OP (2026-06-03) — `estimate_cost` already rounds to 6 dp, exactly matching `NUMERIC(12,6)`, so there's no double-rounding error to fix. — estimated_cost_usd stored as rounded float into NUMERIC(12,6) then summed and cast back to float  (`reva/cost.py:36-44, reva/db/writers.py:235-240`)
 ### dependencies (1)
 
-- **DEPE-4** — reva-shared version is static 0.1.0 and never bumped across releases  (`pyproject.toml:7`)
+- **DEPE-4** — ✅ DONE (2026-06-03) — bumped reva-shared to 0.2.0 to reflect the hardening work. — reva-shared version is static 0.1.0 and never bumped across releases  (`pyproject.toml:7`)
 ### docs (5)
 
 - **DOCS-10** — ✅ DONE (2026-06-03) — `1–7` in README + TUI status bar (7 tabs). — Stale '1-6 switch tabs' hint across README and the in-app dashboard status bar (there are 7 tabs)  (`README.md:159; docs/setup-local.md:174-184; tui/internal/ui/app.go:307`)
@@ -551,7 +551,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 
 - **MAIN-9** — GitHub private-key path bypasses the env_or_file Docker-secret convention used for every other secret  (`api/app/settings.py:32-33, worker/worker/settings.py:53-54, reva/config.py:14,26`)
 - **MAIN-10** — TUI requeue eligibility rules are inconsistent and duplicated across Reviews / Failures / Tickets tabs  (`tui/internal/ui/reviews.go:173, tui/internal/ui/failures.go:74-82, tui/internal/ui/tickets.go:87-90`)
-- **MAIN-11** — schema_migrations created with TIMESTAMP/CURRENT_TIMESTAMP in engine but TIMESTAMPTZ/now() in migration 001 (harmless drift)  (`reva/db/engine.py:67-73, db/migrations/001_initial.sql:2-5`)
+- **MAIN-11** — ⏸️ NOT CHANGED (2026-06-03) — the engine DDL runs on SQLite too, so its portable `TIMESTAMP DEFAULT CURRENT_TIMESTAMP` is correct; `now()`/TIMESTAMPTZ would break SQLite. Harmless drift, left as-is. — schema_migrations created with TIMESTAMP/CURRENT_TIMESTAMP in engine but TIMESTAMPTZ/now() in migration 001 (harmless drift)  (`reva/db/engine.py:67-73, db/migrations/001_initial.sql:2-5`)
 - **MAIN-12** — ✅ DONE (2026-06-03) — also splits on a spaced ASCII hyphen ( - ), without truncating a hyphenated version like v1.2-beta. — get_version only strips em/en dashes, not a plain ASCII hyphen, in CHANGELOG headings  (`reva/prompt_builder.py:96-98, prompts/CHANGELOG.md:1`)
 - **MAIN-13** — ✅ DONE (2026-06-03) — removed the unused `colorBg`. — Dead package-level variable colorBg in TUI styles  (`tui/internal/ui/styles.go:18`)
 ### performance (1)
