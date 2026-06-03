@@ -194,7 +194,11 @@ class ClaudeCodeRunner:
         if head_sha:
             self._run_git_permanent(["-C", repo_path, "checkout", head_sha])
         else:
-            self._run_git_permanent(["-C", repo_path, "reset", "--hard", "FETCH_HEAD"])
+            # origin/HEAD, not FETCH_HEAD: a fresh clone writes no FETCH_HEAD (only
+            # fetch does), so a cold-cache audit — first-ever review of a repo —
+            # would fail. origin/HEAD is set by clone and updated by fetch, always
+            # resolving to the default-branch tip.
+            self._run_git_permanent(["-C", repo_path, "reset", "--hard", "origin/HEAD"])
 
         return repo_path
 

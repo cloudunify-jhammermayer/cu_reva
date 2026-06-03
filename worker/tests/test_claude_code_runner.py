@@ -80,15 +80,57 @@ def test_ensure_repo_fetches_when_exists(runner, tmp_path):
     assert any("checkout" in c for c in calls)
 
 
-def test_ensure_repo_no_sha_resets_to_fetch_head(runner, tmp_path):
+def test_ensure_repo_no_sha_resets_to_default_branch(runner, tmp_path):
     repo_path = tmp_path / "repos" / "acme" / "widgets"
     repo_path.mkdir(parents=True)
 
     with patch("subprocess.run", return_value=_ok()) as mock_run:
         runner.ensure_repo("acme", "widgets", None, "tok")
 
+    # origin/HEAD (not FETCH_HEAD): it resolves to the default-branch tip after
+    # both clone and fetch, whereas a fresh clone has no FETCH_HEAD.
     calls = [c.args[0] for c in mock_run.call_args_list]
-    assert any("reset" in c and "FETCH_HEAD" in c for c in calls)
+    assert any("reset" in c and "origin/HEAD" in c for c in calls)
+
+
+def test_ensure_repo_cold_clone_no_sha_lands_on_default_branch(runner, tmp_path):
+    """Regression: the first-ever audit of a repo (head_sha=None, cold cache)
+    must check out the default branch. A fresh `git clone` writes no FETCH_HEAD,
+    so the old `reset --hard FETCH_HEAD` failed (PermanentError) on a cold clone;
+    `origin/HEAD` is set by clone and resolves to the default-branch tip.
+
+    Real git against a local bare 'remote' — the mocked unit tests above can't
+    catch the missing-FETCH_HEAD failure.
+    """
+    import subprocess as sp
+    from pathlib import Path
+
+    genv = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+    }
+    work = tmp_path / "work"
+    sp.run(["git", "init", "-q", "-b", "main", str(work)], check=True)
+    (work / "marker.txt").write_text("on-default-branch")
+    sp.run(["git", "-C", str(work), "add", "."], check=True, env=genv)
+    sp.run(["git", "-C", str(work), "commit", "-q", "-m", "init"], check=True, env=genv)
+    bare = tmp_path / "remote.git"
+    sp.run(["git", "clone", "-q", "--bare", str(work), str(bare)], check=True)
+
+    real_run = sp.run
+
+    def redirect(cmd, *a, **k):
+        # ensure_repo clones the hard-coded GitHub URL; point it at our bare repo.
+        cmd = list(cmd)
+        if "clone" in cmd:
+            cmd[cmd.index("clone") + 1] = str(bare)
+        return real_run(cmd, *a, **k)
+
+    with patch("subprocess.run", side_effect=redirect):
+        repo_path = runner.ensure_repo("acme", "widgets", None, "tok")
+
+    assert (Path(repo_path) / "marker.txt").read_text() == "on-default-branch"
 
 
 def test_ensure_repo_clone_failure_raises_transient(runner):
