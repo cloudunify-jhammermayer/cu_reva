@@ -20,6 +20,7 @@ from rq import Queue
 
 from reva.db import writers
 from reva.db.engine import Database, create_engine_from_url
+from reva.logging import configure_logging
 from scheduler.monitor import Monitor
 from scheduler.poller import Poller
 from scheduler.reporter import WeeklyReporter
@@ -57,6 +58,7 @@ def maybe_purge_ticket_text(db, now, last_purge, interval_s, retention_days):
 
 
 def main() -> None:
+    configure_logging()
     settings = Settings.from_env()
 
     engine = create_engine_from_url(settings.database_url)

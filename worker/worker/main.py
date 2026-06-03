@@ -12,6 +12,7 @@ import structlog
 from redis import Redis
 from rq import Queue, Worker
 
+from reva.logging import configure_logging
 from worker.runner import build_worker_context
 from worker.settings import Settings
 
@@ -19,6 +20,7 @@ logger = structlog.get_logger()
 
 
 def main() -> None:
+    configure_logging()
     settings = Settings.from_env()
 
     build_worker_context(settings)

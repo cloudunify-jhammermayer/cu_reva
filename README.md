@@ -226,6 +226,9 @@ Notifications fire on `PermanentError` and unexpected exceptions. Transient erro
 | `ODOO_CALLBACK_API_KEY` | — | — | Auth key for the Odoo callback |
 | `REVA_REPORT_WEEKDAY` | — | `0` | Day to send weekly report (0 = Monday, 6 = Sunday) |
 | `REVA_REPORT_HOUR_UTC` | — | `8` | Hour (UTC) to send weekly report (0–23) |
+| `REVA_TICKET_TEXT_RETENTION_DAYS` | — | `30` | Days before raw customer ticket text is scrubbed from `ticket_analyses` |
+| `REVA_LOG_LEVEL` | — | `INFO` | Log level for all services (`DEBUG`/`INFO`/`WARNING`/…) |
+| `REVA_LOG_FORMAT` | — | `json` | `json` (structured, prod) or `console` (human-readable, local dev) |
 
 ## Log rotation
 

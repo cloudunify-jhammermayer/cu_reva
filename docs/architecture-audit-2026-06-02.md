@@ -335,7 +335,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
     - Fix: Negate the README/.gitkeep in .gitignore so the docs are tracked while real secrets stay ignored, e.g. add `!secrets/README.md` and `!secrets/.gitkeep` after the `secrets/` rule (verify with `git check-ignore`). The *.pem/*.key rules still protect the keys.
 ### infra (15)
 
-- **INFR-4** — Application logs are not structured JSON and have no log-level control (structlog is never configured)
+- **INFR-4** — ✅ DONE (2026-06-03) — shared `reva.logging.configure_logging()` called at the top of all three services' entry points: structlog + stdlib (uvicorn/RQ/SQLAlchemy) render through one formatter — JSON by default, `console` for dev (`REVA_LOG_FORMAT`), level via `REVA_LOG_LEVEL`. Documented in README; tests added. — Application logs are not structured JSON and have no log-level control (structlog is never configured)
     - `api/app/main.py:18, worker/worker/main.py:18, scheduler/scheduler/main.py:28, api/Dockerfile:27, reva/notifications.py:12`
     - Fix: Add a single shared `reva.logging.configure_logging()` (JSONRenderer + ISO timestamper + make_filtering_bound_logger with level from REVA_LOG_LEVEL + structlog.stdlib integration so uvicorn/RQ/SQLAlchemy route through the same formatter; keep ConsoleRenderer for local dev, gated by e.g. REVA_LOG_FORMAT) and call it at the top of each service's main()/lifespan before any logging. Wire REVA_LOG_LEVEL into uvicorn (--log-level) and document it in the env table.
 - **INFR-5** — Worker image is single-stage and ships the full node/npm + git build toolchain at runtime

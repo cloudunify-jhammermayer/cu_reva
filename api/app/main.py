@@ -15,6 +15,7 @@ from app.routes.v1 import router as v1_router
 from app.settings import Settings
 from reva.db.engine import Database, create_engine_from_url
 from reva.github_client import GitHubClient
+from reva.logging import configure_logging
 
 logger = structlog.get_logger()
 
@@ -26,6 +27,7 @@ def warn_if_no_api_key(settings: Settings) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging()
     settings = Settings.from_env()
     warn_if_no_api_key(settings)
     engine = create_engine_from_url(settings.database_url)
