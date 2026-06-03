@@ -605,3 +605,34 @@ def test_resolve_review_thread_posts_graphql_mutation(rsa_key_pair):
     client = _make_client(handler, private_pem)
     client.resolve_review_thread("tok", "THREAD_NODE_1")
     assert len(called) == 1
+
+
+def test_find_pr_review_id_ignores_reviews_before_since(rsa_key_pair):
+    """A stale prior-era review (run_id reused / DB reset → marker collision) must
+    NOT be recovered, or a re-review posts nothing. See PR-9 regression."""
+    from datetime import datetime, timezone
+    private_pem, _ = rsa_key_pair
+    client = _make_client(
+        lambda req: httpx.Response(200, json=[
+            {"id": 4399817713, "body": "## REVA · Review\nRun #1",
+             "user": {"type": "Bot"}, "submitted_at": "2026-06-01T08:58:50Z"},
+        ]),
+        private_pem,
+    )
+    since = datetime(2026, 6, 3, 7, 0, 0, tzinfo=timezone.utc)
+    assert client.find_pr_review_id("tok", "a", "b", 1, marker="Run #1", since=since) is None
+
+
+def test_find_pr_review_id_recovers_recent_review_with_since(rsa_key_pair):
+    """A review from THIS run's era (just-posted, crash-recovery) is still recovered."""
+    from datetime import datetime, timezone
+    private_pem, _ = rsa_key_pair
+    client = _make_client(
+        lambda req: httpx.Response(200, json=[
+            {"id": 555, "body": "Run #1", "user": {"type": "Bot"},
+             "submitted_at": "2026-06-03T07:33:00Z"},
+        ]),
+        private_pem,
+    )
+    since = datetime(2026, 6, 3, 7, 0, 0, tzinfo=timezone.utc)
+    assert client.find_pr_review_id("tok", "a", "b", 1, marker="Run #1", since=since) == 555

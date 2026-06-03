@@ -345,6 +345,15 @@ def get_posted_github_ids(db: Database, review_run_id: int) -> tuple[int | None,
     return row[0], row[1]
 
 
+def get_review_run_created_at(db: Database, review_run_id: int) -> datetime | None:
+    """created_at of a run — used to scope review recovery to this run's era so a
+    stale prior review (run-id reuse / DB reset) isn't recovered (PR-9 fix)."""
+    with db.session() as s:
+        return s.execute(
+            select(ReviewRun.created_at).where(ReviewRun.id == review_run_id)
+        ).scalar_one_or_none()
+
+
 def attach_github_ids(
     db: Database,
     review_run_id: int,

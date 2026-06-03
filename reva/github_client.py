@@ -33,6 +33,19 @@ MAX_FILE_PAGES = 30        # safety net; size guard handles real cap
 PAGE_SIZE = 100
 
 
+def _submitted_after(review: dict, since: datetime) -> bool:
+    """True if a PR review's submitted_at is at/after `since`. Conservatively
+    False if missing/unparseable (so an ambiguous review isn't recovered)."""
+    raw = review.get("submitted_at")
+    if not raw:
+        return False
+    try:
+        ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return ts >= since
+
+
 @dataclass
 class _CachedToken:
     token: str
@@ -164,7 +177,8 @@ class GitHubClient:
         return response.text
 
     def find_pr_review_id(
-        self, token: str, owner: str, repo: str, pr_number: int, marker: str
+        self, token: str, owner: str, repo: str, pr_number: int, marker: str,
+        since: datetime | None = None,
     ) -> int | None:
         """Return the id of our PR review whose body contains `marker`, else None.
 
@@ -175,6 +189,13 @@ class GitHubClient:
         so a non-bot commenter can't post a review echoing the marker to hijack
         the recovered id. The listing is paginated (the marker may be on a later
         page once a PR accumulates reviews).
+
+        `since`: only reviews submitted at/after this time are considered. The
+        marker ("Run #N") is NOT unique across runs — the run-id sequence can
+        repeat (DB reset) or a re-review reuses the row — so without this a
+        re-review would recover a STALE prior review and skip posting its new
+        findings (PR-9 regression). Scoping to this run's era keeps same-attempt
+        crash recovery while ignoring old reviews.
         """
         match = None
         page = 1
@@ -187,6 +208,8 @@ class GitHubClient:
             for review in reviews:
                 if (review.get("user") or {}).get("type") != "Bot":
                     continue  # only our app's bot account can be us
+                if since is not None and not _submitted_after(review, since):
+                    continue  # stale prior-era review — not this run's
                 if marker in (review.get("body") or ""):
                     match = review["id"]  # keep the last (newest) match
             if len(reviews) < 100:

@@ -69,7 +69,7 @@ class FakeGitHub:
     def get_installation_token(self, installation_id: int) -> str:
         return self.installation_token
 
-    def find_pr_review_id(self, token, owner, repo, pr_number, marker) -> int | None:
+    def find_pr_review_id(self, token, owner, repo, pr_number, marker, since=None) -> int | None:
         return self.recoverable_review_id
 
     def find_check_run_id(self, token, owner, repo, head_sha, name) -> int | None:
