@@ -35,6 +35,7 @@ Go to **GitHub → Settings → Developer settings → GitHub Apps → New GitHu
 | Checks | Read & write |
 | Contents | Read-only |
 | Pull requests | Read & write |
+| Issues | Read & write |
 
 **Subscribe to events:** tick **Pull requests**.
 

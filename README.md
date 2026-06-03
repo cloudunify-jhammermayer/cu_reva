@@ -66,6 +66,7 @@ Required **repository permissions**:
 | Contents | Read |
 | Pull requests | Read & write |
 | Checks | Read & write |
+| Issues | Read & write |
 
 Required **webhook events**:
 

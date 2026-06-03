@@ -387,6 +387,35 @@ class AuditRun(Base):
     )
 
 
+class AuditFinding(Base):
+    __tablename__ = "audit_findings"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    audit_run_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("audit_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    severity: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    file_path: Mapped[str | None] = mapped_column(Text)
+    line_start: Mapped[int | None] = mapped_column(Integer)
+    line_end: Mapped[int | None] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    suggestion: Mapped[str | None] = mapped_column(Text)
+    confidence: Mapped[float | None] = mapped_column(Numeric(3, 2))
+    is_odoo_specific: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Set when a major/critical finding is opened as a GitHub issue.
+    github_issue_number: Mapped[int | None] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_audit_findings_run", "audit_run_id"),
+        Index("idx_audit_findings_severity", "severity"),
+    )
+
+
 # ------------------------------------------------------------- claude_spend
 
 

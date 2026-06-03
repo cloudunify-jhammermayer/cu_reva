@@ -454,6 +454,88 @@ def test_create_pr_review_posts_comments(rsa_key_pair):
     assert captured["body"]["comments"][0]["line"] == 10
 
 
+def test_create_issue_opens_issue(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        import json
+        captured["method"] = req.method
+        captured["path"] = req.url.path
+        captured["body"] = json.loads(req.content)
+        return httpx.Response(201, json={"number": 77, "html_url": "x"})
+
+    client = _make_client(handler, private_pem)
+    number = client.create_issue(
+        token="tok", owner="acme", repo="widgets",
+        title="[REVA audit] RCE", body="details\n<!-- revaaudit -->",
+        labels=["reva-audit"],
+    )
+    assert number == 77
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/repos/acme/widgets/issues"
+    assert captured["body"]["title"] == "[REVA audit] RCE"
+    assert captured["body"]["labels"] == ["reva-audit"]
+
+
+def test_ensure_label_creates_when_missing(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        import json
+        captured["method"] = req.method
+        captured["path"] = req.url.path
+        captured["body"] = json.loads(req.content)
+        return httpx.Response(201, json={"id": 1, "name": "reva-audit"})
+
+    client = _make_client(handler, private_pem)
+    client.ensure_label("tok", "acme", "widgets", "reva-audit",
+                        color="5319e7", description="REVA audit findings")
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/repos/acme/widgets/labels"
+    assert captured["body"]["name"] == "reva-audit"
+
+
+def test_ensure_label_swallows_already_exists(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(req):
+        return httpx.Response(422, json={"message": "Validation Failed",
+                                         "errors": [{"code": "already_exists"}]})
+
+    client = _make_client(handler, private_pem)
+    # Idempotent: a 422 "already exists" must not raise.
+    client.ensure_label("tok", "acme", "widgets", "reva-audit")
+
+
+def test_issue_exists_with_marker_true_when_search_hits(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        captured["path"] = req.url.path
+        captured["q"] = req.url.params.get("q")
+        return httpx.Response(200, json={"total_count": 1, "items": [{"number": 5}]})
+
+    client = _make_client(handler, private_pem)
+    assert client.issue_exists_with_marker("tok", "acme", "widgets", "revaaudit123") is True
+    assert captured["path"] == "/search/issues"
+    assert "repo:acme/widgets" in captured["q"]
+    assert "state:open" in captured["q"]
+    assert "revaaudit123" in captured["q"]
+
+
+def test_issue_exists_with_marker_false_when_no_hits(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(req):
+        return httpx.Response(200, json={"total_count": 0, "items": []})
+
+    client = _make_client(handler, private_pem)
+    assert client.issue_exists_with_marker("tok", "acme", "widgets", "revaaudit123") is False
+
+
 def test_create_issue_comment_posts_body(rsa_key_pair):
     private_pem, _ = rsa_key_pair
     captured: dict = {}

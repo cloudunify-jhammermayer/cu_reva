@@ -26,6 +26,7 @@ from reva.cost import estimate_cost
 from reva.db.engine import Database
 from reva.db.models import (
     AdminAudit,
+    AuditFinding,
     ClaudeSpend,
     GithubEvent,
     PendingReview,
@@ -630,6 +631,43 @@ def get_findings_for_run(db: Database, review_run_id: int) -> list[dict]:
         {"id": r[0], "file_path": r[1], "line_start": r[2], "line_end": r[3]}
         for r in rows
     ]
+
+
+def insert_audit_findings(db: Database, audit_run_id: int, findings: list[Finding]) -> list[int]:
+    """Persist an audit's findings. Returns the new row ids in input order so the
+    caller can attach GitHub issue numbers to specific findings."""
+    ids: list[int] = []
+    with db.session() as s:
+        for f in findings:
+            row = AuditFinding(
+                audit_run_id=audit_run_id,
+                severity=f.severity,
+                category=f.category,
+                file_path=f.file,
+                line_start=f.line_start,
+                line_end=f.line_end,
+                title=f.title,
+                body=f.body,
+                suggestion=f.suggestion,
+                confidence=f.confidence,
+                is_odoo_specific=f.is_odoo_specific,
+            )
+            s.add(row)
+            s.flush()
+            ids.append(row.id)
+        s.commit()
+    return ids
+
+
+def set_audit_finding_issue_number(db: Database, finding_id: int, issue_number: int) -> None:
+    """Record the GitHub issue opened for an audit finding."""
+    with db.session() as s:
+        s.execute(
+            update(AuditFinding)
+            .where(AuditFinding.id == finding_id)
+            .values(github_issue_number=issue_number)
+        )
+        s.commit()
 
 
 def get_open_findings_for_pr(db: Database, pull_request_id: int, before_run_id: int | None = None) -> list[dict]:

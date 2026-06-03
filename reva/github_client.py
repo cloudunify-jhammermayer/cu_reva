@@ -21,7 +21,7 @@ import jwt
 import structlog
 
 from reva._github_http import NotFound, map_github_status
-from reva.errors import TransientError
+from reva.errors import PermanentError, TransientError
 
 logger = structlog.get_logger()
 
@@ -329,6 +329,60 @@ class GitHubClient:
             {"body": body},
         )
         return response.json()["id"]
+
+    def create_issue(
+        self,
+        token: str,
+        owner: str,
+        repo: str,
+        title: str,
+        body: str,
+        labels: list[str] | None = None,
+    ) -> int:
+        """Open a new issue. Returns the new issue number."""
+        payload: dict = {"title": title, "body": body}
+        if labels:
+            payload["labels"] = labels
+        response = self._post(token, f"/repos/{owner}/{repo}/issues", payload)
+        return response.json()["number"]
+
+    def ensure_label(
+        self,
+        token: str,
+        owner: str,
+        repo: str,
+        name: str,
+        color: str = "5319e7",
+        description: str = "",
+    ) -> None:
+        """Create a repo label if it doesn't exist (idempotent, best-effort).
+
+        Labels are per-repo, so REVA creates its own rather than requiring it to
+        be set up by hand. An existing label returns 422 'already_exists'; any
+        failure is swallowed (labelling must never block issue creation)."""
+        try:
+            self._post(
+                token,
+                f"/repos/{owner}/{repo}/labels",
+                {"name": name, "color": color, "description": description},
+            )
+        except (PermanentError, TransientError):
+            pass
+
+    def issue_exists_with_marker(
+        self, token: str, owner: str, repo: str, marker: str
+    ) -> bool:
+        """True if an OPEN issue in the repo contains `marker` in its body.
+
+        Used to dedup audit issues across re-runs — `marker` is a stable,
+        plain-alphanumeric token embedded (as an HTML comment) in issue bodies.
+        """
+        response = self._get(
+            token,
+            "/search/issues",
+            params={"q": f"repo:{owner}/{repo} type:issue state:open {marker}"},
+        )
+        return (response.json().get("total_count") or 0) > 0
 
     def get_review_comments(
         self, token: str, owner: str, repo: str, pr_number: int, review_id: int
