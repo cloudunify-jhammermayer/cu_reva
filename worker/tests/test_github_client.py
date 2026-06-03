@@ -447,8 +447,8 @@ def test_find_pr_review_id_matches_marker(rsa_key_pair):
     def handler(req):
         captured["path"] = req.url.path
         return httpx.Response(200, json=[
-            {"id": 1, "body": "someone else's review"},
-            {"id": 2, "body": "REVA summary\n*REVA · Run #77*"},
+            {"id": 1, "body": "someone else's review", "user": {"type": "User"}},
+            {"id": 2, "body": "REVA summary\n*REVA · Run #77*", "user": {"type": "Bot"}},
         ])
 
     client = _make_client(handler, private_pem)
@@ -460,10 +460,39 @@ def test_find_pr_review_id_matches_marker(rsa_key_pair):
 def test_find_pr_review_id_returns_none_when_absent(rsa_key_pair):
     private_pem, _ = rsa_key_pair
     client = _make_client(
-        lambda req: httpx.Response(200, json=[{"id": 1, "body": "other"}]),
+        lambda req: httpx.Response(200, json=[{"id": 1, "body": "other", "user": {"type": "Bot"}}]),
         private_pem,
     )
     assert client.find_pr_review_id("tok", "a", "b", 1, marker="Run #77") is None
+
+
+def test_find_pr_review_id_ignores_non_bot_forged_marker(rsa_key_pair):
+    """CORR-5: a non-bot commenter echoing the marker must NOT be matched."""
+    private_pem, _ = rsa_key_pair
+    client = _make_client(
+        lambda req: httpx.Response(200, json=[
+            {"id": 9, "body": "haha Run #77", "user": {"type": "User"}},  # forged by attacker
+        ]),
+        private_pem,
+    )
+    assert client.find_pr_review_id("tok", "a", "b", 1, marker="Run #77") is None
+
+
+def test_find_pr_review_id_paginates(rsa_key_pair):
+    """CORR-5: the marker may be on a later page once a PR has many reviews."""
+    private_pem, _ = rsa_key_pair
+
+    def handler(req):
+        page = int(req.url.params.get("page", "1"))
+        if page == 1:
+            full = [{"id": i, "body": "no marker", "user": {"type": "Bot"}} for i in range(100)]
+            return httpx.Response(200, json=full)
+        return httpx.Response(200, json=[
+            {"id": 777, "body": "REVA · Run #77", "user": {"type": "Bot"}},
+        ])
+
+    client = _make_client(handler, private_pem)
+    assert client.find_pr_review_id("tok", "a", "b", 1, marker="Run #77") == 777
 
 
 def test_find_check_run_id_returns_matching_run(rsa_key_pair):

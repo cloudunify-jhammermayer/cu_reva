@@ -269,7 +269,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
     - Fix: Check stop between sub-steps and inside the poll loop so a shutdown drains cleanly, fix the enqueue/commit ordering (see CONC-1) so a torn tick cannot double-dispatch, and optionally raise the scheduler container stop_grace_period.
 ### correctness (11)
 
-- **CORR-5** — find_pr_review_id matches an attacker-craftable marker AND reads only the first page of PR reviews
+- **CORR-5** — ✅ DONE (2026-06-03) — `find_pr_review_id` now only considers reviews authored by a Bot (our GitHub App), so a non-bot commenter can't forge the marker to hijack the recovered id, and it paginates the listing. Tests: forged-by-User excluded, pagination. — find_pr_review_id matches an attacker-craftable marker AND reads only the first page of PR reviews
     - `reva/github_client.py:162-176, worker/worker/runner.py:289-299, reva/review_formatter.py:203`
     - Fix: Recover review ids with an unforgeable marker (per-run HMAC in an HTML comment) and/or also filter on REVA's app/bot login, and paginate the reviews listing (per_page=100 + page loop, or request newest-first) until the marker is found or the list is exhausted.
 - **CORR-6** — ✅ DONE (2026-06-02) — routed both through clamp_limit (floors at 1). — Negative or zero ?limit on /findings and /failures reaches the SQL LIMIT (Postgres 500 on negative, empty page on zero)
@@ -290,7 +290,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **CORR-11** — ✅ DONE (with SECU-4) — recorded via the spend ledger rather than a new `AuditRun` column (the ledger is the accounting source; an `AuditRun.estimated_cost_usd` would be display-only and nothing renders it). — AuditResult carries no token/cost fields, so audit spend can never be recorded
     - `reva/types.py:237-247, worker/worker/auditor.py:79-87, worker/worker/audit_tasks.py:52-66`
     - Fix: Add token/cost fields to AuditResult, populate them from the runner response in Auditor.execute, and persist them in run_audit (and feed them into the budget accounting like reviews).
-- **CORR-12** — On a TransientError mid-audit, the AuditRun row is left in status='started' forever and each retry inserts a new orphan row
+- **CORR-12** — ✅ DONE (2026-06-03) — audits aren't RQ-retried, so `run_audit` now marks the row `failed` on any exception (transient or permanent) instead of leaving it stuck `started` forever; the misleading "RQ will retry" branch is gone. Test added. (No orphan-per-retry since there's no retry.) — On a TransientError mid-audit, the AuditRun row is left in status='started' forever and each retry inserts a new orphan row
     - `worker/worker/audit_tasks.py:24-50`
     - Fix: Either update the existing row to a retryable/failed state before re-raising (and reuse it on retry), or add an audit reaper analogous to reap_stale_running_reviews.
 - **CORR-13** — ✅ DONE (2026-06-02) — dispatch catches shape errors (KeyError/TypeError), marks processed, accepts with a warning; infra errors still redeliver. — Webhook _handle_pull_request hard-subscripts payload keys; a missing key 500s and re-enters the GitHub redelivery loop

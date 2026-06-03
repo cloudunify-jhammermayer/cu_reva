@@ -44,11 +44,10 @@ def run_audit(job_params: dict) -> dict:
 
     try:
         result = ctx.auditor.execute(params)
-    except TransientError:
-        # Don't mark as failed — RQ will retry and create a new run row.
-        log.warning("audit_job_transient_error", exc_info=True)
-        raise
     except Exception as exc:
+        # Audits are not RQ-retried, so any failure (transient or permanent) is
+        # terminal — mark the row failed instead of leaving it stuck in 'started'
+        # forever (CORR-12). The raw message stays internal (admin-only path).
         with ctx.db.session() as s:
             s.execute(
                 update(AuditRun)
@@ -56,7 +55,8 @@ def run_audit(job_params: dict) -> dict:
                 .values(status="failed", error_message=str(exc)[:500])
             )
             s.commit()
-        log.error("audit_job_failed", error=str(exc))
+        log.error("audit_job_failed", error=str(exc),
+                  transient=isinstance(exc, TransientError))
         raise
 
     with ctx.db.session() as s:

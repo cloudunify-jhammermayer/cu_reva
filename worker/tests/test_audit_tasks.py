@@ -80,3 +80,24 @@ def test_run_audit_declines_when_over_budget_without_running(db):
         assert s.query(AuditRun).count() == 0
         # no new spend recorded for the declined audit
         assert s.query(ClaudeSpend).count() == 1
+
+
+def test_run_audit_marks_row_failed_on_error(db):
+    """CORR-12: audits aren't RQ-retried, so a failure must mark the row failed —
+    not leave it stuck in 'started' forever."""
+    from reva.errors import TransientError
+
+    d, repo_id = db
+
+    class _Boom:
+        def execute(self, params):
+            raise TransientError("network blip mid-audit")
+
+    set_context(_ctx(d, _Boom()))
+    with pytest.raises(TransientError):
+        run_audit({"repository_id": repo_id, "installation_id": 500})
+
+    with d.session() as s:
+        row = s.query(AuditRun).one()  # exactly one row, and it's terminal
+        assert row.status == "failed"
+        assert "network blip" in (row.error_message or "")

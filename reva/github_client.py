@@ -169,14 +169,29 @@ class GitHubClient:
         """Return the id of our PR review whose body contains `marker`, else None.
 
         Used to recover from a crash between posting a review and persisting its
-        id, so a retry reuses the existing review instead of duplicating it. The
-        marker is the run footer (e.g. "Run #77"), unique per review run.
+        id, so a retry reuses the existing review instead of duplicating it.
+
+        CORR-5: only reviews authored by a Bot (our GitHub App) are considered,
+        so a non-bot commenter can't post a review echoing the marker to hijack
+        the recovered id. The listing is paginated (the marker may be on a later
+        page once a PR accumulates reviews).
         """
-        response = self._get(token, f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews")
         match = None
-        for review in response.json():
-            if marker in (review.get("body") or ""):
-                match = review["id"]  # keep the last (newest) match
+        page = 1
+        while True:
+            reviews = self._get(
+                token,
+                f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews",
+                params={"per_page": 100, "page": page},
+            ).json()
+            for review in reviews:
+                if (review.get("user") or {}).get("type") != "Bot":
+                    continue  # only our app's bot account can be us
+                if marker in (review.get("body") or ""):
+                    match = review["id"]  # keep the last (newest) match
+            if len(reviews) < 100:
+                break
+            page += 1
         return match
 
     def find_check_run_id(
