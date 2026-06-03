@@ -1,5 +1,6 @@
 # Rate limiting: GitHub sends at most ~30 webhook events/min per repo in bursts.
 # 30r/m with burst=10 absorbs a rapid push series without dropping events.
+# Keyed on the real client IP (restored from CF-Connecting-IP in nginx.conf).
 limit_req_zone $binary_remote_addr zone=webhooks:10m rate=30r/m;
 
 # API rate limiting: keyed per source IP. (The app authenticates with an
@@ -8,48 +9,34 @@ limit_req_zone $binary_remote_addr zone=webhooks:10m rate=30r/m;
 # 120r/m = 2 req/s sustained; burst=20 absorbs TUI tab-switching and scripted polling.
 limit_req_zone $binary_remote_addr zone=api:10m rate=120r/m;
 
-# Redirect HTTP to HTTPS (except ACME challenge for certbot).
+# Plain-HTTP origin. TLS is terminated at the Cloudflare edge; a cloudflared
+# tunnel forwards requests for ${REVA_DOMAIN} to this server. No certs here.
 server {
     listen 80;
     server_name ${REVA_DOMAIN};
 
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
+    # Security headers. TLS/HSTS are enforced at the Cloudflare edge, not here.
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Pretty branded 404 (baked into the image at /usr/share/nginx/html).
+    error_page 404 /404.html;
+    location = /404.html {
+        root /usr/share/nginx/html;
+        internal;
     }
 
-    # Container self-healthcheck (no TLS, not proxied) — see compose healthcheck.
+    # Container self-healthcheck — see compose healthcheck. Matches any Host
+    # (this is the only/default server), so the loopback probe works.
     location = /nginx-health {
         access_log off;
         return 200 "ok\n";
     }
 
-    location / {
-        return 301 https://$host$request_uri;
-    }
-}
-
-# HTTPS server.
-server {
-    listen 443 ssl;
-    http2 on;
-    server_name ${REVA_DOMAIN};
-
-    ssl_certificate /etc/letsencrypt/live/${REVA_DOMAIN}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${REVA_DOMAIN}/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    ssl_prefer_server_ciphers on;
-    ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
-
-    # Security headers (applied to every response on this server).
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "DENY" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-
     # Webhook endpoint — restricted to GitHub's published hook IP ranges.
-    # Source: https://api.github.com/meta (hooks key). Update when GitHub rotates ranges.
+    # The allowlist matches $remote_addr, which is the real visitor IP thanks to
+    # CF-Connecting-IP (nginx.conf). Source: https://api.github.com/meta (hooks).
     location /webhooks/ {
         # GitHub hook source CIDRs — last updated 2026-05-25.
         allow 192.30.252.0/22;
@@ -65,18 +52,18 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto https;
         proxy_read_timeout 30s;
     }
 
-    # Internal API — rate-limited per API key.
+    # Internal API — rate-limited per source IP.
     location /api/ {
         limit_req zone=api burst=20 nodelay;
         proxy_pass http://api:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto https;
     }
 
     # Health check (used by monitoring / load balancer).

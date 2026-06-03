@@ -1,31 +1,24 @@
-# Production compose — Nginx + Let's Encrypt TLS, Docker secrets for PEM.
+# Production compose — nginx reverse proxy behind a Cloudflare tunnel.
+# TLS is terminated at the Cloudflare edge; cloudflared (run on the host) forwards
+# reva.dev.cloudunify.org to nginx on 127.0.0.1:8080. No certs are needed here.
 # Prereqs:
-#   1. Copy .env.example to .env and fill in values.
+#   1. Copy .env.example to .env and fill in values (REVA_DOMAIN=reva.dev.cloudunify.org).
 #   2. Place GitHub App private key at ./secrets/github-app-private-key.pem
-#   3. Run scripts/setup-letsencrypt.sh once to obtain the initial cert.
+#   3. Point your cloudflared ingress at http://localhost:8080
 #   4. docker compose -f docker-compose.prod.yml up -d
 
 services:
   nginx:
     build: ./nginx
     ports:
-      - "80:80"
-      - "443:443"
+      # Loopback only — the Cloudflare tunnel (cloudflared on the host) is the
+      # sole ingress; nothing is exposed publicly. Point cloudflared at this.
+      - "127.0.0.1:8080:80"
     environment:
       REVA_DOMAIN: ${REVA_DOMAIN}
       # Tell the nginx entrypoint to only expand $REVA_DOMAIN in templates,
       # leaving nginx variables like $host and $remote_addr untouched.
       NGINX_ENVSUBST_FILTER: REVA_DOMAIN
-    # INFR-1: nginx caches the TLS cert at startup and the cert volume is :ro, so
-    # after certbot renews it keeps serving the OLD cert until restarted — ~60
-    # days on it serves an EXPIRED cert and GitHub silently stops delivering
-    # webhooks. certbot runs in a separate container and can't signal us, so
-    # reload every 6h to pick up renewed certs. The stock entrypoint still runs
-    # template substitution first, then execs this command.
-    command: ["/bin/sh", "-c", "while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'"]
-    volumes:
-      - letsencrypt_data:/etc/letsencrypt:ro
-      - certbot_www:/var/www/certbot:ro
     depends_on:
       - api
     healthcheck:
@@ -46,24 +39,6 @@ services:
       options:
         max-size: "20m"
         max-file: "3"
-
-  certbot:
-    image: certbot/certbot:v2.11.0
-    volumes:
-      - letsencrypt_data:/etc/letsencrypt
-      - certbot_www:/var/www/certbot
-    entrypoint: >
-      /bin/sh -c 'trap exit TERM;
-      while :; do certbot renew --webroot -w /var/www/certbot --quiet;
-      sleep 12h; done'
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: 128M
-    networks:
-      - reva-net
-    restart: unless-stopped
 
   api:
     build:
@@ -266,8 +241,6 @@ services:
 
 volumes:
   postgres_data:
-  letsencrypt_data:
-  certbot_www:
   repo_cache:
 
 networks:

@@ -1,9 +1,11 @@
 # Production Server Setup
 
-This guide deploys REVA to a Linux VPS with a real domain, HTTPS via Let's
-Encrypt, and Nginx as the reverse proxy. The stack is identical to local dev
-except Nginx handles TLS termination and the PEM key is passed as a Docker
-secret instead of a bind mount.
+This guide deploys REVA to a Linux server behind a **Cloudflare tunnel**.
+Cloudflare terminates TLS at its edge and a `cloudflared` connector (running on
+the host) forwards `reva.dev.cloudunify.org` to nginx on `127.0.0.1:8080` — so
+**no public ports, no certificates, and no inbound firewall rules** are needed.
+nginx runs plain HTTP as the internal reverse proxy; the PEM key and other
+secrets are passed as Docker secret files instead of bind mounts / env vars.
 
 ---
 
@@ -13,9 +15,9 @@ secret instead of a bind mount.
 |---|---|
 | Linux VPS | 1 vCPU / 1 GB RAM minimum; 2 vCPU / 2 GB recommended |
 | Docker + Docker Compose v2 | `docker compose version` must work |
-| A domain name | DNS A record pointing to the server's public IP |
-| Port 80 + 443 open | In your firewall / security group |
-| GitHub App | Create one per the [local setup guide](setup-local.md#1-create-a-github-app), using `https://your-domain.com/webhooks/github` as the webhook URL |
+| Cloudflare account | Managing the `dev.cloudunify.org` zone |
+| A Cloudflare tunnel + `cloudflared` on the host | Routes `reva.dev.cloudunify.org` → `http://localhost:8080`. **No public IP / DNS A record / open ports needed** — the tunnel connects outbound. |
+| GitHub App | Create one per the [local setup guide](setup-local.md#1-create-a-github-app), using `https://reva.dev.cloudunify.org/webhooks/github` as the webhook URL |
 
 ---
 
@@ -31,12 +33,11 @@ newgrp docker
 docker compose version
 ```
 
-Allow required ports (example with ufw):
+The Cloudflare tunnel connects **outbound**, so you don't open any inbound web
+ports — keep only SSH:
 
 ```bash
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow 22/tcp   # keep SSH open
+sudo ufw allow 22/tcp   # SSH only; no 80/443 needed
 sudo ufw enable
 ```
 
@@ -61,8 +62,8 @@ nano .env   # or vim/whatever you prefer
 Required values:
 
 ```dotenv
-# Domain (must match your DNS A record)
-REVA_DOMAIN=reviews.your-domain.com
+# Domain served via the Cloudflare tunnel (nginx server_name)
+REVA_DOMAIN=reva.dev.cloudunify.org
 
 # GitHub App
 GITHUB_APP_ID=<app-id>
@@ -125,20 +126,42 @@ calls (`Authorization: Bearer <that value>`).
 
 ---
 
-## 5. Obtain the TLS certificate
+## 5. Set up the Cloudflare tunnel
 
-Run this **once** before starting the full stack. Port 80 must be free.
+TLS is handled by Cloudflare — there are no certificates on the server. Install
+`cloudflared` and create a tunnel that forwards `reva.dev.cloudunify.org` to
+nginx (published on `127.0.0.1:8080` by the prod compose).
 
 ```bash
-REVA_DOMAIN=reviews.your-domain.com \
-EMAIL=admin@your-domain.com \
-./scripts/setup-letsencrypt.sh
+# Install cloudflared (Debian/Ubuntu)
+curl -fsSL https://pkg.cloudflare.com/cloudflared.deb -o cloudflared.deb && sudo dpkg -i cloudflared.deb
+
+# Authenticate + create the tunnel
+cloudflared tunnel login
+cloudflared tunnel create reva
+cloudflared tunnel route dns reva reva.dev.cloudunify.org
 ```
 
-This runs certbot in standalone mode, writes the certificate into a local
-`letsencrypt/` directory, and exits. The production stack mounts that directory
-read-only into the Nginx container, and a `certbot` sidecar handles renewals
-automatically every 12 hours.
+Create `~/.cloudflared/config.yml` pointing the hostname at nginx:
+
+```yaml
+tunnel: reva
+credentials-file: /root/.cloudflared/<TUNNEL_ID>.json
+ingress:
+  - hostname: reva.dev.cloudunify.org
+    service: http://localhost:8080
+  - service: http_status:404
+```
+
+Run it as a service so it survives reboots:
+
+```bash
+sudo cloudflared service install
+sudo systemctl enable --now cloudflared
+```
+
+(You can also use a token-based tunnel from the Zero Trust dashboard:
+`cloudflared service install <TOKEN>` with the ingress configured in the UI.)
 
 ---
 
@@ -159,7 +182,7 @@ Check that everything came up:
 
 ```bash
 docker compose -f docker-compose.prod.yml ps
-curl https://reviews.your-domain.com/health   # should return {"status":"ok"}
+curl https://reva.dev.cloudunify.org/health   # should return {"status":"ok"}
 ```
 
 ---
@@ -168,10 +191,27 @@ curl https://reviews.your-domain.com/health   # should return {"status":"ok"}
 
 In your GitHub App settings set:
 
-**Webhook URL:** `https://reviews.your-domain.com/webhooks/github`
+**Webhook URL:** `https://reva.dev.cloudunify.org/webhooks/github`
 
 Test by opening a PR — you should see a Check Run appear within
 `REVA_DEBOUNCE_SECONDS` of the webhook arriving.
+
+> The GitHub App also needs the **Issues: Read & write** repository permission so
+> repo audits can open issues (see the
+> [permissions table in the local guide](setup-local.md#1-create-a-github-app)).
+
+### Trigger a repository audit
+
+An audit reviews the whole repo on the default branch (deep model, Opus 4.8),
+stores findings, and opens GitHub issues (label `reva-audit`) for major/critical
+findings. Trigger one with:
+
+```bash
+curl -X POST https://reva.dev.cloudunify.org/api/v1/repos/<repository_id>/audit
+```
+
+or from the TUI **Repos** tab (press `a`). Read findings via
+`GET /api/v1/audit-findings` or the TUI **Audits** tab (key `8`).
 
 ---
 
@@ -214,7 +254,7 @@ docker compose -f docker-compose.prod.yml build worker
 docker compose -f docker-compose.prod.yml up -d worker
 
 # Requeue a failed review via API
-curl -X POST https://reviews.your-domain.com/api/v1/reviews/<id>/requeue
+curl -X POST https://reva.dev.cloudunify.org/api/v1/reviews/<id>/requeue
 ```
 
 ---
@@ -228,27 +268,31 @@ cd tui
 go build -o reva-tui .
 ```
 
-Point it at the production API:
+Point it at the production API. Prod **requires** the API key
+(`REVA_REQUIRE_API_KEY=true`), so pass the value you put in
+`secrets/reva_api_key`:
 
 ```bash
-REVA_API_URL=https://reviews.your-domain.com/api/v1 ./reva-tui
+REVA_API_URL=https://reva.dev.cloudunify.org/api/v1 \
+REVA_API_KEY=<contents of secrets/reva_api_key> \
+./reva-tui
 ```
 
-The `/api/` path on the Nginx config is proxied to the api container, so no
-extra auth or VPN is needed (add IP allowlist in `reva.conf.template` if you
-want to restrict access).
+The `/api/` path is proxied through the tunnel to the api container; access is
+gated by that Bearer token (no VPN needed). Cloudflare Access can add an extra
+auth layer at the edge if you want.
 
 ---
 
 ## Architecture overview
 
 ```
-Internet
-   │
-   ▼
-Nginx (80/443)
-   ├── /webhooks/*  ──► api:8080  (rate-limited, HMAC-verified)
-   ├── /api/*       ──► api:8080  (read-only review data for TUI)
+Internet ──► Cloudflare edge (TLS) ──► cloudflared tunnel (outbound)
+                                              │
+                                              ▼
+                                   nginx (127.0.0.1:8080, plain HTTP)
+   ├── /webhooks/*  ──► api:8080  (rate-limited, HMAC-verified, GitHub-IP allowlist via CF-Connecting-IP)
+   ├── /api/*       ──► api:8080  (review data for the TUI; Bearer auth)
    └── /health      ──► api:8080
          │
          ▼
@@ -273,34 +317,26 @@ Nginx (80/443)
 
 ## Common problems
 
-### Certificate not found on startup
-Run `setup-letsencrypt.sh` before `docker compose ... up`. The Nginx container
-will fail to start if the cert files do not exist.
+### Tunnel up but site returns 502 / 404
+`cloudflared` reaches the host but not nginx. Check the ingress points at
+`http://localhost:8080` and nginx is healthy:
+```bash
+sudo cloudflared tunnel info reva
+curl -s http://localhost:8080/nginx-health   # should print "ok"
+docker compose -f docker-compose.prod.yml ps nginx
+```
 
-### `curl: (60) SSL certificate problem` on `/health`
-DNS hasn't propagated yet, or the cert was issued for a different domain. Verify
-with `dig reviews.your-domain.com` and check the cert with
-`openssl s_client -connect reviews.your-domain.com:443`.
+### Webhooks rejected (403) at nginx
+The `/webhooks/` allowlist matches the real client IP restored from
+`CF-Connecting-IP`. If GitHub hooks are denied, confirm Cloudflare is forwarding
+that header (it is by default through the tunnel) and that GitHub's hook CIDRs in
+`nginx/templates/reva.conf.template` are current (https://api.github.com/meta).
 
 ### Worker shows `invalid x-api-key`
 Fix the value in `secrets/anthropic_api_key` (no trailing newline — use
 `printf`), then recreate the worker so it re-reads the secret:
 ```bash
 docker compose -f docker-compose.prod.yml up -d --force-recreate worker
-```
-
-### Certbot renewal silently failing
-Check the certbot container logs:
-```bash
-docker compose -f docker-compose.prod.yml logs certbot
-```
-Make sure port 80 still responds to `/.well-known/acme-challenge/` — the Nginx
-HTTP server block handles this automatically.
-
-nginx reloads itself every 6h to pick up renewed certs (INFR-1), so a fresh cert
-takes effect within 6h without a deploy. If you need it live immediately:
-```bash
-docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
 ```
 
 ### New code not picked up after `git pull`
@@ -317,7 +353,7 @@ In production the four secrets below are supplied as **files** under `secrets/`
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `REVA_DOMAIN` | yes | — | FQDN for Nginx + Let's Encrypt (e.g. `reviews.example.com`) |
+| `REVA_DOMAIN` | yes | — | FQDN served via the Cloudflare tunnel; nginx `server_name` (e.g. `reva.dev.cloudunify.org`) |
 | `GITHUB_APP_ID` | yes | — | Numeric ID from the GitHub App settings page |
 | `GITHUB_WEBHOOK_SECRET` | yes (file) | — | `secrets/github_webhook_secret`; must match the GitHub App webhook config |
 | `REVA_API_KEY` | yes (file) | — | `secrets/reva_api_key`; bearer token for the TUI + `/api/v1` admin endpoints. Prod fails closed without it (`REVA_REQUIRE_API_KEY=true`) |
@@ -326,3 +362,7 @@ In production the four secrets below are supplied as **files** under `secrets/`
 | `POSTGRES_PASSWORD` | yes | — | Password for the `review` DB user |
 | `REDIS_PASSWORD` | yes | — | Redis `requirepass` value; embedded in all `REDIS_URL` values |
 | `REVA_DEBOUNCE_SECONDS` | no | 600 | Seconds to wait before enqueuing a review after a webhook |
+| `REVA_DEFAULT_MODEL` | no | `claude-sonnet-4-6` | Model for diff/full reviews, ticket analysis, and comment replies |
+| `REVA_DEEP_MODEL` | no | `claude-opus-4-8` | Model for `/deep-review` and all repo audits |
+| `REVA_CODEGRAPH_ENABLED` | no | `false` | When `true`, repo-aware reviews (full/deep) and audits get a pre-indexed CodeGraph exposed via MCP. Requires the `codegraph` binary in the worker image (already pinned in the Dockerfile) |
+| `REVA_CODEGRAPH_INDEX_TIMEOUT` | no | 180 | Seconds bounding the CodeGraph index step |
