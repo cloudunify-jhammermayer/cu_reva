@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import httpx
 
+from reva.config import DEFAULT_MODEL, DEEP_MODEL
 from reva.errors import PermanentError, TransientError
 from reva.types import ClaudeResponse, ContentBlock
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
-DEEP_MODEL = "claude-opus-4-7"
 ANTHROPIC_VERSION = "2023-06-01"
 # Prompt caching is GA on the 2023-06-01 version; no beta header required.
 

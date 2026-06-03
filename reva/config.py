@@ -10,6 +10,13 @@ from __future__ import annotations
 
 import os
 
+# Model selection — single source of truth so the direct-API client
+# (`reva.claude_client`) and the Claude Code CLI runner (`reva.claude_code_runner`)
+# always use the same models. Override per-deployment via env; the defaults are
+# the pinned production models.
+DEFAULT_MODEL = os.environ.get("REVA_DEFAULT_MODEL", "claude-sonnet-4-6")
+DEEP_MODEL = os.environ.get("REVA_DEEP_MODEL", "claude-opus-4-7")
+
 
 def env_or_file(name: str, default: str | None = None) -> str | None:
     """Return env var `name`, or the stripped contents of the file at `{name}_FILE`.

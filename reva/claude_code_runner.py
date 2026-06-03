@@ -24,6 +24,7 @@ from pathlib import Path
 
 import structlog
 
+from reva.config import DEFAULT_MODEL, DEEP_MODEL
 from reva.errors import PermanentError, TransientError
 from reva.types import ClaudeResponse
 
@@ -49,8 +50,6 @@ def _validate_head_sha(head_sha: str) -> None:
     if not _SHA_RE.match(head_sha):
         raise PermanentError(f"unsafe head_sha: {head_sha!r}")
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
-DEEP_MODEL = "claude-opus-4-7"
 _CLAUDE_BIN = "claude"
 
 # Repo-aware skills that benefit from a pre-indexed code graph (full/deep reviews

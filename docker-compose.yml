@@ -88,6 +88,10 @@ services:
       ODOO_CALLBACK_URL: ${ODOO_CALLBACK_URL:-}
       ODOO_CALLBACK_API_KEY: ${ODOO_CALLBACK_API_KEY:-}
       REVA_REPO_CACHE_DIR: /repos
+      REVA_DEFAULT_MODEL: ${REVA_DEFAULT_MODEL:-claude-sonnet-4-6}
+      REVA_DEEP_MODEL: ${REVA_DEEP_MODEL:-claude-opus-4-7}
+      REVA_CODEGRAPH_ENABLED: ${REVA_CODEGRAPH_ENABLED:-false}
+      REVA_CODEGRAPH_INDEX_TIMEOUT: ${REVA_CODEGRAPH_INDEX_TIMEOUT:-180}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
