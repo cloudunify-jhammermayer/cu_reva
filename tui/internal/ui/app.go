@@ -304,7 +304,7 @@ func (a *App) statusBar() string {
 	var hint string
 	switch a.active {
 	case viewDashboard:
-		hint = "1-6 switch tabs | r=refresh | q quit"
+		hint = "1-7 switch tabs | r=refresh | q quit"
 	case viewReviews:
 		hint = "j/k navigate | / filter | s=status | c=clear | e=requeue | o=browser | r=refresh | q quit"
 	case viewFindings:

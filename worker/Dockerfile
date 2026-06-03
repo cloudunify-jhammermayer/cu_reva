@@ -45,6 +45,6 @@ COPY worker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Container starts as root so entrypoint can chown the /repos volume,
-# then drops to worker via su-exec.
+# then drops to worker via gosu.
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "-m", "worker.main"]

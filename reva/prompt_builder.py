@@ -93,8 +93,10 @@ class PromptBuilder:
             line = line.strip()
             if line.startswith("##"):
                 heading = line.lstrip("#").strip()
-                # Strip trailing description after em dash (—) or en dash (–)
-                return heading.split("—")[0].split("–")[0].strip()
+                # Strip the trailing description after the separator: em dash (—),
+                # en dash (–), or a spaced ASCII hyphen ( - ). The spaced form
+                # avoids splitting a hyphenated version like "v1.2-beta" (MAIN-12).
+                return heading.split("—")[0].split("–")[0].split(" - ")[0].strip()
         raise ValueError("No ## heading found in CHANGELOG.md")
 
     # --- IO -----------------------------------------------------------------

@@ -156,7 +156,7 @@ REVA_API_URL=http://localhost:8080/api/v1 REVA_API_KEY=<key> go run .
 | Pending | `6` | Reviews waiting in the debounce queue · badge shows count |
 | Tickets | `7` | Odoo ticket analyses — requeue `e`, open in Odoo `o` |
 
-Global keys: `1–6` switch tabs · `r` refresh · `q` quit.
+Global keys: `1–7` switch tabs · `r` refresh · `q` quit.
 
 ## Error notifications
 
@@ -245,13 +245,13 @@ Each Python service has its own venv (all install the shared `reva` package as e
 
 ```bash
 cd worker && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/        # worker: 241
+.venv/bin/python -m pytest tests/        # worker: 312
 
 cd ../api && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/        # api: 68
+.venv/bin/python -m pytest tests/        # api: 94
 
 cd ../scheduler && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/        # scheduler: 16
+.venv/bin/python -m pytest tests/        # scheduler: 27
 ```
 
 Tests use SQLite in-memory, `httpx` MockTransport, and subprocess mocks for the Claude CLI; no Docker or network required. The Go TUI: `cd tui && go test ./...`.

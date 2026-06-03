@@ -2,7 +2,7 @@
 
 A terminal dashboard over REVA's internal API (`/api/v1`). Read-only views plus
 two write actions (requeue, on-demand audit). **This is REVA's single dashboard** —
-the Vue web frontend was retired (see [`frontend/`](../frontend)).
+the Vue web frontend was retired.
 
 ## Run
 

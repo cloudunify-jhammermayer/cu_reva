@@ -33,7 +33,12 @@ def estimate_cost(
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0,
 ) -> float:
-    """Return the estimated USD cost for one Claude call."""
+    """Return the estimated USD cost for one Claude call.
+
+    An unknown/unpriced model silently falls back to Sonnet 4.6 rates
+    (`_FALLBACK_KEY`), so the estimate stays non-zero but may be inaccurate for a
+    model not in PRICING — keep the table current when adding models.
+    """
     rates = PRICING.get(model, PRICING[_FALLBACK_KEY])
     total = (
         input_tokens * rates["input"]

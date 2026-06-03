@@ -533,11 +533,11 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **DEPE-4** — reva-shared version is static 0.1.0 and never bumped across releases  (`pyproject.toml:7`)
 ### docs (5)
 
-- **DOCS-10** — Stale '1-6 switch tabs' hint across README, setup-local, and the in-app dashboard status bar (there are 7 tabs)  (`README.md:159; docs/setup-local.md:174-184; tui/internal/ui/app.go:307`)
-- **DOCS-11** — tui/README links to a frontend/ directory that no longer exists  (`tui/README.md:5; README.md:25`)
-- **DOCS-12** — README test counts are stale (worker 241 vs 260, api 68 vs 81)  (`README.md:245-251`)
-- **DOCS-13** — estimate_cost docstring omits the silent Sonnet-rate fallback for unknown models  (`reva/cost.py:29-37`)
-- **DOCS-14** — Worker entrypoint comment references su-exec but the image uses gosu  (`worker/Dockerfile:8,43; worker/entrypoint.sh:4`)
+- **DOCS-10** — ✅ DONE (2026-06-03) — `1–7` in README + TUI status bar (7 tabs). — Stale '1-6 switch tabs' hint across README and the in-app dashboard status bar (there are 7 tabs)  (`README.md:159; docs/setup-local.md:174-184; tui/internal/ui/app.go:307`)
+- **DOCS-11** — ✅ DONE (2026-06-03) — removed the dead `frontend/` link in tui/README. — tui/README links to a frontend/ directory that no longer exists  (`tui/README.md:5; README.md:25`)
+- **DOCS-12** — ✅ DONE (2026-06-03) — updated to worker 312 / api 94 / scheduler 27. — README test counts are stale  (`README.md:245-251`)
+- **DOCS-13** — ✅ DONE (2026-06-03) — docstring now notes the Sonnet-rate fallback for unpriced models. — estimate_cost docstring omits the silent Sonnet-rate fallback for unknown models  (`reva/cost.py:29-37`)
+- **DOCS-14** — ✅ DONE (2026-06-03) — Dockerfile comment corrected to gosu. — Worker entrypoint comment references su-exec but the image uses gosu  (`worker/Dockerfile:8,43; worker/entrypoint.sh:4`)
 ### infra (7)
 
 - **INFR-19** — Worker entrypoint chowns /repos but swallows all errors with || true  (`worker/entrypoint.sh:3`)
@@ -552,7 +552,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **MAIN-9** — GitHub private-key path bypasses the env_or_file Docker-secret convention used for every other secret  (`api/app/settings.py:32-33, worker/worker/settings.py:53-54, reva/config.py:14,26`)
 - **MAIN-10** — TUI requeue eligibility rules are inconsistent and duplicated across Reviews / Failures / Tickets tabs  (`tui/internal/ui/reviews.go:173, tui/internal/ui/failures.go:74-82, tui/internal/ui/tickets.go:87-90`)
 - **MAIN-11** — schema_migrations created with TIMESTAMP/CURRENT_TIMESTAMP in engine but TIMESTAMPTZ/now() in migration 001 (harmless drift)  (`reva/db/engine.py:67-73, db/migrations/001_initial.sql:2-5`)
-- **MAIN-12** — get_version only strips em/en dashes, not a plain ASCII hyphen, in CHANGELOG headings  (`reva/prompt_builder.py:96-98, prompts/CHANGELOG.md:1`)
+- **MAIN-12** — ✅ DONE (2026-06-03) — also splits on a spaced ASCII hyphen ( - ), without truncating a hyphenated version like v1.2-beta. — get_version only strips em/en dashes, not a plain ASCII hyphen, in CHANGELOG headings  (`reva/prompt_builder.py:96-98, prompts/CHANGELOG.md:1`)
 - **MAIN-13** — ✅ DONE (2026-06-03) — removed the unused `colorBg`. — Dead package-level variable colorBg in TUI styles  (`tui/internal/ui/styles.go:18`)
 ### performance (1)
 
