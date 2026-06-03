@@ -522,7 +522,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **CONC-13** — TUI HTTP client has no context / cancellation; in-flight requests cannot be aborted  (`tui/internal/api/client.go:34,52, tui/internal/api/iface.go:4-15, tui/internal/ui/app.go:96-97, tui/main.go:60`)
 ### correctness (6)
 
-- **CORR-14** — Finding body/suggestion are unbounded; one oversized finding fails the whole PR review  (`reva/types.py:64-76, worker/worker/runner.py:381-391, reva/_github_http.py:35-36`)
+- **CORR-14** — ✅ DONE (2026-06-03) — body/suggestion truncated via validators (8000/4000 chars) so one oversized finding can't fail the whole review. Test added. — Finding body/suggestion are unbounded; one oversized finding fails the whole PR review  (`reva/types.py:64-76, worker/worker/runner.py:381-391, reva/_github_http.py:35-36`)
 - **CORR-17** — ✅ DONE (2026-06-02) — `_retry_on_conflict` now retries only on a unique violation (`_is_unique_violation`: PG 23505 / SQLite "unique constraint"); other integrity errors (FK/NOT NULL) re-raise immediately. Tests added. — _retry_on_conflict retries only once and swallows non-TOCTOU IntegrityErrors
 - **CORR-18** — ✅ DONE (2026-06-02) — `get_file_content` URL-encodes the path with `quote(path, safe='/')` (slash preserved, spaces/#/? encoded); test asserts single-encoding. — GitHub API path segments (file path) are interpolated without URL-encoding
 - **CORR-19** — Reaper and budget windows mix the process clock with DB-side timestamps (no skew tolerance)  (`reva/db/writers.py:151,217,237; worker/worker/runner.py:217; reva/db/models.py:174-176`)
@@ -573,7 +573,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **TEST-14** — diff_utils edge cases (multi-hunk, renames, deletion-only, CRLF, malformed headers) covered only transitively  (`reva/diff_utils.py, reva/prompt_builder.py, reva/review_tool.py, reva/ticket_tool.py`)
 ### usability (4)
 
-- **USAB-6** — Model-produced finding titles are placed into PR-comment markdown tables without escaping '|' or newlines  (`reva/review_formatter.py:182; reva/review_formatter.py:242`)
+- **USAB-6** — ✅ DONE (2026-06-03) — `_md_cell` escapes pipes + flattens newlines in finding titles placed in markdown tables. Test added. — Model-produced finding titles are placed into PR-comment markdown tables without escaping '|' or newlines  (`reva/review_formatter.py:182; reva/review_formatter.py:242`)
 - **USAB-7** — Odoo optional-integration off-behavior raises PermanentError instead of the documented clean no-op  (`reva/odoo_client.py:67-70; .env.example:39`)
 - **USAB-8** — ticket_analysis.md does not pin structural keywords/enum values to English for German tickets  (`prompts/ticket_analysis.md:11-14,46-52`)
 - **USAB-9** — TUI REVA_API_URL / REVA_ODOO_URL defaults are hardcoded localhost with no startup URL validation  (`tui/main.go:43-46,48-50,54-57`)

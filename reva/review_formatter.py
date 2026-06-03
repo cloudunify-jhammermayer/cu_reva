@@ -25,6 +25,13 @@ def _redact_internal_paths(msg: str) -> str:
     failure message shown on the PR doesn't disclose the server's layout."""
     return _INTERNAL_PATH_RE.sub("<path>", msg)
 
+
+def _md_cell(s: str) -> str:
+    """Make a (model-produced) string safe in a markdown table cell (USAB-6):
+    escape pipes and flatten newlines so a finding title can't break the table."""
+    return s.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
 AGENT_NAME = "REVA"
 CHECK_RUN_NAME = "REVA Review"
 REVIEW_EVENT = "COMMENT"  # doc/08: always COMMENT; Check Run handles blocking.
@@ -190,7 +197,7 @@ def _findings_tldr(findings: list[Finding]) -> str:
             lines.append("|---|---|---|")
             for f in group:
                 location = f"`{f.file}:{f.line_start}`" if f.file and f.line_start else (f"`{f.file}`" if f.file else "*(general)*")
-                lines.append(f"| {location} | {f.title} | {f.confidence:.0%} |")
+                lines.append(f"| {location} | {_md_cell(f.title)} | {f.confidence:.0%} |")
         else:
             lines.append("*No findings.*")
         lines.append("")
@@ -250,7 +257,7 @@ def _format_unmapped_section(unmapped: list[Finding]) -> str:
     lines = ["**GENERAL**", "", "| File | Issue | Confidence |", "|---|---|---|"]
     for f in unmapped:
         location = f"`{f.file}:{f.line_start}`" if f.file and f.line_start else (f"`{f.file}`" if f.file else "*(general)*")
-        lines.append(f"| {location} | {f.title} | {f.confidence:.0%} |")
+        lines.append(f"| {location} | {_md_cell(f.title)} | {f.confidence:.0%} |")
     return "\n".join(lines)
 
 

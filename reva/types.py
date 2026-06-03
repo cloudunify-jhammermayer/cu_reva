@@ -82,6 +82,22 @@ class Finding(BaseModel):
             return v[:77] + "..."
         return v
 
+    # CORR-14: bound body/suggestion so one oversized finding can't blow past
+    # GitHub's comment-size limit and fail the whole review post.
+    @field_validator("body", mode="before")
+    @classmethod
+    def _truncate_body(cls, v: object) -> object:
+        if isinstance(v, str) and len(v) > 8000:
+            return v[:7997] + "..."
+        return v
+
+    @field_validator("suggestion", mode="before")
+    @classmethod
+    def _truncate_suggestion(cls, v: object) -> object:
+        if isinstance(v, str) and len(v) > 4000:
+            return v[:3997] + "..."
+        return v
+
     @model_validator(mode="after")
     def _check_line_range(self) -> "Finding":
         if (

@@ -208,3 +208,25 @@ def test_inline_payload_requires_line_start():
     """CORR-20: an inline comment must anchor to a line; None fails loudly."""
     with pytest.raises(ValueError, match="line_start"):
         format_inline_comment_payload(_f("major", file="a.py", line_start=None))
+
+
+def test_finding_title_with_pipe_is_escaped_in_table():
+    """USAB-6: a model title containing '|' or newline must not break the table."""
+    body = format_pr_review_body(
+        _result(findings=[_f("major", file="x.py", line_start=3, title="a | b\nc")]),
+        unmapped=[],
+        run_id=1,
+    )
+    assert "a \\| b" in body          # pipe escaped
+    assert "a | b\nc" not in body     # raw pipe+newline gone
+
+
+def test_finding_body_and_suggestion_are_bounded():
+    """CORR-14: oversized body/suggestion are truncated so one finding can't blow
+    past GitHub's comment-size limit and fail the whole review."""
+    from reva.types import Finding
+    f = Finding(severity="major", category="bug", title="t",
+                body="x" * 20000, suggestion="y" * 20000, confidence=0.9)
+    assert len(f.body) <= 8000
+    assert f.body.endswith("...")
+    assert len(f.suggestion) <= 4000
