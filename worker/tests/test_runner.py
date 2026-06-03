@@ -57,6 +57,7 @@ class FakeGitHub:
     next_comment_id: int = 300
 
     created_check_runs: list[dict] = field(default_factory=list)
+    updated_check_runs: list[dict] = field(default_factory=list)
     created_pr_reviews: list[dict] = field(default_factory=list)
     created_issue_comments: list[dict] = field(default_factory=list)
     diff_fetch_count: int = 0
@@ -84,6 +85,10 @@ class FakeGitHub:
         cr_id = self.next_check_run_id
         self.next_check_run_id += 1
         return cr_id
+
+    def update_check_run(self, **kwargs) -> int:
+        self.updated_check_runs.append(kwargs)
+        return kwargs["check_run_id"]
 
     def create_pr_review(self, **kwargs) -> int:
         self.created_pr_reviews.append(kwargs)
@@ -378,7 +383,11 @@ def test_recovers_orphaned_pr_review_from_github(ctx_and_fakes):
 
 
 def test_recovers_orphaned_check_run_from_github(ctx_and_fakes):
-    """Same create->persist window for the Check Run: reuse, don't duplicate."""
+    """Same create->persist window for the Check Run: reuse, don't duplicate.
+
+    On recovery we UPDATE the existing check run with the fresh result rather
+    than reusing it untouched — otherwise a re-review's conclusion stays stale.
+    """
     s = ctx_and_fakes
     s["reviewer"].result = _completed_result()
     gh = s["github"]
@@ -386,7 +395,12 @@ def test_recovers_orphaned_check_run_from_github(ctx_and_fakes):
 
     run_review(_params(s))
 
-    assert gh.created_check_runs == []
+    assert gh.created_check_runs == []  # no duplicate POST
+    assert len(gh.updated_check_runs) == 1
+    update = gh.updated_check_runs[0]
+    assert update["check_run_id"] == 888
+    assert update["conclusion"] == "success"  # fresh result, not the stale one
+    assert update["status"] == "completed"
     with s["db"].session() as session:
         from reva.db.models import ReviewRun
         run = session.query(ReviewRun).one()

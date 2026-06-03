@@ -264,6 +264,33 @@ class GitHubClient:
         response = self._post(token, f"/repos/{owner}/{repo}/check-runs", body)
         return response.json()["id"]
 
+    def update_check_run(
+        self,
+        token: str,
+        owner: str,
+        repo: str,
+        check_run_id: int,
+        status: str,
+        conclusion: str | None,
+        started_at: str | None,
+        completed_at: str | None,
+        output: dict,
+    ) -> int:
+        """Update an existing Check Run with a fresh result. Returns its id.
+
+        Used on re-review/recovery so the existing Check Run on this SHA shows
+        the current conclusion instead of a stale prior one.
+        """
+        body: dict = {"status": status, "output": output}
+        if conclusion is not None:
+            body["conclusion"] = conclusion
+        if started_at is not None:
+            body["started_at"] = started_at
+        if completed_at is not None:
+            body["completed_at"] = completed_at
+        self._patch(token, f"/repos/{owner}/{repo}/check-runs/{check_run_id}", body)
+        return check_run_id
+
     def create_pr_review(
         self,
         token: str,
@@ -425,6 +452,25 @@ class GitHubClient:
         }
         try:
             response = self._client.post(url, headers=headers, json=json_body)
+        except httpx.TimeoutException as exc:
+            raise TransientError(f"GitHub timeout: {exc}") from exc
+        except httpx.TransportError as exc:
+            raise TransientError(f"GitHub transport error: {exc}") from exc
+
+        if response.status_code >= 300:
+            raise map_github_status(response, action=path)
+        return response
+
+    def _patch(self, token: str, path: str, json_body: dict) -> httpx.Response:
+        url = f"{self.base_url}{path}"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = self._client.patch(url, headers=headers, json=json_body)
         except httpx.TimeoutException as exc:
             raise TransientError(f"GitHub timeout: {exc}") from exc
         except httpx.TransportError as exc:

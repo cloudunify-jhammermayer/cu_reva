@@ -376,6 +376,37 @@ def test_create_check_run_posts_payload(rsa_key_pair):
     assert captured["body"]["output"]["title"] == "1 critical"
 
 
+def test_update_check_run_patches_existing(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        import json
+        captured["method"] = req.method
+        captured["path"] = req.url.path
+        captured["body"] = json.loads(req.content)
+        return httpx.Response(200, json={"id": 555, "status": "completed"})
+
+    client = _make_client(handler, private_pem)
+    cr_id = client.update_check_run(
+        token="tok",
+        owner="acme",
+        repo="widgets",
+        check_run_id=555,
+        status="completed",
+        conclusion="success",
+        started_at="2026-06-03T10:00:00Z",
+        completed_at="2026-06-03T10:02:14Z",
+        output={"title": "no findings", "summary": "x", "text": ""},
+    )
+    assert cr_id == 555
+    assert captured["method"] == "PATCH"
+    assert captured["path"] == "/repos/acme/widgets/check-runs/555"
+    assert "head_sha" not in captured["body"]  # PATCH targets the run by id
+    assert captured["body"]["conclusion"] == "success"
+    assert captured["body"]["output"]["title"] == "no findings"
+
+
 def test_create_check_run_omits_conclusion_when_in_progress(rsa_key_pair):
     private_pem, _ = rsa_key_pair
     captured: dict = {}

@@ -346,7 +346,9 @@ def _post_result_to_github(
             if existing_check_id is None:
                 check_run_id = _check_run_id_or_recover(
                     ctx, token, owner, name, params.head_sha,
-                    lambda: _post_completed_check(ctx, params, result, run_id, token, owner, name),
+                    lambda existing_id: _post_completed_check(
+                        ctx, params, result, run_id, token, owner, name, existing_id=existing_id
+                    ),
                 )
                 writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id)
             _backfill_comment_ids(ctx, run_id, token, owner, name, pr_number, review_id)
@@ -355,14 +357,18 @@ def _post_result_to_github(
         elif result.status == "declined":
             check_run_id = _check_run_id_or_recover(
                 ctx, token, owner, name, params.head_sha,
-                lambda: _post_declined(ctx, params, result, run_id, token, owner, name, pr_number),
+                lambda existing_id: _post_declined(
+                    ctx, params, result, run_id, token, owner, name, pr_number,
+                    existing_id=existing_id,
+                ),
             )
             writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id)
         elif result.status == "stale":
             check_run_id = _check_run_id_or_recover(
                 ctx, token, owner, name, params.head_sha,
-                lambda: _post_simple_check_run(
-                    ctx, params, result, run_id, token, owner, name, conclusion="skipped"
+                lambda existing_id: _post_simple_check_run(
+                    ctx, params, result, run_id, token, owner, name,
+                    conclusion="skipped", existing_id=existing_id,
                 ),
             )
             writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id)
@@ -377,15 +383,46 @@ def _post_result_to_github(
 # ---------------------------------------------------------------- post paths
 
 
-def _check_run_id_or_recover(ctx, token, owner, name, head_sha, create):
-    """Return our existing Check Run id on this SHA, else create one.
+def _check_run_id_or_recover(ctx, token, owner, name, head_sha, post):
+    """Find our existing Check Run on this SHA and post the fresh result to it.
 
-    Recovers from a crash between a prior attempt's GitHub create and the DB
-    write of its id, so a retry reuses the existing Check Run rather than
-    posting a duplicate red/green check.
+    `post(existing_id)` updates the Check Run when `existing_id` is not None,
+    else creates one. Recovers from a crash between a prior attempt's GitHub
+    create and the DB write of its id (so a retry doesn't duplicate the check)
+    AND refreshes a stale check on re-review — Check Runs are keyed by SHA, so
+    the found run is genuinely this commit's; reusing it untouched left the
+    conclusion stale (companion to the PR-9 stale-review fix).
     """
-    found = ctx.github.find_check_run_id(token, owner, name, head_sha, CHECK_RUN_NAME)
-    return found if found is not None else create()
+    existing_id = ctx.github.find_check_run_id(token, owner, name, head_sha, CHECK_RUN_NAME)
+    return post(existing_id)
+
+
+def _create_or_update_check(
+    ctx: WorkerContext,
+    token: str,
+    owner: str,
+    name: str,
+    existing_id: int | None,
+    *,
+    status: str,
+    conclusion: str | None,
+    started_at: str | None,
+    completed_at: str | None,
+    output: dict,
+    head_sha: str,
+) -> int:
+    """PATCH the existing Check Run if we have its id, else POST a new one."""
+    if existing_id is not None:
+        return ctx.github.update_check_run(
+            token=token, owner=owner, repo=name, check_run_id=existing_id,
+            status=status, conclusion=conclusion,
+            started_at=started_at, completed_at=completed_at, output=output,
+        )
+    return ctx.github.create_check_run(
+        token=token, owner=owner, repo=name, head_sha=head_sha, name=CHECK_RUN_NAME,
+        status=status, conclusion=conclusion,
+        started_at=started_at, completed_at=completed_at, output=output,
+    )
 
 
 def _post_completed_review(
@@ -445,19 +482,17 @@ def _post_completed_check(
     token: str,
     owner: str,
     name: str,
+    existing_id: int | None = None,
 ) -> int:
-    """Post the completed Check Run. Returns the GitHub check run id."""
-    return ctx.github.create_check_run(
-        token=token,
-        owner=owner,
-        repo=name,
-        head_sha=params.head_sha,
-        name=CHECK_RUN_NAME,
+    """Post (or update) the completed Check Run. Returns the GitHub check run id."""
+    return _create_or_update_check(
+        ctx, token, owner, name, existing_id,
         status="completed",
         conclusion=compute_check_conclusion(result),
         started_at=_iso(result.started_at),
         completed_at=_iso(result.completed_at),
         output=format_check_run_output(result, run_id=run_id),
+        head_sha=params.head_sha,
     )
 
 
@@ -470,26 +505,29 @@ def _post_declined(
     owner: str,
     name: str,
     pr_number: int,
+    existing_id: int | None = None,
 ) -> int:
-    """Post a decline: standalone PR comment + neutral Check Run."""
-    ctx.github.create_issue_comment(
-        token=token,
-        owner=owner,
-        repo=name,
-        pr_number=pr_number,
-        body=format_decline_body(result, run_id=run_id),
-    )
-    return ctx.github.create_check_run(
-        token=token,
-        owner=owner,
-        repo=name,
-        head_sha=params.head_sha,
-        name=CHECK_RUN_NAME,
+    """Post a decline: standalone PR comment + neutral Check Run.
+
+    The issue comment is posted only on first create; on recovery/re-review we
+    refresh the existing Check Run without re-posting the comment (no spam).
+    """
+    if existing_id is None:
+        ctx.github.create_issue_comment(
+            token=token,
+            owner=owner,
+            repo=name,
+            pr_number=pr_number,
+            body=format_decline_body(result, run_id=run_id),
+        )
+    return _create_or_update_check(
+        ctx, token, owner, name, existing_id,
         status="completed",
         conclusion="neutral",
         started_at=None,
         completed_at=_now_iso(),
         output=format_check_run_output(result, run_id=run_id),
+        head_sha=params.head_sha,
     )
 
 
@@ -502,19 +540,17 @@ def _post_simple_check_run(
     owner: str,
     name: str,
     conclusion: str,
+    existing_id: int | None = None,
 ) -> int:
-    """Post only a Check Run — used for stale and failed outcomes."""
-    return ctx.github.create_check_run(
-        token=token,
-        owner=owner,
-        repo=name,
-        head_sha=params.head_sha,
-        name=CHECK_RUN_NAME,
+    """Post (or update) only a Check Run — used for stale and failed outcomes."""
+    return _create_or_update_check(
+        ctx, token, owner, name, existing_id,
         status="completed",
         conclusion=conclusion,
         started_at=None,
         completed_at=_now_iso(),
         output=format_check_run_output(result, run_id=run_id),
+        head_sha=params.head_sha,
     )
 
 
