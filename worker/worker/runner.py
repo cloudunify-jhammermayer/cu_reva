@@ -615,6 +615,13 @@ def _backfill_comment_ids(
         if id_map:
             writers.attach_finding_comment_ids(ctx.db, id_map)
             logger.info("finding_comment_ids_backfilled", count=len(id_map), run_id=run_id)
+        else:
+            # No matches: findings then have no github_comment_id, so a later
+            # delta re-review can't resolve their threads. Make that visible.
+            logger.info(
+                "finding_comment_ids_unmatched", run_id=run_id,
+                comments=len(gh_comments), findings=len(db_findings),
+            )
     except Exception:
         logger.warning("backfill_comment_ids_failed", exc_info=True)
 
@@ -655,6 +662,12 @@ def _verify_and_resolve_findings(
         if f["file_path"] in touched_files and threads.get(f["github_comment_id"])
     ]
     if not candidates:
+        # Visible even when nothing matched — distinguishes "no open threads in
+        # touched files" from "verifier said not-fixed" (both were silent before).
+        logger.info(
+            "delta_resolution_no_candidates", run_id=run_id,
+            old_findings=len(old_findings), touched_files=len(touched_files),
+        )
         return
     if len(candidates) > _MAX_DELTA_VERIFICATIONS:
         logger.info("delta_verification_capped", total=len(candidates), cap=_MAX_DELTA_VERIFICATIONS)
@@ -662,6 +675,7 @@ def _verify_and_resolve_findings(
 
     file_cache: dict[str, str | None] = {}
     errors = 0
+    resolved = 0
     for f in candidates:
         path = f["file_path"]
         try:
@@ -680,6 +694,7 @@ def _verify_and_resolve_findings(
             )
             if ctx.verifier.is_resolved(stored, content):
                 ctx.github.resolve_review_thread(token, threads[f["github_comment_id"]])
+                resolved += 1
                 logger.info("finding_resolved", finding_id=f["id"], file=path)
             errors = 0
         except Exception:
@@ -688,6 +703,11 @@ def _verify_and_resolve_findings(
             if errors >= _MAX_VERIFY_ERRORS:
                 logger.warning("delta_verification_aborted", consecutive_errors=errors)
                 return
+
+    logger.info(
+        "delta_resolution_done", run_id=run_id,
+        candidates=len(candidates), resolved=resolved,
+    )
 
 
 def run_comment_reply(params: dict) -> None:

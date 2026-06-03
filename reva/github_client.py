@@ -387,15 +387,31 @@ class GitHubClient:
     def get_review_comments(
         self, token: str, owner: str, repo: str, pr_number: int, review_id: int
     ) -> list[dict]:
-        """Return all inline comments posted in a PR review.
+        """Return the inline comments belonging to PR review `review_id`.
+
+        Uses the PR-level comments endpoint, NOT `/pulls/{pr}/reviews/{id}/comments`:
+        the review-scoped endpoint reports `line: null` for comments created with
+        the review, which breaks location-based matching (the comment-id backfill
+        then attaches nothing and delta re-reviews can't resolve threads — Aurium
+        PR-60 regression). The PR-level endpoint reports the resolved `line`, and
+        each comment carries `pull_request_review_id` to filter on.
 
         Each item has at minimum: id, path, line, start_line (nullable).
         """
-        response = self._get(
-            token,
-            f"/repos/{owner}/{repo}/pulls/{pr_number}/reviews/{review_id}/comments",
-        )
-        return response.json()
+        out: list[dict] = []
+        page = 1
+        while True:
+            response = self._get(
+                token,
+                f"/repos/{owner}/{repo}/pulls/{pr_number}/comments",
+                params={"per_page": 100, "page": page},
+            )
+            batch = response.json()
+            out.extend(c for c in batch if c.get("pull_request_review_id") == review_id)
+            if len(batch) < 100:
+                break
+            page += 1
+        return out
 
     def reply_to_review_comment(
         self,

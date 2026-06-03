@@ -653,6 +653,59 @@ def test_verify_and_resolve_calls_resolve_for_fixed_finding():
     ctx.github.resolve_review_thread.assert_called_once_with("tok", "THREAD_NODE_1")
 
 
+def test_verify_and_resolve_logs_summary():
+    """A summary log fires so a delta re-review's resolution outcome is visible."""
+    import structlog
+
+    from worker.runner import _verify_and_resolve_findings
+
+    ctx = MagicMock()
+    ctx.github.get_review_threads.return_value = {12345: "THREAD_NODE_1"}
+    ctx.github.get_file_content.return_value = "def foo(): pass"
+    ctx.verifier.is_resolved.return_value = True
+
+    params = MagicMock()
+    params.pull_request_id = 1
+    params.head_sha = "newsha"
+    result = MagicMock()
+    result.diff = (
+        "diff --git a/custom_addons/foo.py b/custom_addons/foo.py\n"
+        "+++ b/custom_addons/foo.py\n+fixed\n"
+    )
+
+    with patch("worker.runner.writers") as mock_writers, structlog.testing.capture_logs() as logs:
+        mock_writers.get_open_findings_for_pr.return_value = [{
+            "id": 1, "file_path": "custom_addons/foo.py", "line_start": 10,
+            "title": "t", "body": "b", "severity": "major", "category": "bug",
+            "github_comment_id": 12345,
+        }]
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)
+
+    done = [e for e in logs if e["event"] == "delta_resolution_done"]
+    assert done and done[0]["resolved"] == 1 and done[0]["candidates"] == 1
+
+
+def test_verify_and_resolve_logs_no_candidates():
+    """When nothing matches, a distinct log fires (was silent before)."""
+    import structlog
+
+    from worker.runner import _verify_and_resolve_findings
+
+    ctx = MagicMock()
+    ctx.github.get_review_threads.return_value = {}
+    params = MagicMock()
+    params.pull_request_id = 1
+    params.head_sha = "newsha"
+    result = MagicMock()
+    result.diff = "diff --git a/x.py b/x.py\n+++ b/x.py\n+y\n"
+
+    with patch("worker.runner.writers") as mock_writers, structlog.testing.capture_logs() as logs:
+        mock_writers.get_open_findings_for_pr.return_value = []
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)
+
+    assert any(e["event"] == "delta_resolution_no_candidates" for e in logs)
+
+
 def test_verify_and_resolve_skips_unfixed_finding():
     from worker.runner import _verify_and_resolve_findings
 

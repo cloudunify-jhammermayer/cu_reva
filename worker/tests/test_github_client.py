@@ -703,6 +703,29 @@ def test_get_review_threads_returns_database_id_to_node_id_map(rsa_key_pair):
     assert result == {12345: "THREAD_NODE_1"}
 
 
+def test_get_review_comments_uses_pr_endpoint_and_filters_by_review(rsa_key_pair):
+    """Must use the PR-level comments endpoint (which reports `line`) and filter
+    by pull_request_review_id — the /reviews/{id}/comments endpoint returns
+    line=null, which breaks location matching (Aurium PR-60 regression)."""
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        captured["path"] = req.url.path
+        return httpx.Response(200, json=[
+            {"id": 11, "path": "a.py", "line": 85, "pull_request_review_id": 100},
+            {"id": 12, "path": "b.py", "line": 95, "pull_request_review_id": 100},
+            {"id": 99, "path": "c.py", "line": 5, "pull_request_review_id": 200},
+        ])
+
+    client = _make_client(handler, private_pem)
+    out = client.get_review_comments("tok", "acme", "widgets", 42, review_id=100)
+
+    assert captured["path"] == "/repos/acme/widgets/pulls/42/comments"
+    assert [c["id"] for c in out] == [11, 12]  # only review 100, with their lines
+    assert out[0]["line"] == 85
+
+
 def test_resolve_review_thread_posts_graphql_mutation(rsa_key_pair):
     private_pem, _ = rsa_key_pair
     called = []
