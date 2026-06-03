@@ -27,7 +27,7 @@ from rq import get_current_job
 from reva.claude_client import ClaudeClient
 from reva.claude_code_runner import ClaudeCodeRunner
 from reva.cost import estimate_cost
-from reva.notifications import notify_worker_error
+from reva.notifications import notify_worker_error, post_to_chat
 from reva.odoo_client import OdooCallbackClient
 from reva.ticket_analyzer import TicketAnalyzer
 from reva.weekly_report import build_weekly_report
@@ -787,9 +787,9 @@ def run_weekly_report(params: dict | None = None) -> None:
         logger.exception("weekly_report_build_failed")
         return
 
-    try:
-        import httpx
-        httpx.post(ctx.google_chat_webhook_url, json={"text": message}, timeout=10)
+    # SECU-15: go through post_to_chat so the webhook host is SSRF-validated like
+    # the alert path (was a raw httpx.post that skipped the check).
+    if post_to_chat(ctx.google_chat_webhook_url, message, timeout=10):
         logger.info("weekly_report_sent", since_days=since_days)
-    except Exception:
-        logger.warning("weekly_report_send_failed", exc_info=True)
+    else:
+        logger.warning("weekly_report_send_failed")

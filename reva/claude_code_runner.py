@@ -323,6 +323,9 @@ class ClaudeCodeRunner:
         must NOT leak into them (SECU-7); proxy vars are forwarded for egress."""
         env = {k: os.environ[k] for k in _ENV_ALLOWLIST if k in os.environ}
         env["HOME"] = "/home/worker"
+        # INFR-25: never let git block on an interactive credential prompt (auth
+        # failure should fail fast under the per-repo lock, not hang).
+        env["GIT_TERMINAL_PROMPT"] = "0"
         return env
 
     def _codegraph_prepare(self, repo_path: str) -> str | None:

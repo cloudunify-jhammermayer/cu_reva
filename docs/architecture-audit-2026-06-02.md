@@ -546,20 +546,20 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **INFR-22** — Worker and scheduler do not dispose the SQLAlchemy engine or close Redis on shutdown (inconsistent with api)  (`api/app/main.py:30,43, worker/worker/main.py:21-36, scheduler/scheduler/main.py:34,38,59-64,108`)
 - **INFR-23** — tui has no Dockerfile / is not part of any image build or release artifact pipeline  (`tui/go.mod:1, .github/workflows/ci.yml:54-59, docker-compose.prod.yml:8-275`)
 - **INFR-24** — Makefile prod target starts without building; lone `make prod` can run a stale image  (`Makefile:15-19,21-22, docs/setup-production.md:131-134,278-280`)
-- **INFR-25** — Worker does not set GIT_TERMINAL_PROMPT=0 for clone/fetch  (`reva/claude_code_runner.py:373-390`)
+- **INFR-25** — ✅ DONE (2026-06-03) — `_subprocess_env` sets `GIT_TERMINAL_PROMPT=0`, so git fails fast on an auth prompt instead of hanging under the per-repo lock. — Worker does not set GIT_TERMINAL_PROMPT=0 for clone/fetch  (`reva/claude_code_runner.py:373-390`)
 ### maintainability (5)
 
 - **MAIN-9** — GitHub private-key path bypasses the env_or_file Docker-secret convention used for every other secret  (`api/app/settings.py:32-33, worker/worker/settings.py:53-54, reva/config.py:14,26`)
 - **MAIN-10** — TUI requeue eligibility rules are inconsistent and duplicated across Reviews / Failures / Tickets tabs  (`tui/internal/ui/reviews.go:173, tui/internal/ui/failures.go:74-82, tui/internal/ui/tickets.go:87-90`)
 - **MAIN-11** — schema_migrations created with TIMESTAMP/CURRENT_TIMESTAMP in engine but TIMESTAMPTZ/now() in migration 001 (harmless drift)  (`reva/db/engine.py:67-73, db/migrations/001_initial.sql:2-5`)
 - **MAIN-12** — get_version only strips em/en dashes, not a plain ASCII hyphen, in CHANGELOG headings  (`reva/prompt_builder.py:96-98, prompts/CHANGELOG.md:1`)
-- **MAIN-13** — Dead package-level variable colorBg in TUI styles  (`tui/internal/ui/styles.go:18`)
+- **MAIN-13** — ✅ DONE (2026-06-03) — removed the unused `colorBg`. — Dead package-level variable colorBg in TUI styles  (`tui/internal/ui/styles.go:18`)
 ### performance (1)
 
 - **PERF-8** — Low-cardinality single-column indexes on review_findings.severity/category add write cost with little selectivity  (`reva/db/models.py:220-221, db/migrations/001_initial.sql:152-153`)
 ### security (9)
 
-- **SECU-15** — Weekly-report task posts to Google Chat without the SSRF host check used on the alert path  (`worker/worker/runner.py:730-733, reva/notifications.py:20-28`)
+- **SECU-15** — ✅ DONE (2026-06-03) — weekly report now posts via `post_to_chat`, which validates the webhook host (allowlist + metadata block) like the alert path. Test added. — Weekly-report task posts to Google Chat without the SSRF host check used on the alert path  (`worker/worker/runner.py:730-733, reva/notifications.py:20-28`)
 - **SECU-19** — GitHub error mapping embeds up to 200 chars of upstream response body into exceptions that propagate to Google Chat alerts/logs  (`reva/_github_http.py:23-24`)
 - **SECU-20** — ✅ DONE (2026-06-02) — `_literal_ip` normalizes decimal/hex/octal integer + IPv4-mapped-IPv6 host forms before the link-local/metadata check (parametrized tests). — url_safety link-local/metadata block is bypassable via obfuscated IP literals  (`reva/url_safety.py`)
 - **SECU-21** — ✅ DONE (2026-06-02) — `format_check_run_output` redacts internal roots (`/repos`, `/tmp`, `/home`, `/app`) from the PR-facing failure message via `_redact_internal_paths` (raw message kept in the DB for ops). Test added. — Failure Check Run / DB error_message leaks internal repo-cache paths to the PR

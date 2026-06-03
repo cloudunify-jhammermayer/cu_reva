@@ -17,15 +17,25 @@ logger = structlog.get_logger()
 _CHAT_ALLOWED_HOSTS = frozenset({"chat.googleapis.com"})
 
 
-def _post_to_chat(webhook_url: str, text: str) -> None:
-    """Best-effort POST to the Google Chat webhook. Validates the host first and
-    swallows all errors so notifications never mask the original failure."""
+def post_to_chat(webhook_url: str, text: str, *, timeout: float = 5) -> bool:
+    """Validate + POST to the Google Chat webhook. Returns True on success.
+
+    Host is validated against the allowlist first (SSRF guard); all errors are
+    swallowed (logged) so notifications never mask the original failure. Shared
+    by the alert paths and the weekly report (SECU-15) so the SSRF check is
+    applied uniformly."""
     try:
         assert_safe_url(webhook_url, allowed_hosts=_CHAT_ALLOWED_HOSTS)
         import httpx
-        httpx.post(webhook_url, json={"text": text}, timeout=5)
+        httpx.post(webhook_url, json={"text": text}, timeout=timeout)
+        return True
     except Exception as exc:
         logger.warning("google_chat_notify_failed", error=str(exc))
+        return False
+
+
+def _post_to_chat(webhook_url: str, text: str) -> None:
+    post_to_chat(webhook_url, text)
 
 # ---------------------------------------------------------------------------
 # Error pattern matchers

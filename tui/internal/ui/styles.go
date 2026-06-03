@@ -15,7 +15,6 @@ var (
 	colorOrange     = lipgloss.Color("#FAB387")
 	colorBlue       = lipgloss.Color("#89B4FA")
 	colorDim        = lipgloss.Color("#45475A")
-	colorBg         = lipgloss.Color("#1E1E2E")
 	colorBorder     = lipgloss.Color("#313244")
 	colorSelected   = lipgloss.Color("#2A5298")
 	colorSelectedFg = lipgloss.Color("#CDD6F4")
