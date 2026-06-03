@@ -375,6 +375,46 @@ func (m *MockClient) Findings(severity, category string, limit int) (*FindingPag
 	return &FindingPage{Items: filtered[:n], Total: len(filtered)}, nil
 }
 
+func (m *MockClient) AuditFindings(severity string, limit int) (*AuditFindingPage, error) {
+	strPtr := func(s string) *string { return &s }
+	intPtr := func(i int) *int { return &i }
+	f64Ptr := func(f float64) *float64 { return &f }
+	now := time.Now()
+
+	all := []AuditFindingSummary{
+		{
+			ID: 1, AuditRunID: 7, RepoFullName: "acme/widgets", Severity: "critical",
+			Category: "security", Title: "Hardcoded API token in settings module",
+			Confidence: f64Ptr(0.96), FilePath: strPtr("config/settings.py"), LineStart: intPtr(21),
+			GithubIssueNumber: intPtr(312), CreatedAt: now.Add(-2 * time.Hour),
+		},
+		{
+			ID: 2, AuditRunID: 7, RepoFullName: "acme/widgets", Severity: "major",
+			Category: "access-control", Title: "Endpoint missing auth decorator",
+			Confidence: f64Ptr(0.84), FilePath: strPtr("controllers/portal.py"), LineStart: intPtr(133),
+			GithubIssueNumber: intPtr(313), CreatedAt: now.Add(-2 * time.Hour),
+		},
+		{
+			ID: 3, AuditRunID: 7, RepoFullName: "acme/widgets", Severity: "minor",
+			Category: "style", Title: "Unused import in valuation model",
+			Confidence: f64Ptr(0.6), FilePath: strPtr("models/valuation.py"), LineStart: intPtr(4),
+			GithubIssueNumber: nil, CreatedAt: now.Add(-2 * time.Hour),
+		},
+	}
+
+	var filtered []AuditFindingSummary
+	for _, f := range all {
+		if severity == "" || f.Severity == severity {
+			filtered = append(filtered, f)
+		}
+	}
+	n := limit
+	if n > len(filtered) {
+		n = len(filtered)
+	}
+	return &AuditFindingPage{Items: filtered[:n], Total: len(filtered)}, nil
+}
+
 func (m *MockClient) Repos() (*RepoPage, error) {
 	strPtr := func(s string) *string { return &s }
 	now := time.Now()
@@ -443,6 +483,10 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 }
 
 func (m *MockClient) Requeue(id int) error {
+	return nil
+}
+
+func (m *MockClient) TriggerAudit(repoID int) error {
 	return nil
 }
 

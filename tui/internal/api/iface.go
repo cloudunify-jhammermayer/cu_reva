@@ -9,7 +9,9 @@ type ClientIface interface {
 	Requeue(id int) error
 	Pending() (*PendingPage, error)
 	Findings(severity, category string, limit int) (*FindingPage, error)
+	AuditFindings(severity string, limit int) (*AuditFindingPage, error)
 	Repos() (*RepoPage, error)
+	TriggerAudit(repoID int) error
 	TicketAnalyses(limit int) (*TicketAnalysisPage, error)
 	RequeueTicket(id int) error
 }

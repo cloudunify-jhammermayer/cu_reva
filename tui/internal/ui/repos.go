@@ -17,10 +17,11 @@ type Repos struct {
 	total   int
 	err     error
 	loading bool
-	cursor  int
-	offset  int
-	width   int
-	height  int
+	cursor    int
+	offset    int
+	width     int
+	height    int
+	statusMsg string
 }
 
 func newRepos(client api.ClientIface) Repos {
@@ -52,6 +53,13 @@ func (r Repos) update(msg tea.Msg) (Repos, tea.Cmd) {
 			r.offset = 0
 		}
 
+	case auditTriggeredMsg:
+		if m.err != nil {
+			r.statusMsg = styleStatusFailed.Render("audit failed: " + m.err.Error())
+		} else {
+			r.statusMsg = styleStatusCompleted.Render("audit queued - findings/issues will appear shortly")
+		}
+
 	case tea.KeyMsg:
 		visibleRows := r.height - 5
 		if visibleRows < 1 {
@@ -67,8 +75,19 @@ func (r Repos) update(msg tea.Msg) (Repos, tea.Cmd) {
 				url := "https://github.com/" + r.items[r.cursor].FullName
 				_ = exec.Command("xdg-open", url).Start()
 			}
+		case "a":
+			if r.cursor < len(r.items) {
+				id := r.items[r.cursor].ID
+				client := r.client
+				r.statusMsg = styleSubtitle.Render("triggering audit...")
+				return r, func() tea.Msg {
+					err := client.TriggerAudit(id)
+					return auditTriggeredMsg{id: id, err: err}
+				}
+			}
 		case "r":
 			r.loading = true
+			r.statusMsg = ""
 			return r, r.load()
 		}
 	}
@@ -173,9 +192,12 @@ func (r Repos) view(w, h int) string {
 
 	table := strings.Join(rows, "\n")
 
-	pos := styleSubtitle.Render(fmt.Sprintf("  %d/%d", r.cursor+1, len(r.items)))
+	posLine := styleSubtitle.Render(fmt.Sprintf("  %d/%d", r.cursor+1, len(r.items)))
+	if r.statusMsg != "" {
+		posLine = "  " + r.statusMsg
+	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", pos)
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", posLine)
 }
 
 func relativeTime(t time.Time) string {

@@ -17,6 +17,25 @@ type FindingPage struct {
 	Total int              `json:"total"`
 }
 
+type AuditFindingSummary struct {
+	ID                int       `json:"id"`
+	AuditRunID        int       `json:"audit_run_id"`
+	RepoFullName      string    `json:"repo_full_name"`
+	Severity          string    `json:"severity"`
+	Category          string    `json:"category"`
+	Title             string    `json:"title"`
+	Confidence        *float64  `json:"confidence"`
+	FilePath          *string   `json:"file_path"`
+	LineStart         *int      `json:"line_start"`
+	GithubIssueNumber *int      `json:"github_issue_number"`
+	CreatedAt         time.Time `json:"created_at"`
+}
+
+type AuditFindingPage struct {
+	Items []AuditFindingSummary `json:"items"`
+	Total int                   `json:"total"`
+}
+
 type RepoSummary struct {
 	ID            int        `json:"id"`
 	FullName      string     `json:"full_name"`

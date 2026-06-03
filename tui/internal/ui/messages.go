@@ -30,6 +30,14 @@ type findingsLoadedMsg struct {
 	data *api.FindingPage
 	err  error
 }
+type auditFindingsLoadedMsg struct {
+	data *api.AuditFindingPage
+	err  error
+}
+type auditTriggeredMsg struct {
+	id  int
+	err error
+}
 type reposLoadedMsg struct {
 	data *api.RepoPage
 	err  error

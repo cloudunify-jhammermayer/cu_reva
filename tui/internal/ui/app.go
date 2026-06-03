@@ -19,6 +19,7 @@ const (
 	viewRepos    // tab 5
 	viewPending  // tab 6
 	viewTickets  // tab 7
+	viewAudits   // tab 8
 )
 
 type App struct {
@@ -31,6 +32,7 @@ type App struct {
 	repos     Repos
 	pending   Pending
 	tickets   Tickets
+	audits    Audits
 	width     int
 	height    int
 }
@@ -46,6 +48,7 @@ func NewApp(client api.ClientIface, odooURL string) *App {
 		repos:     newRepos(client),
 		pending:   newPending(client),
 		tickets:   newTickets(client, odooURL),
+		audits:    newAudits(client),
 	}
 }
 
@@ -58,6 +61,7 @@ func (a *App) Init() tea.Cmd {
 		a.repos.load(),
 		a.pending.load(),
 		a.tickets.load(),
+		a.audits.load(),
 		tick(),
 	)
 }
@@ -89,6 +93,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.pending.height = contentH
 		a.tickets.width = m.Width
 		a.tickets.height = contentH
+		a.audits.width = m.Width
+		a.audits.height = contentH
 		return a, nil
 
 	case tea.KeyMsg:
@@ -123,6 +129,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.clearStatusMsgs()
 			a.active = viewTickets
 			return a, nil
+		case "8":
+			a.clearStatusMsgs()
+			a.active = viewAudits
+			return a, nil
 		}
 		if a.active == viewReviews {
 			var cmd tea.Cmd
@@ -154,6 +164,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.tickets, cmd = a.tickets.update(msg)
 			return a, cmd
 		}
+		if a.active == viewAudits {
+			var cmd tea.Cmd
+			a.audits, cmd = a.audits.update(msg)
+			return a, cmd
+		}
 
 	case tickMsg:
 		var cmd tea.Cmd
@@ -168,7 +183,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.pending, pendCmd = a.pending.update(msg)
 		var ticketCmd tea.Cmd
 		a.tickets, ticketCmd = a.tickets.update(msg)
-		return a, tea.Batch(cmd, findCmd, failCmd, repoCmd, pendCmd, ticketCmd, tick())
+		var auditCmd tea.Cmd
+		a.audits, auditCmd = a.audits.update(msg)
+		return a, tea.Batch(cmd, findCmd, failCmd, repoCmd, pendCmd, ticketCmd, auditCmd, tick())
 
 	case dashboardLoadedMsg:
 		a.dashboard, _ = a.dashboard.update(msg)
@@ -189,7 +206,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case findingsLoadedMsg:
 		a.findings, _ = a.findings.update(msg)
 
+	case auditFindingsLoadedMsg:
+		a.audits, _ = a.audits.update(msg)
+
 	case reposLoadedMsg:
+		a.repos, _ = a.repos.update(msg)
+
+	case auditTriggeredMsg:
 		a.repos, _ = a.repos.update(msg)
 
 	case pendingLoadedMsg:
@@ -241,6 +264,8 @@ func (a *App) View() string {
 		content = a.pending.view(a.width, contentH)
 	case viewTickets:
 		content = a.tickets.view(a.width, contentH)
+	case viewAudits:
+		content = a.audits.view(a.width, contentH)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left,
@@ -265,6 +290,7 @@ func (a *App) tabBar() string {
 		{"5", "Repos", 0, viewRepos},
 		{"6", "Pending", a.pending.total, viewPending},
 		{"7", "Tickets", 0, viewTickets},
+		{"8", "Audits", 0, viewAudits},
 	}
 
 	var parts []string
@@ -298,13 +324,14 @@ func (a *App) clearStatusMsgs() {
 	a.reviews.statusMsg = ""
 	a.failures.statusMsg = ""
 	a.tickets.statusMsg = ""
+	a.repos.statusMsg = ""
 }
 
 func (a *App) statusBar() string {
 	var hint string
 	switch a.active {
 	case viewDashboard:
-		hint = "1-7 switch tabs | r=refresh | q quit"
+		hint = "1-8 switch tabs | r=refresh | q quit"
 	case viewReviews:
 		hint = "j/k navigate | / filter | s=status | c=clear | e=requeue | o=browser | r=refresh | q quit"
 	case viewFindings:
@@ -312,13 +339,15 @@ func (a *App) statusBar() string {
 	case viewFailures:
 		hint = "j/k navigate | e=requeue | r=refresh | q quit"
 	case viewRepos:
-		hint = "j/k navigate | o=open in browser | r=refresh | q quit"
+		hint = "j/k navigate | a=audit | o=open in browser | r=refresh | q quit"
 	case viewPending:
 		hint = "j/k navigate | r=refresh | q quit"
 	case viewTickets:
 		hint = "j/k navigate | e=requeue | o=open in Odoo | r=refresh | q quit"
+	case viewAudits:
+		hint = "j/k navigate | a=all | c=critical | m=major | n=minor | i=info | r=refresh | q quit"
 	default:
-		hint = "1 Dash | 2 Reviews | 3 Findings | 4 Failures | 5 Repos | 6 Pending | 7 Tickets | q quit"
+		hint = "1 Dash | 2 Reviews | 3 Findings | 4 Failures | 5 Repos | 6 Pending | 7 Tickets | 8 Audits | q quit"
 	}
 	return styleStatusBar.Width(a.width).Render(hint)
 }

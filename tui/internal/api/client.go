@@ -113,6 +113,15 @@ func (c *Client) Findings(severity, category string, limit int) (*FindingPage, e
 	return &p, c.get(path, &p)
 }
 
+func (c *Client) AuditFindings(severity string, limit int) (*AuditFindingPage, error) {
+	path := fmt.Sprintf("/audit-findings?limit=%d", limit)
+	if severity != "" {
+		path += "&severity=" + url.QueryEscape(severity)
+	}
+	var p AuditFindingPage
+	return &p, c.get(path, &p)
+}
+
 func (c *Client) Repos() (*RepoPage, error) {
 	var p RepoPage
 	return &p, c.get("/repos", &p)
@@ -121,6 +130,10 @@ func (c *Client) Repos() (*RepoPage, error) {
 func (c *Client) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 	var p TicketAnalysisPage
 	return &p, c.get(fmt.Sprintf("/ticket-analyses?limit=%d", limit), &p)
+}
+
+func (c *Client) TriggerAudit(repoID int) error {
+	return c.post(fmt.Sprintf("/repos/%d/audit", repoID))
 }
 
 func (c *Client) Requeue(id int) error {
