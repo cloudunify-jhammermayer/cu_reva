@@ -110,11 +110,14 @@ def _process_delivery(
 def _handle_pull_request(db: Database, payload: dict, settings: Settings, github=None) -> None:
     action = payload.get("action", "")
     if action not in _REVIEWABLE_ACTIONS:
+        logger.info("pr_event_ignored", reason="non-reviewable action", action=action)
         return
 
     pr_data = payload["pull_request"]
     # Skip drafts unless this is the transition to ready_for_review.
     if pr_data.get("draft", False) and action != "ready_for_review":
+        logger.info("pr_event_ignored", reason="draft PR", action=action,
+                    pr=pr_data.get("number"))
         return
 
     repo_data = payload["repository"]

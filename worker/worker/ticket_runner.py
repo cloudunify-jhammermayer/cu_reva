@@ -27,7 +27,7 @@ def run_ticket_analysis(job_params: dict) -> dict:
         model_name=params.model_name,
         field_name=params.field_name,
     )
-    log.info("ticket_analysis_start")
+    log.info("ticket_analysis_start", text_len=len(params.text))
 
     # Reset Odoo status to pending so the UI shows work-in-progress (handles requeues of completed jobs).
     try:
@@ -65,5 +65,10 @@ def run_ticket_analysis(job_params: dict) -> dict:
         log.warning("ticket_analysis_odoo_callback_error", exc_info=True)
         raise
 
-    log.info("ticket_analysis_done")
+    log.info(
+        "ticket_analysis_done",
+        missing_info=len(result.missing_info),
+        test_cases=len(result.test_cases),
+        acceptance_criteria=len(result.acceptance_criteria),
+    )
     return {"status": "completed", "analysis_id": params.analysis_id}

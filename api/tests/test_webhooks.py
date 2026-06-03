@@ -609,3 +609,13 @@ def test_review_all_command_queues_diff_all_mode(client_and_db):
         pending = s.query(PendingReview).all()
         assert any(p.trigger_event == "comment" and p.review_mode == "diff-all"
                    for p in pending)
+
+
+def test_draft_pr_logs_ignored_reason(client_and_db):
+    """Observability: a skipped draft PR logs why (was a silent return)."""
+    import structlog
+    client, _ = client_and_db
+    with structlog.testing.capture_logs() as logs:
+        _post(client, _pr_payload("opened", draft=True), delivery="draftlog")
+    ignored = [e for e in logs if e.get("event") == "pr_event_ignored"]
+    assert ignored and ignored[0]["reason"] == "draft PR"
