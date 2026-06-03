@@ -12,8 +12,8 @@ dev-build:
 
 # ── Production ────────────────────────────────────────────────────────────────
 
-prod:
-	docker compose -f docker-compose.prod.yml up -d
+prod:  # --build so a lone `make prod` can't start a stale image (INFR-24)
+	docker compose -f docker-compose.prod.yml up -d --build
 
 build:
 	docker compose -f docker-compose.prod.yml build

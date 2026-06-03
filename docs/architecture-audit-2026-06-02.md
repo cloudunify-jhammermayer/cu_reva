@@ -545,7 +545,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **INFR-21** — github_events.payload stores the entire webhook body as JSONB with no retention policy  (`reva/db/models.py:245, reva/db/writers.py:446-456, db/migrations/001_initial.sql:112-123`)
 - **INFR-22** — ⏸️ NOT CHANGED (2026-06-03, negligible) — worker/scheduler dispose at process exit, which the OS reclaims anyway; the api does it only because uvicorn's lifespan is a natural hook. Not worth the churn. — Worker and scheduler do not dispose the SQLAlchemy engine or close Redis on shutdown (inconsistent with api)  (`api/app/main.py:30,43, worker/worker/main.py:21-36, scheduler/scheduler/main.py:34,38,59-64,108`)
 - **INFR-23** — tui has no Dockerfile / is not part of any image build or release artifact pipeline  (`tui/go.mod:1, .github/workflows/ci.yml:54-59, docker-compose.prod.yml:8-275`)
-- **INFR-24** — Makefile prod target starts without building; lone `make prod` can run a stale image  (`Makefile:15-19,21-22, docs/setup-production.md:131-134,278-280`)
+- **INFR-24** — ✅ DONE (2026-06-03) — `make prod` now uses `up -d --build` so it can't start a stale image. — Makefile prod target starts without building; lone `make prod` can run a stale image  (`Makefile:15-19,21-22, docs/setup-production.md:131-134,278-280`)
 - **INFR-25** — ✅ DONE (2026-06-03) — `_subprocess_env` sets `GIT_TERMINAL_PROMPT=0`, so git fails fast on an auth prompt instead of hanging under the per-repo lock. — Worker does not set GIT_TERMINAL_PROMPT=0 for clone/fetch  (`reva/claude_code_runner.py:373-390`)
 ### maintainability (5)
 
@@ -570,7 +570,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **SECU-28** — GitHub client follows redirects globally with no host re-validation  (`reva/github_client.py:53`)
 ### testing (1)
 
-- **TEST-14** — diff_utils edge cases (multi-hunk, renames, deletion-only, CRLF, malformed headers) covered only transitively  (`reva/diff_utils.py, reva/prompt_builder.py, reva/review_tool.py, reva/ticket_tool.py`)
+- **TEST-14** — ✅ DONE (2026-06-03) — direct tests added (multi-hunk, deletion-only→no hunks, malformed header skipped, rename-with-edits, CRLF). The CRLF test surfaced + fixed a real bug: a trailing `\r` leaked into parsed file paths (broke inline mapping) — `parse_diff_hunks`/`iter_diff_files` now rstrip CR. — diff_utils edge cases (multi-hunk, renames, deletion-only, CRLF, malformed headers) covered only transitively  (`reva/diff_utils.py, reva/prompt_builder.py, reva/review_tool.py, reva/ticket_tool.py`)
 ### usability (4)
 
 - **USAB-6** — ✅ DONE (2026-06-03) — `_md_cell` escapes pipes + flattens newlines in finding titles placed in markdown tables. Test added. — Model-produced finding titles are placed into PR-comment markdown tables without escaping '|' or newlines  (`reva/review_formatter.py:182; reva/review_formatter.py:242`)

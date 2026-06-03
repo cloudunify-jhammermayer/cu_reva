@@ -48,7 +48,9 @@ def iter_diff_files(diff: str) -> Iterator[str]:
     """Yield file paths referenced by `+++ b/<path>` headers."""
     for line in diff.split("\n"):
         if line.startswith("+++ b/"):
-            yield line[len("+++ b/") :]
+            # rstrip CR so CRLF diffs don't leave a trailing \r in the path
+            # (which would break inline-comment file matching) — TEST-14.
+            yield line[len("+++ b/") :].rstrip("\r")
 
 
 def extract_file_paths(diff: str) -> set[str]:
@@ -139,7 +141,7 @@ def parse_diff_hunks(diff: str) -> list[DiffHunk]:
     current_file: str | None = None
     for line in diff.split("\n"):
         if line.startswith("+++ b/"):
-            current_file = line[len("+++ b/") :]
+            current_file = line[len("+++ b/") :].rstrip("\r")  # CRLF-safe (TEST-14)
             continue
         if line.startswith("@@") and current_file is not None:
             match = _HUNK_RE.match(line)

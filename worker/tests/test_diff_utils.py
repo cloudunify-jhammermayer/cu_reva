@@ -142,3 +142,45 @@ def test_filter_diff_reviews_both_custom_addons_spellings():
     assert "custom_addons/a.py" in result
     assert "custom-addons/b.py" in result
     assert "oca_modules/c.py" not in result
+
+
+# --- edge cases (TEST-14) ----------------------------------------------------
+
+def test_parse_diff_hunks_multiple_hunks_one_file():
+    diff = (
+        "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n"
+        "@@ -1,2 +1,3 @@\n+a\n"
+        "@@ -20,1 +25,4 @@\n+b\n"
+    )
+    hunks = parse_diff_hunks(diff)
+    assert len(hunks) == 2
+    assert hunks[0].new_start == 1 and hunks[1].new_start == 25
+
+
+def test_parse_diff_hunks_deletion_only_file_has_no_hunks():
+    # A deleted file ends with `+++ /dev/null`, not `+++ b/...`, so there's
+    # nothing to comment inline on.
+    diff = "diff --git a/x.py b/x.py\ndeleted file mode 100644\n--- a/x.py\n+++ /dev/null\n@@ -1,3 +0,0 @@\n-gone\n"
+    assert parse_diff_hunks(diff) == []
+    assert extract_file_paths(diff) == set()
+
+
+def test_parse_diff_hunks_malformed_hunk_header_is_skipped():
+    diff = "+++ b/x.py\n@@ this is not a valid hunk header @@\n+a\n"
+    assert parse_diff_hunks(diff) == []  # no crash, no bogus hunk
+
+
+def test_parse_diff_hunks_crlf_path_has_no_trailing_cr():
+    diff = "diff --git a/x.py b/x.py\r\n--- a/x.py\r\n+++ b/x.py\r\n@@ -1,2 +1,3 @@\r\n+new\r\n"
+    hunks = parse_diff_hunks(diff)
+    assert hunks and hunks[0].file_path == "x.py"  # no trailing \r
+    assert extract_file_paths(diff) == {"x.py"}
+
+
+def test_parse_diff_hunks_rename_with_edits_maps_new_path():
+    diff = (
+        "diff --git a/old.py b/new.py\nsimilarity index 90%\n"
+        "rename from old.py\nrename to new.py\n--- a/old.py\n+++ b/new.py\n@@ -1,1 +1,2 @@\n+x\n"
+    )
+    hunks = parse_diff_hunks(diff)
+    assert [h.file_path for h in hunks] == ["new.py"]
