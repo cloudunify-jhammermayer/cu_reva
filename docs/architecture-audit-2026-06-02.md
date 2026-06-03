@@ -513,7 +513,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **CODE-7** — ✅ DONE (2026-06-02, gofmt -w) — Six TUI source files are not gofmt-clean; formatting not enforced in CI  (`tui/internal/api/mock.go, internal/api/types.go, internal/ui/findings.go, internal/ui/messages.go, internal/ui/repos.go, internal/ui/styles.go`)
 - **CODE-8** — weekly_report success_rate rounded to 4 places but rendered at 0 decimals; two separate now() reads for report range  (`reva/weekly_report.py:159, 206-211, 229`)
 - **CODE-9** — Inconsistent import placement and asymmetric logging between notifications/odoo_client  (`reva/notifications.py:25, reva/odoo_client.py:86-88,104, reva/types.py:214`)
-- **CODE-10** — DatabaseRepoLookup constructed twice in build_worker_context; AuditRun/AdminAudit not exported from reva.db  (`worker/worker/runner.py:123,129, reva/db/__init__.py:11-41`)
+- **CODE-10** — ✅ DONE (2026-06-03) — `DatabaseRepoLookup` built once and shared by reviewer+auditor; `AuditRun`/`AdminAudit` exported from `reva.db`. — DatabaseRepoLookup constructed twice in build_worker_context; AuditRun/AdminAudit not exported from reva.db  (`worker/worker/runner.py:123,129, reva/db/__init__.py:11-41`)
 - **CODE-11** — Anti-leak prompt rule may conflict with the instruction to report embedded injection attempts  (`prompts/review_guidance.md:30-32,89, prompts/system.md:30-31,111`)
 - **CODE-12** — Scheduler inter-tick wait drifts: fixed sleep loop ignores variable work time  (`scheduler/scheduler/main.py:103-106`)
 ### concurrency (2)
@@ -541,9 +541,9 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 ### infra (7)
 
 - **INFR-19** — Worker entrypoint chowns /repos but swallows all errors with || true  (`worker/entrypoint.sh:3`)
-- **INFR-20** — Monitor disk-usage alert measures the whole filesystem, not the repo-cache, and only alerts (no eviction)  (`scheduler/scheduler/monitor.py:83-90`)
+- **INFR-20** — ⏸️ NOT CHANGED (2026-06-03) — measuring the filesystem that holds `/repos` is the right signal for a disk-full alert (a directory has no '% full'); eviction is handled separately (INFR-2). — Monitor disk-usage alert measures the whole filesystem, not the repo-cache, and only alerts (no eviction)  (`scheduler/scheduler/monitor.py:83-90`)
 - **INFR-21** — github_events.payload stores the entire webhook body as JSONB with no retention policy  (`reva/db/models.py:245, reva/db/writers.py:446-456, db/migrations/001_initial.sql:112-123`)
-- **INFR-22** — Worker and scheduler do not dispose the SQLAlchemy engine or close Redis on shutdown (inconsistent with api)  (`api/app/main.py:30,43, worker/worker/main.py:21-36, scheduler/scheduler/main.py:34,38,59-64,108`)
+- **INFR-22** — ⏸️ NOT CHANGED (2026-06-03, negligible) — worker/scheduler dispose at process exit, which the OS reclaims anyway; the api does it only because uvicorn's lifespan is a natural hook. Not worth the churn. — Worker and scheduler do not dispose the SQLAlchemy engine or close Redis on shutdown (inconsistent with api)  (`api/app/main.py:30,43, worker/worker/main.py:21-36, scheduler/scheduler/main.py:34,38,59-64,108`)
 - **INFR-23** — tui has no Dockerfile / is not part of any image build or release artifact pipeline  (`tui/go.mod:1, .github/workflows/ci.yml:54-59, docker-compose.prod.yml:8-275`)
 - **INFR-24** — Makefile prod target starts without building; lone `make prod` can run a stale image  (`Makefile:15-19,21-22, docs/setup-production.md:131-134,278-280`)
 - **INFR-25** — ✅ DONE (2026-06-03) — `_subprocess_env` sets `GIT_TERMINAL_PROMPT=0`, so git fails fast on an auth prompt instead of hanging under the per-repo lock. — Worker does not set GIT_TERMINAL_PROMPT=0 for clone/fetch  (`reva/claude_code_runner.py:373-390`)
@@ -566,7 +566,7 @@ _Not adversarially verified — high-signal leads. Grouped by category._
 - **SECU-22** — ⏸️ DEFERRED (2026-06-02, low value/risk) — API is non-browser (TUI + GitHub webhooks) and behind nginx, so CORS/security-headers add ~nothing and `TrustedHostMiddleware` risks breaking prod on a mis-set host list while nginx already validates `Host`. — No CORS/TrustedHost middleware; security headers live only at nginx
 - **SECU-23** — ⏸️ DEFERRED (2026-06-02) — the container/LB healthcheck needs an open, unrated `/health`; auth would break it and the up/down disclosure is negligible. (INFR-11 liveness/readiness split is the real follow-up if wanted.) — /health is proxied without rate limiting and reports per-dependency status unauthenticated
 - **SECU-26** — No explicit guardrail telling the review model it has no shell and must Write only to output_path  (`prompts/review_guidance.md:86, prompts/skills/reva-diff-review.md, prompts/skills/reva-full-review.md`)
-- **SECU-27** — nginx omits server_tokens off and OCSP stapling  (`nginx/nginx.conf:9-33, nginx/templates/reva.conf.template:39-49`)
+- **SECU-27** — ✅ DONE (2026-06-03, server_tokens) — `server_tokens off;` added to nginx.conf so the version isn't advertised. (OCSP stapling left as an optional TLS-tuning follow-up.) — nginx omits server_tokens off and OCSP stapling  (`nginx/nginx.conf:9-33, nginx/templates/reva.conf.template:39-49`)
 - **SECU-28** — GitHub client follows redirects globally with no host re-validation  (`reva/github_client.py:53`)
 ### testing (1)
 

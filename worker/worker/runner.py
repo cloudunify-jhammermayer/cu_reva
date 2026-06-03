@@ -121,16 +121,17 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         base_url=settings.github_base_url,
     )
     prompts = PromptBuilder(prompts_dir=settings.prompts_dir)
+    repo_lookup = DatabaseRepoLookup(db)  # CODE-10: build once, share
     reviewer = Reviewer(
         runner=runner,
         github=github,
-        repos=DatabaseRepoLookup(db),
+        repos=repo_lookup,
         prompts=prompts,
     )
     auditor = Auditor(
         runner=runner,
         github=github,
-        repos=DatabaseRepoLookup(db),
+        repos=repo_lookup,
     )
     ticket_analyzer = TicketAnalyzer(claude=claude, prompts_dir=settings.prompts_dir)
     verifier = FindingVerifier(claude=claude)

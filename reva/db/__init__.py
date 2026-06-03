@@ -9,6 +9,8 @@ from reva.db import repo_lookup, writers
 from reva.db.engine import Database, create_engine_from_url, migrate
 from reva.db.repo_lookup import DatabaseRepoLookup
 from reva.db.models import (
+    AdminAudit,
+    AuditRun,
     Base,
     ClaudeSpend,
     GithubEvent,
@@ -29,6 +31,8 @@ __all__ = [
     "migrate",
     "repo_lookup",
     "writers",
+    "AdminAudit",
+    "AuditRun",
     "Base",
     "ClaudeSpend",
     "GithubEvent",
