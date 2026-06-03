@@ -32,10 +32,16 @@ that the key would travel in plaintext.
 | `internal/api/client.go` | Real HTTP client (10 s timeout, Bearer auth). |
 | `internal/api/mock.go` | `MockClient` for `--demo`. |
 | `internal/api/types.go` | DTOs mirroring the API's JSON responses. |
-| `internal/ui/*.go` | One file per tab (dashboard, reviews, findings, failures, repos, pending, tickets) plus `app.go` (tab routing), `styles.go`, `messages.go`. |
+| `internal/ui/*.go` | One file per tab (dashboard, reviews, findings, failures, repos, pending, tickets, audits) plus `app.go` (tab routing), `styles.go`, `messages.go`. |
 
-Tabs `1`–`7`; global keys `r` refresh, `q` quit. Per-tab keys are in the
-top-level [README](../README.md#tui).
+Tabs `1`–`8` (Dashboard, Reviews, Findings, Failures, Repos, Pending, Tickets,
+Audits); global keys `r` refresh, `q` quit. The Repos tab adds `a` to trigger a
+repository audit (POST `/repos/{id}/audit`, with an inline status line) and `o`
+to open the repo on GitHub. The Audits tab lists repo-audit findings (severity,
+title, repo, file:line, GitHub issue `#NN`) from `GET /audit-findings`, with the
+same severity filters as Findings (`a` all · `c` critical · `m` major · `n`
+minor · `i` info; `r` refresh). Per-tab keys are in the top-level
+[README](../README.md#tui).
 
 ## Why a TUI (and why only one dashboard)
 

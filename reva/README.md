@@ -14,7 +14,7 @@ helpers that more than one process needs.
 |---|---|
 | `types.py` | Pydantic models — the schema contract: `Finding`, `ReviewResult`, `JobParams`, `AuditJobParams`/`AuditResult`, `TicketJobParams`, `RepoConfig`, `ClaudeResponse`. |
 | `errors.py` | `WorkerError` → `TransientError` (RQ retries) / `PermanentError` (RQ fails). |
-| `config.py` | `env_or_file` / `required_env_or_file` — read a setting from an env var or, if `{NAME}_FILE` is set, from that file (Docker-secrets convention). |
+| `config.py` | `env_or_file` / `required_env_or_file` — read a setting from an env var or, if `{NAME}_FILE` is set, from that file (Docker-secrets convention). Also the **single source for model IDs**: `DEFAULT_MODEL` (`REVA_DEFAULT_MODEL`, default `claude-sonnet-4-6`) and `DEEP_MODEL` (`REVA_DEEP_MODEL`, default `claude-opus-4-8`), imported by both Claude clients so they can't drift. |
 | `claude_client.py` | Direct **Messages API** client (httpx). Used for ticket analysis + comment replies. Prompt caching, tool_use parse, status→error mapping. |
 | `claude_code_runner.py` | **Headless Claude Code CLI** runner. Manages the repo clone cache, per-repo `flock`, runs `claude --print` under a skill, reads the `submit_review` JSON. Used for all PR reviews + audits. Bounds the CLI subprocess and every `git` op with timeouts, validates `owner`/`name` before building cache paths, and exports `REVIEW_JOB_TIMEOUT` (derived from the subprocess timeout) so enqueuers can't set a too-small RQ job timeout. |
 | `github_client.py`, `_github_http.py` | GitHub App client (JWT auth, installation-token cache, PR/diff/file reads + Check Run / PR Review / comment writes; `find_pr_review_id` / `find_check_run_id` for retry recovery) and shared status→error mapping. |

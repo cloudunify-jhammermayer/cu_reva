@@ -147,6 +147,20 @@ python scripts/fake-webhook.py \
   --pr 42
 ```
 
+### Trigger a repository audit
+
+An audit reviews the whole repo on the default branch (deep model, Opus 4.8),
+stores findings, and opens GitHub issues (label `reva-audit`) for major/critical
+findings — this is why the GitHub App needs **Issues: Read & write**. Trigger one
+with:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/repos/<repository_id>/audit
+```
+
+or from the TUI **Repos** tab (press `a`). Read findings via
+`GET /api/v1/audit-findings` or the TUI **Audits** tab (key `8`).
+
 ---
 
 ## 6. Run the TUI
@@ -176,12 +190,11 @@ REVA_API_URL=http://localhost:8080/api/v1 go run .
 
 | Key | Action |
 |---|---|
-| `1` | Dashboard tab |
-| `2` | Reviews tab |
-| `3` | Failures tab |
+| `1`–`8` | Switch tabs: Dashboard, Reviews, Findings, Failures, Repos, Pending, Tickets, Audits |
 | `j` / `k` | Move cursor down / up |
 | `r` | Refresh current view |
-| `e` | Requeue selected failed/stale review |
+| `e` | Requeue selected failed/stale review (Reviews/Failures/Tickets) |
+| `a` | On the Repos tab: trigger a repository audit |
 | `q` | Quit |
 
 ---
@@ -269,3 +282,7 @@ Always run `docker compose build <service> && docker compose up -d <service>`.
 | `POSTGRES_PASSWORD` | yes | — | Password for the `review` DB user |
 | `REDIS_PASSWORD` | yes | — | Redis `requirepass` value; embedded in all `REDIS_URL` values |
 | `REVA_DEBOUNCE_SECONDS` | no | 600 | Seconds to wait before enqueuing a review after a webhook |
+| `REVA_DEFAULT_MODEL` | no | `claude-sonnet-4-6` | Model for diff/full reviews, ticket analysis, and comment replies |
+| `REVA_DEEP_MODEL` | no | `claude-opus-4-8` | Model for `/deep-review` and all repo audits |
+| `REVA_CODEGRAPH_ENABLED` | no | `false` | When `true`, repo-aware reviews (full/deep) and audits get a pre-indexed CodeGraph exposed via MCP. Requires the `codegraph` binary in the worker image (already pinned in the Dockerfile) |
+| `REVA_CODEGRAPH_INDEX_TIMEOUT` | no | 180 | Seconds bounding the CodeGraph index step |

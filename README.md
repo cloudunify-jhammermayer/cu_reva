@@ -9,7 +9,7 @@ REVA uses **two Claude clients** (see `docs/superpowers/specs/2026-05-25-headles
 - **Headless Claude Code CLI** (`reva/claude_code_runner.py`) — runs against a *locally cloned copy of the repo* at the head SHA, so Claude can read connected files, not just the diff. Used for all PR review modes (diff / full / deep) and repo audits. Output is the `submit_review` tool schema written to a temp JSON file.
 - **Direct Messages API** (`reva/claude_client.py`) — used for the structured/fast paths: Odoo ticket analysis and inline-comment reply answers.
 
-> **Doc status:** the design specs under `docs/superpowers/` and the code are authoritative. The numbered design docs in `doc/` describe the *original* Messages-API-only design and are kept as history — don't treat them as current. `HANDOFF.md` is the current work handoff / resume point.
+> **Doc status:** this README, the per-directory `README.md` files, the guides under `docs/`, and the code are authoritative. `HANDOFF.md` is the current work handoff / resume point.
 
 ## What's here
 
@@ -28,8 +28,7 @@ Each directory has its own `README.md` explaining how it works and why.
 ├── nginx/                Reverse proxy (TLS, rate limiting) for production
 ├── scripts/              deploy.sh, setup-letsencrypt.sh, fake-webhook.py
 ├── secrets/              GitHub App private key (gitignored, not committed)
-├── docs/                 Current design specs & plans (docs/superpowers/)
-├── doc/                  Legacy numbered design docs (original Messages-API design)
+├── docs/                 Setup & operations guides + design specs (docs/superpowers/)
 ├── docker-compose.yml    Local development stack
 └── .env                  Environment secrets (copy from .env.example)
 ```
@@ -40,7 +39,7 @@ Each directory has its own `README.md` explaining how it works and why.
 |---|---|
 | Webhook + Internal API | Python / FastAPI |
 | Job queue | Redis + RQ |
-| PR review / audit engine | Headless **Claude Code CLI** against a local repo clone (Sonnet 4.6 default, Opus for deep) |
+| PR review / audit engine | Headless **Claude Code CLI** against a local repo clone (Sonnet 4.6 default, **Opus 4.8** for deep + audits; env-configurable) |
 | Ticket analysis / comment replies | Claude **Messages API** (`reva/claude_client.py`) |
 | Database | PostgreSQL 16 |
 | Dashboard | Go / Bubble Tea TUI (the Vue web frontend is retired) |
@@ -83,8 +82,9 @@ Required **webhook events**:
 | Automatic | Push to an open PR (`opened`, `synchronize`, `reopened`, `ready_for_review`) | `REVA_DEFAULT_REVIEW_MODE` (default `diff`), Sonnet |
 | Manual (diff) | Comment `/review` | diff review (custom_addons only), Sonnet |
 | Manual (diff, all paths) | Comment `/review-all` | diff review of **every** changed file, not just custom_addons, Sonnet |
-| Manual (full) | Comment `/full-review` | full repo-aware review, Sonnet |
-| Manual (deep) | Comment `/deep-review` | full repo-aware review, **Opus** |
+| Manual (full) | Comment `/full-review` | full repo-aware review, Sonnet (+ CodeGraph if enabled) |
+| Manual (deep) | Comment `/deep-review` | full repo-aware review, **Opus 4.8** (+ CodeGraph if enabled) |
+| Repository audit | TUI Repos tab `a`, or `POST /api/v1/repos/{id}/audit` | whole-repo audit on the default branch, **Opus 4.8** — see [Repository audits](#repository-audits) |
 | Requeue failed | Press `e` in the TUI Failures tab | re-runs the original mode |
 
 Automatic triggers have a 10-minute debounce so rapid pushes don't waste API calls. Comment triggers are immediate (no debounce).
@@ -113,6 +113,26 @@ Size limits (configurable per repo via `.claude-review.yml`):
 |---|---|
 | Max diff lines | 2 500 |
 | Max diff tokens | 60 000 |
+
+## Repository audits
+
+A repository audit reviews the **whole repo on the default branch** (not a diff) using the deep model (**Opus 4.8**) and, when enabled, the CodeGraph index (below).
+
+Trigger one from the TUI **Repos** tab (press `a` on a repo) or the API:
+
+```bash
+curl -X POST https://<host>/api/v1/repos/<repository_id>/audit
+```
+
+Every finding is stored in the `audit_findings` table. **Major** and **critical** findings are additionally opened as GitHub issues — titled `[REVA audit] …` and labelled `reva-audit` (REVA creates the label per repo). Re-runs are deduplicated: a finding whose issue is already open is skipped. Lower-severity findings are stored but not turned into issues.
+
+Read results with `GET /api/v1/audit-findings` (filters: `severity`, `repo`, `limit`) or the TUI **Audits** tab (key `8`).
+
+> Audits need the GitHub App **Issues: Read & write** permission (for the issues + label). Issue creation is best-effort: if it fails (e.g. permission not yet granted), the audit still completes and findings stay available via the API/TUI.
+
+## CodeGraph (optional)
+
+With `REVA_CODEGRAPH_ENABLED=true`, the worker indexes the cloned repo using the `codegraph` binary and exposes a read-only code-graph MCP server (`mcp__codegraph__*`) to the **repo-aware** skills only — full/deep PR reviews and repo audits. Diff/delta reviews don't use it. It is fail-silent: any indexing problem logs a warning (`codegraph_index_skipped` / `_failed`) and the review runs without the graph; success logs `codegraph_index_ready`. Off by default.
 
 ## Weekly report
 
@@ -153,11 +173,12 @@ REVA_API_URL=http://localhost:8080/api/v1 REVA_API_KEY=<key> go run .
 | Reviews | `2` | All reviews — filter `/`, cycle status `s`, clear filter `c`, requeue `e`, open PR `o` |
 | Findings | `3` | All findings — filter by severity: `a` all · `c` critical · `m` major · `n` minor · `i` info |
 | Failures | `4` | Failed / stale reviews — requeue with `e` · badge shows count |
-| Repos | `5` | Registered repos — open on GitHub with `o` |
+| Repos | `5` | Registered repos — trigger an audit with `a`, open on GitHub with `o` |
 | Pending | `6` | Reviews waiting in the debounce queue · badge shows count |
 | Tickets | `7` | Odoo ticket analyses — requeue `e`, open in Odoo `o` |
+| Audits | `8` | Repo-audit findings — severity filter `a/c/m/n/i`, shows the GitHub issue # |
 
-Global keys: `1–7` switch tabs · `r` refresh · `q` quit.
+Global keys: `1–8` switch tabs · `r` refresh · `q` quit.
 
 ## Error notifications
 
@@ -188,7 +209,7 @@ Notifications fire on `PermanentError` and unexpected exceptions. Transient erro
 |---|---|---|
 | HTTP 401 | GitHub App authentication failed | Key revoked — download new PEM from App settings |
 | HTTP 403 (rate limit) | GitHub rate limit hit | Auto-retried |
-| HTTP 403 (forbidden) | Permission denied | App needs `contents: read`, `pull_requests: write`, `checks: write` |
+| HTTP 403 (forbidden) | Permission denied | App needs `contents: read`, `pull_requests: write`, `checks: write`, `issues: write` |
 | HTTP 404 | Resource not found | PR or repo may have been deleted |
 | HTTP 422 | Validation error | Duplicate review or invalid inline comment position |
 | HTTP 5xx | GitHub server error | Retries exhausted — check githubstatus.com |
@@ -216,7 +237,11 @@ Notifications fire on `PermanentError` and unexpected exceptions. Transient erro
 | `REVA_REQUIRE_API_KEY` | — | `false` | When `true`, the API refuses to start unless `REVA_API_KEY` is set (prod compose sets this) |
 | `GOOGLE_CHAT_WEBHOOK_URL` | — | _(off)_ | Incoming webhook URL for error notifications and weekly report |
 | `REVA_DEBOUNCE_SECONDS` | — | `600` | Debounce window in seconds |
-| `REVA_DEFAULT_REVIEW_MODE` | — | `diff` | `diff` or `full` |
+| `REVA_DEFAULT_REVIEW_MODE` | — | `diff` | Auto-review mode: `diff`, `diff-all`, `full`, or `deep` |
+| `REVA_DEFAULT_MODEL` | — | `claude-sonnet-4-6` | Model for diff/full reviews, ticket analysis, comment replies |
+| `REVA_DEEP_MODEL` | — | `claude-opus-4-8` | Model for `/deep-review` and all repo audits |
+| `REVA_CODEGRAPH_ENABLED` | — | `false` | Expose a pre-indexed CodeGraph (MCP) to repo-aware reviews + audits |
+| `REVA_CODEGRAPH_INDEX_TIMEOUT` | — | `180` | Seconds bounding the CodeGraph index step |
 | `REVA_REPO_CACHE_DIR` | — | `/repos` | Root path where the worker clones repos for the headless CLI |
 | `REVA_REPO_CACHE_TTL_DAYS` | — | `30` | Days before an unused cloned repo is pruned |
 | `REVA_DAILY_BUDGET_USD` | — | _(off)_ | Rolling 24-hour spend cap; reviews are declined (not run) once trailing spend reaches it. The check is serialized (Postgres advisory lock); residual overshoot is bounded by concurrent workers (≤ one in-flight review each) |
@@ -246,10 +271,10 @@ Each Python service has its own venv (all install the shared `reva` package as e
 
 ```bash
 cd worker && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/        # worker: 312
+.venv/bin/python -m pytest tests/        # worker: 336
 
 cd ../api && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/        # api: 94
+.venv/bin/python -m pytest tests/        # api: 98
 
 cd ../scheduler && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest tests/        # scheduler: 27

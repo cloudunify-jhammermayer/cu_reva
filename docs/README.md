@@ -1,8 +1,10 @@
-# docs/ — current design specs & plans
+# docs/ — guides, design specs & plans
 
-The **authoritative** design record for REVA as it actually works today
-(unlike the legacy numbered docs in [`../doc`](../doc)). Written with the
-Superpowers brainstorming → spec → plan workflow.
+The **authoritative** docs for REVA as it actually works today. Setup and
+operations guides live here directly (`setup-local.md`, `setup-production.md`,
+`egress-lockdown.md`, `security-scanning-setup.md`, `ticket-analysis.md`,
+`odoo-module.md`). Design specs and plans live under `docs/superpowers/`,
+written with the brainstorming → spec → plan workflow.
 
 ```
 docs/superpowers/
@@ -20,9 +22,8 @@ docs/superpowers/
 | `specs/2026-05-22-follow-up-check-design.md` | Inline-comment reply follow-ups. |
 | `plans/*` | The matching implementation plans (e.g. headless-claude, incremental-review, security-hardening). |
 
-## Why this lives apart from `doc/`
+## Source of truth
 
-`doc/` froze at the original Messages-API design and is kept only as history.
-New design work lands here as a spec + plan, and module behaviour is documented
-in each module's `README.md`. When code and a numbered `doc/` file disagree, the
-code (and these specs / the READMEs) win.
+New design work lands here as a spec + plan; module behaviour is documented in
+each module's `README.md`. When an older spec and the code disagree, the code
+(and the READMEs) win.

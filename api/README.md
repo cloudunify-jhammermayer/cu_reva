@@ -26,7 +26,7 @@ comment so the developer gets instant feedback while the review is queued.
 | `app/pagination.py` | `clamp_limit` / `clamp_offset` — bound list-endpoint paging so a huge `offset` can't trigger a deep-offset table scan. |
 | `app/routes/webhooks.py` | Signature check → record event → dispatch. Blocking DB work runs in the threadpool so it never stalls the event loop. Idempotency is keyed on a `processed` flag set only after all downstream writes commit, so a mid-handling failure leaves the delivery reprocessable on GitHub's retry instead of silently dropped. PR pushes upsert a debounced `pending_review`; `/review` & `/deep-review` comments trigger immediately (gated to OWNER/MEMBER/COLLABORATOR, bots skipped); inline-comment replies enqueue `run_comment_reply`. |
 | `app/routes/health.py` | `GET /health` — checks Postgres **and** the Redis broker; returns `503` (`{"status":"degraded"}`) if either is down so orchestration/the TUI see it. |
-| `app/routes/v1/*` | One router per resource: metrics, reviews, findings, failures, repos, pending, ticket_analyses, admin. Gated by `require_api_key` + the rate limiter; list endpoints clamp `limit`/`offset`. |
+| `app/routes/v1/*` | One router per resource: metrics, reviews, findings, failures, repos, pending, ticket_analyses, audits, admin. Gated by `require_api_key` + the rate limiter; list endpoints clamp `limit`/`offset`. |
 | `app/queries/*` | Read-side SQL (kept out of the route handlers). |
 | `app/schemas/*` | Pydantic response models. |
 
@@ -40,6 +40,22 @@ dependency reject requests with `503` — it never serves `/api/v1` unauthentica
 The key is only optional in explicit local-dev mode (`REVA_REQUIRE_API_KEY`
 unset/false and no key). `/webhooks/github` is authenticated separately by the
 GitHub HMAC signature.
+
+## Audit endpoints
+
+- **`POST /api/v1/repos/{repository_id}/audit`** — enqueue a full repository
+  audit. Returns `202` with `{"job_id": "...", "repository_id": N}`. The audit
+  runs the whole repo on the deep model (Opus 4.8) against the default branch,
+  persists findings, and opens GitHub issues for major/critical findings.
+- **`GET /api/v1/audit-findings`** — list audit findings across repos
+  (newest/most-severe first). Query params: `severity` (comma-separated, e.g.
+  `critical,major`), `repo` (full name like `owner/name`), `limit` (default
+  `100`, max `500`). Response: `{"items": [...], "total": N}` where each item
+  has `id`, `audit_run_id`, `repo_full_name`, `severity`, `category`, `title`,
+  `confidence`, `file_path`, `line_start`, `github_issue_number`, `created_at`.
+
+Both live under the `/api/v1` router, so they share its Bearer auth
+(`REVA_API_KEY`) and rate limiting.
 
 ## Tests
 
