@@ -122,6 +122,18 @@ class Reviewer:
         pr_basic = self.repos.get_pr_basic(params.pull_request_id)
         pr_number = pr_basic["pr_number"]
 
+        # Context-bound logger so every decision below says which PR/mode it's
+        # about — the reviewer used to decline/skip silently (unclear why a PR
+        # wasn't reviewed); now each branch logs its reason.
+        log = logger.bind(
+            owner=owner, repo=name, pr=pr_number,
+            mode=params.review_mode, sha=params.head_sha[:8],
+        )
+
+        def declined(reason: str) -> ReviewResult:
+            log.info("review_declined", reason=reason)
+            return _decline(reason)
+
         # 3. Installation token.
         token = self.github.get_installation_token(params.installation_id)
 
@@ -152,6 +164,8 @@ class Reviewer:
             )
             diff = filter_diff(raw_diff, include_prefixes=review_prefixes)
             if not diff.strip():
+                log.info("review_skipped", reason="no reviewable changes since last review",
+                         delta_base=last_review["head_sha"][:8])
                 return ReviewResult(
                     status="stale",
                     summary="No reviewable changes since last review.",
@@ -182,11 +196,11 @@ class Reviewer:
         if not diff.strip():
             if review_prefixes:
                 prefixes = ", ".join(f"`{p}`" for p in review_prefixes)
-                return _decline(
+                return declined(
                     f"No reviewable files found. Only changes under {prefixes} "
                     f"are reviewed (excluding {', '.join(sorted(DEFAULT_EXCLUDE_EXTENSIONS))})."
                 )
-            return _decline(
+            return declined(
                 f"No reviewable files found (excluding "
                 f"{', '.join(sorted(DEFAULT_EXCLUDE_EXTENSIONS))})."
             )
@@ -210,12 +224,12 @@ class Reviewer:
         diff_lines = count_diff_lines(diff)
         diff_tokens = estimate_diff_tokens(diff)
         if diff_lines > max_lines:
-            return _decline(
+            return declined(
                 f"Diff too large ({diff_lines} lines > {max_lines} max). "
                 f"Please split this PR into smaller, focused changes."
             )
         if diff_tokens > max_tokens:
-            return _decline(
+            return declined(
                 f"Diff exceeds the token budget ({diff_tokens} tokens > "
                 f"{max_tokens} max). Please split this PR."
             )
@@ -224,19 +238,19 @@ class Reviewer:
         if repo_config.skip_paths:
             diff = filter_diff_by_paths(diff, repo_config.skip_paths)
             if not diff.strip():
-                return _decline(
+                return declined(
                     "All changed files matched skip_paths; nothing reviewable remains."
                 )
             diff_lines = count_diff_lines(diff)
             diff_tokens = estimate_diff_tokens(diff)
             if diff_lines > max_lines:
-                return _decline(
+                return declined(
                     f"Diff still too large after skip_paths filtering "
                     f"({diff_lines} lines > {max_lines} max). "
                     f"Add more patterns to skip_paths or split the PR."
                 )
             if diff_tokens > max_tokens:
-                return _decline(
+                return declined(
                     f"Diff still too large after skip_paths filtering "
                     f"({diff_tokens} tokens > {max_tokens} max). "
                     f"Add more patterns to skip_paths or split the PR."
@@ -253,6 +267,15 @@ class Reviewer:
             "base_branch": pr_basic["base_branch"],
             "head_branch": pr_basic["head_branch"],
         }
+
+        # What REVA is about to do — the paid call. Makes "why did this cost /
+        # take so long" answerable from the logs (skill, model, size, delta).
+        log.info(
+            "review_executing", skill=skill, model=model,
+            diff_lines=diff_lines, changed_files=len(changed_files),
+            delta_base=delta_base_sha[:8] if delta_base_sha else None,
+            odoo=repo_config.odoo,
+        )
 
         # 11. Ensure repo is cloned/updated, then call Claude Code. The lock
         # spans both so a concurrent job can't checkout a different SHA into the

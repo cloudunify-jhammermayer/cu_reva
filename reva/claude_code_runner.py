@@ -277,6 +277,13 @@ class ClaudeCodeRunner:
                 timeout=SUBPROCESS_TIMEOUT,
             )
             if proc.returncode != 0:
+                # Log what the paid CLI call did before raising, so a failed
+                # review's cause (exit code + stderr) is visible in the logs.
+                logger.warning(
+                    "claude_cli_failed", skill=skill,
+                    returncode=proc.returncode,
+                    stderr=(proc.stderr or proc.stdout or "")[:300],
+                )
                 raise _exit_to_error(proc.returncode, proc.stderr or proc.stdout)
 
             try:

@@ -655,3 +655,18 @@ def test_diff_under_2500_line_cap_is_reviewed():
     reviewer, *_ = _make_reviewer(github=github, runner=runner)
     result = reviewer.execute(_params())
     assert result.status == "completed"
+
+
+def test_decline_is_logged_with_reason():
+    """Observability: a decline must emit a structured log with the reason, so
+    the logs explain why a PR wasn't reviewed (not just the runner's status)."""
+    import structlog
+    diff = "\n".join(f"+line {i}" for i in range(150))
+    github = FakeGitHub(diff=diff, file_contents={".claude-review.yml": "max_diff_lines: 100\n"})
+    reviewer, *_ = _make_reviewer(github=github)
+    with structlog.testing.capture_logs() as logs:
+        result = reviewer.execute(_params())
+    assert result.status == "declined"
+    declined = [e for e in logs if e.get("event") == "review_declined"]
+    assert declined, "decline was not logged"
+    assert "100" in declined[0]["reason"]
