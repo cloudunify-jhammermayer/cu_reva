@@ -11,7 +11,8 @@ Each item: **what / why it matters / approach / touches / test / size.**
 
 ## P0 — fix before trusting it day-to-day
 
-### P0-1 · Comment commands on unknown PRs
+### P0-1 · Comment commands on unknown PRs — ✅ already done (verified 2026-06-05)
+- **Status:** already implemented — `_handle_issue_comment` does `lookup_pull_request` → on miss `_fetch_and_upsert_pr` (via `github.get_pull_request` + `upsert_pull_request`) → proceeds. Covered by a "PR predates the installation" test in `test_webhooks.py`. No work needed.
 - **What:** `/review`, `/review-all`, `/full-review`, `/deep-review` only act on PRs REVA already has a row for. A PR opened before the app was installed logs `comment_trigger_pr_not_found` and is silently ignored.
 - **Why:** high everyday friction — the most common "why did nothing happen?" report.
 - **Approach:** in `_handle_issue_comment`, on a DB miss fetch the PR from the GitHub API (handler already has a `github` client + installation id), upsert it (`writers.upsert_pull_request`), then proceed down the normal enqueue path. Reuse the same association/auth gate as a known PR.
@@ -19,7 +20,7 @@ Each item: **what / why it matters / approach / touches / test / size.**
 - **Test:** webhook test — comment command on an unknown PR → fetch+upsert + `pending_review_upserted` (mock the GitHub fetch). Keep the existing "not found → ignored" test only for the genuine 404 case.
 - **Size:** S–M.
 
-### P0-2 · Push silently downgrades a queued deep/full review to diff (CORR-7)
+### P0-2 · Push silently downgrades a queued deep/full review to diff (CORR-7) — ✅ done (2026-06-05)
 - **What:** `pending_reviews` is unique on `(repository_id, pr_number)`. If `/deep-review` is queued and a push (`synchronize`, default `diff`) lands during the debounce window, the upsert overwrites `review_mode` → the deep review silently becomes a diff review.
 - **Why:** users explicitly ask for deep and silently get diff; erodes trust.
 - **Approach:** on upsert, don't downgrade an unconsumed pending row's mode — keep the higher-intent mode (precedence `deep > full > diff-all > diff`), or only overwrite `head_sha`/`scheduled_at` while preserving the stronger mode. Decide precedence explicitly.

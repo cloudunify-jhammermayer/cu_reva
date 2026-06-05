@@ -458,6 +458,11 @@ def upsert_pull_request(
         return pr.id
 
 
+# Review-mode strength, low → high. A queued review is never downgraded by an
+# auto event (CORR-7); see upsert_pending_review.
+_MODE_PRECEDENCE = {"diff": 0, "diff-all": 1, "full": 2, "deep": 3}
+
+
 @_retry_on_conflict
 def upsert_pending_review(
     db: Database,
@@ -500,11 +505,19 @@ def upsert_pending_review(
             return row.id
         existing.head_sha = head_sha
         existing.installation_id = installation_id
-        existing.trigger_event = trigger_event
-        existing.review_mode = review_mode
         existing.scheduled_at = scheduled_at
         existing.consumed = False
         existing.updated_at = datetime.now(timezone.utc)
+        # CORR-7: don't let an auto event (a push/synchronize, default `diff`)
+        # silently downgrade a stronger queued review. An explicit comment
+        # command is authoritative (the user just asked); otherwise keep the
+        # higher-intent mode. The new head_sha/schedule above still apply, so the
+        # stronger review just runs against the latest commit.
+        if trigger_event == "comment" or _MODE_PRECEDENCE.get(
+            review_mode, 0
+        ) >= _MODE_PRECEDENCE.get(existing.review_mode, 0):
+            existing.review_mode = review_mode
+            existing.trigger_event = trigger_event
         return existing.id
 
 

@@ -361,6 +361,53 @@ def test_upsert_pull_request_updates_head_sha(db, seeded):
     assert new_id == seeded["pull_request_id"]
 
 
+def test_upsert_pending_review_push_does_not_downgrade_queued_deep(db, seeded):
+    """CORR-7: a synchronize push must not silently downgrade a queued deep/full
+    review to diff — but it should still re-point at the new head SHA."""
+    base = dict(
+        repository_id=seeded["repository_id"],
+        pull_request_id=seeded["pull_request_id"],
+        pr_number=42,
+        installation_id=500,
+    )
+    t1 = datetime.now(timezone.utc)
+    pid = writers.upsert_pending_review(
+        db, head_sha="aaa", scheduled_at=t1,
+        trigger_event="comment", review_mode="deep", **base,
+    )
+    t2 = t1 + timedelta(minutes=5)
+    writers.upsert_pending_review(
+        db, head_sha="bbb", scheduled_at=t2,
+        trigger_event="synchronize", review_mode="diff", **base,
+    )
+    with db.session() as s:
+        row = s.get(PendingReview, pid)
+        assert row.review_mode == "deep"   # not downgraded by the push
+        assert row.head_sha == "bbb"        # but the latest commit is reviewed
+        assert row.scheduled_at.replace(tzinfo=None) == t2.replace(tzinfo=None)
+
+
+def test_upsert_pending_review_comment_sets_mode(db, seeded):
+    """An explicit comment command sets the mode (e.g. upgrade diff -> deep)."""
+    base = dict(
+        repository_id=seeded["repository_id"],
+        pull_request_id=seeded["pull_request_id"],
+        pr_number=42,
+        installation_id=500,
+    )
+    t = datetime.now(timezone.utc)
+    pid = writers.upsert_pending_review(
+        db, head_sha="aaa", scheduled_at=t,
+        trigger_event="synchronize", review_mode="diff", **base,
+    )
+    writers.upsert_pending_review(
+        db, head_sha="aaa", scheduled_at=t,
+        trigger_event="comment", review_mode="deep", **base,
+    )
+    with db.session() as s:
+        assert s.get(PendingReview, pid).review_mode == "deep"
+
+
 def test_upsert_pending_review_overwrites_scheduled_at(db, seeded):
     t1 = datetime.now(timezone.utc)
     pr_args = dict(
