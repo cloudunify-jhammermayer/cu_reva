@@ -653,6 +653,32 @@ def test_verify_and_resolve_calls_resolve_for_fixed_finding():
     ctx.github.resolve_review_thread.assert_called_once_with("tok", "THREAD_NODE_1")
 
 
+def test_backfill_pairs_same_line_findings_to_distinct_comments():
+    """POMBERGER #14: N findings at the same (path,line) → N comment threads.
+    Each finding must get its OWN comment id (paired in order), or the sibling
+    threads are orphaned and a delta re-review can never resolve them."""
+    from worker.runner import _backfill_comment_ids
+
+    ctx = MagicMock()
+    # Returned unsorted on purpose; all three at line 19 of the same file.
+    ctx.github.get_review_comments.return_value = [
+        {"id": 30, "path": "a.py", "line": 19},
+        {"id": 10, "path": "a.py", "line": 19},
+        {"id": 20, "path": "a.py", "line": 19},
+    ]
+    with patch("worker.runner.writers") as mock_writers:
+        mock_writers.get_findings_for_run.return_value = [
+            {"id": 27, "file_path": "a.py", "line_start": 19, "line_end": 19},
+            {"id": 28, "file_path": "a.py", "line_start": 19, "line_end": 19},
+            {"id": 29, "file_path": "a.py", "line_start": 19, "line_end": 19},
+        ]
+        _backfill_comment_ids(ctx, 8, "tok", "acme", "widgets", 14, 999)
+        id_map = mock_writers.attach_finding_comment_ids.call_args.args[1]
+
+    # findings (27,28,29) paired in id-order with comments (10,20,30) — all distinct
+    assert id_map == {27: 10, 28: 20, 29: 30}
+
+
 def test_verify_and_resolve_logs_summary():
     """A summary log fires so a delta re-review's resolution outcome is visible."""
     import structlog

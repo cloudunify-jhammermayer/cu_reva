@@ -589,17 +589,22 @@ def _backfill_comment_ids(
     so reply webhooks can be matched back to findings later."""
     try:
         gh_comments = ctx.github.get_review_comments(token, owner, name, pr_number, review_id)
-        # Build lookup: (path, line_as_sent) → github_comment_id
-        comment_by_loc: dict[tuple[str, int], int] = {}
-        for c in gh_comments:
+        # Multiple findings can land on the SAME (path, line) → multiple comment
+        # threads at one line. A (path,line)→id map collapses them (last wins), so
+        # the sibling threads are orphaned and a re-review can never resolve them
+        # (POMBERGER #14). Pair them POSITIONALLY instead: REVA posts inline
+        # comments in finding order and GitHub assigns ids in that order, so the
+        # i-th finding at a location maps to the i-th comment there. Sort both by
+        # id to recover that order.
+        comments_by_loc: dict[tuple[str, int], list[int]] = {}
+        for c in sorted(gh_comments, key=lambda c: c.get("id", 0)):
             path = c.get("path")
             line = c.get("line")
             if path and line:
-                comment_by_loc[(path, line)] = c["id"]
+                comments_by_loc.setdefault((path, line), []).append(c["id"])
 
-        db_findings = writers.get_findings_for_run(ctx.db, run_id)
-        id_map: dict[int, int] = {}
-        for f in db_findings:
+        findings_by_loc: dict[tuple[str, int], list[int]] = {}
+        for f in sorted(writers.get_findings_for_run(ctx.db, run_id), key=lambda f: f["id"]):
             if not f["file_path"] or not f["line_start"]:
                 continue
             # GitHub stores `line` as line_end for multi-line, line_start for single-line.
@@ -608,9 +613,12 @@ def _backfill_comment_ids(
                 if f["line_end"] and f["line_end"] > f["line_start"]
                 else f["line_start"]
             )
-            key = (f["file_path"], github_line)
-            if key in comment_by_loc:
-                id_map[f["id"]] = comment_by_loc[key]
+            findings_by_loc.setdefault((f["file_path"], github_line), []).append(f["id"])
+
+        id_map: dict[int, int] = {}
+        for loc, finding_ids in findings_by_loc.items():
+            for fid, cid in zip(finding_ids, comments_by_loc.get(loc, [])):
+                id_map[fid] = cid
 
         if id_map:
             writers.attach_finding_comment_ids(ctx.db, id_map)
@@ -620,7 +628,8 @@ def _backfill_comment_ids(
             # delta re-review can't resolve their threads. Make that visible.
             logger.info(
                 "finding_comment_ids_unmatched", run_id=run_id,
-                comments=len(gh_comments), findings=len(db_findings),
+                comments=len(gh_comments),
+                findings=sum(len(v) for v in findings_by_loc.values()),
             )
     except Exception:
         logger.warning("backfill_comment_ids_failed", exc_info=True)
