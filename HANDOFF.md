@@ -1,6 +1,6 @@
 # REVA — Work Handoff
 
-**Updated:** 2026-06-02. Resume point for the production-readiness work.
+**Updated:** 2026-06-05. Resume point.
 **Replaces** the old slice-by-slice handoff (that described the original
 Messages-API design and is now history in git).
 
@@ -8,7 +8,7 @@ Messages-API design and is now history in git).
 
 ## ⚠️ Read first — resuming on another workstation
 
-Everything below is **merged to `main` and pushed** (origin in sync at `421b51f`).
+Everything below is **merged to `main` and pushed** (origin in sync at `499da2e`).
 There is no longer a `feature/production-readiness` branch. On a new workstation:
 `git clone`/`git pull`, then recreate the per-service venvs (see "Running tests").
 
@@ -40,7 +40,21 @@ Full detail: **`docs/production-readiness-plan.md`** (every item marked ✅).
 | **B1** error tracking (GlitchTip/Sentry) | ⏸️ backlog (parked by decision) |
 | **E1/E2** human repo-overview, feedback/eval capture | ⏸️ out of scope / deferred |
 
-Test counts: **worker 267 · api 75 · scheduler 16**, ruff clean.
+Test counts (at the time of Phase 2): worker 267 · api 75 · scheduler 16.
+
+---
+
+## Recent work (2026-06-03 → 06-05) — on `main`, deployed locally, NOT yet in prod
+
+Test counts now: **worker 339 · api 98 · scheduler 27**, ruff clean, **CI green**.
+
+- **Repo audits — completed.** Findings are persisted (`audit_findings` table) and **major/critical are opened as GitHub issues** (`[REVA audit] …`, auto-created `reva-audit` label, hidden-marker dedup). Read via `GET /api/v1/audit-findings` + the new **TUI Audits tab (`8`)**; trigger from the **Repos tab (`a`)** or the API. Audits run on the **deep model**. Requires GitHub App **Issues: Read & write**.
+- **Comment auto-resolution — fixed.** Backfill used `/pulls/{pr}/reviews/{id}/comments` (returns `line:null`), so `github_comment_id` was never stored and delta re-reviews resolved nothing (Aurium #60). Now uses the PR-level `/pulls/{pr}/comments` endpoint filtered by `pull_request_review_id`. Added `finding_comment_ids_*` / `delta_resolution_*` logs.
+- **Models env-configurable.** Single source `reva/config.py`: `REVA_DEFAULT_MODEL` (`claude-sonnet-4-6`), `REVA_DEEP_MODEL` (**`claude-opus-4-8`**, bumped from 4-7). Wired through both compose files. Audits + `/deep-review` use the deep model.
+- **CodeGraph enabled** on the live worker (`REVA_CODEGRAPH_ENABLED=true`) + a positive `codegraph_index_ready` log. **Still owed (HANDOFF's standing CodeGraph gate): confirm the model actually calls `mcp__codegraph__*` on a real full/deep PR.**
+- **nginx → Cloudflare tunnel.** Plain HTTP on `127.0.0.1:8080`; TLS at the Cloudflare edge; real client IP via `CF-Connecting-IP`. Dropped certbot / Let's Encrypt / `:443` / `setup-letsencrypt.sh`. Added a branded cloud **404**. Prod compose + `docs/setup-production.md` rewritten for the tunnel.
+
+**👉 What's next — see [`docs/next-steps-plan.md`](docs/next-steps-plan.md)** (per-item P0/P1/P2 plans + a pre-deploy live-test checklist). Highest value: **deploy to the server and run the live-test checklist** — the only way to prove the tunnel, CodeGraph-in-use, the resolution cycle, and audits end-to-end. Then the two **P0** bugs: comment commands on unknown PRs, and the deep→diff downgrade (CORR-7).
 
 ---
 
@@ -116,6 +130,9 @@ Until then the workaround is: reopen the PR or push a commit to register it.
 - **B1 error tracking:** backlog. **CD:** handled by odoo.sh. **Backups:** deferred till past testing.
 - **Rejected:** committable suggested-fixes (juniors learn by doing), change "walkthrough" summaries.
 - **Tooling:** keep it lean / few new services; self-host over SaaS; $0 on GitHub Team.
+- **TLS/ingress (2026-06-05):** Cloudflare tunnel — TLS at the edge, nginx plain-HTTP on `127.0.0.1:8080`, no certs/certbot. Over the old Let's Encrypt+`:443` setup.
+- **Deep model (2026-06-05):** `claude-opus-4-8` (from 4-7), env-overridable; **audits always use the deep model**.
+- **Audits (2026-06-05):** **manual-only** (API/TUI trigger); periodic/cron audits deferred — deliberate, revisit if needed.
 
 ---
 
@@ -128,13 +145,13 @@ analytics; Go/Bubble-Tea `tui` reads the internal `/api/v1`.
 
 - **Authoritative docs:** root `README.md`, per-module `*/README.md`,
   `docs/superpowers/specs/`, and the two `docs/production-readiness-plan*.md`.
-  The numbered `doc/00–13` are **legacy** (original Messages-API design).
+  (The legacy numbered `doc/00–13` tree has been removed.)
 - **Shared lib:** `reva/` (types, clients, db, `claude_code_runner.py`, formatters).
 - **Run tests** (per service, Python 3.14, each installs `reva` editable):
   ```bash
-  cd worker && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest tests/   # 267
-  cd ../api && … pytest tests/        # 75
-  cd ../scheduler && … pytest tests/  # 16
+  cd worker && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest tests/   # 339
+  cd ../api && … pytest tests/        # 98
+  cd ../scheduler && … pytest tests/  # 27
   ```
   Lint: `ruff check reva worker/worker api/app scheduler/scheduler`. Go TUI: `cd tui && go test ./...`.
 - **Live-CLI validation pattern:** A1/A2 were verified by running the real `claude`

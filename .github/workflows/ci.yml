@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# Run the (Node-20) marketplace actions on Node 24 now, ahead of GitHub's
+# 2026-06-16 forced cutover, so we catch any incompatibility before it's forced.
+# Eventual proper fix: pin action versions by SHA on their Node-24 releases (INFR-14).
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   lint-python:
     name: ruff + mypy
