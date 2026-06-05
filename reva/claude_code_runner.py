@@ -310,7 +310,7 @@ class ClaudeCodeRunner:
             except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
                 pass
 
-            return ClaudeResponse(
+            resp = ClaudeResponse(
                 model=model or self.default_model,
                 stop_reason="tool_use",
                 tool_use_input=tool_use_input,
@@ -320,6 +320,19 @@ class ClaudeCodeRunner:
                 cache_creation_tokens=int(usage.get("cache_creation_input_tokens", 0)),
                 total_cost_usd=total_cost_usd,
             )
+            # Visibility into prompt caching (Claude Code caches the static prefix
+            # automatically). cache_read >> cache_creation over time = caching is
+            # working; cache_read ~0 means the prefix isn't stable across calls.
+            cached = resp.cache_read_tokens + resp.cache_creation_tokens
+            logger.info(
+                "claude_cli_usage", skill=skill, model=resp.model,
+                input_tokens=resp.input_tokens, output_tokens=resp.output_tokens,
+                cache_read=resp.cache_read_tokens,
+                cache_creation=resp.cache_creation_tokens,
+                cache_hit_pct=(round(100 * resp.cache_read_tokens / cached) if cached else 0),
+                cost_usd=resp.total_cost_usd,
+            )
+            return resp
         finally:
             Path(output_path).unlink(missing_ok=True)
             if mcp_config_path:

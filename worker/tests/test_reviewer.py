@@ -328,11 +328,11 @@ def test_decline_when_all_files_match_skip_paths():
     # Use a diff under custom_addons/ so it passes filter_diff, then gets stripped by skip_paths.
     github = FakeGitHub(
         diff=(
-            "diff --git a/custom_addons/package-lock.json b/custom_addons/package-lock.json\n"
-            "+++ b/custom_addons/package-lock.json\n"
-            "+ lock content\n"
+            "diff --git a/custom_addons/m/data.json b/custom_addons/m/data.json\n"
+            "+++ b/custom_addons/m/data.json\n"
+            "+ data content\n"
         ),
-        files=[{"filename": "custom_addons/package-lock.json"}],
+        files=[{"filename": "custom_addons/m/data.json"}],
         file_contents={".claude-review.yml": "skip_paths:\n  - '*.json'\n"},
     )
     reviewer, *_ = _make_reviewer(github=github)

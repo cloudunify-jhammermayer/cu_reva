@@ -938,6 +938,20 @@ def test_codegraph_init_when_no_index(cg_runner, tmp_path):
     assert cg_calls[0][:2] == ["codegraph", "init"]
 
 
+def test_review_logs_claude_cli_usage(cg_runner, tmp_path):
+    """Every CLI review emits a usage log (input/output/cache tokens) so prompt-
+    cache effectiveness is visible."""
+    import structlog
+
+    repo_path = _repo(tmp_path)
+    with structlog.testing.capture_logs() as logs:
+        with patch("subprocess.run", side_effect=_cg_fake_run()):
+            cg_runner.review(repo_path=repo_path, skill="reva-full-review", params={})
+    usage = [e for e in logs if e["event"] == "claude_cli_usage"]
+    assert usage, "expected a claude_cli_usage log after a review"
+    assert "cache_hit_pct" in usage[0]
+
+
 def test_codegraph_logs_index_ready_on_success(cg_runner, tmp_path):
     """A successful index emits a positive `codegraph_index_ready` log so a run
     that used CodeGraph is observable (the failure paths log warnings; success

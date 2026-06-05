@@ -11,6 +11,11 @@ gauge a change's blast radius. They query a prebuilt index, so they are cheaper
 and more complete than a grep/read sweep. Use Read/Grep for details the graph
 doesn't cover.
 
+**Skip machine-generated and vendored files** — lockfiles (`*.lock`,
+`package-lock.json`, `yarn.lock`, `go.sum`, …), minified assets (`*.min.js`,
+`*.min.css`), source maps, build artifacts, and vendored dependencies. They are
+not human-authored; reviewing them is noise. Review only source the team wrote.
+
 ## Review process
 
 1. Read the diff to understand what changed.

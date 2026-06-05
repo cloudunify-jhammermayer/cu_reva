@@ -12,6 +12,11 @@ trace coupling and blast radius. They query a prebuilt index. Keep using Grep fo
 regex anti-pattern sweeps (e.g. `sudo\(`, `cr\.execute`) — that is what Grep is
 for — and Read to confirm every candidate.
 
+**Skip machine-generated and vendored files** — lockfiles (`*.lock`,
+`package-lock.json`, `yarn.lock`, `go.sum`, …), minified assets (`*.min.js`,
+`*.min.css`), source maps, build artifacts, and vendored dependencies. They are
+not human-authored; auditing them is noise. Focus on source the team wrote.
+
 ## Audit process
 
 1. Use **Glob** to map the module structure: `**/__manifest__.py`

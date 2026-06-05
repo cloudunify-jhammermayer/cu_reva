@@ -184,3 +184,32 @@ def test_parse_diff_hunks_rename_with_edits_maps_new_path():
     )
     hunks = parse_diff_hunks(diff)
     assert [h.file_path for h in hunks] == ["new.py"]
+
+
+def test_filter_diff_drops_generated_noise_under_prefix():
+    """Lockfiles / minified assets are dropped even when under a reviewed prefix."""
+    diff = (
+        "diff --git a/custom_addons/m/models/x.py b/custom_addons/m/models/x.py\n"
+        "--- a/custom_addons/m/models/x.py\n+++ b/custom_addons/m/models/x.py\n@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/custom_addons/m/poetry.lock b/custom_addons/m/poetry.lock\n"
+        "--- a/custom_addons/m/poetry.lock\n+++ b/custom_addons/m/poetry.lock\n@@ -1 +1 @@\n-x\n+y\n"
+        "diff --git a/custom_addons/m/static/app.min.js b/custom_addons/m/static/app.min.js\n"
+        "--- a/custom_addons/m/static/app.min.js\n+++ b/custom_addons/m/static/app.min.js\n@@ -1 +1 @@\n-x\n+y\n"
+    )
+    out = filter_diff(diff)
+    assert "models/x.py" in out
+    assert "poetry.lock" not in out
+    assert "app.min.js" not in out
+
+
+def test_filter_diff_all_paths_still_drops_lockfiles():
+    """diff-all mode (no prefix) still strips universally-generated files."""
+    diff = (
+        "diff --git a/package-lock.json b/package-lock.json\n"
+        "--- a/package-lock.json\n+++ b/package-lock.json\n@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/src/app.js b/src/app.js\n"
+        "--- a/src/app.js\n+++ b/src/app.js\n@@ -1 +1 @@\n-a\n+b\n"
+    )
+    out = filter_diff(diff, include_prefixes=())
+    assert "package-lock.json" not in out
+    assert "src/app.js" in out

@@ -18,6 +18,19 @@ DEFAULT_EXCLUDE_EXTENSIONS: frozenset[str] = frozenset({".xml", ".po", ".pot", "
 # underscore and hyphen spellings of the custom-addons directory are accepted.
 DEFAULT_REVIEW_PREFIXES: tuple[str, ...] = ("custom_addons/", "custom-addons/")
 
+# Machine-generated / vendored files that exist in many repos and are never
+# worth reviewing (matched against the file's basename). Dropped from every diff
+# regardless of prefix — reviewing them is noise and wastes tokens.
+DEFAULT_EXCLUDE_GLOBS: tuple[str, ...] = (
+    "*.lock",                # poetry.lock, Cargo.lock, *.lock, ...
+    "*.min.js", "*.min.css",  # minified assets
+    "*.map",                 # source maps
+    "package-lock.json", "npm-shrinkwrap.json",
+    "yarn.lock", "pnpm-lock.yaml",
+    "go.sum", "composer.lock", "Gemfile.lock", "Pipfile.lock",
+    "*.snap",                # test snapshots
+)
+
 # Matches a hunk header: `@@ -old_start,old_count +new_start,new_count @@`
 # Counts are optional and default to 1.
 _HUNK_RE = re.compile(
@@ -62,12 +75,15 @@ def filter_diff(
     diff: str,
     exclude_extensions: frozenset[str] = DEFAULT_EXCLUDE_EXTENSIONS,
     include_prefixes: tuple[str, ...] = DEFAULT_REVIEW_PREFIXES,
+    exclude_globs: tuple[str, ...] = DEFAULT_EXCLUDE_GLOBS,
 ) -> str:
-    """Keep only per-file sections that pass both filters:
+    """Keep only per-file sections that pass all filters:
 
     - include_prefixes: file path must start with at least one prefix
       (empty tuple = no restriction).
     - exclude_extensions: file extension must not be in this set.
+    - exclude_globs: file basename must not match any glob (lockfiles, minified
+      assets, source maps, etc. — generated noise present in many repos).
 
     Splits on `diff --git` boundaries and reassembles the kept sections.
     """
@@ -84,6 +100,9 @@ def filter_diff(
             if include_prefixes and not any(path.startswith(p) for p in include_prefixes):
                 continue
             if os.path.splitext(path)[1].lower() in exclude_extensions:
+                continue
+            basename = os.path.basename(path)
+            if any(fnmatch.fnmatch(basename, g) for g in exclude_globs):
                 continue
         kept.append(section)
     return "".join(kept)
