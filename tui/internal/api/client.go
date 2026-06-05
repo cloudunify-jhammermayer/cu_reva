@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -134,6 +135,25 @@ func (c *Client) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 
 func (c *Client) TriggerAudit(repoID int) error {
 	return c.post(fmt.Sprintf("/repos/%d/audit", repoID))
+}
+
+func (c *Client) AddRepo(owner, name string) error {
+	body, _ := json.Marshal(map[string]string{"owner": owner, "name": name})
+	req, err := http.NewRequest(http.MethodPost, c.base+"/repos", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.authHeader(req)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("HTTP %d adding %s/%s", resp.StatusCode, owner, name)
+	}
+	return nil
 }
 
 func (c *Client) Requeue(id int) error {

@@ -22,6 +22,8 @@ type Repos struct {
 	width     int
 	height    int
 	statusMsg string
+	adding    bool   // capturing owner/name text input
+	input     string // the add-repo buffer
 }
 
 func newRepos(client api.ClientIface) Repos {
@@ -60,12 +62,50 @@ func (r Repos) update(msg tea.Msg) (Repos, tea.Cmd) {
 			r.statusMsg = styleStatusCompleted.Render("audit queued - findings/issues will appear shortly")
 		}
 
+	case repoAddedMsg:
+		if m.err != nil {
+			r.statusMsg = styleStatusFailed.Render("add failed: " + m.err.Error())
+		} else {
+			r.statusMsg = styleStatusCompleted.Render("added " + m.owner + "/" + m.name)
+			return r, r.load() // refresh so the new repo shows up
+		}
+
 	case tea.KeyMsg:
+		// Text-input mode: capture keys for the owner/name buffer.
+		if r.adding {
+			switch m.Type {
+			case tea.KeyEsc:
+				r.adding, r.input = false, ""
+			case tea.KeyEnter:
+				owner, name, ok := parseOwnerName(r.input)
+				typed := r.input
+				r.adding, r.input = false, ""
+				if !ok {
+					r.statusMsg = styleStatusFailed.Render("expected owner/name, got: " + typed)
+					return r, nil
+				}
+				client := r.client
+				r.statusMsg = styleSubtitle.Render("adding " + owner + "/" + name + " ...")
+				return r, func() tea.Msg {
+					return repoAddedMsg{owner: owner, name: name, err: client.AddRepo(owner, name)}
+				}
+			case tea.KeyBackspace:
+				if len(r.input) > 0 {
+					r.input = r.input[:len(r.input)-1]
+				}
+			case tea.KeyRunes:
+				r.input += string(m.Runes)
+			}
+			return r, nil
+		}
+
 		visibleRows := r.height - 5
 		if visibleRows < 1 {
 			visibleRows = 1
 		}
 		switch m.String() {
+		case "n":
+			r.adding, r.input, r.statusMsg = true, "", ""
 		case "j", "down":
 			r.cursor, r.offset = moveCursor(r.cursor, r.offset, len(r.items), visibleRows, true)
 		case "k", "up":
@@ -196,8 +236,26 @@ func (r Repos) view(w, h int) string {
 	if r.statusMsg != "" {
 		posLine = "  " + r.statusMsg
 	}
+	if r.adding {
+		posLine = "  " + styleTitle.Render(" add repo ") +
+			"  owner/name: " + r.input + "█" +
+			styleSubtitle.Render("    [enter] add   [esc] cancel")
+	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", posLine)
+}
+
+// parseOwnerName splits "owner/name" (trimming spaces, tolerating a leading
+// scheme/host if pasted). Returns ok=false unless both parts are non-empty.
+func parseOwnerName(s string) (owner, name string, ok bool) {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "https://github.com/")
+	s = strings.Trim(s, "/")
+	parts := strings.Split(s, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 func relativeTime(t time.Time) string {

@@ -98,6 +98,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.KeyMsg:
+		// While the Repos tab is capturing text (add-repo), route every key to
+		// it so digits/letters type instead of switching tabs. ctrl+c still quits.
+		if a.active == viewRepos && a.repos.adding && m.String() != "ctrl+c" {
+			var cmd tea.Cmd
+			a.repos, cmd = a.repos.update(msg)
+			return a, cmd
+		}
 		switch m.String() {
 		case "q", "ctrl+c":
 			return a, tea.Quit
@@ -214,6 +221,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case auditTriggeredMsg:
 		a.repos, _ = a.repos.update(msg)
+
+	case repoAddedMsg:
+		var cmd tea.Cmd
+		a.repos, cmd = a.repos.update(msg)
+		return a, cmd
 
 	case pendingLoadedMsg:
 		a.pending, _ = a.pending.update(msg)
@@ -339,7 +351,7 @@ func (a *App) statusBar() string {
 	case viewFailures:
 		hint = "j/k navigate | e=requeue | r=refresh | q quit"
 	case viewRepos:
-		hint = "j/k navigate | a=audit | o=open in browser | r=refresh | q quit"
+		hint = "j/k navigate | n=add repo | a=audit | o=open in browser | r=refresh | q quit"
 	case viewPending:
 		hint = "j/k navigate | r=refresh | q quit"
 	case viewTickets:

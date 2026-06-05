@@ -12,6 +12,7 @@ type ClientIface interface {
 	AuditFindings(severity string, limit int) (*AuditFindingPage, error)
 	Repos() (*RepoPage, error)
 	TriggerAudit(repoID int) error
+	AddRepo(owner, name string) error
 	TicketAnalyses(limit int) (*TicketAnalysisPage, error)
 	RequeueTicket(id int) error
 }

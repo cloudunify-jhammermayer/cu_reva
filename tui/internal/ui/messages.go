@@ -38,6 +38,11 @@ type auditTriggeredMsg struct {
 	id  int
 	err error
 }
+type repoAddedMsg struct {
+	owner string
+	name  string
+	err   error
+}
 type reposLoadedMsg struct {
 	data *api.RepoPage
 	err  error

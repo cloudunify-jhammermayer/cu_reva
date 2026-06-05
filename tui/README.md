@@ -35,8 +35,9 @@ that the key would travel in plaintext.
 | `internal/ui/*.go` | One file per tab (dashboard, reviews, findings, failures, repos, pending, tickets, audits) plus `app.go` (tab routing), `styles.go`, `messages.go`. |
 
 Tabs `1`–`8` (Dashboard, Reviews, Findings, Failures, Repos, Pending, Tickets,
-Audits); global keys `r` refresh, `q` quit. The Repos tab adds `a` to trigger a
-repository audit (POST `/repos/{id}/audit`, with an inline status line) and `o`
+Audits); global keys `r` refresh, `q` quit. The Repos tab adds `n` to register a
+new app-installed repo (type `owner/name` → POST `/repos`), `a` to trigger a
+repository audit (POST `/repos/{id}/audit`, with an inline status line), and `o`
 to open the repo on GitHub. The Audits tab lists repo-audit findings (severity,
 title, repo, file:line, GitHub issue `#NN`) from `GET /audit-findings`, with the
 same severity filters as Findings (`a` all · `c` critical · `m` major · `n`

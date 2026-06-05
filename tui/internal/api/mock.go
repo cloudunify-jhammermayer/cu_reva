@@ -490,6 +490,10 @@ func (m *MockClient) TriggerAudit(repoID int) error {
 	return nil
 }
 
+func (m *MockClient) AddRepo(owner, name string) error {
+	return nil
+}
+
 func (m *MockClient) RequeueTicket(id int) error {
 	return nil
 }

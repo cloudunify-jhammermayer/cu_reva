@@ -173,7 +173,7 @@ REVA_API_URL=http://localhost:8080/api/v1 REVA_API_KEY=<key> go run .
 | Reviews | `2` | All reviews — filter `/`, cycle status `s`, clear filter `c`, requeue `e`, open PR `o` |
 | Findings | `3` | All findings — filter by severity: `a` all · `c` critical · `m` major · `n` minor · `i` info |
 | Failures | `4` | Failed / stale reviews — requeue with `e` · badge shows count |
-| Repos | `5` | Registered repos — trigger an audit with `a`, open on GitHub with `o` |
+| Repos | `5` | Registered repos — add one with `n` (type `owner/name`), trigger an audit with `a`, open on GitHub with `o` |
 | Pending | `6` | Reviews waiting in the debounce queue · badge shows count |
 | Tickets | `7` | Odoo ticket analyses — requeue `e`, open in Odoo `o` |
 | Audits | `8` | Repo-audit findings — severity filter `a/c/m/n/i`, shows the GitHub issue # |
