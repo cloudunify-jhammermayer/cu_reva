@@ -31,7 +31,13 @@ def _audit_finding_marker(owner: str, repo: str, f: Finding) -> str:
     already exists and skip it. Keyed on repo + file + title — the parts that
     identify "the same problem" run to run."""
     key = f"{owner}/{repo}\x00{f.file or ''}\x00{f.title}"
-    return "revaaudit" + hashlib.sha1(key.encode()).hexdigest()[:16]
+    # SHA-1 here is a content-addressed dedup key, NOT a security hash — and the
+    # value must stay stable so existing issues keep matching. usedforsecurity
+    # signals intent; nosemgrep clears the blocking SAST rule.
+    digest = hashlib.sha1(  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
+        key.encode(), usedforsecurity=False
+    ).hexdigest()
+    return "revaaudit" + digest[:16]
 
 
 def _audit_issue_location(f: Finding, owner: str, repo: str, branch: str) -> str:
