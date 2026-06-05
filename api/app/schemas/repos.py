@@ -25,3 +25,8 @@ class RepoSummary(BaseModel):
 class RepoPage(BaseModel):
     items: list[RepoSummary]
     total: int
+
+
+class AddRepoRequest(BaseModel):
+    owner: str
+    name: str

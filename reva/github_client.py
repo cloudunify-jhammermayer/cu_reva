@@ -111,6 +111,18 @@ class GitHubClient:
 
     # --- Reads --------------------------------------------------------------
 
+    def get_repo_installation_id(self, owner: str, repo: str) -> int:
+        """Installation id for a repo the app is installed on (app-JWT auth).
+
+        Lets REVA register a repo on demand (for audits) without waiting for a
+        webhook. 404 → the app isn't installed on that repo (PermanentError)."""
+        response = self._get(self._make_jwt(), f"/repos/{owner}/{repo}/installation")
+        return response.json()["id"]
+
+    def get_repo(self, token: str, owner: str, repo: str) -> dict:
+        """Repository metadata: id, full_name, default_branch, owner, ..."""
+        return self._get(token, f"/repos/{owner}/{repo}").json()
+
     def get_pull_request(self, token: str, owner: str, repo: str, pr_number: int) -> dict:
         response = self._get(token, f"/repos/{owner}/{repo}/pulls/{pr_number}")
         return response.json()

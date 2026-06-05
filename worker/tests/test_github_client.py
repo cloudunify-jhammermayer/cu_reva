@@ -454,6 +454,38 @@ def test_create_pr_review_posts_comments(rsa_key_pair):
     assert captured["body"]["comments"][0]["line"] == 10
 
 
+def test_get_repo_installation_id_uses_app_jwt(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        captured["path"] = req.url.path
+        captured["auth"] = req.headers.get("authorization", "")
+        return httpx.Response(200, json={"id": 7788, "app_id": 12345})
+
+    client = _make_client(handler, private_pem)
+    inst = client.get_repo_installation_id("acme", "widgets")
+    assert inst == 7788
+    assert captured["path"] == "/repos/acme/widgets/installation"
+    # App-JWT auth (a signed JWT), not an installation token.
+    assert captured["auth"].startswith("Bearer ")
+
+
+def test_get_repo_returns_metadata(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(req):
+        assert req.url.path == "/repos/acme/widgets"
+        return httpx.Response(200, json={
+            "id": 555, "full_name": "acme/widgets", "name": "widgets",
+            "owner": {"login": "acme"}, "default_branch": "main",
+        })
+
+    client = _make_client(handler, private_pem)
+    meta = client.get_repo("tok", "acme", "widgets")
+    assert meta["id"] == 555 and meta["default_branch"] == "main"
+
+
 def test_create_issue_opens_issue(rsa_key_pair):
     private_pem, _ = rsa_key_pair
     captured: dict = {}

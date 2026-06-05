@@ -8,10 +8,11 @@ from sqlalchemy.pool import StaticPool
 
 from unittest.mock import MagicMock
 
-from app.dependencies import get_db, get_queue, get_settings
+from app.dependencies import get_db, get_github_client, get_queue, get_settings
 from app.main import app
 from app.settings import Settings
 from reva.db import Base, Database, create_engine_from_url, writers
+from reva.errors import PermanentError
 from reva.types import JobParams, ReviewResult
 
 
@@ -125,4 +126,57 @@ def test_trigger_audit_returns_404_for_unknown_repo(client_and_db):
     client, _ = client_and_db
     app.dependency_overrides[get_queue] = lambda: MagicMock()
     resp = client.post("/api/v1/repos/999/audit")
+    assert resp.status_code == 404
+
+
+# --- POST /repos (manual registration of an app-installed repo) ---------------
+
+class _FakeGitHub:
+    def __init__(self, installed=True):
+        self.installed = installed
+
+    def get_repo_installation_id(self, owner, repo):
+        if not self.installed:
+            raise PermanentError("404 — app not installed")
+        return 9090
+
+    def get_installation_token(self, installation_id):
+        return "ghs_tok"
+
+    def get_repo(self, token, owner, repo):
+        return {
+            "id": 555, "full_name": f"{owner}/{repo}", "name": repo,
+            "owner": {"login": owner}, "default_branch": "develop",
+        }
+
+
+def test_add_repo_registers_and_lists(client_and_db):
+    client, _ = client_and_db
+    app.dependency_overrides[get_github_client] = lambda: _FakeGitHub(installed=True)
+
+    resp = client.post("/api/v1/repos", json={"owner": "acme", "name": "widgets"})
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["full_name"] == "acme/widgets"
+    assert data["installation_id"] == 9090
+    assert data["default_branch"] == "develop"
+
+    rid = data["repository_id"]
+    listing = client.get("/api/v1/repos").json()
+    assert any(it["id"] == rid and it["full_name"] == "acme/widgets" for it in listing["items"])
+
+
+def test_add_repo_is_idempotent(client_and_db):
+    client, _ = client_and_db
+    app.dependency_overrides[get_github_client] = lambda: _FakeGitHub(installed=True)
+    first = client.post("/api/v1/repos", json={"owner": "acme", "name": "widgets"}).json()
+    second = client.post("/api/v1/repos", json={"owner": "acme", "name": "widgets"}).json()
+    assert first["repository_id"] == second["repository_id"]
+    assert client.get("/api/v1/repos").json()["total"] == 1
+
+
+def test_add_repo_404_when_app_not_installed(client_and_db):
+    client, _ = client_and_db
+    app.dependency_overrides[get_github_client] = lambda: _FakeGitHub(installed=False)
+    resp = client.post("/api/v1/repos", json={"owner": "acme", "name": "ghost"})
     assert resp.status_code == 404
