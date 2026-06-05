@@ -125,6 +125,40 @@ def test_developers_shape(client_and_db):
     assert d["trend"] in {"improving", "stable", "worsening"}
 
 
+def test_developers_review_count_not_inflated_by_findings(client_and_db):
+    """CORR-3: review_count counts reviews, not the ReviewFinding join fan-out."""
+    from reva.types import Finding
+
+    client, db = client_and_db
+    repo_id = writers.upsert_repository(
+        db, github_repository_id=1001, owner="acme", name="widgets",
+        default_branch="main", installation_id=99,
+    )
+    pr_id = writers.upsert_pull_request(
+        db, repository_id=repo_id, github_pr_id=5042, pr_number=42, title="PR",
+        author_login="alice", base_branch="main", head_branch="feat",
+        head_sha="abc", state="open", draft=False,
+    )
+    params = JobParams(
+        repository_id=repo_id, pull_request_id=pr_id, head_sha="abc",
+        installation_id=99, review_mode="diff", trigger_event="opened",
+    )
+    writers.record_review_started(db, params)
+    writers.record_review_completed(db, params, ReviewResult(
+        status="completed", summary="ok", risk_level="high",
+        findings=[
+            Finding(severity="critical", category="security", title="a", body="b", confidence=0.9),
+            Finding(severity="major", category="bug", title="c", body="d", confidence=0.8),
+            Finding(severity="minor", category="style", title="e", body="f", confidence=0.7),
+        ],
+    ))
+
+    d = client.get("/api/v1/metrics/developers").json()[0]
+    assert d["review_count"] == 1      # one review — NOT three findings
+    assert d["avg_findings"] == 3.0     # 3 findings on that one review
+    assert d["avg_major_critical"] == round(2 / 3, 2)  # 2 of 3 are major/critical
+
+
 # --- cost ---------------------------------------------------------------------
 
 

@@ -32,28 +32,30 @@ Each item: **what / why it matters / approach / touches / test / size.**
 
 ## P1 — soon (correctness + safety, not blocking first deploy)
 
-### P1-1 · Finish review-comment pagination (CORR-8 remainder)
+### P1-1 · Finish review-comment pagination (CORR-8 remainder) — ✅ done (2026-06-05)
 - **What:** `get_review_comments` was paginated (2026-06-05); `get_review_threads` still fetches one page. On a busy PR, resolution/reply matching misses threads past page 1.
 - **Approach:** paginate `get_review_threads` (GraphQL `after`/`hasNextPage`, or REST per_page+page) the same way.
 - **Touches:** `reva/github_client.py`; test in `worker/tests/test_github_client.py`.
 - **Size:** S.
 
-### P1-2 · Make context-line findings resolvable (inline mapping)
+### P1-2 · Make context-line findings resolvable (inline mapping) — ⏸️ decision needed
 - **What:** `split_findings` only makes a finding inline when its `line_start` is inside a diff hunk. Findings about existing/untouched code (common in Odoo logic) land in the review **body**, so they can't be tracked or auto-resolved (the Aurium #60 reality).
-- **Approach (pick one, brainstorm first):** (a) snap a finding to the nearest changed line in the same file so it becomes an inline thread; or (b) accept body findings as non-resolvable and document it; or (c) post body findings as a single file-level comment. (a) maximizes resolvability but risks mis-anchoring — needs care.
-- **Touches:** `reva/review_formatter.py` (`split_findings`), tests.
-- **Size:** M (design decision first).
+- **Hard constraint (why this isn't a simple fix):** GitHub **only accepts inline review comments on lines that are part of the PR diff**. A finding about an unchanged line *cannot* be posted as an inline thread on that line (422). So the options are limited:
+  - **(a) snap to the nearest changed line in the same file** — makes it inline/resolvable, but the comment is anchored to a line that isn't where the issue is → **misleading**.
+  - **(b) keep body findings, accept they're not resolvable** — honest, no mis-anchoring; the review summary still surfaces them. *(Recommended — current behavior.)*
+  - **(c) one file-level comment per body finding** — middle ground; still not line-anchored.
+- **Recommendation:** keep **(b)** and document it; only do (a) if you accept mis-anchored threads. **Needs your call before any code change** — left as current behavior.
+- **Touches (if (a)/(c) chosen):** `reva/review_formatter.py` (`split_findings`), tests.
 
-### P1-3 · `developer_stats` join fan-out (CORR-3)
+### P1-3 · `developer_stats` join fan-out (CORR-3) — ✅ done (2026-06-05)
 - **What:** `review_count` / `avg_findings` are inflated because `count(ReviewRun.id)` counts the `ReviewFinding` outer-join fan-out; the leaderboard sort is wrong.
 - **Approach:** `count(distinct ReviewRun.id)`; compute avg findings without the finding join (subquery or separate agg).
 - **Touches:** `api/app/queries/metrics.py`; test the corrected counts.
 - **Size:** S.
 
-### P1-4 · Close the highest-risk test gaps
-- **TEST-2:** API bearer-token auth is untested (fixtures set no key → auth effectively open in tests). Add positive/negative auth tests across the v1 sub-routers.
-- **TEST-3:** the Go TUI has zero tests — add httptest-based client tests (auth header, error propagation, query escaping) + a `truncate` UTF-8 test.
-- **Size:** M.
+### P1-4 · Close the highest-risk test gaps — ✅ done (2026-06-05)
+- **TEST-2 ✅:** API bearer-token auth tested (`api/tests/test_auth.py` — 401 missing/wrong, 200 correct, with `require_api_key=True`).
+- **TEST-3 (partial) ✅:** TUI now has tests — `internal/api/client_test.go` (auth header set/omitted, non-200 errors, AddRepo surfaces the API `detail`) + `internal/ui` `parseOwnerName`. Broader UI-rendering coverage (cursor/`truncate` UTF-8) still open.
 
 ---
 

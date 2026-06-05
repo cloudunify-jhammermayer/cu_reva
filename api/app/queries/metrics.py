@@ -128,12 +128,26 @@ def developer_stats(db: Database, period: str) -> list[dict]:
     recent_cutoff = now - timedelta(weeks=4)
 
     with db.session() as s:
-        # Per-author stats for recent 4 weeks.
+        # CORR-3: review-grain stats must NOT join ReviewFinding, or the
+        # outer-join row fan-out inflates review_count (counts findings) and
+        # skews avg_findings. Keep this query at one-row-per-review.
         recent = s.execute(
             select(
                 PullRequest.author_login,
                 func.count(ReviewRun.id).label("review_count"),
                 func.avg(ReviewRun.finding_count).label("avg_findings"),
+            )
+            .join(PullRequest, ReviewRun.pull_request_id == PullRequest.id)
+            .where(ReviewRun.status == "completed")
+            .where(ReviewRun.created_at >= recent_cutoff)
+            .group_by(PullRequest.author_login)
+        ).all()
+
+        # Finding-grain stat (separate query): fraction of this author's findings
+        # that are major/critical — denominator is findings, which is correct.
+        recent_major = s.execute(
+            select(
+                PullRequest.author_login,
                 func.avg(
                     case(
                         (ReviewFinding.severity.in_(["major", "critical"]), 1),
@@ -141,8 +155,9 @@ def developer_stats(db: Database, period: str) -> list[dict]:
                     )
                 ).label("avg_major_crit"),
             )
+            .select_from(ReviewRun)
             .join(PullRequest, ReviewRun.pull_request_id == PullRequest.id)
-            .outerjoin(ReviewFinding, ReviewFinding.review_run_id == ReviewRun.id)
+            .join(ReviewFinding, ReviewFinding.review_run_id == ReviewRun.id)
             .where(ReviewRun.status == "completed")
             .where(ReviewRun.created_at >= recent_cutoff)
             .group_by(PullRequest.author_login)
@@ -162,6 +177,7 @@ def developer_stats(db: Database, period: str) -> list[dict]:
         ).all()
 
     prior_map = {r.author_login: float(r.avg_findings or 0) for r in prior}
+    major_map = {r.author_login: float(r.avg_major_crit or 0) for r in recent_major}
 
     result = []
     for r in recent:
@@ -183,7 +199,7 @@ def developer_stats(db: Database, period: str) -> list[dict]:
                 "author_login": r.author_login,
                 "review_count": r.review_count,
                 "avg_findings": round(recent_avg, 2),
-                "avg_major_critical": round(float(r.avg_major_crit or 0), 2),
+                "avg_major_critical": round(major_map.get(r.author_login, 0.0), 2),
                 "trend": trend,
             }
         )

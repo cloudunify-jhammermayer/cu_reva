@@ -701,6 +701,31 @@ def test_get_compare_diff_returns_diff_text(rsa_key_pair):
     assert result.startswith("diff --git")
 
 
+def test_get_review_threads_paginates(rsa_key_pair):
+    """CORR-8: >100 threads must be followed across pages, not truncated."""
+    private_pem, _ = rsa_key_pair
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+        cursor = json.loads(request.content)["variables"]["cursor"]
+        calls["n"] += 1
+        if cursor is None:
+            page = {"hasNextPage": True, "endCursor": "C1"}
+            node = {"id": "T1", "isResolved": False, "comments": {"nodes": [{"databaseId": 1}]}}
+        else:
+            assert cursor == "C1"
+            page = {"hasNextPage": False, "endCursor": None}
+            node = {"id": "T2", "isResolved": False, "comments": {"nodes": [{"databaseId": 2}]}}
+        return httpx.Response(200, json={"data": {"repository": {"pullRequest": {
+            "reviewThreads": {"pageInfo": page, "nodes": [node]}}}}})
+
+    client = _make_client(handler, private_pem)
+    out = client.get_review_threads("tok", "acme", "widgets", 42)
+    assert out == {1: "T1", 2: "T2"}
+    assert calls["n"] == 2
+
+
 def test_get_review_threads_returns_database_id_to_node_id_map(rsa_key_pair):
     private_pem, _ = rsa_key_pair
 

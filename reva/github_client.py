@@ -445,12 +445,16 @@ class GitHubClient:
     def get_review_threads(
         self, token: str, owner: str, repo: str, pr_number: int
     ) -> dict[int, str]:
-        """Return {github_comment_database_id → thread_node_id} for unresolved threads."""
+        """Return {github_comment_database_id → thread_node_id} for unresolved threads.
+
+        Paginated (CORR-8): a busy PR can have >100 review threads, and resolution
+        must consider all of them, not just the first page."""
         query = """
-        query GetPRThreads($owner: String!, $repo: String!, $prNumber: Int!) {
+        query GetPRThreads($owner: String!, $repo: String!, $prNumber: Int!, $cursor: String) {
           repository(owner: $owner, name: $repo) {
             pullRequest(number: $prNumber) {
-              reviewThreads(first: 100) {
+              reviewThreads(first: 100, after: $cursor) {
+                pageInfo { hasNextPage endCursor }
                 nodes {
                   id
                   isResolved
@@ -463,24 +467,31 @@ class GitHubClient:
           }
         }
         """
-        response = self._post(
-            token,
-            "/graphql",
-            {"query": query, "variables": {"owner": owner, "repo": repo, "prNumber": pr_number}},
-        )
-        threads = (
-            response.json()
-            .get("data", {})
-            .get("repository", {})
-            .get("pullRequest", {})
-            .get("reviewThreads", {})
-            .get("nodes", [])
-        )
-        return {
-            node["comments"]["nodes"][0]["databaseId"]: node["id"]
-            for node in threads
-            if not node.get("isResolved") and node.get("comments", {}).get("nodes")
-        }
+        out: dict[int, str] = {}
+        cursor: str | None = None
+        while True:
+            response = self._post(
+                token,
+                "/graphql",
+                {"query": query, "variables": {
+                    "owner": owner, "repo": repo, "prNumber": pr_number, "cursor": cursor,
+                }},
+            )
+            review_threads = (
+                response.json()
+                .get("data", {})
+                .get("repository", {})
+                .get("pullRequest", {})
+                .get("reviewThreads", {})
+            )
+            for node in review_threads.get("nodes", []):
+                if not node.get("isResolved") and node.get("comments", {}).get("nodes"):
+                    out[node["comments"]["nodes"][0]["databaseId"]] = node["id"]
+            page = review_threads.get("pageInfo", {})
+            if not page.get("hasNextPage") or not page.get("endCursor"):
+                break
+            cursor = page["endCursor"]
+        return out
 
     def resolve_review_thread(self, token: str, thread_node_id: str) -> None:
         """Resolve a pull request review thread via GraphQL."""
