@@ -36,6 +36,24 @@ type AuditFindingPage struct {
 	Total int                   `json:"total"`
 }
 
+type AuditRunSummary struct {
+	ID           int        `json:"id"`
+	RepoFullName string     `json:"repo_full_name"`
+	Status       string     `json:"status"`
+	Model        *string    `json:"model"`
+	FindingCount int        `json:"finding_count"`
+	IssuedCount  int        `json:"issued_count"`
+	DurationMS   *int       `json:"duration_ms"`
+	RequestedBy  *string    `json:"requested_by"`
+	CreatedAt    time.Time  `json:"created_at"`
+	CompletedAt  *time.Time `json:"completed_at"`
+}
+
+type AuditRunPage struct {
+	Items []AuditRunSummary `json:"items"`
+	Total int               `json:"total"`
+}
+
 type RepoSummary struct {
 	ID            int        `json:"id"`
 	FullName      string     `json:"full_name"`

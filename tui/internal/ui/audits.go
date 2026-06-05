@@ -10,16 +10,23 @@ import (
 )
 
 type Audits struct {
-	client         api.ClientIface
-	items          []api.AuditFindingSummary
-	total          int
-	err            error
-	loading        bool
-	cursor         int
-	offset         int
-	width          int
-	height         int
-	severityFilter string
+	client  api.ClientIface
+	runs    []api.AuditRunSummary
+	total   int
+	err     error
+	loading bool
+	cursor  int
+	offset  int
+	width   int
+	height  int
+
+	// detail: findings for the selected run
+	detail     bool
+	detailRun  int
+	detailRepo string
+	findings   []api.AuditFindingSummary
+	fLoading   bool
+	fErr       error
 }
 
 func newAudits(client api.ClientIface) Audits {
@@ -27,10 +34,17 @@ func newAudits(client api.ClientIface) Audits {
 }
 
 func (a Audits) load() tea.Cmd {
-	sev := a.severityFilter
 	client := a.client
 	return func() tea.Msg {
-		data, err := client.AuditFindings(sev, 200)
+		data, err := client.Audits(100)
+		return auditRunsLoadedMsg{data: data, err: err}
+	}
+}
+
+func (a Audits) loadFindings(runID int) tea.Cmd {
+	client := a.client
+	return func() tea.Msg {
+		data, err := client.AuditFindings(runID, 200)
 		return auditFindingsLoadedMsg{data: data, err: err}
 	}
 }
@@ -38,51 +52,56 @@ func (a Audits) load() tea.Cmd {
 func (a Audits) update(msg tea.Msg) (Audits, tea.Cmd) {
 	switch m := msg.(type) {
 	case tickMsg:
-		return a, a.load()
+		if !a.detail {
+			return a, a.load() // poll runs so a running audit flips to completed
+		}
 
-	case auditFindingsLoadedMsg:
+	case auditRunsLoadedMsg:
 		a.loading = false
 		a.err = m.err
 		if m.data != nil {
-			a.items = m.data.Items
+			a.runs = m.data.Items
 			a.total = m.data.Total
 		}
-		if a.cursor >= len(a.items) {
-			a.cursor = 0
-			a.offset = 0
+		if a.cursor >= len(a.runs) {
+			a.cursor, a.offset = 0, 0
+		}
+
+	case auditFindingsLoadedMsg:
+		a.fLoading = false
+		a.fErr = m.err
+		if m.data != nil {
+			a.findings = m.data.Items
 		}
 
 	case tea.KeyMsg:
+		if a.detail {
+			switch m.String() {
+			case "esc", "left", "h":
+				a.detail = false
+			case "r":
+				a.fLoading = true
+				return a, a.loadFindings(a.detailRun)
+			}
+			return a, nil
+		}
 		visibleRows := a.height - 5
 		if visibleRows < 1 {
 			visibleRows = 1
 		}
 		switch m.String() {
 		case "j", "down":
-			a.cursor, a.offset = moveCursor(a.cursor, a.offset, len(a.items), visibleRows, true)
+			a.cursor, a.offset = moveCursor(a.cursor, a.offset, len(a.runs), visibleRows, true)
 		case "k", "up":
-			a.cursor, a.offset = moveCursor(a.cursor, a.offset, len(a.items), visibleRows, false)
+			a.cursor, a.offset = moveCursor(a.cursor, a.offset, len(a.runs), visibleRows, false)
+		case "enter":
+			if a.cursor < len(a.runs) {
+				run := a.runs[a.cursor]
+				a.detail, a.detailRun, a.detailRepo = true, run.ID, run.RepoFullName
+				a.findings, a.fErr, a.fLoading = nil, nil, true
+				return a, a.loadFindings(run.ID)
+			}
 		case "r":
-			a.loading = true
-			return a, a.load()
-		case "a":
-			a.severityFilter = ""
-			a.loading = true
-			return a, a.load()
-		case "c":
-			a.severityFilter = "critical"
-			a.loading = true
-			return a, a.load()
-		case "m":
-			a.severityFilter = "major"
-			a.loading = true
-			return a, a.load()
-		case "n":
-			a.severityFilter = "minor"
-			a.loading = true
-			return a, a.load()
-		case "i":
-			a.severityFilter = "info"
 			a.loading = true
 			return a, a.load()
 		}
@@ -91,99 +110,118 @@ func (a Audits) update(msg tea.Msg) (Audits, tea.Cmd) {
 }
 
 func (a Audits) view(w, h int) string {
-	filterLabel := a.severityFilter
-	if filterLabel == "" {
-		filterLabel = "all"
+	if a.detail {
+		return a.findingsView(w, h)
 	}
-	header := styleTitle.Padding(0, 1).Render(
-		fmt.Sprintf("Audit findings (%d)  filter: %s", a.total, filterLabel),
-	)
 
-	if a.loading && len(a.items) == 0 {
+	header := styleTitle.Padding(0, 1).Render(fmt.Sprintf("Audits (%d)", a.total))
+	if a.loading && len(a.runs) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
-			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
-				styleSubtitle.Render("Loading...")))
+			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center, styleSubtitle.Render("Loading...")))
 	}
 	if a.err != nil {
-		return lipgloss.JoinVertical(lipgloss.Left, header, "",
-			styleStatusFailed.Render("  Error: "+a.err.Error()))
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", styleStatusFailed.Render("  Error: "+a.err.Error()))
 	}
-	if len(a.items) == 0 {
+	if len(a.runs) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
 			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
-				styleSubtitle.Render("No audit findings — trigger one with POST /repos/{id}/audit")))
+				styleSubtitle.Render("No audits yet — trigger one from the Repos tab (a) or POST /repos/{id}/audit")))
 	}
 
 	visibleRows := h - 5
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
-
-	colTitle := 36
-	colRepo := 22
-	colFile := 24
-	colIssue := 6
-	// dot=1 + spacing(2+2+2+2) = 9 extra chars
-	remaining := w - 1 - colRepo - colFile - colIssue - 10
-	if remaining > colTitle {
-		colTitle = remaining
+	colRepo, colStatus, colFind, colModel, colWhen := 26, 10, 12, 14, 10
+	remaining := w - colStatus - colFind - colModel - colWhen - 12
+	if remaining > colRepo {
+		colRepo = remaining
 	}
 
 	hdr := lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
-		fmt.Sprintf("   %-*s  %-*s  %-*s  %-*s",
-			colTitle, "Title",
-			colRepo, "Repo",
-			colFile, "File:Line",
-			colIssue, "Issue"),
-	)
-
-	var rows []string
-	rows = append(rows, hdr)
+		fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s",
+			colRepo, "Repository", colStatus, "Status", colFind, "Findings",
+			colModel, "Model", colWhen, "When"))
+	rows := []string{hdr}
 
 	end := a.offset + visibleRows
-	if end > len(a.items) {
-		end = len(a.items)
+	if end > len(a.runs) {
+		end = len(a.runs)
 	}
 	for i := a.offset; i < end; i++ {
-		item := a.items[i]
-		title := truncate(item.Title, colTitle)
-		repo := truncate(item.RepoFullName, colRepo)
-		fileLine := ""
-		if item.FilePath != nil {
-			fileLine = *item.FilePath
-			if item.LineStart != nil {
-				fileLine = fmt.Sprintf("%s:%d", fileLine, *item.LineStart)
+		r := a.runs[i]
+		findings := "—"
+		if r.Status == "completed" {
+			findings = fmt.Sprintf("%d", r.FindingCount)
+			if r.IssuedCount > 0 {
+				findings = fmt.Sprintf("%d (%d issue)", r.FindingCount, r.IssuedCount)
 			}
 		}
-		fileLine = truncate(fileLine, colFile)
-		issue := "—"
-		if item.GithubIssueNumber != nil {
-			issue = fmt.Sprintf("#%d", *item.GithubIssueNumber)
+		model := "—"
+		if r.Model != nil {
+			model = strings.TrimPrefix(*r.Model, "claude-")
 		}
-
-		var line string
+		cursor := "  "
 		if i == a.cursor {
-			line = styleSelected.Width(w - 2).Render(fmt.Sprintf("  %s  %-*s  %-*s  %-*s  %-*s",
-				"●",
-				colTitle, title,
-				colRepo, repo,
-				colFile, fileLine,
-				colIssue, issue,
-			))
-		} else {
-			line = fmt.Sprintf("  %s  %-*s  %-*s  %-*s  %-*s",
-				severityDot(item.Severity),
-				colTitle, title,
-				colRepo, repo,
-				colFile, fileLine,
-				colIssue, issue,
-			)
+			cursor = styleStatusCompleted.Render("▸ ")
 		}
+		// Status is pre-styled (variable width); pad the plain text, render the rest plain.
+		line := fmt.Sprintf("%s%-*s  %-*s  %-*s  %-*s  %-*s",
+			cursor,
+			colRepo, truncate(r.RepoFullName, colRepo),
+			colStatus, r.Status,
+			colFind, truncate(findings, colFind),
+			colModel, truncate(model, colModel),
+			colWhen, relativeTime(r.CreatedAt))
 		rows = append(rows, line)
 	}
-
 	table := strings.Join(rows, "\n")
-	pos := styleSubtitle.Render(fmt.Sprintf("  %d/%d", a.cursor+1, len(a.items)))
-
+	pos := styleSubtitle.Render(fmt.Sprintf("  %d/%d   [enter] view findings", a.cursor+1, len(a.runs)))
 	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", pos)
+}
+
+func (a Audits) findingsView(w, h int) string {
+	header := styleTitle.Padding(0, 1).Render(
+		fmt.Sprintf("Audit #%d — %s  (%d findings)", a.detailRun, a.detailRepo, len(a.findings)))
+	if a.fLoading && len(a.findings) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "",
+			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center, styleSubtitle.Render("Loading...")))
+	}
+	if a.fErr != nil {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", styleStatusFailed.Render("  Error: "+a.fErr.Error()))
+	}
+	if len(a.findings) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "",
+			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center, styleSubtitle.Render("No findings recorded for this audit")),
+			styleSubtitle.Render("  [esc] back"))
+	}
+
+	colTitle, colFile, colIssue := 44, 26, 7
+	remaining := w - 1 - colFile - colIssue - 8
+	if remaining > colTitle {
+		colTitle = remaining
+	}
+	hdr := lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
+		fmt.Sprintf("   %-*s  %-*s  %-*s", colTitle, "Title", colFile, "File:Line", colIssue, "Issue"))
+	rows := []string{hdr}
+	for _, f := range a.findings {
+		fileLine := ""
+		if f.FilePath != nil {
+			fileLine = *f.FilePath
+			if f.LineStart != nil {
+				fileLine = fmt.Sprintf("%s:%d", fileLine, *f.LineStart)
+			}
+		}
+		issue := "—"
+		if f.GithubIssueNumber != nil {
+			issue = fmt.Sprintf("#%d", *f.GithubIssueNumber)
+		}
+		rows = append(rows, fmt.Sprintf("  %s  %-*s  %-*s  %-*s",
+			severityDot(f.Severity),
+			colTitle, truncate(f.Title, colTitle),
+			colFile, truncate(fileLine, colFile),
+			colIssue, issue))
+	}
+	table := strings.Join(rows, "\n")
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", styleSubtitle.Render("  [esc] back   [r] refresh"))
 }

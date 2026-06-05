@@ -375,7 +375,30 @@ func (m *MockClient) Findings(severity, category string, limit int) (*FindingPag
 	return &FindingPage{Items: filtered[:n], Total: len(filtered)}, nil
 }
 
-func (m *MockClient) AuditFindings(severity string, limit int) (*AuditFindingPage, error) {
+func (m *MockClient) Audits(limit int) (*AuditRunPage, error) {
+	strPtr := func(s string) *string { return &s }
+	intPtr := func(i int) *int { return &i }
+	now := time.Now()
+	done := now.Add(-2 * time.Hour)
+	runs := []AuditRunSummary{
+		{
+			ID: 8, RepoFullName: "acme/api", Status: "running",
+			Model: strPtr("claude-opus-4-8"), CreatedAt: now.Add(-1 * time.Minute),
+		},
+		{
+			ID: 7, RepoFullName: "acme/widgets", Status: "completed",
+			Model: strPtr("claude-opus-4-8"), FindingCount: 3, IssuedCount: 2,
+			DurationMS: intPtr(221185), CreatedAt: done, CompletedAt: &done,
+		},
+		{
+			ID: 6, RepoFullName: "acme/legacy", Status: "failed",
+			Model: strPtr("claude-opus-4-8"), CreatedAt: now.Add(-3 * time.Hour),
+		},
+	}
+	return &AuditRunPage{Items: runs, Total: len(runs)}, nil
+}
+
+func (m *MockClient) AuditFindings(auditRunID, limit int) (*AuditFindingPage, error) {
 	strPtr := func(s string) *string { return &s }
 	intPtr := func(i int) *int { return &i }
 	f64Ptr := func(f float64) *float64 { return &f }
@@ -404,15 +427,11 @@ func (m *MockClient) AuditFindings(severity string, limit int) (*AuditFindingPag
 
 	var filtered []AuditFindingSummary
 	for _, f := range all {
-		if severity == "" || f.Severity == severity {
+		if auditRunID == 0 || f.AuditRunID == auditRunID {
 			filtered = append(filtered, f)
 		}
 	}
-	n := limit
-	if n > len(filtered) {
-		n = len(filtered)
-	}
-	return &AuditFindingPage{Items: filtered[:n], Total: len(filtered)}, nil
+	return &AuditFindingPage{Items: filtered, Total: len(filtered)}, nil
 }
 
 func (m *MockClient) Repos() (*RepoPage, error) {

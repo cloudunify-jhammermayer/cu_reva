@@ -16,11 +16,49 @@ _SEVERITY_ORDER = case(
 )
 
 
+def list_audit_runs(db: Database, *, limit: int = 50) -> tuple[list[dict], int]:
+    """Audit RUNS newest-first, with repo name + how many findings became issues.
+
+    This is the run-status feed (running / completed / failed) for the TUI."""
+    issued = (
+        select(func.count(AuditFinding.id))
+        .where(AuditFinding.audit_run_id == AuditRun.id)
+        .where(AuditFinding.github_issue_number.isnot(None))
+        .correlate(AuditRun)
+        .scalar_subquery()
+    )
+    with db.session() as s:
+        total = s.execute(select(func.count()).select_from(AuditRun)).scalar_one()
+        rows = s.execute(
+            select(AuditRun, Repository.full_name, issued.label("issued_count"))
+            .join(Repository, AuditRun.repository_id == Repository.id)
+            .order_by(AuditRun.id.desc())
+            .limit(limit)
+        ).all()
+        items = [
+            {
+                "id": r.id,
+                "repo_full_name": full_name,
+                "status": r.status,
+                "model": r.model,
+                "finding_count": r.finding_count,
+                "issued_count": issued_count,
+                "duration_ms": r.duration_ms,
+                "requested_by": r.requested_by,
+                "created_at": r.created_at,
+                "completed_at": r.completed_at,
+            }
+            for r, full_name, issued_count in rows
+        ]
+    return items, total
+
+
 def list_audit_findings(
     db: Database,
     *,
     severities: list[str] | None = None,
     repo: str | None = None,
+    audit_run_id: int | None = None,
     limit: int = 100,
 ) -> tuple[list[dict], int]:
     """Audit findings across repos, newest/most-severe first, with repo name."""
@@ -34,6 +72,8 @@ def list_audit_findings(
             base = base.where(AuditFinding.severity.in_(severities))
         if repo:
             base = base.where(Repository.full_name == repo)
+        if audit_run_id is not None:
+            base = base.where(AuditFinding.audit_run_id == audit_run_id)
 
         total = s.execute(select(func.count()).select_from(base.subquery())).scalar_one()
         rows = s.execute(

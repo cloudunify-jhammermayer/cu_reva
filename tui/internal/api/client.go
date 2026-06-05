@@ -114,13 +114,14 @@ func (c *Client) Findings(severity, category string, limit int) (*FindingPage, e
 	return &p, c.get(path, &p)
 }
 
-func (c *Client) AuditFindings(severity string, limit int) (*AuditFindingPage, error) {
-	path := fmt.Sprintf("/audit-findings?limit=%d", limit)
-	if severity != "" {
-		path += "&severity=" + url.QueryEscape(severity)
-	}
+func (c *Client) Audits(limit int) (*AuditRunPage, error) {
+	var p AuditRunPage
+	return &p, c.get(fmt.Sprintf("/audits?limit=%d", limit), &p)
+}
+
+func (c *Client) AuditFindings(auditRunID, limit int) (*AuditFindingPage, error) {
 	var p AuditFindingPage
-	return &p, c.get(path, &p)
+	return &p, c.get(fmt.Sprintf("/audit-findings?audit_run_id=%d&limit=%d", auditRunID, limit), &p)
 }
 
 func (c *Client) Repos() (*RepoPage, error) {

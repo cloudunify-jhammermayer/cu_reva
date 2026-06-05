@@ -83,3 +83,28 @@ def test_empty_when_no_audits(client_and_db):
     r = client.get("/api/v1/audit-findings")
     assert r.status_code == 200
     assert r.json() == {"items": [], "total": 0}
+
+
+def test_list_audit_runs(client_and_db):
+    client, db = client_and_db
+    aid = _seed(db, severity="critical", issue_number=42)
+
+    data = client.get("/api/v1/audits").json()
+    assert data["total"] == 1
+    run = data["items"][0]
+    assert run["id"] == aid
+    assert run["repo_full_name"] == "acme/widgets"
+    assert run["status"] == "completed"
+    assert run["issued_count"] == 1  # one finding became an issue
+
+
+def test_audit_findings_filter_by_run(client_and_db):
+    client, db = client_and_db
+    a1 = _seed(db, severity="critical")
+    a2 = _seed(db, severity="minor")
+
+    assert client.get("/api/v1/audit-findings").json()["total"] == 2
+    only = client.get(f"/api/v1/audit-findings?audit_run_id={a1}").json()
+    assert only["total"] == 1
+    assert only["items"][0]["audit_run_id"] == a1
+    assert a2 != a1
