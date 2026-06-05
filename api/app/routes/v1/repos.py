@@ -36,14 +36,26 @@ def add_repo(
     owner, name = body.owner.strip(), body.name.strip()
     if not owner or not name:
         raise HTTPException(status_code=422, detail="owner and name are required")
+    # Verify the REVA App is installed on this repo. The app-JWT installation
+    # lookup 404s when the app isn't installed (or the repo doesn't exist) — we
+    # can't audit a repo we have no installation token for.
     try:
         installation_id = github.get_repo_installation_id(owner, name)
+    except PermanentError:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"The REVA GitHub App is not installed on {owner}/{name} "
+                "(or the repository doesn't exist). Install the app on it, then retry."
+            ),
+        )
+    try:
         token = github.get_installation_token(installation_id)
         meta = github.get_repo(token, owner, name)
     except PermanentError:
         raise HTTPException(
             status_code=404,
-            detail=f"{owner}/{name} not found, or the REVA GitHub App is not installed on it",
+            detail=f"Could not read {owner}/{name} with the app installation.",
         )
 
     repo_id = writers.upsert_repository(

@@ -151,6 +151,13 @@ func (c *Client) AddRepo(owner, name string) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
+		// Surface the API's `detail` (e.g. "app is not installed on ...").
+		var e struct {
+			Detail string `json:"detail"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&e) == nil && e.Detail != "" {
+			return fmt.Errorf("%s", e.Detail)
+		}
 		return fmt.Errorf("HTTP %d adding %s/%s", resp.StatusCode, owner, name)
 	}
 	return nil
