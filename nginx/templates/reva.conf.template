@@ -13,6 +13,11 @@ limit_req_zone $binary_remote_addr zone=api:10m rate=120r/m;
 # tunnel forwards requests for ${REVA_DOMAIN} to this server. No certs here.
 server {
     listen 80;
+    # Dual-stack: the compose healthcheck probes http://localhost/nginx-health,
+    # which resolves to ::1 inside the container. Without this, nginx listens on
+    # IPv4 only and the loopback probe is refused. (The stock default.conf used
+    # to provide the IPv6 listener; we removed it, so own it here.)
+    listen [::]:80;
     server_name ${REVA_DOMAIN};
 
     # Security headers. TLS/HSTS are enforced at the Cloudflare edge, not here.

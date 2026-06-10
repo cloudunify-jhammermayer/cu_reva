@@ -13,21 +13,33 @@ import (
 type Client struct {
 	base   string
 	apiKey string
-	http   *http.Client
+	// Optional Cloudflare Access service-token credentials. When set, they are
+	// sent on every request so the TUI can reach an Access-protected origin
+	// directly (no `cloudflared access` proxy needed).
+	cfAccessID     string
+	cfAccessSecret string
+	http           *http.Client
 }
 
-func NewClient(baseURL, apiKey string) *Client {
+func NewClient(baseURL, apiKey, cfAccessID, cfAccessSecret string) *Client {
 	return &Client{
-		base:   baseURL,
-		apiKey: apiKey,
-		http:   &http.Client{Timeout: 10 * time.Second},
+		base:           baseURL,
+		apiKey:         apiKey,
+		cfAccessID:     cfAccessID,
+		cfAccessSecret: cfAccessSecret,
+		http:           &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-// authHeader sets the Bearer token on a request when an API key is configured.
+// authHeader sets the Bearer token (REVA's own auth) and, when configured, the
+// Cloudflare Access service-token headers, on a request.
 func (c *Client) authHeader(req *http.Request) {
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	if c.cfAccessID != "" && c.cfAccessSecret != "" {
+		req.Header.Set("CF-Access-Client-Id", c.cfAccessID)
+		req.Header.Set("CF-Access-Client-Secret", c.cfAccessSecret)
 	}
 }
 

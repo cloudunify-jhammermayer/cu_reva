@@ -15,7 +15,7 @@ func TestAuthHeaderSentWhenKeySet(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := NewClient(srv.URL, "tok123").Repos(); err != nil {
+	if _, err := NewClient(srv.URL, "tok123", "", "").Repos(); err != nil {
 		t.Fatal(err)
 	}
 	if got != "Bearer tok123" {
@@ -31,9 +31,41 @@ func TestNoAuthHeaderWhenKeyEmpty(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, _ = NewClient(srv.URL, "").Repos()
+	_, _ = NewClient(srv.URL, "", "", "").Repos()
 	if got != "" {
 		t.Errorf("unexpected Authorization header %q", got)
+	}
+}
+
+func TestCFAccessHeadersSentWhenConfigured(t *testing.T) {
+	var id, secret string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id = r.Header.Get("CF-Access-Client-Id")
+		secret = r.Header.Get("CF-Access-Client-Secret")
+		_, _ = w.Write([]byte(`{"items":[],"total":0}`))
+	}))
+	defer srv.Close()
+
+	if _, err := NewClient(srv.URL, "tok", "cid.access", "csecret").Repos(); err != nil {
+		t.Fatal(err)
+	}
+	if id != "cid.access" || secret != "csecret" {
+		t.Errorf("CF-Access headers = (%q, %q), want (cid.access, csecret)", id, secret)
+	}
+}
+
+func TestCFAccessHeadersAbsentWhenUnset(t *testing.T) {
+	var id, secret string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id = r.Header.Get("CF-Access-Client-Id")
+		secret = r.Header.Get("CF-Access-Client-Secret")
+		_, _ = w.Write([]byte(`{"items":[],"total":0}`))
+	}))
+	defer srv.Close()
+
+	_, _ = NewClient(srv.URL, "tok", "", "").Repos()
+	if id != "" || secret != "" {
+		t.Errorf("unexpected CF-Access headers (%q, %q)", id, secret)
 	}
 }
 
@@ -43,7 +75,7 @@ func TestGetErrorsOnNon200(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := NewClient(srv.URL, "").Repos(); err == nil {
+	if _, err := NewClient(srv.URL, "", "", "").Repos(); err == nil {
 		t.Error("expected an error on HTTP 500")
 	}
 }
@@ -55,7 +87,7 @@ func TestAddRepoSurfacesAPIDetail(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	err := NewClient(srv.URL, "").AddRepo("acme", "x")
+	err := NewClient(srv.URL, "", "", "").AddRepo("acme", "x")
 	if err == nil || !strings.Contains(err.Error(), "not installed") {
 		t.Errorf("want error containing the API detail, got %v", err)
 	}
@@ -71,7 +103,7 @@ func TestAddRepoSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := NewClient(srv.URL, "").AddRepo("acme", "x"); err != nil {
+	if err := NewClient(srv.URL, "", "", "").AddRepo("acme", "x"); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }

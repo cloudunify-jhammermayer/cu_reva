@@ -12,6 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from app.dependencies import get_db, get_settings
 from app.security import verify_signature
 from app.settings import Settings
+from reva.claude_code_runner import REVIEW_JOB_TIMEOUT
 from reva.db import writers
 from reva.db.engine import Database
 
@@ -93,6 +94,10 @@ def _process_delivery(
             _handle_issue_comment(db, payload, settings, github)
         elif event == "pull_request_review_comment":
             _handle_review_comment(payload, settings, rq_queue)
+        elif event == "installation":
+            _handle_installation(db, payload, github, rq_queue)
+        elif event == "installation_repositories":
+            _handle_installation_repositories(db, payload, github, rq_queue)
     except (KeyError, TypeError) as exc:
         # A malformed/partial payload shape (missing key, wrong type) is not
         # fixable by redelivery — mark it processed so GitHub doesn't loop the
@@ -400,3 +405,87 @@ def _handle_issue_comment(db: Database, payload: dict, settings: Settings, githu
         github, installation_id, repo_data["owner"]["login"], repo_data["name"],
         pr_number, review_mode,
     )
+
+
+def _handle_installation(db: Database, payload: dict, github, rq_queue) -> None:
+    """App freshly installed → register and audit every repo it was granted.
+
+    Only the 'created' action matters; 'deleted'/'suspend'/etc. are stored but
+    ignored. GitHub does not replay past activity, so this is the only chance to
+    audit pre-existing repos automatically (the rest comes via PR webhooks).
+    """
+    if payload.get("action") != "created":
+        return
+    installation_id = (payload.get("installation") or {}).get("id")
+    if not installation_id:
+        return
+    _audit_installed_repos(db, github, rq_queue, installation_id, payload.get("repositories"))
+
+
+def _handle_installation_repositories(db: Database, payload: dict, github, rq_queue) -> None:
+    """Repos added to an existing installation → audit the newly-added ones."""
+    if payload.get("action") != "added":
+        return
+    installation_id = (payload.get("installation") or {}).get("id")
+    if not installation_id:
+        return
+    _audit_installed_repos(
+        db, github, rq_queue, installation_id, payload.get("repositories_added")
+    )
+
+
+def _audit_installed_repos(db: Database, github, rq_queue, installation_id: int,
+                           repos: list | None) -> None:
+    """Register each repo and enqueue a full audit job (which clones it itself).
+
+    Best-effort per repo: a missing client or a GitHub fetch failure skips that
+    repo and logs, never the whole delivery — the same resilience as the ack and
+    PR-fetch paths. The audit job clones the repo and respects the spend cap.
+    """
+    repos = repos or []
+    if not repos:
+        return
+    if github is None or rq_queue is None:
+        logger.warning("installation_audit_skipped_no_client",
+                       installation_id=installation_id, repos=len(repos))
+        return
+
+    try:
+        token = github.get_installation_token(installation_id)
+    except Exception:
+        logger.warning("installation_token_failed",
+                       installation_id=installation_id, exc_info=True)
+        return
+
+    for entry in repos:
+        owner, _, name = (entry.get("full_name") or "").partition("/")
+        if not owner or not name:
+            continue
+        # Fetch metadata for the canonical id + default_branch (not in the
+        # installation payload), mirroring the on-demand add_repo path.
+        try:
+            meta = github.get_repo(token, owner, name)
+        except Exception:
+            logger.warning("installation_repo_fetch_failed",
+                           repo=f"{owner}/{name}", exc_info=True)
+            continue
+
+        repo_id = writers.upsert_repository(
+            db,
+            github_repository_id=meta["id"],
+            owner=meta["owner"]["login"],
+            name=meta["name"],
+            default_branch=meta.get("default_branch") or "main",
+            installation_id=installation_id,
+        )
+        job = rq_queue.enqueue(
+            "worker.audit_tasks.run_audit",
+            {
+                "repository_id": repo_id,
+                "installation_id": installation_id,
+                "requested_by": "installation",
+            },
+            job_timeout=REVIEW_JOB_TIMEOUT,
+        )
+        logger.info("installation_audit_queued", repo=meta["full_name"],
+                    repository_id=repo_id, job_id=job.id)

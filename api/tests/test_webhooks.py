@@ -457,6 +457,7 @@ class _FakeGitHub:
         self.comments = []
         self._pr = pr
         self.fetched = []
+        self.fetched_repos = []
 
     def get_installation_token(self, installation_id):
         return "tok"
@@ -470,6 +471,16 @@ class _FakeGitHub:
         if self._pr is None:
             raise AssertionError("get_pull_request called without a configured PR")
         return self._pr
+
+    def get_repo(self, token, owner, repo):
+        self.fetched_repos.append({"owner": owner, "repo": repo})
+        return {
+            "id": 7000 + len(self.fetched_repos),
+            "name": repo,
+            "full_name": f"{owner}/{repo}",
+            "owner": {"login": owner},
+            "default_branch": "main",
+        }
 
 
 def test_comment_trigger_posts_ack_comment(client_and_db):
@@ -619,3 +630,118 @@ def test_draft_pr_logs_ignored_reason(client_and_db):
         _post(client, _pr_payload("opened", draft=True), delivery="draftlog")
     ignored = [e for e in logs if e.get("event") == "pr_event_ignored"]
     assert ignored and ignored[0]["reason"] == "draft PR"
+
+
+# --- installation → auto-audit ------------------------------------------------
+
+
+def _installation_payload(action: str = "created", repos=None) -> dict:
+    return {
+        "action": action,
+        "installation": {"id": 99, "account": {"login": "acme"}},
+        "repositories": repos
+        if repos is not None
+        else [
+            {"id": 1001, "name": "widgets", "full_name": "acme/widgets"},
+            {"id": 1002, "name": "gadgets", "full_name": "acme/gadgets"},
+        ],
+        "sender": {"login": "alice", "type": "User"},
+    }
+
+
+def _installation_repos_payload(action: str = "added", added=None) -> dict:
+    return {
+        "action": action,
+        "installation": {"id": 99, "account": {"login": "acme"}},
+        "repositories_added": added
+        if added is not None
+        else [{"id": 1003, "name": "sprockets", "full_name": "acme/sprockets"}],
+        "repositories_removed": [],
+        "sender": {"login": "alice", "type": "User"},
+    }
+
+
+def test_installation_created_audits_every_repo(client_and_db):
+    client, db = client_and_db
+    q = _FakeQueue()
+    fake = _FakeGitHub()
+    app.state.rq_queue = q
+    app.state.github = fake
+    try:
+        resp = _post(client, _installation_payload(), event="installation",
+                     delivery="inst1")
+    finally:
+        app.state.rq_queue = None
+        app.state.github = None
+
+    assert resp.status_code == 202
+    # One repo registered + one audit enqueued per granted repo.
+    with db.session() as s:
+        assert s.query(Repository).count() == 2
+    assert [e["func"] for e in q.enqueued] == [
+        "worker.audit_tasks.run_audit",
+        "worker.audit_tasks.run_audit",
+    ]
+    params = q.enqueued[0]["args"][0]
+    assert params["installation_id"] == 99
+    assert params["requested_by"] == "installation"
+    assert isinstance(params["repository_id"], int)
+
+
+def test_installation_non_created_action_does_nothing(client_and_db):
+    client, db = client_and_db
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    app.state.github = _FakeGitHub()
+    try:
+        resp = _post(client, _installation_payload(action="deleted"),
+                     event="installation", delivery="instdel")
+    finally:
+        app.state.rq_queue = None
+        app.state.github = None
+    assert resp.status_code == 202
+    with db.session() as s:
+        assert s.query(Repository).count() == 0
+    assert q.enqueued == []
+
+
+def test_installation_repositories_added_audits_new_repos(client_and_db):
+    client, db = client_and_db
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    app.state.github = _FakeGitHub()
+    try:
+        resp = _post(client, _installation_repos_payload(),
+                     event="installation_repositories", delivery="instrepo1")
+    finally:
+        app.state.rq_queue = None
+        app.state.github = None
+    assert resp.status_code == 202
+    with db.session() as s:
+        assert s.query(Repository).count() == 1
+    assert [e["func"] for e in q.enqueued] == ["worker.audit_tasks.run_audit"]
+
+
+def test_installation_repo_fetch_failure_skips_repo_not_delivery(client_and_db):
+    client, db = client_and_db
+
+    class Boom(_FakeGitHub):
+        def get_repo(self, token, owner, repo):
+            if repo == "widgets":
+                raise RuntimeError("github down")
+            return super().get_repo(token, owner, repo)
+
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    app.state.github = Boom()
+    try:
+        resp = _post(client, _installation_payload(), event="installation",
+                     delivery="instfail")
+    finally:
+        app.state.rq_queue = None
+        app.state.github = None
+    # Delivery still accepted; only the healthy repo is registered + audited.
+    assert resp.status_code == 202
+    with db.session() as s:
+        assert s.query(Repository).count() == 1
+    assert [e["func"] for e in q.enqueued] == ["worker.audit_tasks.run_audit"]

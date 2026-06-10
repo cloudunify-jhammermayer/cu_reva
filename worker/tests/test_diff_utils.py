@@ -10,6 +10,7 @@ from reva.diff_utils import (
     filter_diff,
     filter_diff_by_paths,
     find_line_in_hunks,
+    is_excluded_path,
     iter_diff_files,
     parse_diff_hunks,
 )
@@ -213,3 +214,30 @@ def test_filter_diff_all_paths_still_drops_lockfiles():
     out = filter_diff(diff, include_prefixes=())
     assert "package-lock.json" not in out
     assert "src/app.js" in out
+
+
+def test_filter_diff_drops_thirdparty_odoo_and_enterprise():
+    """odoo/ and enterprise/ are third-party — dropped even in diff-all mode."""
+    diff = (
+        "diff --git a/odoo/addons/base/models/res_partner.py b/odoo/addons/base/models/res_partner.py\n"
+        "--- a/odoo/addons/base/models/res_partner.py\n+++ b/odoo/addons/base/models/res_partner.py\n"
+        "@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/enterprise/account_accountant/models/x.py b/enterprise/account_accountant/models/x.py\n"
+        "--- a/enterprise/account_accountant/models/x.py\n+++ b/enterprise/account_accountant/models/x.py\n"
+        "@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/custom_addons/mod/models/x.py b/custom_addons/mod/models/x.py\n"
+        "--- a/custom_addons/mod/models/x.py\n+++ b/custom_addons/mod/models/x.py\n@@ -1 +1 @@\n-a\n+b\n"
+    )
+    # diff-all (no include restriction) must still drop the third-party trees.
+    out = filter_diff(diff, include_prefixes=())
+    assert "odoo/addons" not in out
+    assert "enterprise/" not in out
+    assert "custom_addons/mod/models/x.py" in out
+
+
+def test_is_excluded_path():
+    assert is_excluded_path("odoo/addons/base/models/res_partner.py")
+    assert is_excluded_path("enterprise/account/models/x.py")
+    assert not is_excluded_path("custom_addons/mod/models/x.py")
+    # A custom module merely named with an odoo* prefix is NOT excluded.
+    assert not is_excluded_path("custom_addons/odoo_helper/x.py")

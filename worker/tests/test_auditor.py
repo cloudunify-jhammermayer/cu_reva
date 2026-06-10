@@ -113,6 +113,28 @@ def test_audit_ensure_repo_called_with_none_sha():
     assert called_with == [None]
 
 
+def test_audit_drops_thirdparty_findings():
+    """Audits explore the whole clone, but findings on odoo/ + enterprise/
+    (third-party) are dropped — REVA never opens issues on code the team
+    doesn't own. Team-owned findings are kept."""
+    def _f(file_):
+        return {
+            "severity": "major", "category": "security", "file": file_,
+            "line_start": None, "line_end": None, "title": "t", "body": "b",
+            "suggestion": None, "confidence": 0.9, "is_odoo_specific": True,
+        }
+
+    runner = FakeRunner(response=_audit_response([
+        _f("custom_addons/mod/x.py"),
+        _f("odoo/addons/base/models/res_partner.py"),
+        _f("enterprise/account/models/y.py"),
+    ]))
+    auditor, _, _, _ = _make_auditor(runner=runner)
+    result = auditor.execute(_params())
+    files = {f.file for f in result.findings}
+    assert files == {"custom_addons/mod/x.py"}
+
+
 def test_audit_propagates_transient_error():
     from reva.errors import TransientError
     runner = FakeRunner(raise_exc=TransientError("timeout"))

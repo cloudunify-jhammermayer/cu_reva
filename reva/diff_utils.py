@@ -18,6 +18,18 @@ DEFAULT_EXCLUDE_EXTENSIONS: frozenset[str] = frozenset({".xml", ".po", ".pot", "
 # underscore and hyphen spellings of the custom-addons directory are accepted.
 DEFAULT_REVIEW_PREFIXES: tuple[str, ...] = ("custom_addons/", "custom-addons/")
 
+# Third-party Odoo core (`odoo/`) and Enterprise (`enterprise/`) trees. REVA may
+# read them for context, but must NEVER review them or report findings on them —
+# they are not the team's code. Dropped from EVERY diff and from findings in all
+# review modes (including /review-all, full, deep, and audits), even when the
+# include-prefix restriction is lifted.
+DEFAULT_EXCLUDE_PREFIXES: tuple[str, ...] = ("odoo/", "enterprise/")
+
+
+def is_excluded_path(path: str) -> bool:
+    """Whether `path` is third-party Odoo core / Enterprise code REVA never reviews."""
+    return path.startswith(DEFAULT_EXCLUDE_PREFIXES)
+
 # Machine-generated / vendored files that exist in many repos and are never
 # worth reviewing (matched against the file's basename). Dropped from every diff
 # regardless of prefix — reviewing them is noise and wastes tokens.
@@ -76,9 +88,13 @@ def filter_diff(
     exclude_extensions: frozenset[str] = DEFAULT_EXCLUDE_EXTENSIONS,
     include_prefixes: tuple[str, ...] = DEFAULT_REVIEW_PREFIXES,
     exclude_globs: tuple[str, ...] = DEFAULT_EXCLUDE_GLOBS,
+    exclude_prefixes: tuple[str, ...] = DEFAULT_EXCLUDE_PREFIXES,
 ) -> str:
     """Keep only per-file sections that pass all filters:
 
+    - exclude_prefixes: file path must NOT start with any prefix (third-party
+      odoo/ + enterprise/ trees). Applied in every mode, even when
+      include_prefixes is empty — REVA never reviews third-party code.
     - include_prefixes: file path must start with at least one prefix
       (empty tuple = no restriction).
     - exclude_extensions: file extension must not be in this set.
@@ -97,6 +113,8 @@ def filter_diff(
         m = re.search(r"^\+\+\+ b/(.+)$", section, re.MULTILINE)
         if m:
             path = m.group(1)
+            if exclude_prefixes and path.startswith(exclude_prefixes):
+                continue
             if include_prefixes and not any(path.startswith(p) for p in include_prefixes):
                 continue
             if os.path.splitext(path)[1].lower() in exclude_extensions:

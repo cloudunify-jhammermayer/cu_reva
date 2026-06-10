@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from reva.claude_code_runner import ClaudeCodeRunner
 from reva.cost import estimate_cost
+from reva.diff_utils import is_excluded_path
 from reva.errors import PermanentError
 from reva.types import AuditJobParams, AuditResult, Finding
 
@@ -79,6 +80,13 @@ class Auditor:
             findings = [Finding.model_validate(f) for f in raw_findings]
         except ValidationError as exc:
             raise PermanentError(f"Audit finding failed schema validation: {exc}") from exc
+
+        # Third-party odoo/ + enterprise/ are out of scope: the audit explores the
+        # whole clone for context, but never opens issues on code the team doesn't own.
+        before = len(findings)
+        findings = [f for f in findings if not (f.file and is_excluded_path(f.file))]
+        if before != len(findings):
+            logger.info("audit_findings_dropped_thirdparty", count=before - len(findings))
 
         # Cost (CORR-11): prefer the CLI's authoritative total, fall back to the
         # token estimate — same as the review path, so audits feed the spend cap.

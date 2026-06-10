@@ -107,12 +107,15 @@ Only `.py` and other code files under `custom_addons/` or `custom-addons/` are s
 
 If a PR contains no reviewable files after filtering, it is declined with an explanatory message rather than silently skipped.
 
+To review **every** changed path on a repo that has no `custom_addons/` (e.g. a non-Odoo repo), set `review_all_paths: true` in that repo's `.claude-review.yml` — automatic PR reviews then behave like `/review-all` for that repo. `odoo/` and `enterprise/` (and lockfiles / minified assets) are still always excluded.
+
 Size limits (configurable per repo via `.claude-review.yml`):
 
 | Limit | Default |
 |---|---|
 | Max diff lines | 2 500 |
 | Max diff tokens | 60 000 |
+| Review all paths (not just `custom_addons/`) | `false` |
 
 ## Repository audits
 

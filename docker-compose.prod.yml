@@ -13,7 +13,14 @@ services:
     ports:
       # Loopback only — the Cloudflare tunnel (cloudflared on the host) is the
       # sole ingress; nothing is exposed publicly. Point cloudflared at this.
-      - "127.0.0.1:8080:80"
+      # Published on host port 80 to match the tunnel's current origin
+      # (originService=http://localhost:80). Bind BOTH IPv4 and IPv6 loopback:
+      # on this host `localhost` resolves to ::1, so without the ::1 bind
+      # cloudflared can't reach nginx and returns 502.
+      # NOTE: deviates from the docs' documented :8080 origin — revisit if the
+      # tunnel's Public Hostname is later pointed at localhost:8080.
+      - "127.0.0.1:80:80"
+      - "[::1]:80:80"
     environment:
       REVA_DOMAIN: ${REVA_DOMAIN}
       # Tell the nginx entrypoint to only expand $REVA_DOMAIN in templates,

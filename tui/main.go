@@ -48,7 +48,11 @@ func main() {
 		if apiKey != "" {
 			checkAPIURLSecurity(baseURL)
 		}
-		client = api.NewClient(baseURL, apiKey)
+		// Optional Cloudflare Access service token — lets the TUI reach an
+		// Access-protected origin directly (no `cloudflared access` proxy).
+		cfAccessID := os.Getenv("CF_ACCESS_CLIENT_ID")
+		cfAccessSecret := os.Getenv("CF_ACCESS_CLIENT_SECRET")
+		client = api.NewClient(baseURL, apiKey, cfAccessID, cfAccessSecret)
 	}
 
 	odooURL := os.Getenv("REVA_ODOO_URL")

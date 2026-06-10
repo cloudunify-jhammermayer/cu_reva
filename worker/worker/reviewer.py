@@ -26,6 +26,7 @@ from reva.diff_utils import (
     estimate_diff_tokens,
     filter_diff,
     filter_diff_by_paths,
+    is_excluded_path,
 )
 from reva.errors import PermanentError
 from reva.prompt_builder import PromptBuilder  # kept for type annotation (prompts param)
@@ -152,10 +153,18 @@ class Reviewer:
                 risk_level="low",
             )
 
-        # 5. Fetch diff + changed files.
-        # The /review-all command ("diff-all" mode) reviews every changed path;
-        # all other modes restrict to the custom_addons prefixes.
-        review_prefixes = () if params.review_mode == "diff-all" else DEFAULT_REVIEW_PREFIXES
+        # 5a. Load .claude-review.yml first — its review_all_paths flag can widen
+        #     the include-prefix below (the only sanctioned per-repo config; a
+        #     repo-supplied CLAUDE.md/.claude/.mcp.json is scrubbed from the clone
+        #     before the CLI runs — see ClaudeCodeRunner._scrub_clone, SECU-1).
+        repo_config = self._load_repo_config(token, owner, name, params.head_sha)
+
+        # 5b. Fetch diff + changed files.
+        # The /review-all command ("diff-all" mode) and a repo's review_all_paths
+        # flag review every changed path; all other modes restrict to the
+        # custom_addons prefixes.
+        review_all = params.review_mode == "diff-all" or repo_config.review_all_paths
+        review_prefixes = () if review_all else DEFAULT_REVIEW_PREFIXES
         # Delta detection: if a prior completed review exists, use the compare diff.
         last_review = self.repos.get_last_completed_review(params.pull_request_id)
         if last_review:
@@ -209,18 +218,14 @@ class Reviewer:
         changed_files = [
             f["filename"] for f in changed_files_payload
             if (not review_prefixes or any(f["filename"].startswith(p) for p in review_prefixes))
+            and not is_excluded_path(f["filename"])
             and os.path.splitext(f["filename"])[1].lower() not in DEFAULT_EXCLUDE_EXTENSIONS
         ]
 
-        # 6. Load .claude-review.yml (the only sanctioned per-repo config; a repo-
-        #    supplied CLAUDE.md/.claude/.mcp.json is scrubbed from the clone before
-        #    the CLI runs — see ClaudeCodeRunner._scrub_clone, SECU-1).
-        repo_config = self._load_repo_config(token, owner, name, params.head_sha)
-
-        # 7. Resolve per-review limits.
+        # 6. Resolve per-review limits.
         max_lines, max_tokens = self._resolve_limits(repo_config)
 
-        # 8. Diff size guards.
+        # 7. Diff size guards.
         diff_lines = count_diff_lines(diff)
         diff_tokens = estimate_diff_tokens(diff)
         if diff_lines > max_lines:
@@ -234,7 +239,7 @@ class Reviewer:
                 f"{max_tokens} max). Please split this PR."
             )
 
-        # 9. skip_paths filtering.
+        # 8. skip_paths filtering.
         if repo_config.skip_paths:
             diff = filter_diff_by_paths(diff, repo_config.skip_paths)
             if not diff.strip():
@@ -256,7 +261,7 @@ class Reviewer:
                     f"Add more patterns to skip_paths or split the PR."
                 )
 
-        # 10. Select model.
+        # 9. Select model.
         model = self.runner.deep_model if params.review_mode == "deep" else self.runner.default_model
 
         skill_params = {
@@ -277,7 +282,7 @@ class Reviewer:
             odoo=repo_config.odoo,
         )
 
-        # 11. Ensure repo is cloned/updated, then call Claude Code. The lock
+        # 10. Ensure repo is cloned/updated, then call Claude Code. The lock
         # spans both so a concurrent job can't checkout a different SHA into the
         # shared working tree while Claude is reading it.
         started_at = datetime.now(timezone.utc)
@@ -290,16 +295,19 @@ class Reviewer:
         completed_at = datetime.now(timezone.utc)
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 
-        # 12. Validate and parse findings.
+        # 11. Validate and parse findings.
         summary, findings = _parse_tool_use(response.tool_use_input)
 
-        # 13. Drop findings citing files absent from the clone (hallucinated or
+        # 12. Drop findings citing files absent from the clone (hallucinated or
         # injection-fabricated), then cap by severity * confidence and recompute risk.
         grounded = _ground_findings(findings, repo_path)
+        # Third-party odoo/ + enterprise/ are out of scope in every mode: full/deep
+        # reviews explore the whole clone, so Claude can still cite them. Drop those.
+        grounded = _drop_thirdparty_findings(grounded)
         capped = _cap_findings(grounded, MAX_FINDINGS)
         risk_level = _recompute_risk_level(capped)
 
-        # 14. Cost: prefer the CLI's authoritative total_cost_usd; fall back to
+        # 13. Cost: prefer the CLI's authoritative total_cost_usd; fall back to
         # the token-based estimate (Messages-API path, or older CLI output).
         cost = response.total_cost_usd or estimate_cost(
             response.model or model,
@@ -309,7 +317,7 @@ class Reviewer:
             response.cache_creation_tokens,
         )
 
-        # 15. Prompt version (best-effort).
+        # 14. Prompt version (best-effort).
         try:
             prompt_version = self.prompts.get_version()
         except Exception as exc:  # noqa: BLE001
@@ -432,6 +440,18 @@ def _ground_findings(findings: list[Finding], repo_path: str) -> list[Finding]:
             dropped.append(f.file)
     if dropped:
         logger.warning("findings_dropped_ungrounded", count=len(dropped), files=dropped)
+    return kept
+
+
+def _drop_thirdparty_findings(findings: list[Finding]) -> list[Finding]:
+    """Drop findings citing third-party Odoo core (`odoo/`) or Enterprise
+    (`enterprise/`) code. REVA may read those trees for context but never reports
+    on them — they are not the team's code. Findings with no file are kept.
+    """
+    kept = [f for f in findings if not (f.file and is_excluded_path(f.file))]
+    dropped = len(findings) - len(kept)
+    if dropped:
+        logger.info("findings_dropped_thirdparty", count=dropped)
     return kept
 
 

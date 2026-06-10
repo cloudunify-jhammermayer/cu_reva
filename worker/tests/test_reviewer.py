@@ -267,6 +267,27 @@ def test_ungrounded_findings_dropped_when_clone_present(tmp_path):
     assert titles == {"real", "general"}
 
 
+def test_thirdparty_findings_dropped(tmp_path):
+    """Findings citing odoo/ or enterprise/ (third-party) are dropped in every
+    mode, even when the file exists in the clone; team code is kept."""
+    for rel in ("custom_addons/real.py", "odoo/core.py", "enterprise/ent.py"):
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("x = 1\n")
+    findings = [
+        _finding("team", "custom_addons/real.py"),
+        _finding("odoo-core", "odoo/core.py"),
+        _finding("enterprise", "enterprise/ent.py"),
+    ]
+    runner = FakeRunner(
+        response=_claude_response_with_findings(findings),
+        repo_path_returned=str(tmp_path),
+    )
+    reviewer, *_ = _make_reviewer(runner=runner)
+    titles = {f.title for f in reviewer.execute(_params()).findings}
+    assert titles == {"team"}
+
+
 def test_findings_not_dropped_when_clone_absent():
     """Fail-open: if the clone path isn't present we can't verify, so keep
     findings rather than nuking all of them."""
@@ -625,6 +646,35 @@ def test_review_all_reviews_changes_outside_custom_addons():
     assert result.status == "completed"
     assert "scripts/deploy.py" in runner.last_params["diff"]
     assert "scripts/deploy.py" in runner.last_params["changed_files"]
+
+
+def test_review_all_paths_yml_flag_reviews_outside_custom_addons():
+    # A repo with `review_all_paths: true` in .claude-review.yml is reviewed over
+    # every path even under the default `diff` mode (no /review-all command).
+    github = FakeGitHub(
+        diff=_OUTSIDE_DIFF,
+        files=[{"filename": "scripts/deploy.py"}],
+        file_contents={".claude-review.yml": "review_all_paths: true\n"},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params(review_mode="diff"))
+    assert result.status == "completed"
+    assert "scripts/deploy.py" in runner.last_params["diff"]
+    assert "scripts/deploy.py" in runner.last_params["changed_files"]
+
+
+def test_default_keeps_custom_addons_lock_without_flag():
+    # Without the flag, the custom_addons prefix filter still drops outside paths.
+    github = FakeGitHub(
+        diff=_OUTSIDE_DIFF,
+        files=[{"filename": "scripts/deploy.py"}],
+        file_contents={".claude-review.yml": "max_diff_lines: 100\n"},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params(review_mode="diff"))
+    assert result.status == "declined"
 
 
 def test_review_all_uses_diff_skill_not_full():
