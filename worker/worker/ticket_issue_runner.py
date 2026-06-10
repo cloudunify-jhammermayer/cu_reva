@@ -1,0 +1,352 @@
+"""Ticket issue creation job orchestration (github-issues handoff).
+
+run_ticket_issues is what RQ calls for each enqueued create-issues job. The
+api enqueues it with rq.Retry(max=3, interval=[30, 120, 300]) — the backoff
+the handoff's Contract 2 response table mandates for 5xx/network callback
+failures.
+
+Differences from the ticket-analysis runner worth knowing:
+  - Completion is reported to Odoo via the issues-created callback (Contract 2),
+    not a field write — Odoo renders the issue links itself.
+  - Failures mark the run failed and best-effort send a "failed" callback:
+    Odoo hides the Create Issues button while the record is pending and only a
+    callback can unblock it. Transient errors first ride the RQ retries (row
+    stays pending; the rerun resumes from the persisted plan); the failed
+    callback goes out on the final attempt.
+  - Re-runs must not duplicate issues. Resolution order:
+      1. resume this run's own persisted plan (requeue),
+      2. adopt the latest prior run's plan for the same record+repo from OUR
+         DB (re-click after the timeout race or a partial failure — includes
+         the not-yet-created remainder, immune to GitHub search-index lag),
+      3. reconcile against the hidden ticket-level marker via GitHub search
+         (fallback when the DB has no plan, e.g. after a DB reset),
+      4. plan with Claude.
+"""
+
+from __future__ import annotations
+
+import hashlib
+
+import structlog
+from rq import get_current_job
+
+from reva.db import writers
+from reva.errors import PermanentError, TransientError
+from reva.github_urls import parse_github_repo_url
+from reva.types import TicketIssueJobParams
+from worker.runner import get_context
+
+logger = structlog.get_logger()
+
+# Label applied to every ticket issue. REVA creates it per-repo if missing, so
+# you can filter `label:reva-ticket` without setting anything up by hand.
+_TICKET_ISSUE_LABEL = "reva-ticket"
+
+
+def _retries_remaining() -> bool:
+    """True when RQ will retry this job after the current attempt fails."""
+    job = get_current_job()
+    return bool(job is not None and getattr(job, "retries_left", None))
+
+
+def _ticket_marker(
+    owner: str, repo: str, model_name: str, ticket_id: int, basis: str
+) -> str:
+    """Stable, plain-alphanumeric token identifying a ticket + planning basis.
+
+    Ticket-level on purpose: issue titles are Claude-generated and change
+    between plans, so a title-keyed marker (the audit pattern) would stop
+    matching on every re-run and duplicate the whole issue set. Owner/repo are
+    lower-cased because GitHub treats them case-insensitively while Odoo's
+    github_url is free text — an admin "fixing" the URL's casing must not
+    change the key. The basis digest IS part of the key: when the planning
+    input changes, the old issues are deliberately not reconciled — a fresh
+    set is created for the new content."""
+    key = f"{owner.lower()}/{repo.lower()}\x00{model_name}\x00{ticket_id}\x00{basis}"
+    # SHA-1 is a content-addressed dedup key, NOT a security hash — and the
+    # value must stay stable so existing issues keep matching.
+    digest = hashlib.sha1(  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
+        key.encode(), usedforsecurity=False
+    ).hexdigest()
+    return "revaticket" + digest[:16]
+
+
+def _same_repo(github_url: str, owner: str, repo: str) -> bool:
+    parsed = parse_github_repo_url(github_url)
+    if parsed is None:
+        return False
+    return (parsed[0].lower(), parsed[1].lower()) == (owner.lower(), repo.lower())
+
+
+def _issue_title(params: TicketIssueJobParams, position: int, total: int, title: str) -> str:
+    """GitHub issue title: '[Task 2010] 3/10 — <planned title>'.
+
+    The Odoo record id makes every issue traceable to its ticket from the
+    GitHub list alone, and position/total mark the intended implementation
+    order (the planner returns issues in that order) independent of how
+    GitHub sorts them."""
+    label = params.model_name.rsplit(".", 1)[-1].capitalize()  # project.task -> Task
+    return f"[{label} {params.ticket_id}] {position}/{total} — {title}"
+
+
+def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str) -> str:
+    """Render one planned issue as a GitHub issue body with the mandatory
+    Odoo back-link (Contract 1: ticket_url) and the hidden dedup marker."""
+    # .get: the retention purge strips bodies from old plans; a requeued
+    # post-purge item still renders its criteria + back-link.
+    lines = [item.get("body", "")]
+    if item.get("acceptance_criteria"):
+        lines += ["", "### Acceptance criteria", ""]
+        lines += [f"- [ ] {criterion}" for criterion in item["acceptance_criteria"]]
+    lines += [
+        "",
+        "---",
+        f"**Odoo ticket:** [{params.name}]({params.ticket_url})",
+        "",
+        "<sub>🤖 Created by REVA from an Odoo ticket.</sub>",
+        f"<!-- {marker} -->",
+    ]
+    return "\n".join(lines)
+
+
+def _issues_payload(issues: list[dict]) -> list[dict]:
+    """Contract 2 issue items for everything that exists on GitHub."""
+    return [
+        {"number": i["number"], "title": i["title"], "url": i["url"]}
+        for i in issues
+        if i.get("number") is not None
+    ]
+
+
+def _send_failed_callback(ctx, params: TicketIssueJobParams, error: str, log) -> None:
+    """Best-effort failure callback so Odoo leaves 'pending' and re-enables the
+    Create Issues button. Must never mask the original error."""
+    try:
+        ctx.odoo.issues_created(
+            ticket_id=params.ticket_id,
+            model_name=params.model_name,
+            request_id=params.run_id,
+            status="failed",
+            issues=[],
+            error=error[:200],
+        )
+    except Exception:
+        log.warning("ticket_issues_failed_callback_error", exc_info=True)
+
+
+def run_ticket_issues(job_params: dict) -> dict:
+    """RQ task entry point for ticket issue creation."""
+    ctx = get_context()
+    params = TicketIssueJobParams.model_validate(job_params)
+
+    log = logger.bind(
+        run_id=params.run_id,
+        ticket_id=params.ticket_id,
+        model_name=params.model_name,
+        github_url=params.github_url,
+    )
+    log.info("ticket_issues_start")
+
+    try:
+        issues = _plan_and_create(ctx, params, log)
+    except TransientError as exc:
+        log.warning("ticket_issues_transient_error", error=str(exc))
+        if _retries_remaining():
+            # Row stays pending; the RQ retry resumes from the persisted plan.
+            raise
+        writers.record_ticket_issue_run_failed(ctx.db, params.run_id, str(exc))
+        _send_failed_callback(ctx, params, str(exc), log)
+        raise
+    except PermanentError as exc:
+        log.error("ticket_issues_error", error=str(exc))
+        writers.record_ticket_issue_run_failed(ctx.db, params.run_id, str(exc))
+        _send_failed_callback(ctx, params, str(exc), log)
+        raise
+    except Exception as exc:
+        log.exception("ticket_issues_unexpected_error")
+        writers.record_ticket_issue_run_failed(ctx.db, params.run_id, str(exc))
+        _send_failed_callback(ctx, params, str(exc), log)
+        raise PermanentError(str(exc)) from exc
+
+    # Persist completion before the callback so the result is never lost.
+    writers.record_ticket_issue_run_completed(ctx.db, params.run_id, issues)
+
+    payload = _issues_payload(issues)
+    try:
+        ctx.odoo.issues_created(
+            ticket_id=params.ticket_id,
+            model_name=params.model_name,
+            request_id=params.run_id,
+            status="created",
+            issues=payload,
+        )
+    except TransientError:
+        # Contract 2: 5xx/network on the callback must be retried. Re-raise so
+        # the RQ retry reruns this job — it short-circuits (everything has an
+        # issue number) and just re-sends the callback.
+        log.warning("ticket_issues_odoo_callback_transient", exc_info=True)
+        raise
+    except PermanentError:
+        # Contract 2: 4xx is do-not-retry. A 409 means Odoo moved on (its 10s
+        # timeout race, or the user re-clicked and a newer request_id rules) —
+        # the issues exist and are persisted, so the run stays completed and
+        # the re-click path re-links them.
+        log.warning("ticket_issues_odoo_callback_permanent", exc_info=True)
+
+    log.info("ticket_issues_done", issues=len(payload))
+    return {"status": "completed", "run_id": params.run_id, "issues": len(payload)}
+
+
+def sync_ticket_issue_state(job_params: dict) -> dict:
+    """RQ task: a GitHub `issues` webhook reported one of our issues closed or
+    reopened. Record the per-issue state on every run carrying it, then notify
+    Odoo per affected record so the rendered links show what's done.
+
+    params keys: owner, repo, number, state ("closed" | "open").
+    """
+    ctx = get_context()
+    try:
+        owner = job_params["owner"]
+        repo = job_params["repo"]
+        number = job_params["number"]
+        state = job_params["state"]
+    except KeyError as exc:
+        raise PermanentError(f"sync_ticket_issue_state: missing param {exc}") from exc
+
+    log = logger.bind(owner=owner, repo=repo, number=number, state=state)
+
+    affected = writers.update_ticket_issue_state(ctx.db, owner, repo, number, state)
+    if not affected:
+        # Labeled like ours but not in our DB (manually labeled, or a wiped DB).
+        log.info("ticket_issue_state_no_match")
+        return {"status": "no_match"}
+
+    notified = 0
+    for record in affected:
+        snapshot = [
+            {"number": i["number"], "title": i["title"], "url": i["url"],
+             "state": i.get("state") or "open"}
+            for i in record["issues"]
+            if i.get("number") is not None
+        ]
+        try:
+            ctx.odoo.issue_state(
+                ticket_id=record["ticket_id"],
+                model_name=record["model_name"],
+                number=number,
+                state=state,
+                issues=snapshot,
+            )
+            notified += 1
+        except TransientError:
+            # Odoo down: re-raise so the RQ retry re-syncs (the DB update is
+            # idempotent and re-running re-sends the remaining records).
+            log.warning("ticket_issue_state_odoo_transient", exc_info=True)
+            raise
+        except PermanentError:
+            # e.g. 409: the record's links are not in 'created' (re-run in
+            # flight, or failed) — the DB state is recorded; Odoo catches up
+            # with the next issues-created callback.
+            log.warning("ticket_issue_state_odoo_permanent",
+                        ticket_id=record["ticket_id"], exc_info=True)
+
+    log.info("ticket_issue_state_done", records=len(affected), notified=notified)
+    return {"status": "completed", "records": len(affected), "notified": notified}
+
+
+def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
+    """Resolve the issue list for this run (resume → adopt → reconcile → plan),
+    then create whatever is missing. Returns the final issues state."""
+    parsed = parse_github_repo_url(params.github_url)
+    if parsed is None:  # route validates; guards requeued rows and manual enqueues
+        raise PermanentError(f"invalid github_url: {params.github_url!r}")
+    owner, repo = parsed
+
+    row = writers.get_ticket_issue_run(ctx.db, params.run_id)
+    # Computed once at row creation and stored (the doc isn't kept), so the
+    # marker is stable across this run and its requeues.
+    basis = (row or {}).get("planning_basis") or "text:none"
+    issues = (row or {}).get("issues") or None
+
+    if issues is None:
+        prior = writers.get_latest_ticket_issue_plan(
+            ctx.db, params.ticket_id, params.model_name, exclude_run_id=params.run_id
+        )
+        if (
+            prior is not None
+            and _same_repo(prior["github_url"], owner, repo)
+            and prior.get("planning_basis") == basis
+        ):
+            # Re-click after the timeout race or a partial failure with
+            # UNCHANGED inputs: the prior run's list is authoritative (it
+            # includes the not-yet-created remainder, which GitHub's marker
+            # search can't know about). A changed docx/description has a
+            # different basis and falls through to a fresh plan instead.
+            issues = [dict(item) for item in prior["issues"]]
+            writers.update_ticket_issue_progress(ctx.db, params.run_id, issues)
+            log.info("ticket_issues_plan_adopted", from_run=prior["id"])
+
+    if issues is not None and all(i.get("number") is not None for i in issues):
+        # Nothing to create (callback resend / fully-created adoption): skip
+        # the GitHub setup round-trips entirely.
+        return issues
+
+    marker = _ticket_marker(owner, repo, params.model_name, params.ticket_id, basis)
+    installation_id = ctx.github.get_repo_installation_id(owner, repo)
+    token = ctx.github.get_installation_token(installation_id)
+
+    if issues is None:
+        existing = ctx.github.find_issues_with_marker(token, owner, repo, marker)
+        if existing:
+            # No plan anywhere in our DB but marked issues exist (e.g. DB
+            # reset): re-link them instead of duplicating.
+            log.info("ticket_issues_reconciled", existing=len(existing))
+            return [dict(issue) for issue in existing]
+
+        response, plan = ctx.ticket_issue_planner.plan_with_response(params)
+        issues = [
+            {
+                "title": item.title,
+                "body": item.body,
+                "acceptance_criteria": item.acceptance_criteria,
+                "number": None,
+                "url": None,
+                "state": None,
+            }
+            for item in plan.issues
+        ]
+        # Plan + spend persist BEFORE any GitHub call: a partial failure must
+        # resume from this plan, never re-plan (titles would drift and the
+        # issue set would duplicate).
+        cost = writers.record_ticket_issue_plan(ctx.db, params.run_id, issues, response)
+        writers.record_claude_spend(ctx.db, "ticket_issues", cost)
+
+    ctx.github.ensure_label(
+        token, owner, repo, _TICKET_ISSUE_LABEL,
+        description="Issues created from Odoo tickets by REVA",
+    )
+    for idx, item in enumerate(issues):
+        if item.get("number") is not None:
+            continue
+        # The full GitHub title (ticket id + order) is what gets stored and
+        # sent to Odoo, so all surfaces show the same name as GitHub.
+        title = _issue_title(params, idx + 1, len(issues), item["title"])
+        created = ctx.github.create_issue(
+            token, owner, repo,
+            title=title,
+            body=_format_issue_body(item, params, marker),
+            labels=[_TICKET_ISSUE_LABEL],
+        )
+        # Keep only what resume, Contract 2, and state tracking need; the body
+        # lives on GitHub now, and dropping it keeps Claude-rendered customer
+        # text out of the retained JSON (the retention purge keeps `issues`).
+        issues[idx] = {
+            "title": title,
+            "number": created["number"],
+            "url": created["url"],
+            "state": "open",
+        }
+        writers.update_ticket_issue_progress(ctx.db, params.run_id, issues)
+        log.info("ticket_issue_created", issue=created["number"], title=title)
+
+    return issues

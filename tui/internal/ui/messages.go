@@ -55,6 +55,10 @@ type ticketAnalysesLoadedMsg struct {
 	data *api.TicketAnalysisPage
 	err  error
 }
+type ticketIssueRunsLoadedMsg struct {
+	data *api.TicketIssueRunPage
+	err  error
+}
 type ticketRequeuedMsg struct {
 	id  int
 	err error

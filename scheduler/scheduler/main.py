@@ -54,6 +54,10 @@ def maybe_purge_ticket_text(db, now, last_purge, interval_s, retention_days):
     purged = writers.purge_old_ticket_text(db, retention_days)
     if purged:
         logger.info("ticket_text_purged", rows=purged, retention_days=retention_days)
+    purged_issue_rows = writers.purge_old_ticket_issue_text(db, retention_days)
+    if purged_issue_rows:
+        logger.info("ticket_issue_text_purged", rows=purged_issue_rows,
+                    retention_days=retention_days)
     return now
 
 

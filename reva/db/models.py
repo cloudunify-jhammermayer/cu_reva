@@ -358,6 +358,67 @@ class TicketAnalysis(Base):
     )
 
 
+# ------------------------------------------------------- ticket_issue_runs
+
+
+class TicketIssueRun(Base):
+    __tablename__ = "ticket_issue_runs"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    job_id: Mapped[str | None] = mapped_column(Text)
+    ticket_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_name: Mapped[str] = mapped_column(Text, nullable=False)
+    github_url: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    analysis_html: Mapped[str] = mapped_column(Text, nullable=False)
+    # What this run plans from: "docx:<hash>" or "text:<hash>" (migration 014).
+    # A 25-byte digest, not the document — the consultant DOCX itself is never
+    # stored server-side; it rides the RQ job params at first-plan time only.
+    planning_basis: Mapped[str | None] = mapped_column(Text)
+    priority: Mapped[str] = mapped_column(Text, nullable=False)
+    ticket_url: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    # The issue plan and its creation progress:
+    # [{"title", "body", "acceptance_criteria", "number", "url"}, ...]
+    # number/url stay null until the issue exists on GitHub.
+    issues: Mapped[Any | None] = mapped_column(JSON)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_creation_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        # Partial UNIQUE index (migration 012): job_id is unique only when set.
+        Index(
+            "idx_ticket_issue_runs_job_id",
+            "job_id",
+            unique=True,
+            postgresql_where=text("job_id IS NOT NULL"),
+            sqlite_where=text("job_id IS NOT NULL"),
+        ),
+        # One in-flight run per Odoo record (closes the dedup check-then-insert race).
+        Index(
+            "idx_ticket_issue_runs_pending",
+            "ticket_id",
+            "model_name",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+            sqlite_where=text("status = 'pending'"),
+        ),
+        Index("idx_ticket_issue_runs_status", "status"),
+        Index("idx_ticket_issue_runs_ticket_id", "ticket_id"),
+        Index("idx_ticket_issue_runs_created_at", "created_at"),
+    )
+
+
 # --------------------------------------------------------------- audit_runs
 
 

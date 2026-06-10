@@ -350,13 +350,16 @@ class GitHubClient:
         title: str,
         body: str,
         labels: list[str] | None = None,
-    ) -> int:
-        """Open a new issue. Returns the new issue number."""
+    ) -> dict:
+        """Open a new issue. Returns {"number", "url"} — url is GitHub's
+        canonical html_url, not reconstructed from the (possibly mis-cased)
+        owner/repo the caller was given."""
         payload: dict = {"title": title, "body": body}
         if labels:
             payload["labels"] = labels
         response = self._post(token, f"/repos/{owner}/{repo}/issues", payload)
-        return response.json()["number"]
+        data = response.json()
+        return {"number": data["number"], "url": data["html_url"]}
 
     def ensure_label(
         self,
@@ -395,6 +398,32 @@ class GitHubClient:
             params={"q": f"repo:{owner}/{repo} type:issue state:open {marker}"},
         )
         return (response.json().get("total_count") or 0) > 0
+
+    def find_issues_with_marker(
+        self, token: str, owner: str, repo: str, marker: str
+    ) -> list[dict]:
+        """Issues — open AND closed — whose body contains `marker`, as
+        [{"number", "title", "url"}].
+
+        Used to reconcile ticket issues across re-runs: a re-click or Odoo's
+        10s-timeout race must re-link the existing issues, not duplicate them,
+        and a closed (completed) issue still belongs to its ticket — so no
+        state filter, unlike issue_exists_with_marker.
+        """
+        response = self._get(
+            token,
+            "/search/issues",
+            params={"q": f"repo:{owner}/{repo} type:issue {marker}"},
+        )
+        return [
+            {
+                "number": item["number"],
+                "title": item["title"],
+                "url": item["html_url"],
+                "state": item.get("state", "open"),
+            }
+            for item in response.json().get("items", [])
+        ]
 
     def get_review_comments(
         self, token: str, owner: str, repo: str, pr_number: int, review_id: int

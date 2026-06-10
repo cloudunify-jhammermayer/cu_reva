@@ -34,7 +34,12 @@ def main() -> None:
         queue=settings.queue_name,
         redis_url=settings.redis_url,
     )
-    worker.work(with_scheduler=False)
+    # with_scheduler: rq.Retry(interval=...) parks failed jobs in the
+    # ScheduledJobRegistry; only a scheduler-enabled worker moves them back to
+    # the queue when due. Without it every retry (reviews via the poller,
+    # create-issues callbacks, issue-state syncs) is scheduled once and then
+    # stranded forever. Safe with multiple workers (lock-guarded).
+    worker.work(with_scheduler=True)
 
 
 if __name__ == "__main__":

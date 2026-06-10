@@ -125,3 +125,111 @@ def test_write_field_payload_shape(monkeypatch):
     assert captured["body"]["model_name"] == kw["model_name"]
     assert captured["body"]["field_name"] == kw["field_name"]
     assert captured["body"]["html"] == kw["html"]
+
+
+# --- issues_created (github-issues handoff, Contract 2) ------------------------
+
+
+def _issues_kwargs() -> dict:
+    return {
+        "ticket_id": 123,
+        "model_name": "helpdesk.ticket",
+        "request_id": 7,
+        "status": "created",
+        "issues": [
+            {"number": 42, "title": "Implement login form",
+             "url": "https://github.com/org/repo/issues/42"},
+        ],
+        "error": None,
+    }
+
+
+def test_issues_created_posts_contract_payload_to_sibling_path(monkeypatch):
+    captured: dict = {}
+
+    def post(url, *, json, headers, **kwargs):
+        captured["url"] = url
+        captured["body"] = json
+        captured["auth"] = headers.get("Authorization", "")
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    _client().issues_created(**_issues_kwargs())
+
+    # base URL is derived from the write-field callback URL — no new config
+    assert captured["url"] == "https://odoo.example.com/api/reva/issues-created"
+    assert captured["auth"] == f"Bearer {_KEY}"
+    assert captured["body"] == _issues_kwargs()
+
+
+def test_issues_created_failed_status(monkeypatch):
+    captured: dict = {}
+
+    def post(url, *, json, **kwargs):
+        captured["body"] = json
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    _client().issues_created(
+        ticket_id=1, model_name="project.task", request_id=9,
+        status="failed", issues=[], error="GitHub authentication failed",
+    )
+    assert captured["body"]["status"] == "failed"
+    assert captured["body"]["issues"] == []
+    assert captured["body"]["error"] == "GitHub authentication failed"
+
+
+def test_issues_created_409_is_permanent(monkeypatch):
+    # 409 = record no longer pending / stale request_id — contract says do not retry
+    monkeypatch.setattr("reva.odoo_client.httpx.post", _mock_post(409, "conflict"))
+    with pytest.raises(PermanentError):
+        _client().issues_created(**_issues_kwargs())
+
+
+def test_issues_created_5xx_is_transient(monkeypatch):
+    monkeypatch.setattr("reva.odoo_client.httpx.post", _mock_post(503, "down"))
+    with pytest.raises(TransientError):
+        _client().issues_created(**_issues_kwargs())
+
+
+def test_disabled_client_issues_created_raises_permanent():
+    client = OdooCallbackClient(callback_url="", api_key="")
+    with pytest.raises(PermanentError):
+        client.issues_created(**_issues_kwargs())
+
+
+# --- issue_state (per-issue done/reopen sync) -----------------------------------
+
+
+def test_issue_state_posts_snapshot_to_sibling_path(monkeypatch):
+    captured: dict = {}
+
+    def post(url, *, json, headers, **kwargs):
+        captured["url"] = url
+        captured["body"] = json
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    snapshot = [
+        {"number": 42, "title": "Implement login form",
+         "url": "https://github.com/org/repo/issues/42", "state": "closed"},
+        {"number": 43, "title": "Add session handling",
+         "url": "https://github.com/org/repo/issues/43", "state": "open"},
+    ]
+    _client().issue_state(
+        ticket_id=123, model_name="helpdesk.ticket",
+        number=42, state="closed", issues=snapshot,
+    )
+
+    assert captured["url"] == "https://odoo.example.com/api/reva/issue-state"
+    assert captured["body"] == {
+        "ticket_id": 123, "model_name": "helpdesk.ticket",
+        "number": 42, "state": "closed", "issues": snapshot,
+    }
+
+
+def test_issue_state_409_is_permanent(monkeypatch):
+    monkeypatch.setattr("reva.odoo_client.httpx.post", _mock_post(409, "conflict"))
+    with pytest.raises(PermanentError):
+        _client().issue_state(ticket_id=1, model_name="project.task",
+                              number=1, state="closed", issues=[])

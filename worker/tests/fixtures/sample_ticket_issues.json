@@ -1,0 +1,41 @@
+{
+  "id": "msg_01TICKETISSUESXYZ",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-6",
+  "stop_reason": "tool_use",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01ISSUES",
+      "name": "submit_ticket_issues",
+      "input": {
+        "issues": [
+          {
+            "title": "Implement login form",
+            "body": "Build the login form with username and password fields so customers can sign in from the portal landing page.",
+            "acceptance_criteria": [
+              "A logged-out visitor sees the login form on the landing page",
+              "Submitting valid credentials signs the user in",
+              "Submitting invalid credentials shows an inline error"
+            ]
+          },
+          {
+            "title": "Add session handling",
+            "body": "Persist the authenticated session so the user stays signed in across page loads until they log out.",
+            "acceptance_criteria": [
+              "The session survives a page reload",
+              "Logging out invalidates the session"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "input_tokens": 1840,
+    "output_tokens": 712,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  }
+}

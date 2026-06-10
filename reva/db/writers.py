@@ -16,6 +16,7 @@ longer transaction can use `Database.session()` directly.
 from __future__ import annotations
 
 import functools
+import hashlib
 from datetime import datetime, timedelta, timezone
 
 import structlog
@@ -35,8 +36,16 @@ from reva.db.models import (
     ReviewFinding,
     ReviewRun,
     TicketAnalysis,
+    TicketIssueRun,
 )
-from reva.types import ClaudeResponse, Finding, JobParams, ReviewResult, TicketJobParams
+from reva.types import (
+    ClaudeResponse,
+    Finding,
+    JobParams,
+    ReviewResult,
+    TicketIssueJobParams,
+    TicketJobParams,
+)
 
 logger = structlog.get_logger()
 
@@ -913,6 +922,315 @@ def get_ticket_analysis(db: Database, analysis_id: int) -> dict | None:
             "created_at": row.created_at,
             "completed_at": row.completed_at,
         }
+
+
+# --- ticket_issue_runs writers -------------------------------------------------
+
+
+def compute_planning_basis(params: TicketIssueJobParams) -> str:
+    """Content-addressed digest of WHAT a run plans from.
+
+    "docx:<sha1[:16]>" when a consultant document is attached (its content is
+    the basis), else "text:<sha1[:16]>" over description + analysis. The prefix
+    lets requeue tell a docx run apart without keeping the document; the hash
+    lets a re-run detect a revised spec. NOT a security hash — stability across
+    a run and its requeues is the only requirement."""
+    if params.description_docx is not None:
+        key = "docx\x00" + params.description_docx.content_base64
+        prefix = "docx:"
+    else:
+        key = "text\x00" + params.description + "\x00" + params.analysis_html
+        prefix = "text:"
+    digest = hashlib.sha1(  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
+        key.encode(), usedforsecurity=False
+    ).hexdigest()[:16]
+    return prefix + digest
+
+
+def record_ticket_issue_run_created(db: Database, params: TicketIssueJobParams) -> int:
+    """Insert a pending ticket_issue_runs row and return its id.
+
+    The row id doubles as the request_id Odoo stores and the callback echoes
+    (github-issues handoff, Contracts 1+2)."""
+    with db.session() as s:
+        row = TicketIssueRun(
+            ticket_id=params.ticket_id,
+            model_name=params.model_name,
+            github_url=params.github_url,
+            name=params.name,
+            description=params.description,
+            analysis_html=params.analysis_html,
+            planning_basis=compute_planning_basis(params),
+            priority=params.priority,
+            ticket_url=params.ticket_url,
+            status="pending",
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def attach_ticket_issue_job_id(db: Database, run_id: int, job_id: str) -> None:
+    """Store the RQ job ID on the ticket_issue_runs row after enqueuing."""
+    with db.session() as s:
+        row = s.get(TicketIssueRun, run_id)
+        if row is not None:
+            row.job_id = job_id
+
+
+def get_pending_ticket_issue_run(
+    db: Database, ticket_id: int, model_name: str
+) -> dict | None:
+    """Return the most recent pending run for this record, or None.
+
+    Request dedup: a re-click while a run is in flight gets the SAME
+    request_id back, so the in-flight run's callback still matches in Odoo."""
+    with db.session() as s:
+        row = s.execute(
+            select(TicketIssueRun)
+            .where(
+                TicketIssueRun.ticket_id == ticket_id,
+                TicketIssueRun.model_name == model_name,
+                TicketIssueRun.status == "pending",
+            )
+            .order_by(TicketIssueRun.created_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        return {"id": row.id, "job_id": row.job_id, "status": row.status}
+
+
+def get_ticket_issue_run(db: Database, run_id: int) -> dict | None:
+    """Return a ticket_issue_runs row as a dict (incl. requeue inputs), or None."""
+    with db.session() as s:
+        row = s.get(TicketIssueRun, run_id)
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "job_id": row.job_id,
+            "ticket_id": row.ticket_id,
+            "model_name": row.model_name,
+            "github_url": row.github_url,
+            "name": row.name,
+            "description": row.description,
+            "analysis_html": row.analysis_html,
+            "planning_basis": row.planning_basis,
+            "priority": row.priority,
+            "ticket_url": row.ticket_url,
+            "status": row.status,
+            "issues": row.issues,
+            "error_message": row.error_message,
+            "model": row.model,
+            "input_tokens": row.input_tokens,
+            "output_tokens": row.output_tokens,
+            "estimated_cost_usd": float(row.estimated_cost_usd) if row.estimated_cost_usd else None,
+            "created_at": row.created_at,
+            "completed_at": row.completed_at,
+        }
+
+
+def record_ticket_issue_plan(
+    db: Database,
+    run_id: int,
+    issues: list[dict],
+    response: ClaudeResponse,
+) -> float:
+    """Persist the validated issue plan + Claude usage; returns the estimated cost.
+
+    Runs BEFORE any GitHub call and leaves status 'pending': a partial failure
+    must resume from this plan on requeue, never re-plan (a re-plan produces
+    different titles and would duplicate the issue set)."""
+    with db.session() as s:
+        row = s.get(TicketIssueRun, run_id)
+        if row is None:
+            return 0.0
+        row.issues = issues
+        row.model = response.model
+        row.input_tokens = response.input_tokens
+        row.output_tokens = response.output_tokens
+        row.cache_read_tokens = response.cache_read_tokens
+        row.cache_creation_tokens = response.cache_creation_tokens
+        cost = estimate_cost(
+            model=response.model,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cache_read_tokens=response.cache_read_tokens,
+            cache_write_tokens=response.cache_creation_tokens,
+        )
+        row.estimated_cost_usd = cost
+        return cost
+
+
+def get_latest_ticket_issue_plan(
+    db: Database, ticket_id: int, model_name: str, exclude_run_id: int
+) -> dict | None:
+    """The most recent OTHER run for this record that has a persisted issue
+    list, as {"id", "github_url", "issues"} — or None.
+
+    Lets a fresh run (re-click after Odoo's timeout race or a partial failure)
+    adopt the prior plan from REVA's own DB instead of trusting GitHub's
+    eventually-consistent search: the prior list is authoritative, includes
+    not-yet-created items, and is immune to index lag. planning_basis is
+    included so the caller can compare bases — a changed consultant docx or
+    description (different basis) must NOT adopt the stale plan."""
+    with db.session() as s:
+        row = s.execute(
+            select(TicketIssueRun)
+            .where(
+                TicketIssueRun.ticket_id == ticket_id,
+                TicketIssueRun.model_name == model_name,
+                TicketIssueRun.issues.is_not(None),
+                TicketIssueRun.id != exclude_run_id,
+            )
+            .order_by(TicketIssueRun.created_at.desc(), TicketIssueRun.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "github_url": row.github_url,
+            "issues": row.issues,
+            "planning_basis": row.planning_basis,
+        }
+
+
+def update_ticket_issue_progress(db: Database, run_id: int, issues: list[dict]) -> None:
+    """Persist creation progress (issue numbers/urls) after each GitHub create.
+
+    Statement-level UPDATE on purpose: this runs once per created issue, and an
+    ORM s.get() would drag the full row (ticket text, analysis HTML) across the
+    wire each time just to overwrite one column."""
+    with db.session() as s:
+        s.execute(
+            update(TicketIssueRun)
+            .where(TicketIssueRun.id == run_id)
+            .values(issues=list(issues))
+        )
+
+
+def record_ticket_issue_run_completed(db: Database, run_id: int, issues: list[dict]) -> None:
+    """Mark a ticket issue run as completed and store the final issue list."""
+    with db.session() as s:
+        row = s.get(TicketIssueRun, run_id)
+        if row is None:
+            return
+        row.status = "completed"
+        row.issues = list(issues)
+        row.completed_at = datetime.now(timezone.utc)
+
+
+def record_ticket_issue_run_failed(db: Database, run_id: int, error_message: str) -> None:
+    """Mark a ticket issue run as failed."""
+    with db.session() as s:
+        row = s.get(TicketIssueRun, run_id)
+        if row is None:
+            return
+        row.status = "failed"
+        row.error_message = error_message
+        row.completed_at = datetime.now(timezone.utc)
+
+
+def reset_ticket_issue_run(db: Database, run_id: int) -> None:
+    """Reset a failed/completed run to pending so it can be re-enqueued.
+
+    Keeps `issues` (the persisted plan + progress) so the rerun resumes
+    creation and re-sends the callback instead of re-planning."""
+    with db.session() as s:
+        row = s.get(TicketIssueRun, run_id)
+        if row is None:
+            return
+        row.status = "pending"
+        row.error_message = None
+        row.completed_at = None
+        row.job_id = None
+
+
+def update_ticket_issue_state(
+    db: Database, owner: str, repo: str, number: int, state: str
+) -> list[dict]:
+    """Set `state` on issue `number` of `owner/repo` across all runs that
+    carry it (adopted/reconciled runs share issues), and return the affected
+    Odoo records with the NEWEST run's full issue snapshot:
+    [{"ticket_id", "model_name", "issues"}].
+
+    Matching is done in Python after a coarse SQL filter: github_url is free
+    text from Odoo (casing/.git/trailing-slash variants), so the LIKE only
+    narrows the scan and parse_github_repo_url decides.
+    """
+    from reva.github_urls import parse_github_repo_url
+
+    target = (owner.lower(), repo.lower())
+    affected: dict[tuple[int, str], dict] = {}
+    with db.session() as s:
+        rows = s.execute(
+            select(TicketIssueRun)
+            .where(
+                TicketIssueRun.issues.is_not(None),
+                TicketIssueRun.github_url.ilike(f"%github.com/{owner}/{repo}%"),
+            )
+            .order_by(TicketIssueRun.created_at.desc(), TicketIssueRun.id.desc())
+        ).scalars().all()
+        for row in rows:
+            parsed = parse_github_repo_url(row.github_url)
+            if parsed is None or (parsed[0].lower(), parsed[1].lower()) != target:
+                continue
+            items = [dict(i) for i in (row.issues or [])]
+            if not any(i.get("number") == number for i in items):
+                continue
+            for item in items:
+                if item.get("number") == number:
+                    item["state"] = state
+            row.issues = items
+            # rows are newest-first: the first hit per record is its snapshot
+            affected.setdefault((row.ticket_id, row.model_name), {
+                "ticket_id": row.ticket_id,
+                "model_name": row.model_name,
+                "issues": items,
+            })
+    return list(affected.values())
+
+
+def purge_old_ticket_issue_text(db: Database, older_than_days: int) -> int:
+    """Scrub raw ticket inputs on ticket_issue_runs past retention (F1/SECU-8).
+
+    description and analysis_html carry customer-authored content (the
+    consultant DOCX is never stored server-side). The issue links in `issues`
+    (number/title/url/state) are derived data and kept — but un-created plan
+    items on failed runs still hold full Claude-rendered bodies derived from
+    that content, so those keys are stripped too (which also means such runs
+    can no longer resume; the purge already accepts that trade-off for
+    description). Idempotent. Returns the number of rows whose raw text was
+    scrubbed."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+    with db.session() as s:
+        result = s.execute(
+            update(TicketIssueRun)
+            .where(
+                TicketIssueRun.created_at < cutoff,
+                TicketIssueRun.description != PURGED_TICKET_TEXT,
+            )
+            .values(
+                description=PURGED_TICKET_TEXT,
+                analysis_html=PURGED_TICKET_TEXT,
+            )
+        )
+        rows = s.execute(
+            select(TicketIssueRun).where(
+                TicketIssueRun.created_at < cutoff,
+                TicketIssueRun.issues.is_not(None),
+            )
+        ).scalars().all()
+        for row in rows:
+            stripped = [
+                {k: v for k, v in item.items() if k not in ("body", "acceptance_criteria")}
+                for item in row.issues
+            ]
+            if stripped != row.issues:
+                row.issues = stripped
+        return result.rowcount
 
 
 # --- internals --------------------------------------------------------------

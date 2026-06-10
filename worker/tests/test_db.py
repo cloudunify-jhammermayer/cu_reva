@@ -753,3 +753,256 @@ def test_migration_runner_rejects_unnamed_files(tmp_path):
     (mdir / "no_version.sql").write_text("SELECT 1;")
     with pytest.raises(ValueError, match="version number"):
         migrate(engine, mdir)
+
+
+# --- ticket_issue_runs writers -------------------------------------------------
+
+
+def _issue_params(ticket_id: int = 7, run_id: int = 0) -> "TicketIssueJobParams":
+    from reva.types import TicketIssueJobParams
+    return TicketIssueJobParams(
+        run_id=run_id,
+        ticket_id=ticket_id,
+        model_name="helpdesk.ticket",
+        github_url="https://github.com/acme/widgets",
+        name="Login page broken",
+        description="We need a login page.",
+        analysis_html="<h2>Summary</h2>",
+        priority="1",
+        ticket_url="https://odoo.example.com/web#id=7&model=helpdesk.ticket&view_type=form",
+    )
+
+
+def _claude_response() -> "ClaudeResponse":
+    from reva.types import ClaudeResponse
+    return ClaudeResponse(
+        model="claude-sonnet-4-6",
+        stop_reason="tool_use",
+        input_tokens=1000,
+        output_tokens=400,
+        cache_read_tokens=0,
+        cache_creation_tokens=0,
+    )
+
+
+def test_ticket_issue_run_create_and_get_roundtrip(db):
+    run_id = writers.record_ticket_issue_run_created(db, _issue_params())
+    writers.attach_ticket_issue_job_id(db, run_id, "rq:job:ti-1")
+
+    row = writers.get_ticket_issue_run(db, run_id)
+    assert row["id"] == run_id
+    assert row["job_id"] == "rq:job:ti-1"
+    assert row["status"] == "pending"
+    assert row["github_url"] == "https://github.com/acme/widgets"
+    assert row["name"] == "Login page broken"
+    assert row["description"] == "We need a login page."
+    assert row["analysis_html"] == "<h2>Summary</h2>"
+    assert row["priority"] == "1"
+    assert row["ticket_url"].startswith("https://odoo.example.com/")
+    assert row["issues"] is None
+
+    assert writers.get_ticket_issue_run(db, 99999) is None
+
+
+def test_ticket_issue_run_pending_dedup(db):
+    run_id = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=7))
+    existing = writers.get_pending_ticket_issue_run(db, 7, "helpdesk.ticket")
+    assert existing is not None and existing["id"] == run_id
+    # different record -> no match
+    assert writers.get_pending_ticket_issue_run(db, 8, "helpdesk.ticket") is None
+    assert writers.get_pending_ticket_issue_run(db, 7, "project.task") is None
+    # non-pending rows don't match
+    writers.record_ticket_issue_run_failed(db, run_id, "boom")
+    assert writers.get_pending_ticket_issue_run(db, 7, "helpdesk.ticket") is None
+
+
+def test_ticket_issue_plan_persists_usage_and_returns_cost(db):
+    run_id = writers.record_ticket_issue_run_created(db, _issue_params())
+    plan = [{"title": "A", "body": "b", "acceptance_criteria": ["c"],
+             "number": None, "url": None}]
+
+    cost = writers.record_ticket_issue_plan(db, run_id, plan, _claude_response())
+
+    assert cost > 0
+    row = writers.get_ticket_issue_run(db, run_id)
+    assert row["status"] == "pending"  # plan persists BEFORE completion
+    assert row["issues"] == plan
+    assert row["model"] == "claude-sonnet-4-6"
+    assert row["input_tokens"] == 1000
+    assert row["output_tokens"] == 400
+    assert row["estimated_cost_usd"] == pytest.approx(cost)
+
+
+def test_ticket_issue_progress_and_completion(db):
+    run_id = writers.record_ticket_issue_run_created(db, _issue_params())
+    plan = [
+        {"title": "A", "body": "b", "acceptance_criteria": [], "number": None, "url": None},
+        {"title": "B", "body": "b", "acceptance_criteria": [], "number": None, "url": None},
+    ]
+    writers.record_ticket_issue_plan(db, run_id, plan, _claude_response())
+
+    plan[0]["number"], plan[0]["url"] = 42, "https://github.com/acme/widgets/issues/42"
+    writers.update_ticket_issue_progress(db, run_id, plan)
+    row = writers.get_ticket_issue_run(db, run_id)
+    assert row["issues"][0]["number"] == 42
+    assert row["issues"][1]["number"] is None
+    assert row["status"] == "pending"
+
+    plan[1]["number"], plan[1]["url"] = 43, "https://github.com/acme/widgets/issues/43"
+    writers.record_ticket_issue_run_completed(db, run_id, plan)
+    row = writers.get_ticket_issue_run(db, run_id)
+    assert row["status"] == "completed"
+    assert row["completed_at"] is not None
+    assert [i["number"] for i in row["issues"]] == [42, 43]
+
+
+def test_ticket_issue_run_failed_and_reset_keeps_plan(db):
+    run_id = writers.record_ticket_issue_run_created(db, _issue_params())
+    plan = [{"title": "A", "body": "b", "acceptance_criteria": [],
+             "number": 42, "url": "https://github.com/acme/widgets/issues/42"}]
+    writers.record_ticket_issue_plan(db, run_id, plan, _claude_response())
+    writers.record_ticket_issue_run_failed(db, run_id, "GitHub 403")
+
+    row = writers.get_ticket_issue_run(db, run_id)
+    assert row["status"] == "failed"
+    assert row["error_message"] == "GitHub 403"
+
+    writers.reset_ticket_issue_run(db, run_id)
+    row = writers.get_ticket_issue_run(db, run_id)
+    assert row["status"] == "pending"
+    assert row["error_message"] is None
+    assert row["job_id"] is None
+    assert row["completed_at"] is None
+    # the persisted plan survives the reset so a requeue resumes, not re-plans
+    assert row["issues"] == plan
+
+
+def test_purge_old_ticket_issue_text_scrubs_inputs_keeps_issues(db):
+    from reva.db.models import TicketIssueRun
+
+    old_id = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=1))
+    recent_id = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=2))
+    issues = [{"title": "A", "body": "b", "acceptance_criteria": [],
+               "number": 42, "url": "https://github.com/acme/widgets/issues/42"}]
+    with db.session() as s:
+        old = s.get(TicketIssueRun, old_id)
+        old.created_at = datetime.now(timezone.utc) - timedelta(days=40)
+        old.issues = issues
+
+    n = writers.purge_old_ticket_issue_text(db, older_than_days=30)
+
+    assert n == 1
+    with db.session() as s:
+        old = s.get(TicketIssueRun, old_id)
+        assert old.description == writers.PURGED_TICKET_TEXT
+        assert old.analysis_html == writers.PURGED_TICKET_TEXT
+        # derived link refs retained; the Claude-rendered plan body
+        # (customer-derived text) is scrubbed with the rest
+        assert old.issues == [{"title": "A", "number": 42,
+                               "url": "https://github.com/acme/widgets/issues/42"}]
+        recent = s.get(TicketIssueRun, recent_id)
+        assert recent.description == "We need a login page."
+    # idempotent
+    assert writers.purge_old_ticket_issue_text(db, older_than_days=30) == 0
+
+
+def test_ticket_issue_pending_unique_per_record(db):
+    """Partial unique index: only one pending run per (ticket_id, model_name) —
+    closes the dedup check-then-insert race between concurrent POSTs."""
+    from sqlalchemy.exc import IntegrityError
+
+    writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=7))
+    with pytest.raises(IntegrityError):
+        writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=7))
+    # a non-pending sibling doesn't block a new run
+    run2 = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=8))
+    writers.record_ticket_issue_run_failed(db, run2, "boom")
+    writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=8))
+
+
+def test_get_latest_ticket_issue_plan(db):
+    a = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=7))
+    plan = [{"title": "A", "body": "b", "acceptance_criteria": [], "number": None, "url": None}]
+    writers.record_ticket_issue_plan(db, a, plan, _claude_response())
+    writers.record_ticket_issue_run_failed(db, a, "boom")
+    b = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=7))
+
+    prior = writers.get_latest_ticket_issue_plan(db, 7, "helpdesk.ticket", exclude_run_id=b)
+    assert prior is not None and prior["id"] == a and prior["issues"] == plan
+    # the current run is excluded, runs without a plan don't match
+    assert writers.get_latest_ticket_issue_plan(db, 7, "helpdesk.ticket", exclude_run_id=a) is None
+
+
+def test_update_ticket_issue_state_matches_repo_and_number(db):
+    """Closing issue 42 updates every run carrying it (case-insensitive repo
+    match on the free-text github_url) and returns the newest snapshot per
+    Odoo record."""
+    issues = [
+        {"title": "A", "number": 42, "url": "https://github.com/acme/widgets/issues/42",
+         "state": "open"},
+        {"title": "B", "number": 43, "url": "https://github.com/acme/widgets/issues/43",
+         "state": "open"},
+    ]
+    old_run = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=7))
+    writers.update_ticket_issue_progress(db, old_run, issues)
+    writers.record_ticket_issue_run_failed(db, old_run, "boom")
+    new_run = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=7))
+    writers.update_ticket_issue_progress(db, new_run, issues)
+    # same issue number in a DIFFERENT repo must not match
+    from reva.db.models import TicketIssueRun
+    other = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=8))
+    with db.session() as s:
+        s.get(TicketIssueRun, other).github_url = "https://github.com/acme/other"
+    writers.update_ticket_issue_progress(db, other, [dict(issues[0])])
+
+    affected = writers.update_ticket_issue_state(db, "Acme", "Widgets", 42, "closed")
+
+    assert len(affected) == 1
+    rec = affected[0]
+    assert (rec["ticket_id"], rec["model_name"]) == (7, "helpdesk.ticket")
+    assert rec["issues"][0]["state"] == "closed"
+    assert rec["issues"][1]["state"] == "open"
+    # both runs of the record were updated; the other repo untouched
+    assert writers.get_ticket_issue_run(db, old_run)["issues"][0]["state"] == "closed"
+    assert writers.get_ticket_issue_run(db, new_run)["issues"][0]["state"] == "closed"
+    assert writers.get_ticket_issue_run(db, other)["issues"][0]["state"] == "open"
+
+
+def test_update_ticket_issue_state_no_match_returns_empty(db):
+    run = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=7))
+    writers.update_ticket_issue_progress(db, run, [
+        {"title": "A", "number": 42, "url": "u", "state": "open"},
+    ])
+    assert writers.update_ticket_issue_state(db, "acme", "widgets", 999, "closed") == []
+    assert writers.update_ticket_issue_state(db, "acme", "elsewhere", 42, "closed") == []
+
+
+def test_planning_basis_stored_not_the_doc(db):
+    from reva.types import DocxAttachment
+
+    docx = _issue_params(ticket_id=1).model_copy(update={
+        "description_docx": DocxAttachment(filename="spec.docx", content_base64="UEsDBABzZQ=="),
+    })
+    docx_id = writers.record_ticket_issue_run_created(db, docx)
+    text_id = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=2))
+
+    docx_row = writers.get_ticket_issue_run(db, docx_id)
+    text_row = writers.get_ticket_issue_run(db, text_id)
+    # the document is not persisted — only a small typed digest
+    assert "description_docx" not in docx_row
+    assert docx_row["planning_basis"].startswith("docx:")
+    assert text_row["planning_basis"].startswith("text:")
+    assert len(docx_row["planning_basis"]) <= 25
+
+
+def test_planning_basis_changes_when_doc_changes(db):
+    from reva.types import DocxAttachment
+
+    def basis_for(content):
+        p = _issue_params(ticket_id=1).model_copy(update={
+            "description_docx": DocxAttachment(filename="s.docx", content_base64=content),
+        })
+        return writers.compute_planning_basis(p)
+
+    assert basis_for("UEsDBABhAA==") == basis_for("UEsDBABhAA==")
+    assert basis_for("UEsDBABhAA==") != basis_for("UEsDBABiBB==")

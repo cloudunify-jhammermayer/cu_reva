@@ -236,6 +236,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ticketAnalysesLoadedMsg:
 		a.tickets, _ = a.tickets.update(msg)
 
+	case ticketIssueRunsLoadedMsg:
+		a.tickets, _ = a.tickets.update(msg)
+
 	case ticketRequeuedMsg:
 		a.tickets, _ = a.tickets.update(msg)
 
@@ -358,7 +361,7 @@ func (a *App) statusBar() string {
 	case viewPending:
 		hint = "j/k navigate | r=refresh | q quit"
 	case viewTickets:
-		hint = "j/k navigate | e=requeue | o=open in Odoo | r=refresh | q quit"
+		hint = "j/k navigate | enter=issues | e=requeue | o=open in Odoo | r=refresh | q quit"
 	case viewAudits:
 		hint = "j/k navigate | enter=findings | esc=back | r=refresh | q quit"
 	default:

@@ -495,15 +495,18 @@ def test_create_issue_opens_issue(rsa_key_pair):
         captured["method"] = req.method
         captured["path"] = req.url.path
         captured["body"] = json.loads(req.content)
-        return httpx.Response(201, json={"number": 77, "html_url": "x"})
+        return httpx.Response(
+            201, json={"number": 77, "html_url": "https://github.com/acme/widgets/issues/77"}
+        )
 
     client = _make_client(handler, private_pem)
-    number = client.create_issue(
+    created = client.create_issue(
         token="tok", owner="acme", repo="widgets",
         title="[REVA audit] RCE", body="details\n<!-- revaaudit -->",
         labels=["reva-audit"],
     )
-    assert number == 77
+    # url is GitHub's canonical html_url, not reconstructed from owner/repo
+    assert created == {"number": 77, "url": "https://github.com/acme/widgets/issues/77"}
     assert captured["method"] == "POST"
     assert captured["path"] == "/repos/acme/widgets/issues"
     assert captured["body"]["title"] == "[REVA audit] RCE"
@@ -829,3 +832,48 @@ def test_find_pr_review_id_recovers_recent_review_with_since(rsa_key_pair):
     )
     since = datetime(2026, 6, 3, 7, 0, 0, tzinfo=timezone.utc)
     assert client.find_pr_review_id("tok", "a", "b", 1, marker="Run #1", since=since) == 555
+
+
+def test_find_issues_with_marker_returns_items_any_state(rsa_key_pair):
+    """Reconcile needs the matching issues themselves (number/title/url), open
+    AND closed — a completed issue still belongs to its ticket and must be
+    re-linked, not re-created."""
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        captured["path"] = req.url.path
+        captured["q"] = req.url.params.get("q")
+        return httpx.Response(200, json={
+            "total_count": 2,
+            "items": [
+                {"number": 5, "title": "Open one", "state": "open",
+                 "html_url": "https://github.com/acme/widgets/issues/5"},
+                {"number": 3, "title": "Closed one", "state": "closed",
+                 "html_url": "https://github.com/acme/widgets/issues/3"},
+            ],
+        })
+
+    client = _make_client(handler, private_pem)
+    issues = client.find_issues_with_marker("tok", "acme", "widgets", "revaticketabc")
+
+    assert captured["path"] == "/search/issues"
+    assert "repo:acme/widgets" in captured["q"]
+    assert "revaticketabc" in captured["q"]
+    assert "state:open" not in captured["q"]
+    assert issues == [
+        {"number": 5, "title": "Open one",
+         "url": "https://github.com/acme/widgets/issues/5", "state": "open"},
+        {"number": 3, "title": "Closed one",
+         "url": "https://github.com/acme/widgets/issues/3", "state": "closed"},
+    ]
+
+
+def test_find_issues_with_marker_empty(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(req):
+        return httpx.Response(200, json={"total_count": 0, "items": []})
+
+    client = _make_client(handler, private_pem)
+    assert client.find_issues_with_marker("tok", "acme", "widgets", "revaticketabc") == []

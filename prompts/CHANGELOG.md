@@ -1,3 +1,35 @@
+## v1.5 — Consultant DOCX as planning basis
+
+- `ticket_issues.md`: when Odoo forwards a consultant specification document
+  (Contract 1 `description_docx`, project tasks only), it is the authoritative
+  planning basis — the worker extracts its text and the prompt plans from it
+  instead of the ticket description/analysis.
+
+## v1.4 — Ticket issues carry order
+
+- `ticket_issues.md`: the planner must return issues in intended
+  implementation order — the worker now numbers GitHub issue titles
+  `[Task <ticket_id>] <n>/<total> — <title>`, so every issue is traceable to
+  its Odoo record and the sequence survives GitHub's list sorting.
+
+## v1.3 — Ticket issue prompt hardening
+
+- `ticket_issues.md`: issues are now always written in English (freelancers
+  are not necessarily German speakers), and the rules explicitly forbid
+  serializing the `issues` array into a JSON string — a production run failed
+  schema validation when the model returned the array as a malformed embedded
+  JSON string (unescaped quotes). The tool description carries the same
+  instruction; on the code side such validation failures are now classified
+  transient (RQ re-plans) instead of failing the run outright.
+
+## v1.2 — Ticket issue planning prompt
+
+- Added `ticket_issues.md`: system prompt for the create-issues flow
+  (github-issues handoff). Plans 1–10 GitHub issues from an Odoo ticket's
+  title/description and, when present, its completed REVA analysis; splits
+  only into independently deliverable pieces, same-language rule, forced
+  `submit_ticket_issues` tool call.
+
 ## v1.1 — Shared review guidance on the CLI path
 
 - Added `review_guidance.md`: path-agnostic governance (identity, anti-injection

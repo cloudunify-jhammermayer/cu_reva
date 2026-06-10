@@ -102,3 +102,58 @@ class OdooCallbackClient:
             "html": html,
         })
         logger.bind(ticket_id=ticket_id, model_name=model_name).info("odoo_callback_ok")
+
+    def issues_created(
+        self,
+        ticket_id: int,
+        model_name: str,
+        request_id: int,
+        status: str,
+        issues: list[dict],
+        error: str | None = None,
+    ) -> None:
+        """POST the created GitHub issues (or a failure) to the Odoo callback.
+
+        Contract 2 of the github-issues handoff: status is exactly "created"
+        or "failed"; issues items are {"number", "title", "url"}; request_id
+        must echo the id REVA returned from POST /api/v1/create-issues. Odoo
+        responds 409 (permanent) when the record is no longer pending or the
+        request_id is stale — the expected outcome of its 10s-timeout race.
+        """
+        self._post("/issues-created", {
+            "ticket_id": ticket_id,
+            "model_name": model_name,
+            "request_id": request_id,
+            "status": status,
+            "issues": issues,
+            "error": error,
+        })
+        logger.bind(ticket_id=ticket_id, model_name=model_name).info(
+            "odoo_issues_created_ok"
+        )
+
+    def issue_state(
+        self,
+        ticket_id: int,
+        model_name: str,
+        number: int,
+        state: str,
+        issues: list[dict],
+    ) -> None:
+        """POST a per-issue state change (GitHub issue closed/reopened) to Odoo.
+
+        `number`/`state` identify the change; `issues` is the FULL current
+        snapshot [{"number", "title", "url", "state"}] so Odoo re-renders the
+        links idempotently (done issues get marked). 409 = the record's links
+        are not in the 'created' state — permanent, do not retry.
+        """
+        self._post("/issue-state", {
+            "ticket_id": ticket_id,
+            "model_name": model_name,
+            "number": number,
+            "state": state,
+            "issues": issues,
+        })
+        logger.bind(ticket_id=ticket_id, model_name=model_name, number=number).info(
+            "odoo_issue_state_ok"
+        )

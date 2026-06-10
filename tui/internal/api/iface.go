@@ -15,5 +15,6 @@ type ClientIface interface {
 	TriggerAudit(repoID int) error
 	AddRepo(owner, name string) error
 	TicketAnalyses(limit int) (*TicketAnalysisPage, error)
+	TicketIssueRuns(limit int) (*TicketIssueRunPage, error)
 	RequeueTicket(id int) error
 }

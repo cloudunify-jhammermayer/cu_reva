@@ -110,7 +110,7 @@ def _open_audit_issues(ctx, params: AuditJobParams, audit_id: int, findings: lis
                 title=f"[REVA audit] {f.title}",
                 body=_format_audit_issue_body(f, marker, owner, name, branch, audit_id),
                 labels=[_AUDIT_ISSUE_LABEL],
-            )
+            )["number"]
             writers.set_audit_finding_issue_number(ctx.db, fid, number)
             log.info("audit_issue_created", finding_id=fid, issue=number)
         except Exception as exc:  # best-effort; the finding is already persisted

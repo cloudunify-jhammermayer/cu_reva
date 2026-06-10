@@ -65,7 +65,7 @@ def test_system_blocks_full_set(builder):
 
 
 def test_get_version_returns_current_version(builder):
-    assert builder.get_version() == "v1.1"
+    assert builder.get_version() == "v1.5"
 
 
 def test_diff_review_template_renders(builder):

@@ -745,3 +745,74 @@ def test_installation_repo_fetch_failure_skips_repo_not_delivery(client_and_db):
     with db.session() as s:
         assert s.query(Repository).count() == 1
     assert [e["func"] for e in q.enqueued] == ["worker.audit_tasks.run_audit"]
+
+
+# --- issues events (per-issue state sync) ---------------------------------------
+
+
+def _issues_payload(action: str = "closed", labels: list[str] | None = None,
+                    number: int = 42) -> dict:
+    return {
+        "action": action,
+        "installation": {"id": 99},
+        "repository": {"id": 1001, "name": "widgets", "full_name": "acme/widgets",
+                       "owner": {"login": "acme"}},
+        "issue": {
+            "number": number,
+            "title": "Implement login form",
+            "state": "closed" if action == "closed" else "open",
+            "labels": [{"name": name} for name in (labels if labels is not None else ["reva-ticket"])],
+        },
+        "sender": {"login": "alice", "type": "User"},
+    }
+
+
+def test_issue_closed_with_ticket_label_enqueues_state_sync(client_and_db):
+    client, _ = client_and_db
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    try:
+        r = _post(client, _issues_payload("closed"), event="issues", delivery="d-iss-1")
+        assert r.status_code == 202
+        assert len(q.enqueued) == 1
+        assert q.enqueued[0]["func"] == "worker.ticket_issue_tasks.sync_ticket_issue_state"
+        assert q.enqueued[0]["args"][0] == {
+            "owner": "acme", "repo": "widgets", "number": 42, "state": "closed",
+        }
+    finally:
+        app.state.rq_queue = None
+
+
+def test_issue_reopened_enqueues_open_state(client_and_db):
+    client, _ = client_and_db
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    try:
+        _post(client, _issues_payload("reopened"), event="issues", delivery="d-iss-2")
+        assert q.enqueued[0]["args"][0]["state"] == "open"
+    finally:
+        app.state.rq_queue = None
+
+
+def test_issue_without_ticket_label_is_ignored(client_and_db):
+    client, _ = client_and_db
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    try:
+        r = _post(client, _issues_payload("closed", labels=["bug"]),
+                  event="issues", delivery="d-iss-3")
+        assert r.status_code == 202  # stored, but no job
+        assert q.enqueued == []
+    finally:
+        app.state.rq_queue = None
+
+
+def test_issue_irrelevant_action_is_ignored(client_and_db):
+    client, _ = client_and_db
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    try:
+        _post(client, _issues_payload("labeled"), event="issues", delivery="d-iss-4")
+        assert q.enqueued == []
+    finally:
+        app.state.rq_queue = None

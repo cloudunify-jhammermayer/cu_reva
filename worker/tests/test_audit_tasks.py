@@ -52,7 +52,7 @@ class FakeGitHub:
                              "repo": repo, "labels": labels})
         n = self._next
         self._next += 1
-        return n
+        return {"number": n, "url": f"https://github.com/{owner}/{repo}/issues/{n}"}
 
 
 def _result_with(findings, cost=1.0) -> AuditResult:

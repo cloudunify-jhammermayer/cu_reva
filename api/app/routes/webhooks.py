@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from rq import Retry
 from starlette.concurrency import run_in_threadpool
 
 from app.dependencies import get_db, get_settings
@@ -94,6 +95,8 @@ def _process_delivery(
             _handle_issue_comment(db, payload, settings, github)
         elif event == "pull_request_review_comment":
             _handle_review_comment(payload, settings, rq_queue)
+        elif event == "issues":
+            _handle_issues(payload, rq_queue)
         elif event == "installation":
             _handle_installation(db, payload, github, rq_queue)
         elif event == "installation_repositories":
@@ -241,6 +244,45 @@ def _handle_review_comment(payload: dict, settings: Settings, rq_queue) -> None:
         repo=repo,
         pr=pr_number,
         in_reply_to=in_reply_to_id,
+    )
+
+
+# Label REVA puts on every issue it creates from an Odoo ticket — cheap
+# pre-filter so unrelated repo issues never hit the DB or the queue.
+_TICKET_ISSUE_LABEL = "reva-ticket"
+# GitHub issue actions that change the state we track per issue.
+_ISSUE_STATE_ACTIONS: dict[str, str] = {"closed": "closed", "reopened": "open"}
+
+
+def _handle_issues(payload: dict, rq_queue) -> None:
+    """A ticket issue was closed (done) or reopened → sync the per-issue state
+    to the DB and notify Odoo, via the worker (it owns the Odoo client)."""
+    state = _ISSUE_STATE_ACTIONS.get(payload.get("action", ""))
+    if state is None:
+        return
+
+    issue = payload.get("issue") or {}
+    labels = {(label.get("name") or "") for label in issue.get("labels") or []}
+    if _TICKET_ISSUE_LABEL not in labels:
+        return
+
+    repo_data = payload.get("repository") or {}
+    owner = (repo_data.get("owner") or {}).get("login")
+    repo = repo_data.get("name")
+    number = issue.get("number")
+    if not owner or not repo or not number or rq_queue is None:
+        return
+
+    rq_queue.enqueue(
+        "worker.ticket_issue_tasks.sync_ticket_issue_state",
+        {"owner": owner, "repo": repo, "number": number, "state": state},
+        # The Odoo notify must survive a transient Odoo outage (same policy as
+        # the issues-created callback); the sync is idempotent.
+        retry=Retry(max=3, interval=[30, 120, 300]),
+    )
+    logger.info(
+        "ticket_issue_state_queued",
+        repo=repo_data.get("full_name"), issue=number, state=state,
     )
 
 

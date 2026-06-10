@@ -48,3 +48,28 @@ def test_purge_skipped_within_interval(db):
     assert new_last == last  # not due → unchanged
     with db.session() as s:
         assert s.get(TicketAnalysis, tid).input_text == "raw customer PII"  # untouched
+
+
+def test_purge_also_scrubs_ticket_issue_runs(db):
+    from reva.db.models import TicketIssueRun
+    from reva.types import TicketIssueJobParams
+
+    run_id = writers.record_ticket_issue_run_created(
+        db, TicketIssueJobParams(
+            run_id=0, ticket_id=1, model_name="helpdesk.ticket",
+            github_url="https://github.com/acme/widgets", name="t",
+            description="raw customer PII", analysis_html="<p>derived PII</p>",
+            priority="1", ticket_url="https://odoo.example.com/web#id=1",
+        )
+    )
+    with db.session() as s:
+        s.get(TicketIssueRun, run_id).created_at = (
+            datetime.now(timezone.utc) - timedelta(days=40)
+        )
+
+    maybe_purge_ticket_text(db, _now(), None, interval_s=86_400, retention_days=30)
+
+    with db.session() as s:
+        row = s.get(TicketIssueRun, run_id)
+        assert "raw customer PII" not in row.description
+        assert "derived PII" not in row.analysis_html

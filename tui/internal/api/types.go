@@ -173,6 +173,35 @@ type TicketAnalysisPage struct {
 	Total int                     `json:"total"`
 }
 
+// TicketIssueRef is one planned/created GitHub issue of a create-issues run.
+// Number/URL are nil until the issue exists on GitHub; State ("open"/"closed")
+// is synced from GitHub issue webhooks.
+type TicketIssueRef struct {
+	Number *int    `json:"number"`
+	Title  string  `json:"title"`
+	URL    *string `json:"url"`
+	State  *string `json:"state"`
+}
+
+type TicketIssueRunSummary struct {
+	ID               int              `json:"id"`
+	TicketID         int              `json:"ticket_id"`
+	ModelName        string           `json:"model_name"`
+	GithubURL        string           `json:"github_url"`
+	Status           string           `json:"status"`
+	Issues           []TicketIssueRef `json:"issues"`
+	ErrorMessage     *string          `json:"error_message"`
+	Model            *string          `json:"model"`
+	EstimatedCostUSD *float64         `json:"estimated_cost_usd"`
+	CreatedAt        time.Time        `json:"created_at"`
+	CompletedAt      *time.Time       `json:"completed_at"`
+}
+
+type TicketIssueRunPage struct {
+	Items []TicketIssueRunSummary `json:"items"`
+	Total int                     `json:"total"`
+}
+
 type DashboardMetrics struct {
 	Last24h            PeriodStats   `json:"last_24h"`
 	Last7d             PeriodStats   `json:"last_7d"`

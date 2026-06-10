@@ -187,6 +187,23 @@ class ContentBlock(TypedDict, total=False):
 # --- Ticket analysis types ---------------------------------------------------
 
 
+def _unwrap_json_list(v: object) -> object:
+    """Claude occasionally returns list fields as JSON strings; unwrap them."""
+    if isinstance(v, str):
+        import json
+        try:
+            return json.loads(v)
+        except json.JSONDecodeError as exc:
+            # Stringified AND malformed (typically unescaped quotes in the
+            # embedded text) — name the real problem instead of leaking a bare
+            # json.loads parse error into the validation message.
+            raise ValueError(
+                f"list field arrived as a JSON string that does not parse "
+                f"(malformed embedded JSON: {exc})"
+            ) from exc
+    return v
+
+
 class AcceptanceCriterion(BaseModel):
     given: str
     when: str
@@ -228,11 +245,7 @@ class TicketAnalysisResult(BaseModel):
     )
     @classmethod
     def _parse_json_string_list(cls, v: object) -> object:
-        """Claude occasionally returns list fields as JSON strings; unwrap them."""
-        if isinstance(v, str):
-            import json
-            return json.loads(v)
-        return v
+        return _unwrap_json_list(v)
 
 
 class TicketJobParams(BaseModel):
@@ -243,6 +256,67 @@ class TicketJobParams(BaseModel):
     model_name: str  # e.g. "helpdesk.ticket" or "project.task"
     field_name: str
     text: str
+
+
+# --- Ticket issue creation types -----------------------------------------------
+
+
+class TicketIssueItem(BaseModel):
+    """One GitHub issue planned from an Odoo ticket."""
+
+    title: str
+    body: str
+    acceptance_criteria: list[str] = Field(default_factory=list)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def _truncate_title(cls, v: object) -> object:
+        # Bound well under GitHub's 256-char issue-title limit.
+        if isinstance(v, str) and len(v) > 200:
+            return v[:197] + "..."
+        return v
+
+    @field_validator("acceptance_criteria", mode="before")
+    @classmethod
+    def _parse_json_string_list(cls, v: object) -> object:
+        return _unwrap_json_list(v)
+
+
+class TicketIssuePlan(BaseModel):
+    """Structured output from the submit_ticket_issues tool_use call."""
+
+    issues: list[TicketIssueItem] = Field(min_length=1, max_length=10)
+
+    @field_validator("issues", mode="before")
+    @classmethod
+    def _parse_json_string_list(cls, v: object) -> object:
+        return _unwrap_json_list(v)
+
+
+class DocxAttachment(BaseModel):
+    """A consultant Word document forwarded by Odoo (Contract 1,
+    description_docx). When present it is THE basis for the issue split —
+    description/analysis_html are ignored."""
+
+    filename: str
+    content_base64: str
+
+
+class TicketIssueJobParams(BaseModel):
+    """Inputs handed to the create-issues RQ job: the Contract 1 payload from
+    the Odoo addon (github-issues handoff) plus the ticket_issue_runs row id,
+    which doubles as the request_id Odoo correlates callbacks with."""
+
+    run_id: int
+    ticket_id: int
+    model_name: str  # e.g. "helpdesk.ticket" or "project.task"
+    github_url: str
+    name: str
+    description: str
+    analysis_html: str  # "" when the record has no completed analysis
+    description_docx: DocxAttachment | None = None  # tasks only
+    priority: str  # Odoo priority key "0".."3"
+    ticket_url: str
 
 
 class AuditJobParams(BaseModel):

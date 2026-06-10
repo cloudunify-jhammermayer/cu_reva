@@ -501,6 +501,50 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 	return &TicketAnalysisPage{Items: items[:n], Total: len(items)}, nil
 }
 
+func (m *MockClient) TicketIssueRuns(limit int) (*TicketIssueRunPage, error) {
+	now := time.Now()
+	strPtr := func(s string) *string { return &s }
+	intPtr := func(i int) *int { return &i }
+	f64Ptr := func(f float64) *float64 { return &f }
+	t1 := now.Add(-3 * time.Minute)
+
+	items := []TicketIssueRunSummary{
+		{
+			ID: 3, TicketID: 456, ModelName: "helpdesk.ticket",
+			GithubURL: "https://github.com/acme/widgets", Status: "completed",
+			Issues: []TicketIssueRef{
+				{Number: intPtr(42), Title: "Implement login form",
+					URL:   strPtr("https://github.com/acme/widgets/issues/42"),
+					State: strPtr("closed")},
+				{Number: intPtr(43), Title: "Add session handling",
+					URL:   strPtr("https://github.com/acme/widgets/issues/43"),
+					State: strPtr("open")},
+			},
+			Model:            strPtr("claude-sonnet-4-6"),
+			EstimatedCostUSD: f64Ptr(0.0048),
+			CreatedAt:        now.Add(-4 * time.Minute), CompletedAt: &t1,
+		},
+		{
+			ID: 2, TicketID: 123, ModelName: "project.task",
+			GithubURL: "https://github.com/acme/widgets", Status: "failed",
+			Issues: []TicketIssueRef{
+				{Number: intPtr(40), Title: "Create export wizard",
+					URL: strPtr("https://github.com/acme/widgets/issues/40")},
+				{Number: nil, Title: "Add export cron", URL: nil},
+			},
+			ErrorMessage: strPtr("GitHub 403 secondary rate limit"),
+			CreatedAt:    now.Add(-12 * time.Minute),
+		},
+		{
+			ID: 1, TicketID: 99, ModelName: "helpdesk.ticket",
+			GithubURL: "https://github.com/acme/widgets", Status: "pending",
+			CreatedAt: now.Add(-20 * time.Second),
+		},
+	}
+	n := min(limit, len(items))
+	return &TicketIssueRunPage{Items: items[:n], Total: len(items)}, nil
+}
+
 func (m *MockClient) Requeue(id int) error {
 	return nil
 }

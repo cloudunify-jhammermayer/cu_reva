@@ -30,6 +30,7 @@ from reva.cost import estimate_cost
 from reva.notifications import notify_worker_error, post_to_chat
 from reva.odoo_client import OdooCallbackClient
 from reva.ticket_analyzer import TicketAnalyzer
+from reva.ticket_issue_planner import TicketIssuePlanner
 from reva.weekly_report import build_weekly_report
 from reva.db import (
     Database,
@@ -75,6 +76,9 @@ class WorkerContext:
     ticket_analyzer: TicketAnalyzer
     verifier: FindingVerifier
     odoo: OdooCallbackClient
+    # Default None keeps existing WorkerContext call sites/fixtures valid;
+    # build_worker_context always wires it.
+    ticket_issue_planner: TicketIssuePlanner | None = None
     google_chat_webhook_url: str = ""
     daily_budget_usd: float | None = None
     repo_cache_ttl_days: int = 30
@@ -134,6 +138,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         repos=repo_lookup,
     )
     ticket_analyzer = TicketAnalyzer(claude=claude, prompts_dir=settings.prompts_dir)
+    ticket_issue_planner = TicketIssuePlanner(claude=claude, prompts_dir=settings.prompts_dir)
     verifier = FindingVerifier(claude=claude)
     odoo = OdooCallbackClient(
         callback_url=settings.odoo_callback_url,
@@ -147,6 +152,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         reviewer=reviewer,
         auditor=auditor,
         ticket_analyzer=ticket_analyzer,
+        ticket_issue_planner=ticket_issue_planner,
         verifier=verifier,
         odoo=odoo,
         google_chat_webhook_url=settings.google_chat_webhook_url,
