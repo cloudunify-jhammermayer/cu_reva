@@ -13,6 +13,7 @@ import pytest
 from reva.errors import PermanentError, TransientError
 from worker.reviewer import (
     Reviewer,
+    _calibrate_odoo_severity,
     _cap_findings,
     _recompute_risk_level,
 )
@@ -747,3 +748,86 @@ def test_decline_is_logged_with_reason():
     declined = [e for e in logs if e.get("event") == "review_declined"]
     assert declined, "decline was not logged"
     assert "100" in declined[0]["reason"]
+
+
+# --- odoo severity calibration -----------------------------------------------
+
+
+def _of(severity, title, body, *, is_odoo_specific=True, file="custom_addons/app.py") -> Finding:
+    return Finding(
+        severity=severity,  # type: ignore[arg-type]
+        category="security",
+        file=file,
+        title=title,
+        body=body,
+        confidence=0.8,
+        is_odoo_specific=is_odoo_specific,
+    )
+
+
+def test_calibrate_floors_cr_execute_string_fmt_to_critical():
+    out = _calibrate_odoo_severity(
+        [_of("minor", "Raw cr.execute", "uses string formatting in cr.execute()")]
+    )
+    assert out[0].severity == "critical"
+
+
+def test_calibrate_does_not_downgrade():
+    out = _calibrate_odoo_severity(
+        [_of("critical", "manual transaction", "manual cr.commit in business logic")]
+    )
+    assert out[0].severity == "critical"  # floor is major, never lowers
+
+
+def test_calibrate_floors_cr_commit_to_major():
+    out = _calibrate_odoo_severity(
+        [_of("minor", "manual commit", "calls cr.commit() directly")]
+    )
+    assert out[0].severity == "major"
+
+
+def test_calibrate_floors_missing_access_csv_to_major():
+    out = _calibrate_odoo_severity(
+        [_of("minor", "No ACL", "missing ir.model.access.csv for the new model")]
+    )
+    assert out[0].severity == "major"
+
+
+def test_calibrate_skips_non_odoo_findings():
+    out = _calibrate_odoo_severity(
+        [_of("minor", "commit", "calls cr.commit()", is_odoo_specific=False)]
+    )
+    assert out[0].severity == "minor"  # untouched: not is_odoo_specific
+
+
+def test_calibrate_no_false_floor_on_safe_cr_execute():
+    out = _calibrate_odoo_severity(
+        [_of("minor", "Safe query", "cr.execute is parameterized with %s placeholders, safe")]
+    )
+    assert out[0].severity == "minor"  # no injection cue -> not floored
+
+
+def test_calibrate_empty_is_noop():
+    assert _calibrate_odoo_severity([]) == []
+
+
+def test_execute_calibration_lifts_risk_level():
+    # A model-minor Odoo cr.execute-injection finding must come back critical AND
+    # lift risk_level — proving calibration runs before _recompute_risk_level.
+    finding = {
+        "severity": "minor",
+        "category": "security",
+        "file": "custom_addons/app.py",
+        "line_start": 10,
+        "line_end": 10,
+        "title": "Raw cr.execute with f-string",
+        "body": "Builds the query with an f-string in cr.execute() — SQL injection risk.",
+        "confidence": 0.8,
+        "is_odoo_specific": True,
+    }
+    runner = FakeRunner(response=_claude_response_with_findings([finding]))
+    reviewer, *_ = _make_reviewer(runner=runner)
+    result = reviewer.execute(_params())
+    assert result.status == "completed"
+    assert result.findings[0].severity == "critical"
+    assert result.risk_level == "critical"

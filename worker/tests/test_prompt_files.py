@@ -12,8 +12,23 @@ import pytest
 
 from reva.prompt_builder import PromptBuilder
 from reva.types import RepoConfig
+from worker.reviewer import _ODOO_SEVERITY_RULES
 
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
+
+# Each deterministic calibration rule must trace to a phrase that actually
+# appears in odoo19.md, so the rule table and the prompt can't silently drift.
+_RULE_ANCHORS = {
+    "cr_execute_string_format": "cr.execute()",
+    "manual_transaction": "cr.commit()",
+    "missing_model_access": "ir.model.access.csv",
+    "sudo_in_controller": "sudo()",
+    "controller_auth_none": "auth='none'",
+    "api_depends_missing": "@api.depends",
+    "api_onchange_writes_db": "@api.onchange",
+    "csp_inline_script": "inline `<script>`",
+    "manifest_missing_depends": "__manifest__.py",
+}
 
 
 @pytest.fixture()
@@ -66,6 +81,16 @@ def test_system_blocks_full_set(builder):
 
 def test_get_version_returns_current_version(builder):
     assert builder.get_version() == "v1.5"
+
+
+def test_odoo_severity_rules_in_sync_with_odoo19_md():
+    text = (PROMPTS_DIR / "odoo19.md").read_text().lower()
+    rule_names = {name for name, _, _ in _ODOO_SEVERITY_RULES}
+    assert rule_names == set(_RULE_ANCHORS), (
+        "every calibration rule needs an anchor phrase in _RULE_ANCHORS (and vice versa)"
+    )
+    for name, anchor in _RULE_ANCHORS.items():
+        assert anchor.lower() in text, f"rule {name!r} anchor {anchor!r} missing from odoo19.md"
 
 
 def test_diff_review_template_renders(builder):

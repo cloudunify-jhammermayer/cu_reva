@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Protocol
 
@@ -36,6 +37,7 @@ from reva.types import (
     RepoConfig,
     ReviewResult,
     RiskLevel,
+    Severity,
 )
 
 logger = structlog.get_logger()
@@ -46,6 +48,82 @@ MAX_FINDINGS = 15
 
 # severity weights for capping and risk_level recomputation
 _SEVERITY_WEIGHT: dict[str, int] = {"info": 1, "minor": 2, "major": 3, "critical": 4}
+
+
+def _contains_any(haystack: str, needles: tuple[str, ...]) -> bool:
+    return any(n in haystack for n in needles)
+
+
+# Cues that a cr.execute() call interpolates untrusted data (vs. safe %s params).
+_INJECTION_CUES = (
+    "string format", "f-string", 'f"', "f'", "concatenat",
+    "sql injection", "format(", "%-format", "interpolat",
+)
+
+# Deterministic severity FLOORS for canonical Odoo anti-patterns, mirroring
+# prompts/odoo19.md. Each rule is (name, minimum severity, predicate over the
+# lowercased "title body" haystack); ordered highest-floor first, first match
+# wins. Only unambiguous, keyword-detectable rules are encoded — judgement-
+# dependent ones (general sudo(), destructive migrations, N+1) and the *minor*
+# deprecation rules are deliberately omitted (see docs/tier0-plan.md). The
+# anchor phrases are kept in sync with odoo19.md by test_prompt_files.
+_ODOO_SEVERITY_RULES: list[tuple[str, Severity, Callable[[str], bool]]] = [
+    (
+        "cr_execute_string_format",  # odoo19.md: cr.execute with string formatting
+        "critical",
+        lambda h: ("cr.execute" in h or "cursor.execute" in h)
+        and _contains_any(h, _INJECTION_CUES),
+    ),
+    (
+        "manual_transaction",  # odoo19.md: cr.commit()/cr.rollback()
+        "major",
+        lambda h: "cr.commit" in h or "cr.rollback" in h,
+    ),
+    (
+        "missing_model_access",  # odoo19.md: ir.model.access.csv for new models
+        "major",
+        lambda h: "ir.model.access" in h
+        and _contains_any(h, ("missing", "no access", "without")),
+    ),
+    (
+        "sudo_in_controller",  # odoo19.md: sudo() in controllers without validation
+        "major",
+        lambda h: "sudo()" in h
+        and _contains_any(
+            h, ("controller", "public", "auth=", "without validation", "without input")
+        ),
+    ),
+    (
+        "controller_auth_none",  # odoo19.md: controllers using auth='none'
+        "major",
+        lambda h: _contains_any(h, ("auth='none'", 'auth="none"', "auth=none")),
+    ),
+    (
+        "api_depends_missing",  # odoo19.md: @api.depends missing a field
+        "major",
+        lambda h: "api.depends" in h
+        and _contains_any(h, ("missing", "incomplete", "stale", "does not list")),
+    ),
+    (
+        "api_onchange_writes_db",  # odoo19.md: @api.onchange writing to the DB
+        "major",
+        lambda h: "api.onchange" in h
+        and _contains_any(h, ("write", "create", "database", "persist")),
+    ),
+    (
+        "csp_inline_script",  # odoo19.md: inline <script>/external CDN (CSP)
+        "major",
+        lambda h: "script" in h
+        and _contains_any(h, ("inline <script", "external cdn", "csp")),
+    ),
+    (
+        "manifest_missing_depends",  # odoo19.md: __manifest__.py missing a dependency
+        "major",
+        lambda h: "__manifest__" in h
+        and "depends" in h
+        and _contains_any(h, ("missing", "incomplete")),
+    ),
+]
 
 
 class GitHubReader(Protocol):
@@ -304,6 +382,9 @@ class Reviewer:
         # Third-party odoo/ + enterprise/ are out of scope in every mode: full/deep
         # reviews explore the whole clone, so Claude can still cite them. Drop those.
         grounded = _drop_thirdparty_findings(grounded)
+        # Floor Odoo anti-pattern severities to odoo19.md's documented minimums
+        # before capping/risk so the Check Run conclusion reflects them.
+        grounded = _calibrate_odoo_severity(grounded)
         capped = _cap_findings(grounded, MAX_FINDINGS)
         risk_level = _recompute_risk_level(capped)
 
@@ -467,6 +548,33 @@ def _drop_thirdparty_findings(findings: list[Finding]) -> list[Finding]:
     if dropped:
         logger.info("findings_dropped_thirdparty", count=dropped)
     return kept
+
+
+def _calibrate_odoo_severity(findings: list[Finding]) -> list[Finding]:
+    """Floor each Odoo-specific finding's severity up to the minimum documented
+    in odoo19.md for the matched anti-pattern. Never downgrades — a finding the
+    model already raised higher keeps its severity. Non-Odoo findings (and ones
+    matching no rule) are returned unchanged. Must run before _cap_findings (so
+    a floored-up critical isn't dropped) and before _recompute_risk_level.
+    """
+    calibrated: list[Finding] = []
+    for f in findings:
+        if not f.is_odoo_specific:
+            calibrated.append(f)
+            continue
+        haystack = f"{f.title} {f.body}".lower()
+        result = f
+        for name, floor, matches in _ODOO_SEVERITY_RULES:
+            if matches(haystack):
+                if _SEVERITY_WEIGHT[floor] > _SEVERITY_WEIGHT[f.severity]:
+                    result = f.model_copy(update={"severity": floor})
+                    logger.info(
+                        "odoo_severity_floored",
+                        rule=name, old=f.severity, new=floor, title=f.title,
+                    )
+                break  # first (highest) matching rule wins
+        calibrated.append(result)
+    return calibrated
 
 
 def _cap_findings(findings: list[Finding], max_count: int) -> list[Finding]:
