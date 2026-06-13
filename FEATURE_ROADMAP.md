@@ -50,6 +50,8 @@ tiers hang off.
 | **Per-finding outcome ledger** 🔓 | M/H | Persist the *already-computed* fix-verified verdict from the delta-resolution loop → implicit ground truth at zero extra Claude cost. |
 | **prompt_versions hash write** | S→M/H | On startup, hash the assembled prompt files into the dead `prompt_versions` table; alert on unbumped drift. (S subset first; full eval-gate is M.) |
 
+> Detailed implementation plan: [`docs/tier1-plan.md`](docs/tier1-plan.md).
+
 ## Tier 2 — Review intelligence & Odoo depth (the actual "skillset")
 
 | Feature | E/V | Summary |
