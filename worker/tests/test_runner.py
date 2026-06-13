@@ -67,6 +67,14 @@ class FakeGitHub:
     recoverable_review_id: int | None = None
     recoverable_check_run_id: int | None = None
 
+    # Label state for the risk-label path. existing_labels seeds what's already
+    # on the PR; ensured/added/removed record what _set_risk_label did.
+    existing_labels: list[str] = field(default_factory=list)
+    ensured_labels: list[str] = field(default_factory=list)
+    added_labels: list[str] = field(default_factory=list)
+    removed_labels: list[str] = field(default_factory=list)
+    raise_on_add_labels: bool = False
+
     def get_installation_token(self, installation_id: int) -> str:
         return self.installation_token
 
@@ -101,6 +109,23 @@ class FakeGitHub:
         cid = self.next_comment_id
         self.next_comment_id += 1
         return cid
+
+    def ensure_label(self, token, owner, repo, name, color="5319e7", description="") -> None:
+        self.ensured_labels.append(name)
+
+    def get_issue_labels(self, token, owner, repo, issue_number) -> list[str]:
+        return list(self.existing_labels)
+
+    def add_labels(self, token, owner, repo, issue_number, labels) -> None:
+        if self.raise_on_add_labels:
+            raise RuntimeError("label API down")
+        self.added_labels.extend(labels)
+        self.existing_labels.extend(labels)
+
+    def remove_label(self, token, owner, repo, issue_number, name) -> None:
+        self.removed_labels.append(name)
+        if name in self.existing_labels:
+            self.existing_labels.remove(name)
 
 
 # --- Fixtures ----------------------------------------------------------------
@@ -262,6 +287,58 @@ def test_completed_with_no_findings_is_success(ctx_and_fakes):
     review = s["github"].created_pr_reviews[0]
     assert review["comments"] == []
     assert "**GENERAL**" not in review["body"]
+
+
+# --- risk labels -------------------------------------------------------------
+
+
+def test_completed_run_sets_risk_label(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["reviewer"].result = _completed_result()  # risk_level "low"
+    run_review(_params(s))
+    assert "reva-risk-low" in s["github"].added_labels
+    assert "reva-risk-low" in s["github"].ensured_labels
+
+
+def test_re_review_downgrade_removes_prior_risk_label(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["github"].existing_labels = ["reva-risk-high", "bug"]
+    s["reviewer"].result = _completed_result()  # risk_level "low"
+    run_review(_params(s))
+    assert "reva-risk-high" in s["github"].removed_labels
+    assert "reva-risk-low" in s["github"].added_labels
+    assert "bug" not in s["github"].removed_labels  # human/CI labels untouched
+
+
+def test_same_risk_level_is_noop(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["github"].existing_labels = ["reva-risk-low"]
+    s["reviewer"].result = _completed_result()  # risk_level "low"
+    run_review(_params(s))
+    assert s["github"].added_labels == []
+    assert s["github"].removed_labels == []
+
+
+def test_label_failure_does_not_fail_review(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["github"].raise_on_add_labels = True
+    s["reviewer"].result = _completed_result()
+    result = run_review(_params(s))
+    assert result["status"] == "completed"
+    assert len(s["github"].created_check_runs) == 1
+    assert len(s["github"].created_pr_reviews) == 1
+
+
+def test_declined_review_sets_no_risk_label(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["reviewer"].result = ReviewResult(
+        status="declined", summary="No reviewable files.",
+        risk_level="low", decline_reason="No reviewable files.",
+    )
+    run_review(_params(s))
+    assert s["github"].added_labels == []
+    assert s["github"].removed_labels == []
+    assert s["github"].ensured_labels == []
 
 
 def test_completed_with_only_unmapped_findings_skips_inlines(ctx_and_fakes):

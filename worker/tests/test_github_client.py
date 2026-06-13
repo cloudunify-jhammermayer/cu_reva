@@ -544,6 +544,66 @@ def test_ensure_label_swallows_already_exists(rsa_key_pair):
     client.ensure_label("tok", "acme", "widgets", "reva-audit")
 
 
+def test_get_issue_labels_returns_names(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        captured["method"] = req.method
+        captured["path"] = req.url.path
+        return httpx.Response(200, json=[{"name": "bug"}, {"name": "reva-risk-high"}])
+
+    client = _make_client(handler, private_pem)
+    labels = client.get_issue_labels("tok", "acme", "widgets", 42)
+    assert labels == ["bug", "reva-risk-high"]
+    assert captured["method"] == "GET"
+    assert captured["path"] == "/repos/acme/widgets/issues/42/labels"
+
+
+def test_add_labels_posts_labels_array(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        import json
+        captured["method"] = req.method
+        captured["path"] = req.url.path
+        captured["body"] = json.loads(req.content)
+        return httpx.Response(200, json=[{"name": "reva-risk-low"}])
+
+    client = _make_client(handler, private_pem)
+    client.add_labels("tok", "acme", "widgets", 42, ["reva-risk-low"])
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/repos/acme/widgets/issues/42/labels"
+    assert captured["body"] == {"labels": ["reva-risk-low"]}
+
+
+def test_remove_label_deletes_url_encoded_name(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        captured["method"] = req.method
+        captured["path"] = req.url.path
+        return httpx.Response(200, json=[])
+
+    client = _make_client(handler, private_pem)
+    client.remove_label("tok", "acme", "widgets", 42, "reva-risk-high")
+    assert captured["method"] == "DELETE"
+    assert captured["path"] == "/repos/acme/widgets/issues/42/labels/reva-risk-high"
+
+
+def test_remove_label_swallows_404(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(req):
+        return httpx.Response(404, json={"message": "Label does not exist"})
+
+    client = _make_client(handler, private_pem)
+    # Label not present -> no-op, must not raise.
+    client.remove_label("tok", "acme", "widgets", 42, "reva-risk-low")
+
+
 def test_issue_exists_with_marker_true_when_search_hits(rsa_key_pair):
     private_pem, _ = rsa_key_pair
     captured: dict = {}

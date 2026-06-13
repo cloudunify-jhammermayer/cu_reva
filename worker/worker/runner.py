@@ -61,6 +61,17 @@ from reva.types import JobParams, ReviewResult
 
 logger = structlog.get_logger()
 
+# Mutually-exclusive risk label set on each completed review's PR (one per
+# level) so reviewers can triage from the PR list. The hyphen namespace matches
+# the existing reva-audit / reva-ticket labels.
+RISK_LABEL_PREFIX = "reva-risk-"
+RISK_LABEL_META: dict[str, tuple[str, str]] = {
+    "critical": ("b60205", "REVA risk: critical"),
+    "high": ("d93f0b", "REVA risk: high"),
+    "medium": ("fbca04", "REVA risk: medium"),
+    "low": ("0e8a16", "REVA risk: low"),
+}
+
 
 # ----------------------------------------------------------------- context
 
@@ -358,6 +369,7 @@ def _post_result_to_github(
                 )
                 writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id)
             _backfill_comment_ids(ctx, run_id, token, owner, name, pr_number, review_id)
+            _set_risk_label(ctx, token, owner, name, pr_number, result.risk_level, log)
             if result.delta_base_sha:
                 _verify_and_resolve_findings(ctx, params, result, token, owner, name, pr_number, run_id)
         elif result.status == "declined":
@@ -558,6 +570,33 @@ def _post_simple_check_run(
         output=format_check_run_output(result, run_id=run_id),
         head_sha=params.head_sha,
     )
+
+
+def _set_risk_label(
+    ctx: WorkerContext,
+    token: str,
+    owner: str,
+    name: str,
+    pr_number: int,
+    risk_level: str,
+    log,
+) -> None:
+    """Set the single reva-risk-* label matching the review's risk_level on the
+    PR, removing any prior reva-risk-* label it set. Best-effort: any failure
+    (incl. a TransientError from the label API) is logged and swallowed so it
+    never fails — or triggers an RQ retry of — the already-posted review."""
+    try:
+        target = RISK_LABEL_PREFIX + risk_level
+        color, description = RISK_LABEL_META.get(risk_level, ("ededed", "REVA risk"))
+        ctx.github.ensure_label(token, owner, name, target, color=color, description=description)
+        current = ctx.github.get_issue_labels(token, owner, name, pr_number)
+        for label in current:
+            if label.startswith(RISK_LABEL_PREFIX) and label != target:
+                ctx.github.remove_label(token, owner, name, pr_number, label)
+        if target not in current:
+            ctx.github.add_labels(token, owner, name, pr_number, [target])
+    except Exception:  # noqa: BLE001
+        log.warning("risk_label_failed", exc_info=True)
 
 
 def _post_failure_check_run(

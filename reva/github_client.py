@@ -384,6 +384,40 @@ class GitHubClient:
         except (PermanentError, TransientError):
             pass
 
+    def get_issue_labels(
+        self, token: str, owner: str, repo: str, issue_number: int
+    ) -> list[str]:
+        """Label names currently on an issue/PR (single page).
+
+        PRs and issues share the `/issues/{n}/labels` endpoint, so `issue_number`
+        is the PR number for a pull request.
+        """
+        response = self._get(
+            token, f"/repos/{owner}/{repo}/issues/{issue_number}/labels"
+        )
+        return [item["name"] for item in response.json()]
+
+    def add_labels(
+        self, token: str, owner: str, repo: str, issue_number: int, labels: list[str]
+    ) -> None:
+        """Add labels to an issue/PR. Additive — does not clear existing labels."""
+        self._post(
+            token,
+            f"/repos/{owner}/{repo}/issues/{issue_number}/labels",
+            {"labels": labels},
+        )
+
+    def remove_label(
+        self, token: str, owner: str, repo: str, issue_number: int, name: str
+    ) -> None:
+        """Remove a single label from an issue/PR. A 404 (label not present) is a
+        no-op. The label name is URL-encoded (it may contain ':' or spaces)."""
+        self._delete(
+            token,
+            f"/repos/{owner}/{repo}/issues/{issue_number}/labels/{quote(name, safe='')}",
+            allow_404=True,
+        )
+
     def issue_exists_with_marker(
         self, token: str, owner: str, repo: str, marker: str
     ) -> bool:
@@ -598,6 +632,28 @@ class GitHubClient:
         except httpx.TransportError as exc:
             raise TransientError(f"GitHub transport error: {exc}") from exc
 
+        if response.status_code >= 300:
+            raise map_github_status(response, action=path)
+        return response
+
+    def _delete(
+        self, token: str, path: str, allow_404: bool = False
+    ) -> httpx.Response | None:
+        url = f"{self.base_url}{path}"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        try:
+            response = self._client.delete(url, headers=headers)
+        except httpx.TimeoutException as exc:
+            raise TransientError(f"GitHub timeout: {exc}") from exc
+        except httpx.TransportError as exc:
+            raise TransientError(f"GitHub transport error: {exc}") from exc
+
+        if response.status_code == 404 and allow_404:
+            return None
         if response.status_code >= 300:
             raise map_github_status(response, action=path)
         return response
