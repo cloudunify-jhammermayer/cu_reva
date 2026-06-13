@@ -341,6 +341,7 @@ class Reviewer:
             cache_creation_tokens=response.cache_creation_tokens,
             estimated_cost_usd=cost,
             delta_base_sha=delta_base_sha,
+            block_on_severity=repo_config.block_on_severity,
         )
 
     # ----------------------------------------------------------------- helpers
@@ -367,7 +368,20 @@ class Reviewer:
             return RepoConfig()
         if not isinstance(parsed, dict):
             return RepoConfig()
-        return RepoConfig.model_validate(parsed)
+        try:
+            return RepoConfig.model_validate(parsed)
+        except ValidationError as exc:
+            # A bad value for a known field (e.g. block_on_severity: high) would
+            # otherwise fail every review on this repo. Degrade to defaults, same
+            # as the malformed-YAML path above.
+            logger.warning(
+                "claude_review_yml_invalid",
+                owner=owner,
+                name=name,
+                head_sha=head_sha[:8],
+                error=str(exc),
+            )
+            return RepoConfig()
 
     def _resolve_limits(self, repo_config: RepoConfig) -> tuple[int, int]:
         """Per-repo overrides for diff size guards."""

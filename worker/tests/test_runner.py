@@ -172,7 +172,11 @@ def _params(s: dict, **overrides) -> dict:
     return base
 
 
-def _completed_result(findings: list[Finding] | None = None, diff: str = SAMPLE_DIFF) -> ReviewResult:
+def _completed_result(
+    findings: list[Finding] | None = None,
+    diff: str = SAMPLE_DIFF,
+    block_on_severity: str = "major",
+) -> ReviewResult:
     return ReviewResult(
         status="completed",
         summary="Looks fine.",
@@ -187,6 +191,7 @@ def _completed_result(findings: list[Finding] | None = None, diff: str = SAMPLE_
         input_tokens=100,
         output_tokens=50,
         estimated_cost_usd=0.001,
+        block_on_severity=block_on_severity,
     )
 
 
@@ -233,6 +238,18 @@ def test_completed_run_posts_check_and_review(ctx_and_fakes):
     check = s["github"].created_check_runs[0]
     assert check["conclusion"] == "failure"  # major → failure
     assert check["status"] == "completed"
+
+
+def test_block_on_severity_critical_makes_major_non_blocking(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["reviewer"].result = _completed_result(
+        findings=[_f("major", file="x.py", line_start=12)],
+        block_on_severity="critical",
+    )
+    run_review(_params(s))
+
+    check = s["github"].created_check_runs[0]
+    assert check["conclusion"] == "neutral"  # major below the critical gate
 
 
 def test_completed_with_no_findings_is_success(ctx_and_fakes):

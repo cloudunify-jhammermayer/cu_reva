@@ -56,10 +56,15 @@ _SEVERITY_LABEL: dict[Severity, str] = {
 # --- Conclusion mapping ------------------------------------------------------
 
 
+_SEVERITY_RANK: dict[str, int] = {"info": 0, "minor": 1, "major": 2, "critical": 3}
+
+
 def compute_check_conclusion(result: ReviewResult) -> CheckConclusion:
     """Map a ReviewResult to the GitHub Check Run `conclusion`.
 
-    Matches the blocking matrix in pr-review-requirements.md §9.
+    Matches the blocking matrix in pr-review-requirements.md §9. The blocking
+    severity is per-repo via `result.block_on_severity` (default "major" — any
+    major/critical blocks, as before). "none" never blocks.
     """
     if result.status == "stale":
         return "skipped"
@@ -68,14 +73,16 @@ def compute_check_conclusion(result: ReviewResult) -> CheckConclusion:
     if result.status == "failed":
         return "failure"  # safety: failures block until resolved
 
-    # status == "completed"
-    severities = {f.severity for f in result.findings}
-    if "critical" in severities or "major" in severities:
+    # status == "completed" — gate on the per-repo threshold.
+    threshold = result.block_on_severity
+    if threshold == "none":
+        return "success"
+    max_rank = max((_SEVERITY_RANK[f.severity] for f in result.findings), default=-1)
+    if max_rank >= _SEVERITY_RANK[threshold]:
         return "failure"
-    if "minor" in severities:
-        return "neutral"
-    # only info, or no findings
-    return "success"
+    if max_rank >= _SEVERITY_RANK["minor"]:
+        return "neutral"  # findings present but below the gate
+    return "success"  # only info, or no findings
 
 
 # --- Finding partitioning ----------------------------------------------------

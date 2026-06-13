@@ -420,6 +420,33 @@ def test_missing_claude_md_and_yml_still_succeeds():
     assert result.status == "completed"
 
 
+def test_block_on_severity_resolved_from_yml():
+    github = FakeGitHub(file_contents={".claude-review.yml": "block_on_severity: critical\n"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert result.status == "completed"
+    assert result.block_on_severity == "critical"
+
+
+def test_block_on_severity_defaults_to_major():
+    github = FakeGitHub(file_contents={})  # no .claude-review.yml
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert result.block_on_severity == "major"
+
+
+def test_invalid_block_on_severity_falls_back_to_major():
+    # A typo'd value must not permanently fail every review on the repo.
+    github = FakeGitHub(file_contents={".claude-review.yml": "block_on_severity: high\n"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert result.status == "completed"
+    assert result.block_on_severity == "major"
+
+
 # --- finding cap + risk recompute --------------------------------------------
 
 

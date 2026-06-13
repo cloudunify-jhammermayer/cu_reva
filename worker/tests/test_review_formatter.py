@@ -43,6 +43,7 @@ def _result(status="completed", findings=None, **kwargs):
         duration_ms=kwargs.get("duration_ms", 134_000),  # 2m 14s
         estimated_cost_usd=kwargs.get("estimated_cost_usd", 0.042),
         decline_reason=kwargs.get("decline_reason"),
+        block_on_severity=kwargs.get("block_on_severity", "major"),
     )
 
 
@@ -79,6 +80,39 @@ def test_conclusion_failed_is_failure():
 
 def test_conclusion_stale_is_skipped():
     assert compute_check_conclusion(_result(status="stale")) == "skipped"
+
+
+# --- per-repo gating (block_on_severity) ------------------------------------
+
+
+def test_gate_critical_threshold_major_is_neutral():
+    r = _result(findings=[_f("major")], block_on_severity="critical")
+    assert compute_check_conclusion(r) == "neutral"
+
+
+def test_gate_critical_threshold_critical_is_failure():
+    r = _result(findings=[_f("critical")], block_on_severity="critical")
+    assert compute_check_conclusion(r) == "failure"
+
+
+def test_gate_minor_threshold_minor_is_failure():
+    r = _result(findings=[_f("minor")], block_on_severity="minor")
+    assert compute_check_conclusion(r) == "failure"
+
+
+def test_gate_minor_threshold_info_only_is_success():
+    r = _result(findings=[_f("info")], block_on_severity="minor")
+    assert compute_check_conclusion(r) == "success"
+
+
+def test_gate_none_never_blocks():
+    r = _result(findings=[_f("critical")], block_on_severity="none")
+    assert compute_check_conclusion(r) == "success"
+
+
+def test_gate_declined_ignores_threshold():
+    r = _result(status="declined", block_on_severity="none")
+    assert compute_check_conclusion(r) == "neutral"
 
 
 # --- finding split ----------------------------------------------------------

@@ -37,6 +37,10 @@ TriggerEvent = Literal[
 
 ReviewStatus = Literal["completed", "stale", "declined", "failed"]
 
+# Per-repo Check Run blocking threshold (.claude-review.yml: block_on_severity).
+# The lowest finding severity that fails the Check Run; "none" never blocks.
+BlockSeverity = Literal["critical", "major", "minor", "none"]
+
 
 # --- Repo config --------------------------------------------------------------
 
@@ -59,6 +63,9 @@ class RepoConfig(BaseModel):
     odoo: bool = False
     framework: str | None = None
     custom_instructions: str | None = None
+    # Lowest finding severity that fails the Check Run. Default "major" keeps the
+    # historical behavior (any major/critical blocks); "none" never blocks.
+    block_on_severity: BlockSeverity = "major"
 
 
 # --- Finding ------------------------------------------------------------------
@@ -136,6 +143,11 @@ class ReviewResult(BaseModel):
     # Transient: the reviewed diff, carried from Reviewer.execute to runner._post_completed
     # for hunk parsing. Not written to the database.
     diff: str = ""
+
+    # Transient: per-repo Check Run gating threshold, carried from Reviewer.execute
+    # to compute_check_conclusion. Not persisted; the default "major" preserves
+    # behavior for results built outside execute (declines/stale/failed).
+    block_on_severity: BlockSeverity = "major"
 
     model: str | None = None
     prompt_version: str | None = None
