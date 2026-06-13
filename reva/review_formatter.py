@@ -66,7 +66,7 @@ def compute_check_conclusion(result: ReviewResult) -> CheckConclusion:
     severity is per-repo via `result.block_on_severity` (default "major" — any
     major/critical blocks, as before). "none" never blocks.
     """
-    if result.status == "stale":
+    if result.status in ("stale", "skipped_trivial"):
         return "skipped"
     if result.status == "declined":
         return "neutral"
@@ -156,6 +156,9 @@ def format_check_run_output(result: ReviewResult, run_id: int | None = None) -> 
     elif result.status == "stale":
         parts.append("## Skipped\n\nThe PR head SHA changed before the review completed; "
                      "a new review will be scheduled on the latest commit.")
+    elif result.status == "skipped_trivial":
+        parts.append("## Skipped\n\n"
+                     + (result.summary or "No substantive changes to review."))
     elif result.status == "failed":
         msg = result.error_message or "An internal error prevented the review from completing."
         parts.append(f"## Error\n\n{_redact_internal_paths(msg)}")
@@ -171,6 +174,8 @@ def _check_run_title(result: ReviewResult) -> str:
         return f"{AGENT_NAME} declined this review"
     if result.status == "stale":
         return f"{AGENT_NAME} skipped — head SHA changed"
+    if result.status == "skipped_trivial":
+        return f"{AGENT_NAME} skipped — no substantive changes"
     if result.status == "failed":
         return f"{AGENT_NAME} encountered an error"
     # completed

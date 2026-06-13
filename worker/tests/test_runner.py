@@ -389,6 +389,39 @@ def test_stale_posts_only_skipped_check(ctx_and_fakes):
     assert s["github"].created_check_runs[0]["conclusion"] == "skipped"
 
 
+def test_skipped_trivial_posts_only_skipped_check(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["reviewer"].result = ReviewResult(
+        status="skipped_trivial",
+        summary="No substantive changes to review.",
+        risk_level="low",
+    )
+    run_review(_params(s))
+
+    assert len(s["github"].created_check_runs) == 1
+    assert len(s["github"].created_pr_reviews) == 0
+    assert len(s["github"].created_issue_comments) == 0
+    assert s["github"].created_check_runs[0]["conclusion"] == "skipped"
+    # No risk label for a trivial skip (only completed reviews are labelled).
+    assert s["github"].added_labels == []
+
+
+def test_skipped_trivial_persists_run_with_zero_findings(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["reviewer"].result = ReviewResult(
+        status="skipped_trivial",
+        summary="No substantive changes to review.",
+        risk_level="low",
+    )
+    run_review(_params(s))
+
+    from reva.db.models import ReviewRun
+    with s["db"].session() as session:
+        run = session.query(ReviewRun).one()
+        assert run.status == "skipped_trivial"
+        assert run.finding_count == 0
+
+
 def test_permanent_error_records_failed_and_posts_failure_check(ctx_and_fakes):
     s = ctx_and_fakes
     s["reviewer"].raise_exc = PermanentError("Claude returned invalid JSON")

@@ -215,6 +215,18 @@ def record_review_stale(db: Database, params: JobParams) -> int:
         return run.id
 
 
+def record_review_skipped_trivial(db: Database, params: JobParams, summary: str) -> int:
+    """Record a review short-circuited as trivial (no Claude call, no spend)."""
+    with db.session() as s:
+        run = _upsert_review_run(s, params, status="skipped_trivial")
+        run.completed_at = datetime.now(timezone.utc)
+        run.summary = summary
+        run.finding_count = 0
+        s.flush()
+        _replace_findings(s, run.id, [])
+        return run.id
+
+
 def reap_stale_running_reviews(db: Database, older_than_seconds: int) -> int:
     """Fail review_runs stuck in `running` longer than older_than_seconds.
 

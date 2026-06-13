@@ -11,6 +11,7 @@ from reva.diff_utils import (
     filter_diff_by_paths,
     find_line_in_hunks,
     is_excluded_path,
+    is_trivial_diff,
     iter_diff_files,
     parse_diff_hunks,
 )
@@ -241,3 +242,114 @@ def test_is_excluded_path():
     assert not is_excluded_path("custom_addons/mod/models/x.py")
     # A custom module merely named with an odoo* prefix is NOT excluded.
     assert not is_excluded_path("custom_addons/odoo_helper/x.py")
+
+
+# --- is_trivial_diff ---------------------------------------------------------
+
+
+def _pydiff(body: str, path: str = "custom_addons/m/a.py") -> str:
+    return (
+        f"diff --git a/{path} b/{path}\n"
+        f"--- a/{path}\n"
+        f"+++ b/{path}\n"
+        f"@@ -1,3 +1,3 @@\n"
+        f"{body}"
+    )
+
+
+def test_trivial_whitespace_reindent():
+    assert is_trivial_diff(_pydiff(" def f():\n-    return 1\n+\treturn 1\n")) is True
+
+
+def test_trivial_trailing_whitespace():
+    assert is_trivial_diff(_pydiff("-x = 1\n+x = 1 \n")) is True
+
+
+def test_trivial_blank_line_added():
+    assert is_trivial_diff(_pydiff(" x = 1\n+\n")) is True
+
+
+def test_trivial_comment_only_python():
+    assert is_trivial_diff(_pydiff("-# old comment\n+# new comment\n")) is True
+
+
+def test_trivial_import_reorder():
+    assert is_trivial_diff(
+        _pydiff("-import os\n-import sys\n+import sys\n+import os\n")
+    ) is True
+
+
+def test_nontrivial_import_added():
+    assert is_trivial_diff(_pydiff("+import json\n")) is False
+
+
+def test_nontrivial_comment_plus_real_line():
+    assert is_trivial_diff(_pydiff("+# a comment\n+x = compute()\n")) is False
+
+
+def test_nontrivial_add_line_and_reindent():
+    assert is_trivial_diff(
+        _pydiff(" def f():\n-  return 1\n+    return 1\n+    extra()\n")
+    ) is False
+
+
+def test_nontrivial_real_code_change():
+    assert is_trivial_diff(_pydiff("-    return 1\n+    return 2\n")) is False
+
+
+def test_nontrivial_deleted_file():
+    diff = (
+        "diff --git a/custom_addons/m/a.py b/custom_addons/m/a.py\n"
+        "deleted file mode 100644\n"
+        "--- a/custom_addons/m/a.py\n"
+        "+++ /dev/null\n"
+        "@@ -1,2 +0,0 @@\n"
+        "-x = 1\n"
+        "-y = 2\n"
+    )
+    assert is_trivial_diff(diff) is False
+
+
+def test_nontrivial_new_file_with_content():
+    diff = (
+        "diff --git a/custom_addons/m/new.py b/custom_addons/m/new.py\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        "+++ b/custom_addons/m/new.py\n"
+        "@@ -0,0 +1,2 @@\n"
+        "+import os\n"
+        "+print(os.getcwd())\n"
+    )
+    assert is_trivial_diff(diff) is False
+
+
+def test_nontrivial_mixed_whitespace_and_real_change():
+    diff = (
+        _pydiff("-x = 1\n+x = 1 \n", path="custom_addons/m/a.py")
+        + _pydiff("-y = 1\n+y = 2\n", path="custom_addons/m/b.py")
+    )
+    assert is_trivial_diff(diff) is False
+
+
+def test_trivial_two_files_both_whitespace_only():
+    diff = (
+        _pydiff("-x = 1\n+x = 1 \n", path="custom_addons/m/a.py")
+        + _pydiff("- y = 2\n+y = 2\n", path="custom_addons/m/b.py")
+    )
+    assert is_trivial_diff(diff) is True
+
+
+def test_trivial_crlf_whitespace_only():
+    diff = (
+        "diff --git a/custom_addons/m/a.py b/custom_addons/m/a.py\r\n"
+        "--- a/custom_addons/m/a.py\r\n"
+        "+++ b/custom_addons/m/a.py\r\n"
+        "@@ -1 +1 @@\r\n"
+        "-x=1\r\n"
+        "+ x=1\r\n"
+    )
+    assert is_trivial_diff(diff) is True
+
+
+def test_empty_diff_is_not_trivial():
+    assert is_trivial_diff("") is False

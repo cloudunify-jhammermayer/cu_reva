@@ -82,6 +82,16 @@ def test_conclusion_stale_is_skipped():
     assert compute_check_conclusion(_result(status="stale")) == "skipped"
 
 
+def test_conclusion_skipped_trivial_is_skipped():
+    assert compute_check_conclusion(_result(status="skipped_trivial")) == "skipped"
+
+
+def test_skipped_trivial_output_is_non_error():
+    out = format_check_run_output(_result(status="skipped_trivial", summary="No substantive changes."))
+    assert "error" not in out["title"].lower()
+    assert "Skipped" in out["summary"]
+
+
 # --- per-repo gating (block_on_severity) ------------------------------------
 
 

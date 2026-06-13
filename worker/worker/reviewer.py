@@ -28,6 +28,7 @@ from reva.diff_utils import (
     filter_diff,
     filter_diff_by_paths,
     is_excluded_path,
+    is_trivial_diff,
 )
 from reva.errors import PermanentError
 from reva.prompt_builder import PromptBuilder  # kept for type annotation (prompts param)
@@ -339,6 +340,12 @@ class Reviewer:
                     f"Add more patterns to skip_paths or split the PR."
                 )
 
+        # 8b. Trivial-diff short-circuit: if what remains is only whitespace,
+        # comments, or import reordering, skip the paid Claude call entirely.
+        if is_trivial_diff(diff):
+            log.info("review_skipped_trivial", diff_lines=diff_lines)
+            return _skipped_trivial()
+
         # 9. Select model.
         model = self.runner.deep_model if params.review_mode == "deep" else self.runner.default_model
 
@@ -480,6 +487,14 @@ def _decline(reason: str) -> ReviewResult:
         summary=reason,
         risk_level="low",
         decline_reason=reason,
+    )
+
+
+def _skipped_trivial() -> ReviewResult:
+    return ReviewResult(
+        status="skipped_trivial",
+        summary="No substantive changes to review (whitespace, comments, or import reordering only).",
+        risk_level="low",
     )
 
 

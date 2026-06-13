@@ -35,7 +35,7 @@ TriggerEvent = Literal[
     "comment", "manual", "manual_requeue",
 ]
 
-ReviewStatus = Literal["completed", "stale", "declined", "failed"]
+ReviewStatus = Literal["completed", "stale", "declined", "failed", "skipped_trivial"]
 
 # Per-repo Check Run blocking threshold (.claude-review.yml: block_on_severity).
 # The lowest finding severity that fails the Check Run; "none" never blocks.
@@ -133,6 +133,7 @@ class ReviewResult(BaseModel):
       declined   — summary + decline_reason only.
       stale      — summary only.
       failed     — error_message + error_class only.
+      skipped_trivial — summary only (no findings, no Claude call, no spend).
     """
 
     status: ReviewStatus

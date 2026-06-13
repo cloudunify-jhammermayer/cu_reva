@@ -199,3 +199,99 @@ def find_line_in_hunks(file_path: str, line: int, hunks: list[DiffHunk]) -> bool
         if h.file_path == file_path and h.new_start <= line <= h.new_end:
             return True
     return False
+
+
+# --- Triviality --------------------------------------------------------------
+
+# Single-line comment marker per extension. Only languages REVA actually reviews
+# need an entry; an unknown extension is treated as "not comment-only" (safe).
+_COMMENT_MARKER: dict[str, str] = {".py": "#"}
+
+
+def _body_lines(section: str, sign: str) -> list[str]:
+    """Added (sign='+') or removed (sign='-') body lines of a diff section,
+    excluding the +++/--- file headers and CRLF-safe."""
+    header = sign * 3
+    return [
+        line[1:].rstrip("\r")
+        for line in section.split("\n")
+        if line.startswith(sign) and not line.startswith(header)
+    ]
+
+
+def _ws_signature(lines: list[str]) -> dict[str, int]:
+    """Multiset of non-blank lines with all whitespace removed. Two line sets
+    with equal signatures differ only in whitespace and/or blank lines."""
+    sig: dict[str, int] = {}
+    for line in lines:
+        if not line.strip():
+            continue  # blank line — a whitespace-only change
+        key = re.sub(r"\s+", "", line)
+        sig[key] = sig.get(key, 0) + 1
+    return sig
+
+
+def _nonblank_stripped(lines: list[str]) -> list[str]:
+    return [line.strip() for line in lines if line.strip()]
+
+
+def _all_imports(lines: list[str]) -> bool:
+    stripped = _nonblank_stripped(lines)
+    return bool(stripped) and all(
+        s.startswith("import ") or s.startswith("from ") for s in stripped
+    )
+
+
+def _all_comments(lines: list[str], ext: str) -> bool:
+    marker = _COMMENT_MARKER.get(ext)
+    if marker is None:
+        return False
+    return all(not line.strip() or line.strip().startswith(marker) for line in lines)
+
+
+def _section_is_trivial(added: list[str], removed: list[str], ext: str) -> bool:
+    # whitespace/blank-line only: same content modulo whitespace
+    if _ws_signature(added) == _ws_signature(removed):
+        return True
+    # pure import reordering (Python): same import lines, reordered
+    if (
+        ext == ".py"
+        and _all_imports(added)
+        and _all_imports(removed)
+        and sorted(_nonblank_stripped(added)) == sorted(_nonblank_stripped(removed))
+    ):
+        return True
+    # comment-only edit
+    return _all_comments(added, ext) and _all_comments(removed, ext)
+
+
+def is_trivial_diff(diff: str) -> bool:
+    """Whether every changed file section is only whitespace, comment, or
+    import-reordering changes — i.e. nothing worth a paid review.
+
+    Conservative by construction: ANY real added/removed code line makes the
+    whole diff non-trivial, and a deleted/renamed/binary file (no `+++ b/`
+    header) is always treated as substantive. Used to short-circuit the review
+    before calling Claude.
+    """
+    if not diff.strip():
+        return False
+    sections = re.split(r"(?=^diff --git )", diff, flags=re.MULTILINE)
+    seen = False
+    for section in sections:
+        if not section.strip():
+            continue
+        m = re.search(r"^\+\+\+ b/(.+)$", section, re.MULTILINE)
+        if m is None:
+            # Deleted file (+++ /dev/null), binary, or pure rename — substantive.
+            return False
+        ext = os.path.splitext(m.group(1).rstrip("\r"))[1].lower()
+        added = _body_lines(section, "+")
+        removed = _body_lines(section, "-")
+        if not added and not removed:
+            seen = True  # pure context / new empty file / mode change
+            continue
+        if not _section_is_trivial(added, removed, ext):
+            return False
+        seen = True
+    return seen

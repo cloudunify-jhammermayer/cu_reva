@@ -831,3 +831,72 @@ def test_execute_calibration_lifts_risk_level():
     assert result.status == "completed"
     assert result.findings[0].severity == "critical"
     assert result.risk_level == "critical"
+
+
+# --- trivial-diff short-circuit ----------------------------------------------
+
+
+def test_trivial_diff_skips_without_calling_claude():
+    # A whitespace-only change under custom_addons must short-circuit: no Claude.
+    diff = (
+        "diff --git a/custom_addons/m/a.py b/custom_addons/m/a.py\n"
+        "--- a/custom_addons/m/a.py\n"
+        "+++ b/custom_addons/m/a.py\n"
+        "@@ -1 +1 @@\n"
+        "-x = 1\n"
+        "+x = 1 \n"
+    )
+    github = FakeGitHub(diff=diff, files=[{"filename": "custom_addons/m/a.py"}])
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert result.status == "skipped_trivial"
+    assert runner.last_skill is None  # Claude was never called
+
+
+def test_trivial_skip_after_skip_paths_filtering():
+    # skip_paths strips one file; the remaining file is whitespace-only -> skip.
+    diff = (
+        "diff --git a/custom_addons/m/data.json b/custom_addons/m/data.json\n"
+        "--- a/custom_addons/m/data.json\n+++ b/custom_addons/m/data.json\n@@ -1 +1 @@\n-a\n+b\n"
+        "diff --git a/custom_addons/m/a.py b/custom_addons/m/a.py\n"
+        "--- a/custom_addons/m/a.py\n+++ b/custom_addons/m/a.py\n@@ -1 +1 @@\n-x = 1\n+x = 1 \n"
+    )
+    github = FakeGitHub(
+        diff=diff,
+        files=[{"filename": "custom_addons/m/a.py"}],
+        file_contents={".claude-review.yml": "skip_paths:\n  - '*.json'\n"},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert result.status == "skipped_trivial"
+    assert runner.last_skill is None
+
+
+def test_substantive_diff_still_reviewed():
+    diff = (
+        "diff --git a/custom_addons/m/a.py b/custom_addons/m/a.py\n"
+        "--- a/custom_addons/m/a.py\n+++ b/custom_addons/m/a.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n"
+    )
+    github = FakeGitHub(diff=diff, files=[{"filename": "custom_addons/m/a.py"}])
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert result.status == "completed"
+    assert runner.last_skill == "reva-diff-review"
+
+
+def test_trivial_skip_is_logged():
+    import structlog
+    diff = (
+        "diff --git a/custom_addons/m/a.py b/custom_addons/m/a.py\n"
+        "--- a/custom_addons/m/a.py\n+++ b/custom_addons/m/a.py\n@@ -1 +1 @@\n-x = 1\n+x = 1 \n"
+    )
+    github = FakeGitHub(diff=diff, files=[{"filename": "custom_addons/m/a.py"}])
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    with structlog.testing.capture_logs() as logs:
+        result = reviewer.execute(_params())
+    assert result.status == "skipped_trivial"
+    assert any(e.get("event") == "review_skipped_trivial" for e in logs)

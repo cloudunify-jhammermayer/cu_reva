@@ -318,6 +318,8 @@ def _execute_and_persist(
         writers.record_review_declined(ctx.db, params, result.decline_reason or "Declined.")
     elif result.status == "stale":
         writers.record_review_stale(ctx.db, params)
+    elif result.status == "skipped_trivial":
+        writers.record_review_skipped_trivial(ctx.db, params, result.summary)
 
     return result
 
@@ -381,7 +383,7 @@ def _post_result_to_github(
                 ),
             )
             writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id)
-        elif result.status == "stale":
+        elif result.status in ("stale", "skipped_trivial"):
             check_run_id = _check_run_id_or_recover(
                 ctx, token, owner, name, params.head_sha,
                 lambda existing_id: _post_simple_check_run(
