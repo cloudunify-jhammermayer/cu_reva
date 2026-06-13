@@ -353,3 +353,18 @@ def test_trivial_crlf_whitespace_only():
 
 def test_empty_diff_is_not_trivial():
     assert is_trivial_diff("") is False
+
+
+def test_nontrivial_statement_reorder():
+    # Swapping two statements is a permutation of identical lines — behavior can
+    # change, so it must NOT be classified as a whitespace-only (trivial) change.
+    assert is_trivial_diff(
+        _pydiff("-self.x = compute_a()\n-self.y = compute_b()\n+self.y = compute_b()\n+self.x = compute_a()\n")
+    ) is False
+
+
+def test_nontrivial_reorder_with_reindent():
+    # Reorder + reindent together is still substantive (the reorder dominates).
+    assert is_trivial_diff(
+        _pydiff("-a()\n-b()\n+    b()\n+    a()\n")
+    ) is False

@@ -219,16 +219,13 @@ def _body_lines(section: str, sign: str) -> list[str]:
     ]
 
 
-def _ws_signature(lines: list[str]) -> dict[str, int]:
-    """Multiset of non-blank lines with all whitespace removed. Two line sets
-    with equal signatures differ only in whitespace and/or blank lines."""
-    sig: dict[str, int] = {}
-    for line in lines:
-        if not line.strip():
-            continue  # blank line — a whitespace-only change
-        key = re.sub(r"\s+", "", line)
-        sig[key] = sig.get(key, 0) + 1
-    return sig
+def _ws_normalized(lines: list[str]) -> list[str]:
+    """Non-blank lines with all whitespace removed, IN ORDER. Two line lists that
+    are equal under this normalization differ only in whitespace and/or blank
+    lines — not in content or ordering. The comparison is positional on purpose:
+    a reordering of identical lines (e.g. swapped statements) is substantive and
+    must NOT be classified as a whitespace-only change."""
+    return [re.sub(r"\s+", "", line) for line in lines if line.strip()]
 
 
 def _nonblank_stripped(lines: list[str]) -> list[str]:
@@ -250,8 +247,8 @@ def _all_comments(lines: list[str], ext: str) -> bool:
 
 
 def _section_is_trivial(added: list[str], removed: list[str], ext: str) -> bool:
-    # whitespace/blank-line only: same content modulo whitespace
-    if _ws_signature(added) == _ws_signature(removed):
+    # whitespace/blank-line only: same content + same order, modulo whitespace
+    if _ws_normalized(added) == _ws_normalized(removed):
         return True
     # pure import reordering (Python): same import lines, reordered
     if (
