@@ -5,6 +5,10 @@
   findings) and must NOT re-emit them as new inline comments — fixes duplicate
   comments on follow-up pushes. (Further Tier 2 skill/prompt additions land under
   this version.)
+- `review_guidance.md`: added a "Stated intent" section. When a PR body closes a
+  GitHub issue (`closes #N`), REVA now passes a nonce-fenced `stated_intent` param;
+  the model checks the diff against it (contradiction → bug, unimplemented/scope
+  creep → maintainability) and scopes the check to new changes on delta reviews.
 
 ## v1.5 — Consultant DOCX as planning basis
 

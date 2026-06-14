@@ -146,6 +146,41 @@ def test_get_file_content_url_encodes_path(rsa_key_pair):
     assert " " not in captured["raw"]  # no raw space leaked into the URL
 
 
+def test_get_issue_returns_title_and_body(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        captured["path"] = req.url.path
+        return httpx.Response(200, json={"title": "Add export", "body": "needs CSV"})
+
+    client = _make_client(handler, private_pem)
+    issue = client.get_issue("tok", "acme", "widgets", 5)
+
+    assert issue == {"title": "Add export", "body": "needs CSV"}
+    assert captured["path"] == "/repos/acme/widgets/issues/5"
+
+
+def test_get_issue_returns_none_on_404(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(req):
+        return httpx.Response(404, json={"message": "Not Found"})
+
+    client = _make_client(handler, private_pem)
+    assert client.get_issue("tok", "acme", "widgets", 999) is None
+
+
+def test_get_issue_coerces_null_body_to_empty(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(req):
+        return httpx.Response(200, json={"title": "t", "body": None})
+
+    client = _make_client(handler, private_pem)
+    assert client.get_issue("tok", "acme", "widgets", 1) == {"title": "t", "body": ""}
+
+
 def test_get_pull_request_returns_json(rsa_key_pair):
     private_pem, _ = rsa_key_pair
     captured: dict = {}

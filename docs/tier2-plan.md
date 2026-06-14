@@ -12,7 +12,7 @@ below. Companion to [`FEATURE_ROADMAP.md`](../FEATURE_ROADMAP.md) and the
 | 1 | Delta-aware finding suppression | S | high | unit | ✅ `0786cc0` |
 | 2 | Force-push/rebase delta-base guard | S | high | unit | ✅ `05bbcf9` |
 | 3 | Test-coverage gate | M | high | unit | ✅ `a336002` |
-| 4 | Intent-grounded review | M | high* | unit | ⬜ ready |
+| 4 | Intent-grounded review | M | high* | unit | ✅ (GitHub-issue path; quality → staging) |
 | 5 | `__manifest__.py` validator | M | high | unit | ⬜ ready |
 | 6 | Second-pass self-critique | M | high | unit + staging | ⬜ ready |
 | 7 | Migration-safety review skill | M | high | unit (routing) + **staging** | ⬜ ready |
@@ -33,6 +33,11 @@ comments" problem** (1 stops re-emitting duplicates; 2 stops a rebase from produ
   (`ahead`/`identical`); a rebase/`diverged` falls back to a full review (and skips the resolution pass).
 - **Test-coverage gate** — `diff_utils.analyze_test_coverage` flags modules adding logic with no `tests/`
   change; passed as `test_coverage` to the diff/delta/full skills.
+- **Intent-grounded review (4)** — `closes/fixes/resolves #N` in the PR body resolves the GitHub issue(s)
+  via the new `github_client.get_issue`; a nonce-fenced `stated_intent` skill param + `review_guidance.md`
+  guidance let the model flag contradiction (bug) / unimplemented / scope creep (maintainability), scoped to
+  new changes on delta reviews. GitHub-issue path only (ticket-AC enrichment deferred), default-on, advisory.
+  **Owed: live-CLI staging validation of review quality** (false-positive rate) before fully trusting it.
 
 > **Exhaustive per-feature plans for 4–9** (files, approach, edge cases, test plan, verified
 > corrections) live in [`tier2-detailed-plans.md`](tier2-detailed-plans.md). The summaries below are the

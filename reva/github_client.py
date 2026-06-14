@@ -177,6 +177,23 @@ class GitHubClient:
             return None
         return response.text
 
+    def get_issue(
+        self, token: str, owner: str, repo: str, issue_number: int
+    ) -> dict | None:
+        """Return {title, body} for an issue, or None if it 404s (deleted /
+        wrong number / cross-repo #N). Same Issues:read scope as create_issue,
+        so no new GitHub App permission. Mirrors get_file_content's 404 handling."""
+        try:
+            response = self._get(
+                token,
+                f"/repos/{owner}/{repo}/issues/{issue_number}",
+                allow_404=True,
+            )
+        except NotFound:
+            return None
+        data = response.json()
+        return {"title": data.get("title") or "", "body": data.get("body") or ""}
+
     def get_compare_diff(
         self, token: str, owner: str, repo: str, base_sha: str, head_sha: str
     ) -> str:
