@@ -13,6 +13,7 @@ Before implementing:
 - If multiple interpretations exist, present them - don't pick silently.
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop. Name what's confusing. Ask.
+- **Treat docs as possibly stale.** Claims in `HANDOFF.md`, `FEATURE_ROADMAP.md`, `docs/`, and READMEs about "known bugs", TODOs, "next steps", planned fixes, or line numbers can lag the code. Verify against the current code (and its tests) before acting — don't "fix" something already fixed. When you find a doc contradicted by the code, correct the doc as part of your change. **Code and tests win over prose.**
 
 ### 2. Simplicity First
 Minimum code that solves the problem. Nothing speculative.
@@ -92,7 +93,11 @@ cd tui && go test ./...
 cd tui && go run . --demo   # demo mode, no live server needed
 ```
 
-Unit tests need no Docker or network: SQLite in-memory replaces Postgres, `httpx` MockTransport fakes GitHub, subprocess mocks fake the Claude CLI. Concurrency behavior (`FOR UPDATE SKIP LOCKED`, advisory locks) is a no-op on SQLite — that's what the `REVA_TEST_POSTGres_URL`-gated integration tests in `make test-integration` cover.
+Unit tests need no Docker or network: SQLite in-memory replaces Postgres, `httpx` MockTransport fakes GitHub, subprocess mocks fake the Claude CLI. Concurrency behavior (`FOR UPDATE SKIP LOCKED`, advisory locks) is a no-op on SQLite — that's what the `REVA_TEST_POSTGRES_URL`-gated integration tests in `make test-integration` cover.
+
+Tests build tables from the ORM models (`create_all`), **not** the SQL files in `db/migrations/` — so a migration's raw SQL and any Postgres-only query construct (e.g. `count(distinct case(...))`) are exercised only on real Postgres. Validate those via `make test-integration` or the first staging boot.
+
+**Definition of done before committing a feature:** the suites for every service you touched are green, plus `ruff`. A change to shared `reva/` affects all three services — run `worker`, `api`, **and** `scheduler` (`make test`). Touching `tui/` requires `cd tui && go build ./... && go vet ./... && go test ./...`. State outcomes honestly: if a path is only unit-tested (not live-CLI / not Postgres), say so.
 
 ## Architecture
 
@@ -109,7 +114,7 @@ Components:
 - `worker/` — RQ jobs: review, audit, ticket_analysis, ticket_issues, comment_reply, weekly_report, repo_cache_eviction. `Reviewer.execute()` is the pure pipeline (token → diff → config → CLI → parse → cap at 15 findings); `runner.run_review()` wraps it with claim/persist/post/notify. Retries: `TransientError` retried by RQ (max 3, backoff); `PermanentError` fails and notifies.
 - `scheduler/` — single-replica loops: debounce poller, weekly reporter, stale-`running` reaper, operational alerts, repo-cache eviction.
 - `prompts/skills/` — the headless-CLI skills. Selection is centralized in `Reviewer._select_skill` on the final (post-filter) diff, precedence **migration > delta > xml-only > diff/full**: `reva-diff-review` (diff/diff-all), `reva-full-review` (full/deep), `reva-delta-review` (incremental), `reva-migration-review` (Odoo upgrade scripts — overrides mode/delta, keeps `delta_base_sha`), `reva-xml-review` (XML-only diff), `reva-repo-audit` (audits). CodeGraph MCP (`REVA_CODEGRAPH_ENABLED`, fail-silent) is wired into the repo-aware skills only (full/deep/audit), never the diff-depth paths.
-- `db/migrations/` — plain SQL, applied idempotently at service startup by `Database.migrate()` under a Postgres advisory lock.
+- `db/migrations/` — plain SQL, applied idempotently at service startup by `Database.migrate()` under a Postgres advisory lock. Conventions for a new table: numbered file, idempotent (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`), `id BIGSERIAL PRIMARY KEY` (match the existing files — not `GENERATED … IDENTITY`), and add the matching ORM model in `reva/db/models.py` (tests build from the models, so a missing model means the table is invisible to tests).
 
 Invariants the design leans on (look for `SECU-*` / `CONC-*` / `CORR-*` codes in comments and follow that convention):
 
