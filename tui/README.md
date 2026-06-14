@@ -32,10 +32,13 @@ that the key would travel in plaintext.
 | `internal/api/client.go` | Real HTTP client (10 s timeout, Bearer auth). |
 | `internal/api/mock.go` | `MockClient` for `--demo`. |
 | `internal/api/types.go` | DTOs mirroring the API's JSON responses. |
-| `internal/ui/*.go` | One file per tab (dashboard, reviews, findings, failures, repos, pending, tickets, audits) plus `app.go` (tab routing), `styles.go`, `messages.go`. |
+| `internal/ui/*.go` | One file per tab (dashboard, reviews, findings, failures, repos, pending, tickets, audits, feedback) plus `app.go` (tab routing), `styles.go`, `messages.go`. |
 
-Tabs `1`–`8` (Dashboard, Reviews, Findings, Failures, Repos, Pending, Tickets,
-Audits); global keys `r` refresh, `q` quit. The Repos tab adds `n` to register a
+Tabs `1`–`9` (Dashboard, Reviews, Findings, Failures, Repos, Pending, Tickets,
+Audits, Feedback); global keys `r` refresh, `q` quit. The **Feedback** tab (`9`)
+shows the Tier-3 learning signals — per (repo, category) findings / dismissals
+(`/dismiss`) / fixes from `GET /metrics/learning`, plus active `/mute`s from
+`GET /metrics/mutes`. The Repos tab adds `n` to register a
 new app-installed repo (type `owner/name` → POST `/repos`), `a` to trigger a
 repository audit (POST `/repos/{id}/audit`, with an inline status line), and `o`
 to open the repo on GitHub. The Audits tab lists repo-audit findings (severity,

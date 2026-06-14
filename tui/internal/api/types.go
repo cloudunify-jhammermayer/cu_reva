@@ -210,3 +210,23 @@ type DashboardMetrics struct {
 	AvgCostPerReview7d *float64      `json:"avg_cost_per_review_7d"`
 	ActiveWorkers      int           `json:"active_workers"`
 }
+
+// LearningStat is one (repo, category) row of the Tier-3 feedback statistic:
+// how many findings were posted, dismissed, and fixed — the input for per-repo
+// learned memory. Served by GET /api/v1/metrics/learning.
+type LearningStat struct {
+	Repo             string `json:"repo"`
+	Category         string `json:"category"`
+	Findings         int    `json:"findings"`
+	Dismissed        int    `json:"dismissed"`
+	ResolvedByFix    int    `json:"resolved_by_fix"`
+	StillOpenAtMerge int    `json:"still_open_at_merge"`
+}
+
+// MuteEntry is one active (repo, category) mute. Served by GET /api/v1/metrics/mutes.
+type MuteEntry struct {
+	Repo      string    `json:"repo"`
+	Category  string    `json:"category"`
+	MutedBy   string    `json:"muted_by"`
+	CreatedAt time.Time `json:"created_at"`
+}

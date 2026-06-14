@@ -194,3 +194,70 @@ def test_feedback_shape_with_findings(client_and_db):
     # Findings were not seeded with finding_count, so feedback will still be empty.
     resp = client.get("/api/v1/metrics/feedback")
     assert resp.status_code == 200
+
+
+# --- learning + mutes (Tier 3 feature A statistic) ---------------------------
+
+
+def _seed_review_with_findings(db, findings):
+    repo_id = writers.upsert_repository(
+        db, github_repository_id=2002, owner="acme", name="widgets",
+        default_branch="main", installation_id=99,
+    )
+    pr_id = writers.upsert_pull_request(
+        db, repository_id=repo_id, github_pr_id=7000, pr_number=7, title="PR",
+        author_login="alice", base_branch="main", head_branch="feat",
+        head_sha="s7", state="open", draft=False,
+    )
+    params = JobParams(
+        repository_id=repo_id, pull_request_id=pr_id, head_sha="s7",
+        installation_id=99, review_mode="diff", trigger_event="opened",
+    )
+    writers.record_review_completed(
+        db, params,
+        ReviewResult(status="completed", summary="ok", risk_level="high", findings=findings),
+    )
+    return repo_id
+
+
+def test_learning_empty(client_and_db):
+    client, _ = client_and_db
+    resp = client.get("/api/v1/metrics/learning")
+    assert resp.status_code == 200 and resp.json() == []
+
+
+def test_learning_counts_dismissed_per_repo_category(client_and_db):
+    from reva.db.models import ReviewFinding
+    from reva.types import Finding
+
+    client, db = client_and_db
+    f = Finding(severity="minor", category="style", file="x.py", line_start=1,
+                line_end=1, title="nit", body="b", confidence=0.8, is_odoo_specific=False)
+    _seed_review_with_findings(db, [f])
+    with db.session() as s:
+        row = s.query(ReviewFinding).one()
+        fid, rr = row.id, row.review_run_id
+    writers.record_feedback(db, review_finding_id=fid, review_run_id=rr,
+                            github_comment_id=11, reactor_login="alice",
+                            reaction="dismissed", is_positive=False)
+
+    data = client.get("/api/v1/metrics/learning").json()
+    assert len(data) == 1
+    assert data[0]["repo"] == "acme/widgets"
+    assert data[0]["category"] == "style"
+    assert data[0]["findings"] == 1
+    assert data[0]["dismissed"] == 1
+
+
+def test_mutes_endpoint_returns_active_only(client_and_db):
+    client, db = client_and_db
+    repo_id = writers.upsert_repository(
+        db, github_repository_id=3003, owner="acme", name="widgets",
+        default_branch="main", installation_id=99,
+    )
+    writers.set_category_mute(db, repo_id, "docs", muted_by="bob", active=True)
+    writers.set_category_mute(db, repo_id, "style", muted_by="bob", active=False)
+    data = client.get("/api/v1/metrics/mutes").json()
+    assert [(m["repo"], m["category"], m["muted_by"]) for m in data] == [
+        ("acme/widgets", "docs", "bob")
+    ]

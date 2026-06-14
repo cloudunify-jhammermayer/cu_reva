@@ -20,6 +20,7 @@ const (
 	viewPending  // tab 6
 	viewTickets  // tab 7
 	viewAudits   // tab 8
+	viewFeedback // tab 9
 )
 
 type App struct {
@@ -33,6 +34,7 @@ type App struct {
 	pending   Pending
 	tickets   Tickets
 	audits    Audits
+	feedback  Feedback
 	width     int
 	height    int
 }
@@ -49,6 +51,7 @@ func NewApp(client api.ClientIface, odooURL string) *App {
 		pending:   newPending(client),
 		tickets:   newTickets(client, odooURL),
 		audits:    newAudits(client),
+		feedback:  newFeedback(client),
 	}
 }
 
@@ -62,6 +65,7 @@ func (a *App) Init() tea.Cmd {
 		a.pending.load(),
 		a.tickets.load(),
 		a.audits.load(),
+		a.feedback.load(),
 		tick(),
 	)
 }
@@ -140,6 +144,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.clearStatusMsgs()
 			a.active = viewAudits
 			return a, nil
+		case "9":
+			a.clearStatusMsgs()
+			a.active = viewFeedback
+			return a, nil
 		}
 		if a.active == viewReviews {
 			var cmd tea.Cmd
@@ -176,6 +184,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.audits, cmd = a.audits.update(msg)
 			return a, cmd
 		}
+		if a.active == viewFeedback {
+			var cmd tea.Cmd
+			a.feedback, cmd = a.feedback.update(msg)
+			return a, cmd
+		}
 
 	case tickMsg:
 		var cmd tea.Cmd
@@ -192,7 +205,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.tickets, ticketCmd = a.tickets.update(msg)
 		var auditCmd tea.Cmd
 		a.audits, auditCmd = a.audits.update(msg)
-		return a, tea.Batch(cmd, findCmd, failCmd, repoCmd, pendCmd, ticketCmd, auditCmd, tick())
+		var fbCmd tea.Cmd
+		a.feedback, fbCmd = a.feedback.update(msg)
+		return a, tea.Batch(cmd, findCmd, failCmd, repoCmd, pendCmd, ticketCmd, auditCmd, fbCmd, tick())
 
 	case dashboardLoadedMsg:
 		a.dashboard, _ = a.dashboard.update(msg)
@@ -218,6 +233,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case auditFindingsLoadedMsg:
 		a.audits, _ = a.audits.update(msg)
+
+	case feedbackLoadedMsg:
+		a.feedback, _ = a.feedback.update(msg)
 
 	case reposLoadedMsg:
 		a.repos, _ = a.repos.update(msg)
@@ -284,6 +302,8 @@ func (a *App) View() string {
 		content = a.tickets.view(a.width, contentH)
 	case viewAudits:
 		content = a.audits.view(a.width, contentH)
+	case viewFeedback:
+		content = a.feedback.view(a.width, contentH)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left,
@@ -309,6 +329,7 @@ func (a *App) tabBar() string {
 		{"6", "Pending", a.pending.total, viewPending},
 		{"7", "Tickets", 0, viewTickets},
 		{"8", "Audits", 0, viewAudits},
+		{"9", "Feedback", 0, viewFeedback},
 	}
 
 	var parts []string
@@ -349,7 +370,7 @@ func (a *App) statusBar() string {
 	var hint string
 	switch a.active {
 	case viewDashboard:
-		hint = "1-8 switch tabs | r=refresh | q quit"
+		hint = "1-9 switch tabs | r=refresh | q quit"
 	case viewReviews:
 		hint = "j/k navigate | / filter | s=status | c=clear | e=requeue | o=browser | r=refresh | q quit"
 	case viewFindings:
@@ -364,6 +385,8 @@ func (a *App) statusBar() string {
 		hint = "j/k navigate | enter=issues | e=requeue | o=open in Odoo | r=refresh | q quit"
 	case viewAudits:
 		hint = "j/k navigate | enter=findings | esc=back | r=refresh | q quit"
+	case viewFeedback:
+		hint = "dismissals & mutes per repo/category | r=refresh | q quit"
 	default:
 		hint = "1 Dash | 2 Reviews | 3 Findings | 4 Failures | 5 Repos | 6 Pending | 7 Tickets | 8 Audits | q quit"
 	}

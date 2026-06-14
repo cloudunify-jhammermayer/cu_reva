@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -49,3 +51,19 @@ class FeedbackEntry(BaseModel):
     thumbs_up: int
     thumbs_down: int
     approval_rate: float | None
+
+
+class LearningStat(BaseModel):
+    repo: str
+    category: str
+    findings: int
+    dismissed: int
+    resolved_by_fix: int
+    still_open_at_merge: int
+
+
+class MuteEntry(BaseModel):
+    repo: str
+    category: str
+    muted_by: str
+    created_at: datetime

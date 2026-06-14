@@ -561,6 +561,20 @@ func (m *MockClient) RequeueTicket(id int) error {
 	return nil
 }
 
+func (m *MockClient) Learning() ([]LearningStat, error) {
+	return []LearningStat{
+		{Repo: "acme/odoo-modules", Category: "style", Findings: 18, Dismissed: 11, ResolvedByFix: 2, StillOpenAtMerge: 1},
+		{Repo: "acme/odoo-modules", Category: "security", Findings: 6, Dismissed: 0, ResolvedByFix: 5, StillOpenAtMerge: 0},
+		{Repo: "acme/odoo-modules", Category: "bug", Findings: 22, Dismissed: 3, ResolvedByFix: 14, StillOpenAtMerge: 2},
+	}, nil
+}
+
+func (m *MockClient) Mutes() ([]MuteEntry, error) {
+	return []MuteEntry{
+		{Repo: "acme/odoo-modules", Category: "style", MutedBy: "alice", CreatedAt: time.Now().Add(-72 * time.Hour)},
+	}, nil
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

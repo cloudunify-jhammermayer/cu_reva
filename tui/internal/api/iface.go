@@ -17,4 +17,6 @@ type ClientIface interface {
 	TicketAnalyses(limit int) (*TicketAnalysisPage, error)
 	TicketIssueRuns(limit int) (*TicketIssueRunPage, error)
 	RequeueTicket(id int) error
+	Learning() ([]LearningStat, error)
+	Mutes() ([]MuteEntry, error)
 }

@@ -11,7 +11,14 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import Engine, case, func, select
 
 from reva.db.engine import Database
-from reva.db.models import PullRequest, Repository, ReviewFeedback, ReviewFinding, ReviewRun
+from reva.db.models import (
+    MutedCategory,
+    PullRequest,
+    Repository,
+    ReviewFeedback,
+    ReviewFinding,
+    ReviewRun,
+)
 
 _PERIOD_FMT = {
     "week": "%Y-W%W",
@@ -277,3 +284,67 @@ def feedback_stats(db: Database, since_days: int = 90) -> list[dict]:
             }
         )
     return result
+
+
+def learning_stats(db: Database, since_days: int = 90) -> list[dict]:
+    """Per (repo, category): findings posted, how many a developer dismissed
+    (negative feedback / `/dismiss`), and the fix outcomes. This is the input
+    statistic for Tier-3 per-repo learned memory — a high dismiss rate in a
+    category is the signal to suppress or down-weight it for that repo."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=since_days)
+    with db.session() as s:
+        rows = s.execute(
+            select(
+                Repository.full_name.label("repo"),
+                ReviewFinding.category,
+                func.count(func.distinct(ReviewFinding.id)).label("findings"),
+                func.count(func.distinct(
+                    case((ReviewFeedback.is_positive == False, ReviewFeedback.review_finding_id))  # noqa: E712
+                )).label("dismissed"),
+                func.count(func.distinct(
+                    case((ReviewFinding.outcome == "resolved_by_fix", ReviewFinding.id))
+                )).label("resolved_by_fix"),
+                func.count(func.distinct(
+                    case((ReviewFinding.outcome == "still_open_at_merge", ReviewFinding.id))
+                )).label("still_open_at_merge"),
+            )
+            .select_from(ReviewFinding)
+            .join(ReviewRun, ReviewFinding.review_run_id == ReviewRun.id)
+            .join(Repository, ReviewRun.repository_id == Repository.id)
+            .outerjoin(ReviewFeedback, ReviewFeedback.review_finding_id == ReviewFinding.id)
+            .where(ReviewFinding.created_at >= cutoff)
+            .group_by(Repository.full_name, ReviewFinding.category)
+            .order_by(Repository.full_name, ReviewFinding.category)
+        ).all()
+    return [
+        {
+            "repo": r.repo,
+            "category": r.category,
+            "findings": r.findings,
+            "dismissed": r.dismissed,
+            "resolved_by_fix": r.resolved_by_fix,
+            "still_open_at_merge": r.still_open_at_merge,
+        }
+        for r in rows
+    ]
+
+
+def active_mutes(db: Database) -> list[dict]:
+    """Currently-muted (repo, category) pairs (Tier-3 /mute), newest first."""
+    with db.session() as s:
+        rows = s.execute(
+            select(
+                Repository.full_name.label("repo"),
+                MutedCategory.category,
+                MutedCategory.muted_by,
+                MutedCategory.created_at,
+            )
+            .join(Repository, MutedCategory.repository_id == Repository.id)
+            .where(MutedCategory.active.is_(True))
+            .order_by(MutedCategory.created_at.desc())
+        ).all()
+    return [
+        {"repo": r.repo, "category": r.category,
+         "muted_by": r.muted_by, "created_at": r.created_at}
+        for r in rows
+    ]

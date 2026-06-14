@@ -101,10 +101,19 @@ muted-category findings before capping; unknown category / non-finding thread ar
 - **M3** — `muted_categories` (migration 016) + `/mute` `/unmute` + reviewer suppression + tests. ✅
 - **M4** — discoverability (README + review-body hint) + full suites + commit. ✅
 
-**Shipped.** Feature A complete: worker 615 / api 151 / scheduler 28, ruff clean. No prompt change.
+**Shipped.** Feature A complete: worker 615 / api 154 / scheduler 28, ruff clean. No prompt change.
 
 No prompt/skill change → no CHANGELOG version bump (these are handler/pipeline features).
 
+### Learning statistic + TUI (shipped alongside A — the input & measurement for B)
+- `GET /api/v1/metrics/learning` → per (repo, category): `findings`, `dismissed`,
+  `resolved_by_fix`, `still_open_at_merge` (`queries.metrics.learning_stats`, 90-day window).
+  **This is the statistic that drives B** — a high dismiss rate in a (repo, category) is the
+  signal to suppress / down-weight it.
+- `GET /api/v1/metrics/mutes` → active `/mute`s (`active_mutes`).
+- **TUI Feedback tab (`9`)** renders both — the visible form of the learning loop.
+
 ### Owed later (not this slice)
-- **B (learned memory)** consumes the `dismissed` signals: derive a per-repo "what this team
-  rejects" block and inject it into the prompt. A's data is the input; B is its own slice.
+- **B (learned memory)** consumes `/metrics/learning`: derive a per-repo "what this team rejects"
+  block from the dismiss rates and inject it into the prompt. The statistic + TUI now exist, so B
+  is measurable from day one.

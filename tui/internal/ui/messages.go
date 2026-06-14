@@ -63,4 +63,9 @@ type ticketRequeuedMsg struct {
 	id  int
 	err error
 }
+type feedbackLoadedMsg struct {
+	stats []api.LearningStat
+	mutes []api.MuteEntry
+	err   error
+}
 type tickMsg struct{}

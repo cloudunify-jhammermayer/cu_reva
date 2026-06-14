@@ -188,3 +188,13 @@ func (c *Client) Requeue(id int) error {
 func (c *Client) RequeueTicket(id int) error {
 	return c.post(fmt.Sprintf("/ticket-analysis/%d/requeue", id))
 }
+
+func (c *Client) Learning() ([]LearningStat, error) {
+	var out []LearningStat
+	return out, c.get("/metrics/learning", &out)
+}
+
+func (c *Client) Mutes() ([]MuteEntry, error) {
+	var out []MuteEntry
+	return out, c.get("/metrics/mutes", &out)
+}

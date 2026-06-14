@@ -9,6 +9,8 @@ from app.schemas.metrics import (
     DashboardMetrics,
     DeveloperStat,
     FeedbackEntry,
+    LearningStat,
+    MuteEntry,
 )
 from reva.db.engine import Database
 
@@ -46,3 +48,13 @@ def cost(
 @router.get("/metrics/feedback", response_model=list[FeedbackEntry])
 def feedback(db: Database = Depends(get_db)) -> list[dict]:
     return [FeedbackEntry.model_validate(r) for r in q.feedback_stats(db)]
+
+
+@router.get("/metrics/learning", response_model=list[LearningStat])
+def learning(db: Database = Depends(get_db)) -> list[dict]:
+    return [LearningStat.model_validate(r) for r in q.learning_stats(db)]
+
+
+@router.get("/metrics/mutes", response_model=list[MuteEntry])
+def mutes(db: Database = Depends(get_db)) -> list[dict]:
+    return [MuteEntry.model_validate(r) for r in q.active_mutes(db)]
