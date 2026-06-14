@@ -49,6 +49,8 @@ class FakeGitHub:
     token_calls: int = 0
     compare_diff: str = _DEFAULT_DIFF
     compare_diff_calls: int = 0
+    compare_status: str = "ahead"   # ahead/identical = delta; diverged/behind = full
+    compare_status_calls: int = 0
 
     def get_installation_token(self, installation_id: int) -> str:
         self.token_calls += 1
@@ -64,6 +66,10 @@ class FakeGitHub:
     def get_compare_diff(self, token, owner, repo, base_sha, head_sha) -> str:
         self.compare_diff_calls += 1
         return self.compare_diff
+
+    def get_compare_status(self, token, owner, repo, base_sha, head_sha) -> str:
+        self.compare_status_calls += 1
+        return self.compare_status
 
     def get_changed_files(self, token, owner, repo, pr_number) -> list[dict]:
         return self.files
@@ -608,6 +614,59 @@ def test_delta_review_used_when_prior_review_exists():
     assert result.delta_base_sha == "prevsha"
     assert runner.last_skill == "reva-delta-review"
     assert github.compare_diff_calls == 1
+
+
+def test_diverged_falls_back_to_full_review():
+    """A rebase/force-push (compare status 'diverged') must NOT take the delta path —
+    review the full PR diff and skip resolution (delta_base_sha None)."""
+    github = FakeGitHub(head_sha="newsha", compare_status="diverged")
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 1, "head_sha": "prevsha"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(
+        repository_id=1, pull_request_id=1, head_sha="newsha",
+        installation_id=99, trigger_event="synchronize",
+    )
+
+    result = reviewer.execute(params)
+
+    assert result.status == "completed"
+    assert result.delta_base_sha is None              # full review, no resolution pass
+    assert runner.last_skill in ("reva-diff-review", "reva-full-review")
+    assert github.diff_calls == 1
+    assert github.compare_diff_calls == 0             # never fetched the garbage delta
+
+
+def test_behind_falls_back_to_full_review():
+    github = FakeGitHub(head_sha="newsha", compare_status="behind")
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 1, "head_sha": "prevsha"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(
+        repository_id=1, pull_request_id=1, head_sha="newsha",
+        installation_id=99, trigger_event="synchronize",
+    )
+    result = reviewer.execute(params)
+    assert result.delta_base_sha is None
+
+
+def test_compare_status_error_falls_back_to_full_review():
+    """A failure fetching compare status must not fail the run — full review."""
+    github = FakeGitHub(head_sha="newsha")
+    def _boom(*a, **k):
+        raise RuntimeError("compare status 500")
+    github.get_compare_status = _boom  # type: ignore[assignment]
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 1, "head_sha": "prevsha"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(
+        repository_id=1, pull_request_id=1, head_sha="newsha",
+        installation_id=99, trigger_event="synchronize",
+    )
+    result = reviewer.execute(params)
+    assert result.status == "completed"
+    assert result.delta_base_sha is None
+    assert github.diff_calls == 1
 
 
 def test_full_review_used_when_no_prior_review():

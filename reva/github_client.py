@@ -188,6 +188,22 @@ class GitHubClient:
         )
         return response.text
 
+    def get_compare_status(
+        self, token: str, owner: str, repo: str, base_sha: str, head_sha: str
+    ) -> str:
+        """Return GitHub's compare `status` for base...head — one of
+        "ahead" | "behind" | "identical" | "diverged".
+
+        "ahead"/"identical" mean base is an ancestor of head (a clean follow-up
+        push), so the two-dot compare diff is a true delta. "diverged"/"behind"
+        mean the branch was rebased/squashed/reset, so the delta base is invalid.
+        Reads the compare endpoint as JSON (not the v3.diff media type)."""
+        response = self._get(
+            token,
+            f"/repos/{owner}/{repo}/compare/{base_sha}...{head_sha}",
+        )
+        return response.json().get("status", "")
+
     def find_pr_review_id(
         self, token: str, owner: str, repo: str, pr_number: int, marker: str,
         since: datetime | None = None,

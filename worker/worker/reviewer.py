@@ -146,6 +146,10 @@ class GitHubReader(Protocol):
         self, token: str, owner: str, repo: str, base_sha: str, head_sha: str
     ) -> str: ...
 
+    def get_compare_status(
+        self, token: str, owner: str, repo: str, base_sha: str, head_sha: str
+    ) -> str: ...
+
     def get_changed_files(
         self, token: str, owner: str, repo: str, pr_number: int
     ) -> list[dict]: ...
@@ -244,9 +248,29 @@ class Reviewer:
         # custom_addons prefixes.
         review_all = params.review_mode == "diff-all" or repo_config.review_all_paths
         review_prefixes = () if review_all else DEFAULT_REVIEW_PREFIXES
-        # Delta detection: if a prior completed review exists, use the compare diff.
+        # Delta detection: if a prior completed review exists AND its head is an
+        # ancestor of the current head, review only the compare diff. A rebase /
+        # squash / force-push makes the prior head a non-ancestor, so the two-dot
+        # compare diff would be garbage — fall back to a full review for that push
+        # (and skip the resolution pass, which keys off delta_base_sha).
         last_review = self.repos.get_last_completed_review(params.pull_request_id)
+        use_delta = False
         if last_review:
+            try:
+                status = self.github.get_compare_status(
+                    token, owner, name, last_review["head_sha"], params.head_sha
+                )
+            except Exception:  # noqa: BLE001 — best-effort; any failure → full review
+                log.warning("review_delta_status_failed",
+                            delta_base=last_review["head_sha"][:8], exc_info=True)
+                status = ""
+            if status in ("ahead", "identical"):
+                use_delta = True
+            else:
+                log.info("review_delta_diverged",
+                         delta_base=last_review["head_sha"][:8], status=status)
+
+        if use_delta:
             raw_diff = self.github.get_compare_diff(
                 token, owner, name, last_review["head_sha"], params.head_sha
             )

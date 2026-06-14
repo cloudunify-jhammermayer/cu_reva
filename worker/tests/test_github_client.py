@@ -764,6 +764,19 @@ def test_get_compare_diff_returns_diff_text(rsa_key_pair):
     assert result.startswith("diff --git")
 
 
+def test_get_compare_status_reads_json_status(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "/compare/abc123...def456" in str(request.url)
+        # JSON read, NOT the v3.diff media type.
+        assert "diff" not in request.headers.get("accept", "")
+        return httpx.Response(200, json={"status": "diverged", "ahead_by": 2, "behind_by": 5})
+
+    client = _make_client(handler, private_pem)
+    assert client.get_compare_status("tok", "acme", "widgets", "abc123", "def456") == "diverged"
+
+
 def test_get_review_threads_paginates(rsa_key_pair):
     """CORR-8: >100 threads must be followed across pages, not truncated."""
     private_pem, _ = rsa_key_pair
