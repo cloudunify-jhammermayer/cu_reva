@@ -38,6 +38,9 @@ class Settings:
     codegraph_enabled: bool = False
     codegraph_version: str = "0.9.8"
     codegraph_index_timeout: int = 180
+    # Second-pass self-critique: re-verify high-stakes findings before posting.
+    # Default off; per-repo `.claude-review.yml verify_findings` overrides it.
+    verify_high_cost: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -77,4 +80,6 @@ class Settings:
             in ("1", "true", "yes"),
             codegraph_version=os.environ.get("REVA_CODEGRAPH_VERSION", "0.9.8"),
             codegraph_index_timeout=int(os.environ.get("REVA_CODEGRAPH_INDEX_TIMEOUT", "180")),
+            verify_high_cost=os.environ.get("REVA_VERIFY_HIGH_COST", "false").lower()
+            in ("1", "true", "yes"),
         )

@@ -44,9 +44,11 @@ class FakeReviewer:
     result: ReviewResult | None = None
     raise_exc: Exception | None = None
     call_count: int = 0
+    last_verify_budget_ok: bool | None = None
 
-    def execute(self, params: JobParams) -> ReviewResult:
+    def execute(self, params: JobParams, verify_budget_ok: bool = True) -> ReviewResult:
         self.call_count += 1
+        self.last_verify_budget_ok = verify_budget_ok
         if self.raise_exc:
             raise self.raise_exc
         assert self.result is not None
@@ -621,6 +623,18 @@ def test_review_runs_when_under_budget(ctx_and_fakes):
 
     assert out["status"] == "completed"
     assert s["reviewer"].call_count == 1
+
+
+def test_verify_budget_ok_passed_true_under_budget(ctx_and_fakes):
+    # Feature 6 wiring: execute() receives verify_budget_ok from the pre-flight
+    # budget check. Under budget it must be True. (The over-budget case declines
+    # upstream before execute runs, so False is unreachable here — the skip is
+    # unit-tested at the reviewer level.)
+    s = ctx_and_fakes
+    _set_budget(s, 1000.0)
+    s["reviewer"].result = _completed_result()
+    run_review(_params(s))
+    assert s["reviewer"].last_verify_budget_ok is True
 
 
 def test_completed_review_falls_back_to_body_only_on_unresolvable_line(ctx_and_fakes):

@@ -14,7 +14,7 @@ below. Companion to [`FEATURE_ROADMAP.md`](../FEATURE_ROADMAP.md) and the
 | 3 | Test-coverage gate | M | high | unit | ✅ `a336002` |
 | 4 | Intent-grounded review | M | high* | unit | ✅ (GitHub-issue path; quality → staging) |
 | 5 | `__manifest__.py` validator | M | high | unit | ✅ (deterministic helper + skill guidance) |
-| 6 | Second-pass self-critique | M | high | unit + staging | ⬜ ready |
+| 6 | Second-pass self-critique | M | high | unit + staging | ✅ (default-off; quality → staging) |
 | 7 | Migration-safety review skill | M | high | unit (routing) + **staging** | ⬜ ready |
 | 8 | XML/QWeb review skill | M | high* | unit (filter/routing) + **staging** | ⬜ ready |
 | 9 | Security-model consistency | S | medium | mostly **staging** | ⬜ ready |
@@ -44,6 +44,13 @@ comments" problem** (1 stops re-emitting duplicates; 2 stops a rebase from produ
   is in the diff (existence via the contents API; fail-open) and passes a `manifest_audit` param to the
   diff/delta/full skills; full/audit also do the LLM `depends` cross-check. Owed: live staging of the
   LLM `depends`/version judgement and how the model merges the deterministic param.
+- **Second-pass self-critique (6)** — `finding_verifier.is_substantiated` (inverse of `is_resolved`,
+  conservative: keeps on ambiguity/missing-tool-call). `reviewer._verify_findings` re-verifies
+  high-stakes findings (full/deep: all file-bearing; other modes: ≥ `block_on_severity`) against the
+  cloned file and drops confident false positives — runs after calibration, before capping; bounded
+  (20 verifications, abort after 3 errors), spend folded into `estimated_cost_usd`. **Default OFF**
+  (`REVA_VERIFY_HIGH_COST` / per-repo `verify_findings`); runner gates it on the pre-flight budget
+  check. Owed: live staging of the false-drop rate (the headline risk) before enabling.
 
 > **Exhaustive per-feature plans for 4–9** (files, approach, edge cases, test plan, verified
 > corrections) live in [`tier2-detailed-plans.md`](tier2-detailed-plans.md). The summaries below are the

@@ -138,11 +138,14 @@ def build_worker_context(settings: Settings) -> WorkerContext:
     prompts = PromptBuilder(prompts_dir=settings.prompts_dir)
     _register_prompt_version(db, prompts, settings)
     repo_lookup = DatabaseRepoLookup(db)  # CODE-10: build once, share
+    verifier = FindingVerifier(claude=claude)
     reviewer = Reviewer(
         runner=runner,
         github=github,
         repos=repo_lookup,
         prompts=prompts,
+        verifier=verifier,
+        verify_high_cost=settings.verify_high_cost,
     )
     auditor = Auditor(
         runner=runner,
@@ -151,7 +154,6 @@ def build_worker_context(settings: Settings) -> WorkerContext:
     )
     ticket_analyzer = TicketAnalyzer(claude=claude, prompts_dir=settings.prompts_dir)
     ticket_issue_planner = TicketIssuePlanner(claude=claude, prompts_dir=settings.prompts_dir)
-    verifier = FindingVerifier(claude=claude)
     odoo = OdooCallbackClient(
         callback_url=settings.odoo_callback_url,
         api_key=settings.odoo_callback_api_key,
@@ -321,7 +323,9 @@ def _execute_and_persist(
 ) -> ReviewResult:
     """Execute the reviewer and persist its outcome. Re-raises on any error."""
     try:
-        result = ctx.reviewer.execute(params)
+        # Pre-flight budget gate for the optional second-pass self-critique: don't
+        # start paid verification when the rolling cap is already reached.
+        result = ctx.reviewer.execute(params, verify_budget_ok=budget_exceeded(ctx) is None)
     except TransientError:
         # Don't write a "failed" row — RQ will retry; started status preserved.
         log.warning("review_transient_error", exc_info=True)

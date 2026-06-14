@@ -66,6 +66,9 @@ class RepoConfig(BaseModel):
     # Lowest finding severity that fails the Check Run. Default "major" keeps the
     # historical behavior (any major/critical blocks); "none" never blocks.
     block_on_severity: BlockSeverity = "major"
+    # Per-repo override for the second-pass self-critique. None = defer to the
+    # global REVA_VERIFY_HIGH_COST setting; True/False force it on/off.
+    verify_findings: bool | None = None
 
 
 # --- Finding ------------------------------------------------------------------

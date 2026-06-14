@@ -174,6 +174,20 @@ def _claude_response_with_findings(findings: list[dict]) -> ClaudeResponse:
     )
 
 
+@dataclass
+class FakeVerifier:
+    """Fake FindingVerifier for second-pass self-critique tests."""
+    verdicts: dict[str, bool] = field(default_factory=dict)  # title -> substantiated
+    raise_exc: Exception | None = None
+    calls: list[str] = field(default_factory=list)
+
+    def is_substantiated(self, finding, file_content) -> bool:
+        self.calls.append(finding.title)
+        if self.raise_exc:
+            raise self.raise_exc
+        return self.verdicts.get(finding.title, True)
+
+
 def _make_reviewer(**overrides):
     github = overrides.pop("github", None) or FakeGitHub()
     repos = overrides.pop("repos", None) or FakeRepos()
@@ -1247,3 +1261,132 @@ def test_manifest_audit_skips_deleted_manifest():
     result = reviewer.execute(_params())
     assert result.status == "completed"
     assert "manifest_audit" not in runner.last_params
+
+
+# --- second-pass self-critique (feature 6) -----------------------------------
+
+
+def _verify_reviewer(tmp_path, finding_dicts, *, verifier, verify_high_cost=True):
+    """Reviewer wired with a FakeVerifier and a clone holding the cited files
+    (so grounding keeps them and _verify_findings can read them)."""
+    for fd in finding_dicts:
+        if fd["file"]:
+            p = tmp_path / fd["file"]
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("code\n")
+    runner = FakeRunner(
+        response=_claude_response_with_findings(finding_dicts),
+        repo_path_returned=str(tmp_path),
+    )
+    reviewer, *_ = _make_reviewer(
+        runner=runner, verifier=verifier, verify_high_cost=verify_high_cost
+    )
+    return reviewer, runner
+
+
+def test_verify_drops_rejected_finding_in_full_mode(tmp_path):
+    findings = [_finding("real", "custom_addons/real.py"),
+                _finding("fp", "custom_addons/fp.py")]
+    verifier = FakeVerifier(verdicts={"fp": False})
+    reviewer, _ = _verify_reviewer(tmp_path, findings, verifier=verifier)
+    titles = {f.title for f in reviewer.execute(_params(review_mode="full")).findings}
+    assert titles == {"real"}
+    assert set(verifier.calls) == {"real", "fp"}  # full verifies every file-bearing finding
+
+
+def test_verify_only_runs_at_or_above_threshold_in_diff_mode(tmp_path):
+    major = _finding("maj", "custom_addons/a.py")
+    minor = _finding("min", "custom_addons/b.py")
+    minor["severity"] = "minor"
+    verifier = FakeVerifier()
+    reviewer, _ = _verify_reviewer(tmp_path, [major, minor], verifier=verifier)
+    reviewer.execute(_params(review_mode="diff"))  # block_on_severity default "major"
+    assert verifier.calls == ["maj"]  # minor is below the gate
+
+
+def test_verify_respects_block_on_severity_critical(tmp_path):
+    (tmp_path / "custom_addons").mkdir()
+    (tmp_path / "custom_addons" / "a.py").write_text("x\n")
+    verifier = FakeVerifier()
+    github = FakeGitHub(file_contents={".claude-review.yml": "block_on_severity: critical\n"})
+    runner = FakeRunner(
+        response=_claude_response_with_findings([_finding("maj", "custom_addons/a.py")]),
+        repo_path_returned=str(tmp_path),
+    )
+    reviewer, *_ = _make_reviewer(
+        runner=runner, github=github, verifier=verifier, verify_high_cost=True
+    )
+    reviewer.execute(_params(review_mode="diff"))
+    assert verifier.calls == []  # major is below the critical gate
+
+
+def test_verify_disabled_by_flag_leaves_findings_untouched(tmp_path):
+    findings = [_finding("x", "custom_addons/x.py")]
+    verifier = FakeVerifier(verdicts={"x": False})
+    reviewer, _ = _verify_reviewer(tmp_path, findings, verifier=verifier, verify_high_cost=False)
+    titles = {f.title for f in reviewer.execute(_params(review_mode="full")).findings}
+    assert titles == {"x"}  # not dropped
+    assert verifier.calls == []
+
+
+def test_verify_skipped_when_over_budget(tmp_path):
+    findings = [_finding("x", "custom_addons/x.py")]
+    verifier = FakeVerifier(verdicts={"x": False})
+    reviewer, _ = _verify_reviewer(tmp_path, findings, verifier=verifier)
+    result = reviewer.execute(_params(review_mode="full"), verify_budget_ok=False)
+    assert {f.title for f in result.findings} == {"x"}
+    assert verifier.calls == []
+
+
+def test_verify_caps_at_max_verifications(tmp_path):
+    findings = [_finding(f"f{i}", f"custom_addons/f{i}.py") for i in range(25)]
+    verifier = FakeVerifier()
+    reviewer, _ = _verify_reviewer(tmp_path, findings, verifier=verifier)
+    reviewer.execute(_params(review_mode="full"))
+    assert len(verifier.calls) == 20  # _MAX_VERIFICATIONS
+
+
+def test_verify_aborts_after_consecutive_errors(tmp_path):
+    findings = [_finding(f"f{i}", f"custom_addons/f{i}.py") for i in range(10)]
+    verifier = FakeVerifier(raise_exc=RuntimeError("boom"))
+    reviewer, _ = _verify_reviewer(tmp_path, findings, verifier=verifier)
+    result = reviewer.execute(_params(review_mode="full"))
+    assert len(verifier.calls) == 3        # aborted after _MAX_VERIFY_ERRORS
+    assert len(result.findings) == 10      # nothing dropped on an error
+
+
+def test_verify_keeps_no_file_finding_without_call(tmp_path):
+    findings = [_finding("general", None), _finding("real", "custom_addons/r.py")]
+    verifier = FakeVerifier()
+    reviewer, _ = _verify_reviewer(tmp_path, findings, verifier=verifier)
+    titles = {f.title for f in reviewer.execute(_params(review_mode="full")).findings}
+    assert "general" in titles
+    assert verifier.calls == ["real"]  # general (no-file) finding never verified
+
+
+def test_verify_dropped_critical_downgrades_risk(tmp_path):
+    crit = _finding("crit", "custom_addons/c.py")
+    crit["severity"] = "critical"
+    verifier = FakeVerifier(verdicts={"crit": False})
+    reviewer, _ = _verify_reviewer(tmp_path, [crit], verifier=verifier)
+    result = reviewer.execute(_params(review_mode="full"))
+    assert result.findings == []
+    assert result.risk_level == "low"  # recomputed on the post-verify set
+
+
+def test_verify_adds_cost(tmp_path):
+    (tmp_path / "custom_addons").mkdir()
+    (tmp_path / "custom_addons" / "x.py").write_text("x\n")
+    findings = [_finding("x", "custom_addons/x.py")]
+
+    def run(verify_high_cost):
+        runner = FakeRunner(
+            response=_claude_response_with_findings(findings),
+            repo_path_returned=str(tmp_path),
+        )
+        reviewer, *_ = _make_reviewer(
+            runner=runner, verifier=FakeVerifier(), verify_high_cost=verify_high_cost
+        )
+        return reviewer.execute(_params(review_mode="full")).estimated_cost_usd
+
+    assert run(True) > run(False)  # verifier spend folded into estimated_cost_usd

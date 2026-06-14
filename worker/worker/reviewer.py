@@ -35,6 +35,7 @@ from reva.diff_utils import (
     is_trivial_diff,
 )
 from reva.errors import PermanentError
+from reva.finding_verifier import FindingVerifier, StoredFinding
 from reva.odoo_manifest import audit_manifest, check_version_format, parse_manifest
 from reva.prompt_builder import PromptBuilder  # kept for type annotation (prompts param)
 from reva.types import (
@@ -51,6 +52,9 @@ logger = structlog.get_logger()
 DEFAULT_MAX_DIFF_LINES = 2500
 DEFAULT_MAX_DIFF_TOKENS = 60_000
 MAX_FINDINGS = 15
+# Second-pass self-critique bounds (mirror runner's delta-verify caps).
+_MAX_VERIFICATIONS = 20
+_MAX_VERIFY_ERRORS = 3
 
 # severity weights for capping and risk_level recomputation
 _SEVERITY_WEIGHT: dict[str, int] = {"info": 1, "minor": 2, "major": 3, "critical": 4}
@@ -201,6 +205,8 @@ class Reviewer:
         prompts: PromptBuilder,
         max_diff_lines: int = DEFAULT_MAX_DIFF_LINES,
         max_diff_tokens: int = DEFAULT_MAX_DIFF_TOKENS,
+        verifier: FindingVerifier | None = None,
+        verify_high_cost: bool = False,
     ) -> None:
         self.runner = runner
         self.github = github
@@ -208,11 +214,17 @@ class Reviewer:
         self.prompts = prompts
         self.max_diff_lines = max_diff_lines
         self.max_diff_tokens = max_diff_tokens
+        self.verifier = verifier
+        self.verify_high_cost = verify_high_cost
 
     # ------------------------------------------------------------------ public
 
-    def execute(self, params: JobParams) -> ReviewResult:
+    def execute(self, params: JobParams, verify_budget_ok: bool = True) -> ReviewResult:
         """Run a single review attempt. See module docstring for the contract.
+
+        `verify_budget_ok` (set by the runner from the pre-flight budget check)
+        gates the optional second-pass self-critique — Reviewer is pure and can't
+        read the spend ledger itself.
 
         Raises:
             TransientError: bubbles up from the Claude client; RQ will retry.
@@ -470,18 +482,32 @@ class Reviewer:
         # Floor Odoo anti-pattern severities to odoo19.md's documented minimums
         # before capping/risk so the Check Run conclusion reflects them.
         grounded = _calibrate_odoo_severity(grounded)
+        # 12b. Optional second-pass self-critique: re-verify high-stakes findings
+        # against the cited file and drop confident false positives. Runs after
+        # calibration (so floored-up severities are in scope) and before capping.
+        verify_enabled = (
+            repo_config.verify_findings
+            if repo_config.verify_findings is not None
+            else self.verify_high_cost
+        )
+        verify_cost = 0.0
+        if verify_enabled:
+            grounded, verify_cost = self._verify_findings(
+                grounded, repo_path, params.review_mode,
+                repo_config.block_on_severity, model, verify_budget_ok,
+            )
         capped = _cap_findings(grounded, MAX_FINDINGS)
         risk_level = _recompute_risk_level(capped)
 
         # 13. Cost: prefer the CLI's authoritative total_cost_usd; fall back to
         # the token-based estimate (Messages-API path, or older CLI output).
-        cost = response.total_cost_usd or estimate_cost(
+        cost = (response.total_cost_usd or estimate_cost(
             response.model or model,
             response.input_tokens,
             response.output_tokens,
             response.cache_read_tokens,
             response.cache_creation_tokens,
-        )
+        )) + verify_cost
 
         # 14. Prompt version (best-effort).
         try:
@@ -511,6 +537,93 @@ class Reviewer:
         )
 
     # ----------------------------------------------------------------- helpers
+
+    def _verify_findings(
+        self,
+        findings: list[Finding],
+        repo_path: str,
+        mode: str,
+        block_on_severity: str,
+        model: str,
+        verify_budget_ok: bool,
+    ) -> tuple[list[Finding], float]:
+        """Re-verify high-stakes findings against the cited file and drop confident
+        false positives. Scope: full/deep verify every file-bearing finding; other
+        modes verify only findings at/above the repo's blocking threshold. Bounded
+        by _MAX_VERIFICATIONS and abort-after-_MAX_VERIFY_ERRORS. Never drops on an
+        infrastructure failure (unreadable file / verifier error) — only on a
+        confident "not substantiated" verdict. Returns (kept_findings, est_cost)."""
+        if self.verifier is None or not verify_budget_ok:
+            if self.verifier is not None and not verify_budget_ok:
+                logger.info("findings_verification_skipped", reason="over_budget")
+            return findings, 0.0
+        full_mode = mode in ("full", "deep")
+        threshold = _SEVERITY_WEIGHT.get(block_on_severity, 99)
+        candidates = [
+            f for f in findings
+            if f.file and (full_mode or _SEVERITY_WEIGHT[f.severity] >= threshold)
+        ]
+        if not candidates:
+            logger.info("findings_verification_skipped", reason="no_candidates")
+            return findings, 0.0
+        if len(candidates) > _MAX_VERIFICATIONS:
+            logger.info("findings_verification_capped",
+                        candidates=len(candidates), cap=_MAX_VERIFICATIONS)
+        candidate_ids = {id(f) for f in candidates[:_MAX_VERIFICATIONS]}
+
+        root = os.path.realpath(repo_path) if os.path.isdir(repo_path) else None
+        file_cache: dict[str, str | None] = {}
+
+        def read_file(rel: str) -> str | None:
+            if rel not in file_cache:
+                content: str | None = None
+                if root is not None:
+                    resolved = os.path.realpath(os.path.join(root, rel))
+                    within = resolved == root or resolved.startswith(root + os.sep)
+                    if within and os.path.isfile(resolved):
+                        try:
+                            with open(resolved, encoding="utf-8", errors="replace") as fh:
+                                content = fh.read()
+                        except OSError:
+                            content = None
+                file_cache[rel] = content
+            return file_cache[rel]
+
+        kept: list[Finding] = []
+        dropped: list[str] = []
+        cost = 0.0
+        verified = 0
+        errors = 0
+        for f in findings:
+            if id(f) not in candidate_ids or errors >= _MAX_VERIFY_ERRORS:
+                kept.append(f)
+                continue
+            content = read_file(f.file)
+            if content is None:
+                kept.append(f)  # unreadable -> never drop on an infra failure
+                continue
+            stored = StoredFinding(
+                file_path=f.file, line_start=f.line_start, title=f.title,
+                body=f.body, severity=f.severity, category=f.category,
+            )
+            try:
+                substantiated = self.verifier.is_substantiated(stored, content)
+            except Exception:
+                errors += 1
+                logger.warning("finding_verify_error", exc_info=True)
+                kept.append(f)  # keep on a verifier error
+                continue
+            verified += 1
+            cost += estimate_cost(model, max(1, len(content)) // 4, 64)
+            if substantiated:
+                kept.append(f)
+            else:
+                dropped.append(f.title)
+        if dropped:
+            logger.info("finding_unsubstantiated_dropped", count=len(dropped), titles=dropped)
+        logger.info("findings_verification_done", verified=verified,
+                    dropped=len(dropped), errors=errors, cost=round(cost, 4))
+        return kept, cost
 
     def _load_repo_config(
         self, token: str, owner: str, name: str, head_sha: str
