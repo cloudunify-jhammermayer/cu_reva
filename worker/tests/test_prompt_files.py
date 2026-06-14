@@ -186,6 +186,14 @@ def test_stated_intent_guidance_present():
     assert "stated_intent" in (PROMPTS_DIR / "review_guidance.md").read_text()
 
 
+def test_migration_skill_present_and_well_formed():
+    text = (SKILLS_DIR / "reva-migration-review.md").read_text()
+    assert text.strip(), "reva-migration-review.md is empty"
+    assert "output_path" in text          # same submit_review output contract
+    assert "risk_level" in text           # instructs NOT to set risk_level
+    assert "migrate.py" in text or "migration" in text.lower()
+
+
 def test_manifest_guidance_present():
     # diff/delta/full receive the deterministic manifest_audit param
     for skill in ("reva-diff-review.md", "reva-delta-review.md", "reva-full-review.md"):

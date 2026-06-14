@@ -16,6 +16,7 @@ from reva.diff_utils import (
     is_logic_path,
     is_trivial_diff,
     iter_diff_files,
+    migration_paths,
     module_root,
     parse_diff_hunks,
 )
@@ -446,3 +447,37 @@ def test_coverage_empty_and_outside_paths():
     assert analyze_test_coverage(_file_diff("scripts/deploy.py", "+x = 1\n")) == []
     # view-only change (no logic .py) -> no flag
     assert analyze_test_coverage(_file_diff("custom_addons/m/views/v.xml", "+<x/>\n")) == []
+
+
+# --- migration_paths (feature 7) ---------------------------------------------
+
+
+def test_migration_paths_matches_pre_post_end():
+    for fname in ("pre-migrate.py", "post-migrate.py", "end-migrate.py"):
+        path = f"custom_addons/foo/migrations/18.0.1.0/{fname}"
+        assert migration_paths(_file_diff(path, "+x = 1\n")) == [path]
+
+
+def test_migration_paths_accepts_hyphen_addons_spelling():
+    path = "custom-addons/foo/migrations/17.0.2.0/pre-migrate.py"
+    assert migration_paths(_file_diff(path, "+x = 1\n")) == [path]
+
+
+def test_migration_paths_ignores_non_migrate_file_in_migrations_dir():
+    path = "custom_addons/foo/migrations/18.0.1.0/helpers.py"
+    assert migration_paths(_file_diff(path, "+x = 1\n")) == []
+
+
+def test_migration_paths_ignores_migrate_outside_migrations_dir():
+    path = "custom_addons/foo/migrate.py"
+    assert migration_paths(_file_diff(path, "+x = 1\n")) == []
+
+
+def test_migration_paths_is_crlf_safe():
+    path = "custom_addons/foo/migrations/18.0.1.0/post-migrate.py"
+    diff = _file_diff(path, "+x = 1\n").replace("\n", "\r\n")
+    assert migration_paths(diff) == [path]
+
+
+def test_migration_paths_empty_diff():
+    assert migration_paths("") == []

@@ -15,7 +15,7 @@ below. Companion to [`FEATURE_ROADMAP.md`](../FEATURE_ROADMAP.md) and the
 | 4 | Intent-grounded review | M | high* | unit | ✅ (GitHub-issue path; quality → staging) |
 | 5 | `__manifest__.py` validator | M | high | unit | ✅ (deterministic helper + skill guidance) |
 | 6 | Second-pass self-critique | M | high | unit + staging | ✅ (default-off; quality → staging) |
-| 7 | Migration-safety review skill | M | high | unit (routing) + **staging** | ⬜ ready |
+| 7 | Migration-safety review skill | M | high | unit (routing) + **staging** | ✅ (routing; quality → staging) |
 | 8 | XML/QWeb review skill | M | high* | unit (filter/routing) + **staging** | ⬜ ready |
 | 9 | Security-model consistency | S | medium | mostly **staging** | ⬜ ready |
 
@@ -51,6 +51,11 @@ comments" problem** (1 stops re-emitting duplicates; 2 stops a rebase from produ
   (20 verifications, abort after 3 errors), spend folded into `estimated_cost_usd`. **Default OFF**
   (`REVA_VERIFY_HIGH_COST` / per-repo `verify_findings`); runner gates it on the pre-flight budget
   check. Owed: live staging of the false-drop rate (the headline risk) before enabling.
+- **Migration-safety skill (7)** — `diff_utils.migration_paths` detects
+  `.../migrations/<ver>/{pre,post,end}-migrate.py`; `reviewer._select_skill` (new central router,
+  placed after the trivial-diff short-circuit) routes them to the new `reva-migration-review.md`
+  skill, overriding the mode/delta choice while keeping `delta_base_sha`. Owed: live staging of the
+  migration review quality (destructive DDL, idempotency, JSONB).
 
 > **Exhaustive per-feature plans for 4–9** (files, approach, edge cases, test plan, verified
 > corrections) live in [`tier2-detailed-plans.md`](tier2-detailed-plans.md). The summaries below are the

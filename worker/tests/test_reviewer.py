@@ -1390,3 +1390,78 @@ def test_verify_adds_cost(tmp_path):
         return reviewer.execute(_params(review_mode="full")).estimated_cost_usd
 
     assert run(True) > run(False)  # verifier spend folded into estimated_cost_usd
+
+
+# --- migration-safety routing (feature 7) ------------------------------------
+
+
+_MIGRATION_DIFF = (
+    "diff --git a/custom_addons/m/migrations/18.0.1.0/pre-migrate.py "
+    "b/custom_addons/m/migrations/18.0.1.0/pre-migrate.py\n"
+    "--- a/custom_addons/m/migrations/18.0.1.0/pre-migrate.py\n"
+    "+++ b/custom_addons/m/migrations/18.0.1.0/pre-migrate.py\n"
+    "@@ -1 +1 @@\n+def migrate(cr, version):\n+    cr.execute('ALTER TABLE t DROP COLUMN x')\n"
+)
+_MIGRATION_FILES = [{"filename": "custom_addons/m/migrations/18.0.1.0/pre-migrate.py"}]
+
+
+def test_migration_diff_routes_to_migration_skill():
+    github = FakeGitHub(diff=_MIGRATION_DIFF, files=_MIGRATION_FILES)
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    reviewer.execute(_params(review_mode="diff"))
+    assert runner.last_skill == "reva-migration-review"
+    assert "pre-migrate.py" in runner.last_params["diff"]
+
+
+def test_migration_routes_in_diff_all_mode():
+    github = FakeGitHub(diff=_MIGRATION_DIFF, files=_MIGRATION_FILES)
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    reviewer.execute(_params(review_mode="diff-all"))
+    assert runner.last_skill == "reva-migration-review"
+
+
+def test_migration_overrides_full_skill():
+    github = FakeGitHub(diff=_MIGRATION_DIFF, files=_MIGRATION_FILES)
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    reviewer.execute(_params(review_mode="full"))
+    assert runner.last_skill == "reva-migration-review"
+
+
+def test_migration_overrides_delta_but_keeps_delta_base():
+    github = FakeGitHub(head_sha="newsha", compare_diff=_MIGRATION_DIFF,
+                        compare_status="ahead", files=_MIGRATION_FILES)
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 1, "head_sha": "prevsha"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(repository_id=1, pull_request_id=1, head_sha="newsha",
+                       installation_id=99, trigger_event="synchronize")
+    result = reviewer.execute(params)
+    assert runner.last_skill == "reva-migration-review"  # override wins
+    assert result.delta_base_sha == "prevsha"            # delta bookkeeping intact
+
+
+def test_non_migration_diff_routes_to_diff_skill():
+    runner = FakeRunner(response=_claude_response_with_findings([]))  # default app.py diff
+    reviewer, *_ = _make_reviewer(runner=runner)
+    reviewer.execute(_params(review_mode="diff"))
+    assert runner.last_skill == "reva-diff-review"
+
+
+def test_migration_removed_by_skip_paths_does_not_route():
+    diff = _MIGRATION_DIFF + (
+        "diff --git a/custom_addons/m/models/x.py b/custom_addons/m/models/x.py\n"
+        "--- a/custom_addons/m/models/x.py\n+++ b/custom_addons/m/models/x.py\n"
+        "@@ -1 +1 @@\n+def f():\n+    return 1\n"
+    )
+    github = FakeGitHub(
+        diff=diff,
+        files=[{"filename": "custom_addons/m/models/x.py"}],
+        file_contents={".claude-review.yml": "skip_paths:\n  - '*/migrations/*'\n"},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    reviewer.execute(_params(review_mode="diff"))
+    assert runner.last_skill == "reva-diff-review"  # migration stripped before routing

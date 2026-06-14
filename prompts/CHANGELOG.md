@@ -13,6 +13,10 @@
   diff/delta/full skills receive a deterministic `manifest_audit` param (missing
   data files, security-before-views order, version format) to surface; full/audit
   additionally do the used-but-undeclared `depends` cross-check.
+- New `reva-migration-review.md` skill. PRs touching Odoo upgrade scripts
+  (`migrations/<ver>/{pre,post,end}-migrate.py`) are path-routed to it (overrides
+  the mode/delta skill); it checks destructive DDL, non-idempotent backfills,
+  ORM-vs-SQL staging, JSONB translations, and SQL injection.
 
 ## v1.5 — Consultant DOCX as planning basis
 

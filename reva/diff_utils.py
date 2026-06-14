@@ -83,6 +83,18 @@ def extract_file_paths(diff: str) -> set[str]:
     return set(iter_diff_files(diff))
 
 
+# Odoo upgrade scripts: .../migrations/<version>/{pre,post,end}-migrate.py.
+# Suffix-anchored (not on the addons prefix) so it matches custom_addons/ and
+# custom-addons/ and, under diff-all, a migration outside custom_addons too.
+MIGRATION_PATH_RE = re.compile(r"/migrations/[^/]+/(?:pre|post|end)-migrate\.py$")
+
+
+def migration_paths(diff: str) -> list[str]:
+    """Migration-script paths in `diff` (operates on the same filtered diff the
+    reviewer sends, so third-party/skip_paths-stripped files never match)."""
+    return [p for p in iter_diff_files(diff) if MIGRATION_PATH_RE.search(p)]
+
+
 def filter_diff(
     diff: str,
     exclude_extensions: frozenset[str] = DEFAULT_EXCLUDE_EXTENSIONS,
