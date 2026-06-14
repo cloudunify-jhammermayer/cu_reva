@@ -59,6 +59,9 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+### 5. Keep the TUI in Sync
+The Go/Bubble Tea **tui** (`tui/`, read-only client of `/api/v1`) is the operational dashboard. When a change adds data worth seeing at a glance — feedback/learning signals, mutes, finding outcomes, per-repo/per-worker stats — surface it there too, adding or extending the backing `/api/v1` endpoint as needed. Match the existing tab/client patterns (`internal/ui/*.go`, `internal/api/{client,iface,mock,types}.go`); `go build/vet/test ./...` must stay green. Don't leave new capabilities visible only in the DB or logs.
+
 ## What this is
 
 REVA — automated GitHub PR review platform built on Claude. Webhook-driven: it debounces PR pushes, reviews the change with a headless Claude Code CLI against a local repo clone, and posts a Check Run + PR Review with inline comments. Also: whole-repo audits, Odoo ticket analysis, and replies to developer questions on its own inline comments.
