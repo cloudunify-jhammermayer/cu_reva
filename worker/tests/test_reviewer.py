@@ -1025,3 +1025,56 @@ def test_format_already_reported_renders_stable_lines():
     ])
     assert "- a.py:5 — T1" in out
     assert "- (general) — general issue" in out
+
+
+# --- test-coverage gate ------------------------------------------------------
+
+
+_LOGIC_DIFF = (
+    "diff --git a/custom_addons/m/models/x.py b/custom_addons/m/models/x.py\n"
+    "--- a/custom_addons/m/models/x.py\n+++ b/custom_addons/m/models/x.py\n"
+    "@@ -1 +1 @@\n+def f():\n+    return 1\n"
+)
+
+
+def test_test_coverage_param_present_for_untested_logic():
+    github = FakeGitHub(diff=_LOGIC_DIFF, files=[{"filename": "custom_addons/m/models/x.py"}])
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    reviewer.execute(_params())
+    assert "test_coverage" in runner.last_params
+    assert "custom_addons/m" in runner.last_params["test_coverage"]
+
+
+def test_test_coverage_param_absent_when_tests_present():
+    diff = _LOGIC_DIFF + (
+        "diff --git a/custom_addons/m/tests/test_x.py b/custom_addons/m/tests/test_x.py\n"
+        "--- a/custom_addons/m/tests/test_x.py\n+++ b/custom_addons/m/tests/test_x.py\n"
+        "@@ -1 +1 @@\n+def test_f():\n+    pass\n"
+    )
+    github = FakeGitHub(diff=diff, files=[{"filename": "custom_addons/m/models/x.py"}])
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    reviewer.execute(_params())
+    assert "test_coverage" not in runner.last_params
+
+
+def test_test_coverage_param_absent_for_non_logic_change():
+    runner = FakeRunner(response=_claude_response_with_findings([]))  # default diff = custom_addons/app.py
+    reviewer, *_ = _make_reviewer(runner=runner)
+    reviewer.execute(_params())
+    assert "test_coverage" not in runner.last_params
+
+
+def test_test_coverage_signal_uses_delta_diff_not_changed_files():
+    # On a delta review the signal must derive from the compare diff, not the
+    # whole-PR get_changed_files list (which here claims a tests/ file).
+    github = FakeGitHub(head_sha="newsha", compare_diff=_LOGIC_DIFF, compare_status="ahead",
+                        files=[{"filename": "custom_addons/m/tests/test_x.py"}])
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 1, "head_sha": "prevsha"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(repository_id=1, pull_request_id=1, head_sha="newsha",
+                       installation_id=99, trigger_event="synchronize")
+    reviewer.execute(params)
+    assert "test_coverage" in runner.last_params

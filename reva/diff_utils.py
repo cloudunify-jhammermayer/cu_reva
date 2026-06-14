@@ -292,3 +292,82 @@ def is_trivial_diff(diff: str) -> bool:
             return False
         seen = True
     return seen
+
+
+# --- Test-coverage signal ----------------------------------------------------
+
+# Subdirs of an Odoo module that hold reviewable Python logic (Odoo layout).
+LOGIC_SUBDIRS = ("models", "controllers", "wizard", "wizards", "report")
+
+
+def module_root(path: str) -> str | None:
+    """Return `custom_addons/<module>` (or the hyphen spelling) for a path under
+    a reviewed addons prefix, else None."""
+    for prefix in DEFAULT_REVIEW_PREFIXES:
+        if path.startswith(prefix):
+            module = path[len(prefix):].split("/", 1)[0]
+            if module:
+                return prefix + module
+    return None
+
+
+def is_in_tests_dir(path: str) -> bool:
+    """True if `path` has a `tests` directory segment under its module root."""
+    root = module_root(path)
+    if root is None:
+        return False
+    dir_segments = path[len(root) + 1:].split("/")[:-1]
+    return "tests" in dir_segments
+
+
+def is_logic_path(path: str) -> bool:
+    """True if `path` is a .py file under a module's logic subdir."""
+    root = module_root(path)
+    if root is None or not path.endswith(".py"):
+        return False
+    return path[len(root) + 1:].split("/")[0] in LOGIC_SUBDIRS
+
+
+@dataclass(frozen=True)
+class ModuleCoverage:
+    """A module that adds new logic without an accompanying tests/ change."""
+
+    module: str
+    added_controller: bool  # added a new @route/@http.route (untested route is worse)
+
+
+def analyze_test_coverage(diff: str) -> list[ModuleCoverage]:
+    """Modules that ADD new logic (.py under models/controllers/wizard/report)
+    with NO change under that module's tests/ dir. Conservative: any tests/ touch
+    in the module clears it, and a pure deletion is not 'added logic'. Computed
+    from the already-filtered diff, so it works on both the full and delta paths."""
+    if not diff.strip():
+        return []
+    added_route: dict[str, bool] = {}   # module with added logic -> added a route
+    has_test_change: set[str] = set()
+    for section in re.split(r"(?=^diff --git )", diff, flags=re.MULTILINE):
+        if not section.strip():
+            continue
+        m = re.search(r"^\+\+\+ b/(.+)$", section, re.MULTILINE)
+        if m is None:
+            continue
+        path = m.group(1).rstrip("\r")
+        root = module_root(path)
+        if root is None:
+            continue
+        if is_in_tests_dir(path):
+            has_test_change.add(root)
+        elif is_logic_path(path):
+            added = _body_lines(section, "+")
+            if not added:
+                continue  # pure deletion / no added lines — not new logic
+            is_controller = path[len(root) + 1:].split("/")[0] == "controllers"
+            has_route = is_controller and any(
+                "@route" in ln or "@http.route" in ln for ln in added
+            )
+            added_route[root] = added_route.get(root, False) or has_route
+    return [
+        ModuleCoverage(module=mod, added_controller=route)
+        for mod, route in added_route.items()
+        if mod not in has_test_change
+    ]

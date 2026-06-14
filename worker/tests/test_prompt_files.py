@@ -173,3 +173,10 @@ def test_compute_prompt_hashes_missing_file_raises(tmp_path):
     pb = PromptBuilder(prompts_dir=str(tmp_path))  # no review_guidance.md
     with pytest.raises(FileNotFoundError):
         pb.compute_prompt_hashes(str(tmp_path / "skills"))
+
+
+def test_test_coverage_guidance_present():
+    text = (PROMPTS_DIR / "review_guidance.md").read_text()
+    assert "test_coverage" in text
+    for skill in ("reva-diff-review.md", "reva-delta-review.md", "reva-full-review.md"):
+        assert "test_coverage" in (SKILLS_DIR / skill).read_text(), skill

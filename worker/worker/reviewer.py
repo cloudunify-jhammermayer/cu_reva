@@ -23,6 +23,7 @@ from reva.cost import estimate_cost
 from reva.diff_utils import (
     DEFAULT_EXCLUDE_EXTENSIONS,
     DEFAULT_REVIEW_PREFIXES,
+    analyze_test_coverage,
     count_diff_lines,
     estimate_diff_tokens,
     filter_diff,
@@ -391,10 +392,14 @@ class Reviewer:
             "base_branch": pr_basic["base_branch"],
             "head_branch": pr_basic["head_branch"],
         }
-        # Delta re-reviews: hand the still-open prior findings to the skill so it
-        # suppresses duplicates. Added last + only when present, so the cached
-        # prompt prefix is byte-identical to a first review. The runner XML-fences
-        # the value, so the (REVA-authored, already-redacted) text is data.
+        # Optional structured hints, added only when present so a clean PR's
+        # cached prompt prefix stays byte-identical (runner XML-fences each value).
+        # Test-coverage: modules that add new logic with no accompanying tests/.
+        coverage = analyze_test_coverage(diff)
+        if coverage:
+            skill_params["test_coverage"] = _format_test_coverage(coverage)
+        # Delta re-reviews: the still-open prior findings, so the skill suppresses
+        # duplicates (the fixed case is handled by _verify_and_resolve_findings).
         if prior_findings:
             skill_params["already_reported"] = _format_already_reported(prior_findings)
 
@@ -404,7 +409,7 @@ class Reviewer:
             "review_executing", skill=skill, model=model,
             diff_lines=diff_lines, changed_files=len(changed_files),
             delta_base=delta_base_sha[:8] if delta_base_sha else None,
-            odoo=repo_config.odoo,
+            odoo=repo_config.odoo, untested_modules=len(coverage),
         )
 
         # 10. Ensure repo is cloned/updated, then call Claude Code. The lock
@@ -519,6 +524,16 @@ class Reviewer:
 
 
 # --- Module-level helpers -----------------------------------------------------
+
+
+def _format_test_coverage(coverage: list) -> str:
+    """One line per module that added new logic without touching tests/, for the
+    `test_coverage` skill param. The model decides whether to emit a `test` finding."""
+    lines = ["Modules that add new logic in this change but touch no tests/ files:"]
+    for c in coverage:
+        route = " (adds a new HTTP route — untested routes are higher risk)" if c.added_controller else ""
+        lines.append(f"- {c.module}: new logic, no test change{route}")
+    return "\n".join(lines)
 
 
 def _format_already_reported(findings: list[dict]) -> str:

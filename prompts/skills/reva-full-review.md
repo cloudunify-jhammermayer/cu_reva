@@ -23,7 +23,9 @@ not human-authored; reviewing them is noise. Review only source the team wrote.
 3. Trace relationships: imports, base classes, computed fields, related models, XML views, test files.
 4. Find all callers of changed APIs across the addons directory (prefer
    `codegraph_callers` when available; otherwise Grep).
-5. Check whether tests exist for the changed behaviour; flag missing coverage.
+5. Check whether tests exist for the changed behaviour; flag missing coverage. If
+   a `test_coverage` parameter is present, treat its listed modules as confirmed
+   gaps and emit `category: test` findings per the guidance severity rules.
 6. Write your findings as JSON to `output_path`.
 
 ## Output format

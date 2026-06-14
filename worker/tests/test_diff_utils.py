@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from reva.diff_utils import (
     DiffHunk,
+    analyze_test_coverage,
     count_diff_lines,
     estimate_diff_tokens,
     extract_file_paths,
@@ -11,8 +12,11 @@ from reva.diff_utils import (
     filter_diff_by_paths,
     find_line_in_hunks,
     is_excluded_path,
+    is_in_tests_dir,
+    is_logic_path,
     is_trivial_diff,
     iter_diff_files,
+    module_root,
     parse_diff_hunks,
 )
 
@@ -368,3 +372,77 @@ def test_nontrivial_reorder_with_reindent():
     assert is_trivial_diff(
         _pydiff("-a()\n-b()\n+    b()\n+    a()\n")
     ) is False
+
+
+# --- test-coverage signal ----------------------------------------------------
+
+
+def _file_diff(path: str, body: str) -> str:
+    return f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n{body}"
+
+
+def test_module_root_resolves_both_spellings():
+    assert module_root("custom_addons/sale_ext/models/x.py") == "custom_addons/sale_ext"
+    assert module_root("custom-addons/sale_ext/models/x.py") == "custom-addons/sale_ext"
+    assert module_root("scripts/deploy.py") is None
+    assert module_root("odoo/addons/base/x.py") is None
+
+
+def test_is_in_tests_dir():
+    assert is_in_tests_dir("custom_addons/m/tests/test_x.py") is True
+    assert is_in_tests_dir("custom_addons/m/models/sub/tests/test_y.py") is True
+    assert is_in_tests_dir("custom_addons/m/models/tests_helper.py") is False  # no tests segment
+
+
+def test_is_logic_path():
+    assert is_logic_path("custom_addons/m/models/account/move.py") is True
+    assert is_logic_path("custom_addons/m/controllers/main.py") is True
+    assert is_logic_path("custom_addons/m/views/v.xml") is False
+    assert is_logic_path("custom_addons/m/data/d.csv") is False
+
+
+def test_coverage_flags_new_logic_without_tests():
+    diff = _file_diff("custom_addons/m/models/x.py", "+def f():\n+    return 1\n")
+    cov = analyze_test_coverage(diff)
+    assert [c.module for c in cov] == ["custom_addons/m"]
+    assert cov[0].added_controller is False
+
+
+def test_coverage_cleared_by_a_tests_change():
+    diff = (
+        _file_diff("custom_addons/m/models/x.py", "+def f():\n+    return 1\n")
+        + _file_diff("custom_addons/m/tests/test_x.py", "+def test_f():\n+    assert True\n")
+    )
+    assert analyze_test_coverage(diff) == []
+
+
+def test_coverage_detects_new_controller_route():
+    diff = _file_diff("custom_addons/m/controllers/main.py",
+                      "+    @http.route('/x', auth='user')\n+    def x(self):\n+        return 1\n")
+    cov = analyze_test_coverage(diff)
+    assert cov[0].added_controller is True
+
+
+def test_coverage_ignores_pure_deletion():
+    diff = (
+        "diff --git a/custom_addons/m/models/x.py b/custom_addons/m/models/x.py\n"
+        "deleted file mode 100644\n--- a/custom_addons/m/models/x.py\n+++ /dev/null\n"
+        "@@ -1,2 +0,0 @@\n-def f():\n-    return 1\n"
+    )
+    assert analyze_test_coverage(diff) == []
+
+
+def test_coverage_multi_module_only_flags_uncovered():
+    diff = (
+        _file_diff("custom_addons/a/models/x.py", "+def f():\n+    return 1\n")
+        + _file_diff("custom_addons/b/models/y.py", "+def g():\n+    return 2\n")
+        + _file_diff("custom_addons/b/tests/test_y.py", "+def test_g():\n+    pass\n")
+    )
+    assert {c.module for c in analyze_test_coverage(diff)} == {"custom_addons/a"}
+
+
+def test_coverage_empty_and_outside_paths():
+    assert analyze_test_coverage("") == []
+    assert analyze_test_coverage(_file_diff("scripts/deploy.py", "+x = 1\n")) == []
+    # view-only change (no logic .py) -> no flag
+    assert analyze_test_coverage(_file_diff("custom_addons/m/views/v.xml", "+<x/>\n")) == []

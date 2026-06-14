@@ -11,8 +11,11 @@ category, confidence, and conduct rules in the guidance above apply.
 2. Use Read to examine the full content of each changed file.
 3. Use Read to check imports, parent classes, related models, and tests for the changed code.
 4. Use Grep to find callers of changed functions when the change is non-trivial.
-5. Keep only findings you are confident about (confidence ≥ 0.7).
-6. Write your findings as JSON to `output_path`.
+5. If a `test_coverage` parameter is present, verify the listed modules genuinely
+   lack tests for the new logic and, if so, emit a `category: test` finding per the
+   guidance severity rules.
+6. Keep only findings you are confident about (confidence ≥ 0.7).
+7. Write your findings as JSON to `output_path`.
 
 ## Output format
 
