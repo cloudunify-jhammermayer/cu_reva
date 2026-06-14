@@ -17,6 +17,11 @@
   (`migrations/<ver>/{pre,post,end}-migrate.py`) are path-routed to it (overrides
   the mode/delta skill); it checks destructive DDL, non-idempotent backfills,
   ORM-vs-SQL staging, JSONB translations, and SQL injection.
+- New `reva-xml-review.md` skill + `.xml` is no longer blanket-stripped from the
+  diff (third-party odoo/enterprise XML still dropped by prefix). XML-only PRs route
+  to it: resolves xpath/inherit_id/ref targets against the clone, applies the view
+  rules (t-esc→t-out, inline `<script>`/CDN CSP, explicit inherit_id, `<card>`,
+  noupdate). Per-repo `max_xml_diff_lines`/`max_xml_diff_tokens` cap view dumps.
 
 ## v1.5 — Consultant DOCX as planning basis
 

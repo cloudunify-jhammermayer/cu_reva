@@ -1465,3 +1465,72 @@ def test_migration_removed_by_skip_paths_does_not_route():
     reviewer, *_ = _make_reviewer(github=github, runner=runner)
     reviewer.execute(_params(review_mode="diff"))
     assert runner.last_skill == "reva-diff-review"  # migration stripped before routing
+
+
+# --- XML/QWeb routing (feature 8) --------------------------------------------
+
+
+_XML_DIFF = (
+    "diff --git a/custom_addons/m/views/partner_views.xml "
+    "b/custom_addons/m/views/partner_views.xml\n"
+    "--- a/custom_addons/m/views/partner_views.xml\n"
+    "+++ b/custom_addons/m/views/partner_views.xml\n"
+    '@@ -1 +1 @@\n+<field name="x"/>\n'
+)
+_XML_FILES = [{"filename": "custom_addons/m/views/partner_views.xml"}]
+
+
+def test_pure_xml_pr_routes_to_xml_skill():
+    github = FakeGitHub(diff=_XML_DIFF, files=_XML_FILES)
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params(review_mode="diff"))
+    assert result.status == "completed"            # XML no longer declined as "no reviewable files"
+    assert runner.last_skill == "reva-xml-review"
+
+
+def test_mixed_py_xml_routes_to_diff_skill_with_xml_present():
+    diff = _XML_DIFF + (
+        "diff --git a/custom_addons/m/models/x.py b/custom_addons/m/models/x.py\n"
+        "--- a/custom_addons/m/models/x.py\n+++ b/custom_addons/m/models/x.py\n"
+        "@@ -1 +1 @@\n+def f():\n+    return 1\n"
+    )
+    github = FakeGitHub(diff=diff, files=[*_XML_FILES, {"filename": "custom_addons/m/models/x.py"}])
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    reviewer.execute(_params(review_mode="diff"))
+    assert runner.last_skill == "reva-diff-review"  # mixed PR uses the generic skill
+    assert "partner_views.xml" in runner.last_params["diff"]          # but XML reaches the model
+    assert "custom_addons/m/views/partner_views.xml" in runner.last_params["changed_files"]
+
+
+def test_xml_only_over_xml_cap_declines():
+    github = FakeGitHub(diff=_XML_DIFF, files=_XML_FILES,
+                        file_contents={".claude-review.yml": "max_xml_diff_lines: 0\n"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params(review_mode="diff"))
+    assert result.status == "declined"
+    assert "XML diff too large" in (result.decline_reason or "")
+
+
+def test_xml_cap_override_allows_review():
+    github = FakeGitHub(diff=_XML_DIFF, files=_XML_FILES,
+                        file_contents={".claude-review.yml": "max_xml_diff_lines: 100\n"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params(review_mode="diff"))
+    assert result.status == "completed"
+    assert runner.last_skill == "reva-xml-review"
+
+
+def test_delta_xml_only_stays_on_delta_skill():
+    github = FakeGitHub(head_sha="newsha", compare_diff=_XML_DIFF,
+                        compare_status="ahead", files=_XML_FILES)
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 1, "head_sha": "prevsha"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(repository_id=1, pull_request_id=1, head_sha="newsha",
+                       installation_id=99, trigger_event="synchronize")
+    reviewer.execute(params)
+    assert runner.last_skill == "reva-delta-review"  # v1: delta unchanged by XML routing

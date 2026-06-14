@@ -34,6 +34,7 @@ from reva.diff_utils import (
     is_excluded_path,
     is_trivial_diff,
     migration_paths,
+    xml_only_diff,
 )
 from reva.errors import PermanentError
 from reva.finding_verifier import FindingVerifier, StoredFinding
@@ -401,8 +402,24 @@ class Reviewer:
             return _skipped_trivial()
 
         # 8c. Select the skill from the final (post-skip_paths, non-trivial) diff so
-        # content-driven routing (migration scripts) sees exactly what Claude will.
+        # content-driven routing (migration scripts, XML-only) sees what Claude will.
         skill = _select_skill(params.review_mode, delta_base_sha is not None, diff)
+
+        # 8d. Optional stricter cap for XML-only PRs (view dumps are verbose). Only
+        # acts when configured; the general max_diff_lines/tokens guard already ran.
+        if skill == "reva-xml-review":
+            if repo_config.max_xml_diff_lines is not None and diff_lines > repo_config.max_xml_diff_lines:
+                return declined(
+                    f"XML diff too large ({diff_lines} lines > "
+                    f"{repo_config.max_xml_diff_lines} max for XML). Split the view "
+                    f"changes or raise max_xml_diff_lines."
+                )
+            if repo_config.max_xml_diff_tokens is not None and diff_tokens > repo_config.max_xml_diff_tokens:
+                return declined(
+                    f"XML diff exceeds the XML token budget ({diff_tokens} > "
+                    f"{repo_config.max_xml_diff_tokens}). Split the view changes or "
+                    f"raise max_xml_diff_tokens."
+                )
 
         # 9. Select model.
         model = self.runner.deep_model if params.review_mode == "deep" else self.runner.default_model
@@ -727,7 +744,9 @@ def _select_skill(review_mode: str, has_delta: bool, diff: str) -> str:
     if migration_paths(diff):
         return "reva-migration-review"
     if has_delta:
-        return "reva-delta-review"
+        return "reva-delta-review"  # v1: delta stays on the delta skill, incl. XML-only
+    if xml_only_diff(diff):
+        return "reva-xml-review"
     if review_mode in ("diff", "diff-all"):
         return "reva-diff-review"
     return "reva-full-review"

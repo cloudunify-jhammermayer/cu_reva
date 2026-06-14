@@ -19,6 +19,7 @@ from reva.diff_utils import (
     migration_paths,
     module_root,
     parse_diff_hunks,
+    xml_only_diff,
 )
 
 
@@ -481,3 +482,43 @@ def test_migration_paths_is_crlf_safe():
 
 def test_migration_paths_empty_diff():
     assert migration_paths("") == []
+
+
+# --- XML review routing (feature 8) ------------------------------------------
+
+
+def test_filter_diff_keeps_custom_addons_xml():
+    diff = _file_diff("custom_addons/m/views/partner_views.xml", "+<field name='x'/>\n")
+    assert "partner_views.xml" in filter_diff(diff)
+
+
+def test_filter_diff_still_strips_po_pot_md_rst():
+    for path in ("custom_addons/m/i18n/de.po", "custom_addons/m/i18n/m.pot",
+                 "custom_addons/m/README.md", "custom_addons/m/doc/index.rst"):
+        assert filter_diff(_file_diff(path, "+x\n")).strip() == "", path
+
+
+def test_filter_diff_still_strips_thirdparty_xml_by_prefix():
+    diff = (
+        _file_diff("odoo/addons/base/views/base.xml", "+<x/>\n")
+        + _file_diff("enterprise/web/views/w.xml", "+<x/>\n")
+    )
+    assert filter_diff(diff).strip() == ""  # XML no longer in ext set must not leak third-party
+
+
+def test_xml_only_diff_true_for_pure_xml():
+    diff = (
+        _file_diff("custom_addons/m/views/a.xml", "+<x/>\n")
+        + _file_diff("custom_addons/m/views/b.xml", "+<y/>\n")
+    )
+    assert xml_only_diff(diff) is True
+
+
+def test_xml_only_diff_false_for_mixed_and_code_and_empty():
+    mixed = (
+        _file_diff("custom_addons/m/views/a.xml", "+<x/>\n")
+        + _file_diff("custom_addons/m/models/x.py", "+x = 1\n")
+    )
+    assert xml_only_diff(mixed) is False
+    assert xml_only_diff(_file_diff("custom_addons/m/models/x.py", "+x = 1\n")) is False
+    assert xml_only_diff("") is False

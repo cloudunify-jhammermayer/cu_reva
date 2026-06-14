@@ -16,7 +16,7 @@ below. Companion to [`FEATURE_ROADMAP.md`](../FEATURE_ROADMAP.md) and the
 | 5 | `__manifest__.py` validator | M | high | unit | ✅ (deterministic helper + skill guidance) |
 | 6 | Second-pass self-critique | M | high | unit + staging | ✅ (default-off; quality → staging) |
 | 7 | Migration-safety review skill | M | high | unit (routing) + **staging** | ✅ (routing; quality → staging) |
-| 8 | XML/QWeb review skill | M | high* | unit (filter/routing) + **staging** | ⬜ ready |
+| 8 | XML/QWeb review skill | M | high* | unit (filter/routing) + **staging** | ✅ (filter+routing; quality → staging) |
 | 9 | Security-model consistency | S | medium | mostly **staging** | ⬜ ready |
 
 `*` plan was accurate apart from the corrections noted below. "staging" = the review *quality* (does the
@@ -56,6 +56,12 @@ comments" problem** (1 stops re-emitting duplicates; 2 stops a rebase from produ
   placed after the trivial-diff short-circuit) routes them to the new `reva-migration-review.md`
   skill, overriding the mode/delta choice while keeping `delta_base_sha`. Owed: live staging of the
   migration review quality (destructive DDL, idempotency, JSONB).
+- **XML/QWeb skill (8)** — `.xml` removed from `DEFAULT_EXCLUDE_EXTENSIONS` (third-party odoo/enterprise
+  XML still dropped by prefix); `diff_utils.xml_only_diff` routes pure-view PRs to the new
+  `reva-xml-review.md` skill (resolves xpath/inherit_id/ref against the clone, embeds the view rules);
+  mixed PRs keep the generic skill but now see XML. Per-repo `max_xml_diff_lines`/`max_xml_diff_tokens`
+  cap. Delta stays on the delta skill (v1). Owed: live staging of xpath/inherit_id resolution quality
+  (false positives on valid xpath are the risk).
 
 > **Exhaustive per-feature plans for 4–9** (files, approach, edge cases, test plan, verified
 > corrections) live in [`tier2-detailed-plans.md`](tier2-detailed-plans.md). The summaries below are the

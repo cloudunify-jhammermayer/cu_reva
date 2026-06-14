@@ -194,6 +194,14 @@ def test_migration_skill_present_and_well_formed():
     assert "migrate.py" in text or "migration" in text.lower()
 
 
+def test_xml_skill_present_and_has_csp_anchor():
+    text = (SKILLS_DIR / "reva-xml-review.md").read_text()
+    assert text.strip(), "reva-xml-review.md is empty"
+    assert "output_path" in text and "risk_level" in text
+    # keep the CSP anchor so _ODOO_SEVERITY_RULES.csp_inline_script still floors it
+    assert "<script" in text
+
+
 def test_manifest_guidance_present():
     # diff/delta/full receive the deterministic manifest_audit param
     for skill in ("reva-diff-review.md", "reva-delta-review.md", "reva-full-review.md"):

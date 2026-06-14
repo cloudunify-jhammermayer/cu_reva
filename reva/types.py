@@ -56,6 +56,10 @@ class RepoConfig(BaseModel):
 
     max_diff_lines: int | None = None
     max_diff_tokens: int | None = None
+    # Optional stricter caps for XML-only PRs (verbose view dumps). None = no extra
+    # cap beyond the general max_diff_lines/tokens.
+    max_xml_diff_lines: int | None = None
+    max_xml_diff_tokens: int | None = None
     skip_paths: list[str] = Field(default_factory=list)
     # When true, review every changed path (like the /review-all command),
     # not just the custom_addons prefixes. Default keeps the custom_addons lock.

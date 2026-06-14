@@ -11,7 +11,10 @@ from dataclasses import dataclass
 # Extensions stripped from diffs before size-guarding and Claude ingestion.
 # These files are rarely useful for code review and can be extremely large
 # (Odoo XML views, gettext .po/.pot catalogs).
-DEFAULT_EXCLUDE_EXTENSIONS: frozenset[str] = frozenset({".xml", ".po", ".pot", ".md", ".rst"})
+# NB: .xml is deliberately NOT excluded — Odoo view/QWeb XML under custom_addons/
+# is reviewed by the reva-xml-review skill. Third-party odoo/enterprise XML is
+# still dropped by exclude_prefixes, and translation/doc catalogs stay excluded.
+DEFAULT_EXCLUDE_EXTENSIONS: frozenset[str] = frozenset({".po", ".pot", ".md", ".rst"})
 
 # Only files under these path prefixes are reviewed. Everything else
 # (CI configs, root-level scripts, OCA modules, etc.) is dropped. Both the
@@ -93,6 +96,13 @@ def migration_paths(diff: str) -> list[str]:
     """Migration-script paths in `diff` (operates on the same filtered diff the
     reviewer sends, so third-party/skip_paths-stripped files never match)."""
     return [p for p in iter_diff_files(diff) if MIGRATION_PATH_RE.search(p)]
+
+
+def xml_only_diff(diff: str) -> bool:
+    """True iff the diff touches at least one file and every touched path is .xml.
+    Routing predicate for the dedicated XML/QWeb review skill."""
+    paths = list(iter_diff_files(diff))
+    return bool(paths) and all(p.lower().endswith(".xml") for p in paths)
 
 
 def filter_diff(
