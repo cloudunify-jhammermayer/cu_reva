@@ -28,6 +28,12 @@ _REVIEWABLE_ACTIONS = frozenset({"opened", "synchronize", "reopened", "ready_for
 _ACK_PR_ACTIONS = frozenset({"opened", "reopened", "ready_for_review"})
 
 
+def _is_bot_sender(payload: dict) -> bool:
+    """Whether the event was sent by a Bot (incl. REVA itself). The anti-loop
+    guard for every handler that would otherwise act on REVA's own actions."""
+    return (payload.get("sender") or {}).get("type") == "Bot"
+
+
 @router.post("/webhooks/github", status_code=202)
 async def receive_webhook(
     request: Request,
@@ -95,6 +101,8 @@ def _process_delivery(
             _handle_issue_comment(db, payload, settings, github)
         elif event == "pull_request_review_comment":
             _handle_review_comment(payload, settings, rq_queue)
+        elif event == "pull_request_review_thread":
+            _handle_review_thread(db, payload)
         elif event == "issues":
             _handle_issues(payload, rq_queue)
         elif event == "installation":
@@ -211,7 +219,7 @@ def _handle_review_comment(payload: dict, settings: Settings, rq_queue) -> None:
         return  # top-level comment, not a reply — ignore
 
     # Never reply to other bots (including ourselves — prevents reply loops)
-    if payload.get("sender", {}).get("type") == "Bot":
+    if _is_bot_sender(payload):
         return
 
     # SECU-3: a reply drives a paid Claude call, so only commenters with
@@ -262,6 +270,47 @@ def _handle_review_comment(payload: dict, settings: Settings, rq_queue) -> None:
         repo=repo,
         pr=pr_number,
         in_reply_to=in_reply_to_id,
+    )
+
+
+_REVIEW_THREAD_ACTIONS = frozenset({"resolved", "unresolved"})
+
+
+def _handle_review_thread(db: Database, payload: dict) -> None:
+    """Capture developer feedback when a REVA finding's comment thread is marked
+    resolved (accept) or unresolved (reject/reopen) — the only webhook-delivered
+    signal for this (GitHub fires no webhook for 👍/👎 reactions). Writes a
+    review_feedback row keyed to the owning finding via the thread's root comment.
+    """
+    action = payload.get("action")
+    if action not in _REVIEW_THREAD_ACTIONS:
+        return
+    # Anti-loop: ignore a thread resolved/unresolved by a bot (incl. REVA itself).
+    if _is_bot_sender(payload):
+        return
+
+    comments = (payload.get("thread") or {}).get("comments") or []
+    root = next((c for c in comments if c.get("in_reply_to_id") is None), None)
+    if root is None or root.get("id") is None:
+        return
+    comment_id = root["id"]
+
+    finding = writers.lookup_finding_by_comment_id(db, comment_id)
+    if finding is None:
+        return  # not one of REVA's finding threads
+
+    written = writers.record_feedback(
+        db,
+        review_finding_id=finding["id"],
+        review_run_id=finding["review_run_id"],
+        github_comment_id=comment_id,
+        reactor_login=(payload.get("sender") or {}).get("login") or "",
+        reaction=action,
+        is_positive=(action == "resolved"),
+    )
+    logger.info(
+        "review_feedback_recorded",
+        finding_id=finding["id"], reaction=action, deduped=written is None,
     )
 
 
@@ -387,7 +436,7 @@ def _handle_issue_comment(db: Database, payload: dict, settings: Settings, githu
         return
 
     # Never act on a bot's comment — prevents REVA triggering itself (cost loop).
-    if payload.get("sender", {}).get("type") == "Bot":
+    if _is_bot_sender(payload):
         return
 
     comment = payload.get("comment", {})

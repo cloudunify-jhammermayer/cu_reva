@@ -868,3 +868,86 @@ def test_issue_irrelevant_action_is_ignored(client_and_db):
         assert q.enqueued == []
     finally:
         app.state.rq_queue = None
+
+
+# --- pull_request_review_thread (feedback capture) ---------------------------
+
+
+def _review_thread_payload(action="resolved", root_comment_id=777, sender_type="User"):
+    return {
+        "action": action,
+        "installation": {"id": 99},
+        "repository": {"id": 1001, "name": "widgets", "full_name": "acme/widgets",
+                       "owner": {"login": "acme"}},
+        "sender": {"login": "bob", "type": sender_type},
+        "thread": {
+            "comments": [
+                {"id": root_comment_id, "in_reply_to_id": None},
+                {"id": 888, "in_reply_to_id": root_comment_id},
+            ],
+        },
+    }
+
+
+def test_review_thread_resolved_writes_positive_feedback(client_and_db):
+    client, db = client_and_db
+    fid = _seed_posted_finding(db)  # github_comment_id=777
+    _post(client, _review_thread_payload("resolved"), event="pull_request_review_thread")
+    from reva.db.models import ReviewFeedback
+    with db.session() as s:
+        rows = s.query(ReviewFeedback).all()
+        assert len(rows) == 1
+        assert rows[0].review_finding_id == fid
+        assert rows[0].is_positive is True
+        assert rows[0].reaction == "resolved"
+
+
+def test_review_thread_unresolved_writes_negative_feedback(client_and_db):
+    client, db = client_and_db
+    _seed_posted_finding(db)
+    _post(client, _review_thread_payload("unresolved"), event="pull_request_review_thread")
+    from reva.db.models import ReviewFeedback
+    with db.session() as s:
+        rows = s.query(ReviewFeedback).all()
+        assert len(rows) == 1 and rows[0].is_positive is False
+
+
+def test_review_thread_non_reva_thread_writes_nothing(client_and_db):
+    client, db = client_and_db
+    _seed_posted_finding(db)  # comment id 777
+    _post(client, _review_thread_payload("resolved", root_comment_id=999),
+          event="pull_request_review_thread")
+    from reva.db.models import ReviewFeedback
+    with db.session() as s:
+        assert s.query(ReviewFeedback).count() == 0
+
+
+def test_review_thread_by_bot_is_ignored(client_and_db):
+    client, db = client_and_db
+    _seed_posted_finding(db)
+    _post(client, _review_thread_payload("resolved", sender_type="Bot"),
+          event="pull_request_review_thread")
+    from reva.db.models import ReviewFeedback
+    with db.session() as s:
+        assert s.query(ReviewFeedback).count() == 0
+
+
+def test_review_thread_resolve_twice_deduped(client_and_db):
+    client, db = client_and_db
+    _seed_posted_finding(db)
+    _post(client, _review_thread_payload("resolved"),
+          event="pull_request_review_thread", delivery="d1")
+    _post(client, _review_thread_payload("resolved"),
+          event="pull_request_review_thread", delivery="d2")
+    from reva.db.models import ReviewFeedback
+    with db.session() as s:
+        assert s.query(ReviewFeedback).count() == 1  # unique constraint dedups
+
+
+def test_review_thread_malformed_payload_accepted(client_and_db):
+    client, db = client_and_db
+    payload = {"action": "resolved", "installation": {"id": 99},
+               "repository": {"full_name": "acme/widgets"},
+               "sender": {"login": "x", "type": "User"}}  # no 'thread'
+    resp = _post(client, payload, event="pull_request_review_thread")
+    assert resp.status_code == 202

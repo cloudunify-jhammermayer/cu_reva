@@ -1103,3 +1103,39 @@ def test_mark_open_findings_at_merge_is_idempotent(db, seeded):
     writers.attach_finding_comment_ids(db, {fid: 111})
     assert writers.mark_open_findings_at_merge(db, seeded["pull_request_id"]) == 1
     assert writers.mark_open_findings_at_merge(db, seeded["pull_request_id"]) == 0  # no-op
+
+
+# --- feedback capture (record_feedback / lookup review_run_id) ---------------
+
+
+def test_lookup_finding_by_comment_id_returns_review_run_id(db, seeded):
+    [fid] = _seed_findings(db, seeded, 1)
+    writers.attach_finding_comment_ids(db, {fid: 555})
+    found = writers.lookup_finding_by_comment_id(db, 555)
+    assert found is not None and found["id"] == fid
+    assert found["review_run_id"] is not None
+
+
+def test_record_feedback_inserts_then_dedups(db, seeded):
+    from reva.db.models import ReviewFeedback
+    [fid] = _seed_findings(db, seeded, 1)
+    writers.attach_finding_comment_ids(db, {fid: 555})
+    rr = writers.lookup_finding_by_comment_id(db, 555)["review_run_id"]
+    kw = dict(review_finding_id=fid, review_run_id=rr, github_comment_id=555,
+              reactor_login="alice", reaction="resolved", is_positive=True)
+    assert writers.record_feedback(db, **kw) is not None
+    assert writers.record_feedback(db, **kw) is None  # dedup on unique constraint
+    with db.session() as s:
+        assert s.query(ReviewFeedback).count() == 1
+
+
+def test_record_feedback_resolve_then_unresolve_two_rows(db, seeded):
+    from reva.db.models import ReviewFeedback
+    [fid] = _seed_findings(db, seeded, 1)
+    writers.attach_finding_comment_ids(db, {fid: 555})
+    rr = writers.lookup_finding_by_comment_id(db, 555)["review_run_id"]
+    base = dict(review_finding_id=fid, review_run_id=rr, github_comment_id=555, reactor_login="alice")
+    writers.record_feedback(db, reaction="resolved", is_positive=True, **base)
+    writers.record_feedback(db, reaction="unresolved", is_positive=False, **base)
+    with db.session() as s:
+        assert s.query(ReviewFeedback).count() == 2  # distinct reaction values

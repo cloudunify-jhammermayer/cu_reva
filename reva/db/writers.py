@@ -34,6 +34,7 @@ from reva.db.models import (
     PromptVersion,
     PullRequest,
     Repository,
+    ReviewFeedback,
     ReviewFinding,
     ReviewRun,
     TicketAnalysis,
@@ -845,6 +846,7 @@ def lookup_finding_by_comment_id(db: Database, github_comment_id: int) -> dict |
                 ReviewFinding.file_path,
                 ReviewFinding.line_start,
                 ReviewFinding.suggestion,
+                ReviewFinding.review_run_id,
             ).where(ReviewFinding.github_comment_id == github_comment_id)
         ).first()
     if row is None:
@@ -857,7 +859,46 @@ def lookup_finding_by_comment_id(db: Database, github_comment_id: int) -> dict |
         "file_path": row[4],
         "line_start": row[5],
         "suggestion": row[6],
+        "review_run_id": row[7],
     }
+
+
+def record_feedback(
+    db: Database,
+    *,
+    review_finding_id: int,
+    review_run_id: int,
+    github_comment_id: int,
+    reactor_login: str,
+    reaction: str,
+    is_positive: bool,
+) -> int | None:
+    """Insert one review_feedback row; return its id, or None on a duplicate.
+
+    review_feedback was created (migration 002) for 👍/👎 reactions; it now also
+    carries thread-resolution signal, where `reaction` is "resolved"/"unresolved"
+    and `is_positive` is the polarity (resolved = accept).
+
+    Idempotent on uq_review_feedback_unique (review_finding_id, reactor_login,
+    reaction): a repeated signal (e.g. a redelivered thread-resolved event) is a
+    no-op. A stale finding/run id (FK violation) is also swallowed so a webhook
+    can't 500 on a deleted finding.
+    """
+    try:
+        with db.session() as s:
+            row = ReviewFeedback(
+                review_finding_id=review_finding_id,
+                review_run_id=review_run_id,
+                github_comment_id=github_comment_id,
+                reactor_login=reactor_login,
+                reaction=reaction,
+                is_positive=is_positive,
+            )
+            s.add(row)
+            s.flush()
+            return row.id
+    except IntegrityError:
+        return None
 
 
 # --- ticket_analyses writers -------------------------------------------------

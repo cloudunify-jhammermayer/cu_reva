@@ -261,7 +261,7 @@ def format_pr_review_body(
     if unmapped:
         parts.append(_format_unmapped_section(unmapped))
     parts.append(_footer(result, run_id))
-    parts.append("*React with 👍 or 👎 on individual comments to help me improve.*")
+    parts.append("*Resolve a comment thread once you've addressed it — that tells me the finding landed.*")
     return "\n\n".join(parts)
 
 
