@@ -1,3 +1,11 @@
+## v1.6 — Tier 2 review-intelligence prompts
+
+- `reva-delta-review.md`: added an "Already-reported findings" block. Delta
+  re-reviews now receive an `already_reported` param (the prior review's still-open
+  findings) and must NOT re-emit them as new inline comments — fixes duplicate
+  comments on follow-up pushes. (Further Tier 2 skill/prompt additions land under
+  this version.)
+
 ## v1.5 — Consultant DOCX as planning basis
 
 - `ticket_issues.md`: when Odoo forwards a consultant specification document

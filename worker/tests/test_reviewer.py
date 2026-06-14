@@ -92,6 +92,8 @@ class FakeRepos:
         }
     )
     last_completed_review: dict | None = None
+    prior_open_findings: list[dict] = field(default_factory=list)
+    prior_open_findings_calls: int = 0
 
     def get_owner_name(self, repository_id: int) -> tuple[str, str]:
         return self.owner, self.name
@@ -101,6 +103,10 @@ class FakeRepos:
 
     def get_last_completed_review(self, pull_request_id: int) -> dict | None:
         return self.last_completed_review
+
+    def get_prior_open_findings(self, pull_request_id: int) -> list[dict]:
+        self.prior_open_findings_calls += 1
+        return self.prior_open_findings
 
 
 @dataclass
@@ -959,3 +965,63 @@ def test_trivial_skip_is_logged():
         result = reviewer.execute(_params())
     assert result.status == "skipped_trivial"
     assert any(e.get("event") == "review_skipped_trivial" for e in logs)
+
+
+# --- delta-aware finding suppression -----------------------------------------
+
+
+def test_delta_passes_already_reported_param():
+    github = FakeGitHub(head_sha="newsha", compare_diff=_DEFAULT_DIFF, compare_status="ahead")
+    repos = FakeRepos(
+        pr=_DEFAULT_PR,
+        last_completed_review={"id": 1, "head_sha": "prevsha"},
+        prior_open_findings=[
+            {"file_path": "custom_addons/app.py", "line_start": 10, "title": "Missing null check"},
+            {"file_path": "custom_addons/x.py", "line_start": None, "title": "No ACL"},
+        ],
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(repository_id=1, pull_request_id=1, head_sha="newsha",
+                       installation_id=99, trigger_event="synchronize")
+    reviewer.execute(params)
+
+    assert runner.last_skill == "reva-delta-review"
+    ar = runner.last_params.get("already_reported")
+    assert ar is not None
+    assert "custom_addons/app.py:10 — Missing null check" in ar
+    assert "custom_addons/x.py — No ACL" in ar  # null line_start -> no colon
+
+
+def test_delta_without_prior_findings_omits_param():
+    github = FakeGitHub(head_sha="newsha", compare_diff=_DEFAULT_DIFF, compare_status="ahead")
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 1, "head_sha": "prevsha"},
+                      prior_open_findings=[])
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(repository_id=1, pull_request_id=1, head_sha="newsha",
+                       installation_id=99, trigger_event="synchronize")
+    reviewer.execute(params)
+    assert "already_reported" not in runner.last_params
+
+
+def test_first_review_does_not_query_prior_findings():
+    github = FakeGitHub(head_sha="sha1")
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review=None)
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(repository_id=1, pull_request_id=1, head_sha="sha1",
+                       installation_id=99, trigger_event="opened")
+    reviewer.execute(params)
+    assert repos.prior_open_findings_calls == 0
+    assert "already_reported" not in runner.last_params
+
+
+def test_format_already_reported_renders_stable_lines():
+    from worker.reviewer import _format_already_reported
+    out = _format_already_reported([
+        {"file_path": "a.py", "line_start": 5, "title": "T1"},
+        {"file_path": None, "line_start": None, "title": "general issue"},
+    ])
+    assert "- a.py:5 — T1" in out
+    assert "- (general) — general issue" in out

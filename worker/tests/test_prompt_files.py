@@ -81,7 +81,7 @@ def test_system_blocks_full_set(builder):
 
 
 def test_get_version_returns_current_version(builder):
-    assert builder.get_version() == "v1.5"
+    assert builder.get_version() == "v1.6"
 
 
 def test_odoo_severity_rules_in_sync_with_odoo19_md():

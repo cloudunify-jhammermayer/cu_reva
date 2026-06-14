@@ -1139,3 +1139,18 @@ def test_record_feedback_resolve_then_unresolve_two_rows(db, seeded):
     writers.record_feedback(db, reaction="unresolved", is_positive=False, **base)
     with db.session() as s:
         assert s.query(ReviewFeedback).count() == 2  # distinct reaction values
+
+
+# --- get_prior_open_findings (delta suppression source) ----------------------
+
+
+def test_get_prior_open_findings_returns_only_posted(db, seeded):
+    ids = _seed_findings(db, seeded, 2)
+    writers.attach_finding_comment_ids(db, {ids[0]: 901})  # only the first is posted
+    found = DatabaseRepoLookup(db).get_prior_open_findings(seeded["pull_request_id"])
+    assert {f["id"] for f in found} == {ids[0]}  # unposted finding excluded
+    assert found[0]["github_comment_id"] == 901
+
+
+def test_get_prior_open_findings_empty_when_no_completed_run(db, seeded):
+    assert DatabaseRepoLookup(db).get_prior_open_findings(seeded["pull_request_id"]) == []

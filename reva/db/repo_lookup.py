@@ -96,3 +96,9 @@ class DatabaseRepoLookup:
 
     def get_last_completed_review(self, pull_request_id: int) -> dict | None:
         return get_last_completed_review(self._db, pull_request_id)
+
+    def get_prior_open_findings(self, pull_request_id: int) -> list[dict]:
+        # Most-recent completed run's posted findings (= the delta base's open
+        # threads). Local import avoids a package-init cycle with writers.
+        from reva.db import writers
+        return writers.get_open_findings_for_pr(self._db, pull_request_id)

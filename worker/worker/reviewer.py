@@ -173,6 +173,11 @@ class RepoLookup(Protocol):
         """Returns {id, head_sha} or None if no completed review exists."""
         ...
 
+    def get_prior_open_findings(self, pull_request_id: int) -> list[dict]:
+        """Posted findings (with a github_comment_id) of the most recent completed
+        review — what already has an open inline comment thread. [] if none."""
+        ...
+
 
 class Reviewer:
     def __init__(
@@ -254,6 +259,7 @@ class Reviewer:
         # compare diff would be garbage — fall back to a full review for that push
         # (and skip the resolution pass, which keys off delta_base_sha).
         last_review = self.repos.get_last_completed_review(params.pull_request_id)
+        prior_findings: list[dict] = []
         use_delta = False
         if last_review:
             try:
@@ -285,6 +291,10 @@ class Reviewer:
                 )
             skill = "reva-delta-review"
             delta_base_sha: str | None = last_review["head_sha"]
+            # Show the model what it already flagged so it doesn't re-post the same
+            # issue as a fresh inline comment (the still-present case; the fixed case
+            # is handled by runner._verify_and_resolve_findings resolving threads).
+            prior_findings = self.repos.get_prior_open_findings(params.pull_request_id)
         else:
             raw_diff = self.github.get_pull_request_diff(token, owner, name, pr_number)
             diff = filter_diff(raw_diff, include_prefixes=review_prefixes)
@@ -381,6 +391,12 @@ class Reviewer:
             "base_branch": pr_basic["base_branch"],
             "head_branch": pr_basic["head_branch"],
         }
+        # Delta re-reviews: hand the still-open prior findings to the skill so it
+        # suppresses duplicates. Added last + only when present, so the cached
+        # prompt prefix is byte-identical to a first review. The runner XML-fences
+        # the value, so the (REVA-authored, already-redacted) text is data.
+        if prior_findings:
+            skill_params["already_reported"] = _format_already_reported(prior_findings)
 
         # What REVA is about to do — the paid call. Makes "why did this cost /
         # take so long" answerable from the logs (skill, model, size, delta).
@@ -503,6 +519,21 @@ class Reviewer:
 
 
 # --- Module-level helpers -----------------------------------------------------
+
+
+def _format_already_reported(findings: list[dict]) -> str:
+    """One stable line per prior open finding for the `already_reported` skill
+    param: `- {file}:{line} — {title}`. Body is omitted on purpose (keeps the
+    param small and avoids feeding stale prose back to the model)."""
+    lines = [
+        "Issues flagged on an earlier review that already have open inline comments:"
+    ]
+    for f in findings:
+        loc = f.get("file_path") or "(general)"
+        if f.get("line_start"):
+            loc = f"{loc}:{f['line_start']}"
+        lines.append(f"- {loc} — {f.get('title', '')}")
+    return "\n".join(lines)
 
 
 def _decline(reason: str) -> ReviewResult:
