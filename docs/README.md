@@ -22,6 +22,15 @@ docs/superpowers/
 | `specs/2026-05-22-follow-up-check-design.md` | Inline-comment reply follow-ups. |
 | `plans/*` | The matching implementation plans (e.g. headless-claude, incremental-review, security-hardening). |
 
+## Roadmap & feature work
+
+| Doc | Covers |
+|---|---|
+| `../FEATURE_ROADMAP.md` | The 6-tier roadmap. |
+| `tier0-plan.md`, `tier1-plan.md`, `tier2-plan.md` | Per-tier plans + status (Tiers 0–2 shipped). |
+| `tier2-detailed-plans.md` | Exhaustive, verified per-feature plans for Tier-2 features 4–9. |
+| `tier2-staging-runbook.md` | **What to do before testing Tier-2 features 4–9 on a live worker** — setup + per-feature pass/fail scenarios. |
+
 ## Source of truth
 
 New design work lands here as a spec + plan; module behaviour is documented in

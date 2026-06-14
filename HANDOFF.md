@@ -31,13 +31,18 @@ This session built a feature roadmap and worked through it. **All work is on
   `REVA_VERIFY_HIGH_COST`); **migration-safety skill** (7, `reva-migration-review`); **XML/QWeb skill**
   (8, `.xml` un-stripped + `reva-xml-review`); **security-model consistency** (9, cross-check + floor).
   Routing is centralized in `reviewer._select_skill` (migration > delta > xml-only > diff/full).
+- **Ops:** multi-worker (RQ) confirmed distributing jobs across replicas. `review_runs.worker_id` is
+  now populated (RQ `hostname.pid`, else container hostname) for per-replica attribution — it was
+  blank before. Two known "P0" bugs turned out already fixed (see the roadmap exclusions).
 
 **⏭️ NEXT: Tier 3 (self-improvement)** per `FEATURE_ROADMAP.md` — now unblocked by the Tier-1 data loop
 (feedback capture + outcome ledger). But **first run the live-CLI staging gate** for the Tier-2 review
 features (below) before trusting their output in prod.
 
 **Owed staging validation (live-CLI gate, A1/A2 pattern) for Tier 2 features 4–9** — unit suites prove
-plumbing/routing only; review *quality* must be validated on a real Odoo repo:
+plumbing/routing only; review *quality* must be validated on a real Odoo repo. **Step-by-step setup +
+per-feature pass/fail scenarios: [`docs/tier2-staging-runbook.md`](docs/tier2-staging-runbook.md).**
+Summary of what to watch:
 - (4) intent-grounding false-positive rate; (5) the LLM `depends`/version judgement + how the model
   merges the deterministic `manifest_audit` param; (6) the self-critique **false-drop rate** (enable
   `REVA_VERIFY_HIGH_COST` on staging first); (7) migration checks (destructive DDL, idempotency, JSONB);

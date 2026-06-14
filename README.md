@@ -102,20 +102,26 @@ Anti-loop: REVA ignores any reply sent by a Bot account, so it never replies to 
 Only `.py` and other code files under `custom_addons/` or `custom-addons/` are sent to Claude. The following are stripped from the diff before any size check or token count:
 
 - Files outside `custom_addons/` / `custom-addons/` (CI configs, root scripts, OCA modules, etc.)
-- `.xml` files (Odoo views — can be very large)
-- `.po` / `.pot` files (translation catalogs)
+- `.po` / `.pot` / `.md` / `.rst` files (translation catalogs and docs)
+
+`custom_addons/**/*.xml` (Odoo views/QWeb) **is** reviewed — an XML-only PR routes to the dedicated `reva-xml-review` skill. Third-party `odoo/` / `enterprise/` XML is still always excluded.
 
 If a PR contains no reviewable files after filtering, it is declined with an explanatory message rather than silently skipped.
 
 To review **every** changed path on a repo that has no `custom_addons/` (e.g. a non-Odoo repo), set `review_all_paths: true` in that repo's `.claude-review.yml` — automatic PR reviews then behave like `/review-all` for that repo. `odoo/` and `enterprise/` (and lockfiles / minified assets) are still always excluded.
 
-Size limits (configurable per repo via `.claude-review.yml`):
+Per-repo config (`.claude-review.yml`):
 
-| Limit | Default |
-|---|---|
-| Max diff lines | 2 500 |
-| Max diff tokens | 60 000 |
-| Review all paths (not just `custom_addons/`) | `false` |
+| Key | Default | Meaning |
+|---|---|---|
+| `max_diff_lines` | 2 500 | Decline PRs whose reviewable diff exceeds this. |
+| `max_diff_tokens` | 60 000 | Decline if the estimated prompt tokens exceed this. |
+| `max_xml_diff_lines` / `max_xml_diff_tokens` | none | Optional stricter cap for XML-only PRs (verbose view dumps). |
+| `review_all_paths` | `false` | Review every changed path, not just `custom_addons/`. |
+| `skip_paths` | `[]` | Glob patterns to drop from the diff. |
+| `block_on_severity` | `major` | Lowest finding severity that fails the Check Run (`none` never blocks). |
+| `verify_findings` | global | Per-repo override for the second-pass self-critique (see `REVA_VERIFY_HIGH_COST`). |
+| `odoo` / `custom_instructions` | — | Apply the Odoo guidance / inject repo-specific reviewer instructions. |
 
 ## Repository audits
 

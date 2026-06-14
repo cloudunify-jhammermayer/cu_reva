@@ -625,6 +625,20 @@ def test_review_runs_when_under_budget(ctx_and_fakes):
     assert s["reviewer"].call_count == 1
 
 
+def test_review_run_records_worker_id(ctx_and_fakes):
+    # review_runs.worker_id must be populated so per-replica analytics work. With
+    # no RQ job in the test context, _worker_id falls back to the hostname.
+    import socket
+
+    from reva.db.models import ReviewRun
+    s = ctx_and_fakes
+    s["reviewer"].result = _completed_result()
+    run_review(_params(s))
+    with s["db"].session() as session:
+        run = session.query(ReviewRun).one()
+    assert run.worker_id == socket.gethostname()
+
+
 def test_verify_budget_ok_passed_true_under_budget(ctx_and_fakes):
     # Feature 6 wiring: execute() receives verify_budget_ok from the pre-flight
     # budget check. Under budget it must be True. (The over-budget case declines

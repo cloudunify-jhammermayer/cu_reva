@@ -18,6 +18,7 @@ documented in HANDOFF.md.
 from __future__ import annotations
 
 import secrets
+import socket
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -219,6 +220,15 @@ def run_repo_cache_eviction(job_params: dict | None = None) -> dict:
     return {"status": "ok", "ttl_days": ttl_days}
 
 
+def _worker_id(job) -> str:
+    """Identify the replica that ran this job, for `review_runs.worker_id`.
+
+    Prefer RQ's worker name (`hostname.pid`, set while a worker executes a job);
+    fall back to the container hostname so the column is never blank."""
+    name = getattr(job, "worker_name", None) if job is not None else None
+    return name or socket.gethostname()
+
+
 def run_review(job_params: dict) -> dict:
     """RQ task entry point."""
     ctx = get_context()
@@ -245,7 +255,9 @@ def run_review(job_params: dict) -> dict:
     # review. A retry of THIS job re-claims, so retries still complete.
     job = get_current_job()
     run_id, claimed = writers.claim_review_run(
-        ctx.db, params, job_id=(job.id if job is not None else None)
+        ctx.db, params,
+        job_id=(job.id if job is not None else None),
+        worker_id=_worker_id(job),
     )
     if not claimed:
         log.info("review_skipped_duplicate_in_flight")

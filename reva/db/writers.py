@@ -89,7 +89,9 @@ def _is_unique_violation(exc: IntegrityError) -> bool:
 
 
 @_retry_on_conflict
-def claim_review_run(db: Database, params: JobParams, job_id: str | None) -> tuple[int, bool]:
+def claim_review_run(
+    db: Database, params: JobParams, job_id: str | None, worker_id: str | None = None
+) -> tuple[int, bool]:
     """Atomically claim the (repo, pr, head_sha, review_mode) review for `job_id`.
 
     Returns (run_id, claimed). `claimed=False` means a **different** worker job
@@ -125,6 +127,7 @@ def claim_review_run(db: Database, params: JobParams, job_id: str | None) -> tup
                 status="running",
                 started_at=now,
                 claimed_by_job_id=job_id,
+                worker_id=worker_id,
             )
             s.add(run)
             s.flush()
@@ -137,6 +140,7 @@ def claim_review_run(db: Database, params: JobParams, job_id: str | None) -> tup
         existing.status = "running"
         existing.started_at = now
         existing.claimed_by_job_id = job_id
+        existing.worker_id = worker_id
         existing.trigger_event = params.trigger_event
         s.flush()
         return existing.id, True
