@@ -17,6 +17,16 @@ category, confidence, and conduct rules in the guidance above apply.
 6. Keep only findings you are confident about (confidence ≥ 0.7).
 7. Write your findings as JSON to `output_path`.
 
+## Manifest checks
+
+If a `manifest_audit` parameter is present, a module's `__manifest__.py` changed
+and REVA ran **deterministic** structural checks (missing data files,
+security-before-views order, version format). Surface those as findings at the
+suggested severity — trust them, don't re-derive. Additionally, for the changed
+module, check that addons used in the changed files (`from odoo.addons.X`, cross-addon
+`ref=`/`inherit_id`) are declared in `depends`; flag a missing one as **major**
+`is_odoo_specific: true`. Scope this to what the changed files reveal.
+
 ## Output format
 
 Use the Write tool to write a JSON file to `output_path` with exactly this

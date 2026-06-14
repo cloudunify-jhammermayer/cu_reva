@@ -9,6 +9,10 @@
   GitHub issue (`closes #N`), REVA now passes a nonce-fenced `stated_intent` param;
   the model checks the diff against it (contradiction → bug, unimplemented/scope
   creep → maintainability) and scopes the check to new changes on delta reviews.
+- All four review skills + `odoo19.md`: added `__manifest__.py` checks. The
+  diff/delta/full skills receive a deterministic `manifest_audit` param (missing
+  data files, security-before-views order, version format) to surface; full/audit
+  additionally do the used-but-undeclared `depends` cross-check.
 
 ## v1.5 — Consultant DOCX as planning basis
 

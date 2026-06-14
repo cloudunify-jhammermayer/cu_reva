@@ -31,7 +31,12 @@ not human-authored; auditing them is noise. Focus on source the team wrote.
    grep hit alone.
 5. Look for: security misuse, missing `ir.model.access.csv` / `ir.rule`, N+1 ORM
    patterns, deprecated Odoo APIs, and missing test coverage.
-6. Write your structured audit report as JSON to `output_path`.
+6. **For each module's `__manifest__.py`**, parse it and verify systematically:
+   `depends` is complete for the addons the module actually uses; every `data`/`demo`
+   file exists on disk; `data` loads `security/` before views; `version` is the
+   5-part `N.N.N.N.N` form. There is no `manifest_audit` param on the audit path —
+   derive these yourself with Read/Glob.
+7. Write your structured audit report as JSON to `output_path`.
 
 ## Output format
 

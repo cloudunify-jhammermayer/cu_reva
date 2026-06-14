@@ -28,6 +28,19 @@ not human-authored; reviewing them is noise. Review only source the team wrote.
    gaps and emit `category: test` findings per the guidance severity rules.
 6. Write your findings as JSON to `output_path`.
 
+## Manifest checks (when a `__manifest__.py` changed)
+
+If a module's `__manifest__.py` is in the diff:
+
+1. Cross-check `depends`: every external addon the module uses — Python
+   `from odoo.addons.X` / cross-addon imports, and XML `ref=`/`inherit_id` that
+   target records owned by another module — must appear in `depends`. Flag a
+   used-but-undeclared dependency as a **major** finding with `is_odoo_specific: true`.
+2. If a `manifest_audit` parameter is present, it carries **deterministic** results
+   (missing data files, security-before-views order, version format). Trust it and
+   surface those as findings at the suggested severity rather than re-deriving them.
+3. Flag a `version` not in the 5-part `N.N.N.N.N` form as **minor**.
+
 ## Output format
 
 Use the Write tool to write a JSON file to `output_path` with exactly this

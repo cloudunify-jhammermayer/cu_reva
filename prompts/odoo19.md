@@ -50,10 +50,12 @@ security issue uses `category: security` with `is_odoo_specific: true`).
 
 ## Module Structure
 
-- Verify `__manifest__.py` `depends` list is complete and correct. **Major** if a runtime dependency is missing.
+- Verify `__manifest__.py` `depends` list is complete and correct (every used addon declared). **Major** if a runtime dependency is missing.
+- Verify every `data`/`demo` file listed in `__manifest__.py` exists in the module. **Major** if a listed file is missing.
 - Verify file naming follows Odoo conventions: `models/`, `views/`, `wizard/`, `report/`, `security/`, `data/`.
 - Flag static assets loaded from external URLs — copy them into the module instead. **Minor**.
 - Check that data files in `__manifest__.py` are in the correct order (security before views). **Minor**.
+- Verify `version` follows Odoo's 5-part `SERIES.x.y.z` form (e.g. `19.0.1.0.0`). **Minor** otherwise.
 
 ## Data and Migrations
 

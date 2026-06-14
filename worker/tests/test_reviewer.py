@@ -1179,3 +1179,71 @@ def test_stated_intent_passed_on_delta_review():
     reviewer.execute(params)
     assert runner.last_skill == "reva-delta-review"
     assert "stated_intent" in runner.last_params
+
+
+# --- manifest validator (feature 5) ------------------------------------------
+
+
+def test_manifest_audit_param_present_for_missing_data_file():
+    manifest = "{'name': 'M', 'version': '19.0.1.0.0', 'data': ['views/m_views.xml']}"
+    github = FakeGitHub(
+        diff=_LOGIC_DIFF,
+        files=[{"filename": "custom_addons/m/__manifest__.py"}],
+        # views/m_views.xml absent from file_contents -> get_file_content None -> missing
+        file_contents={"custom_addons/m/__manifest__.py": manifest},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    reviewer.execute(_params())
+    assert "manifest_audit" in runner.last_params
+    assert "views/m_views.xml" in runner.last_params["manifest_audit"]
+
+
+def test_manifest_audit_flags_bad_version():
+    manifest = "{'name': 'M', 'version': '1.0', 'data': ['security/x.csv']}"
+    github = FakeGitHub(
+        diff=_LOGIC_DIFF,
+        files=[{"filename": "custom_addons/m/__manifest__.py"}],
+        file_contents={
+            "custom_addons/m/__manifest__.py": manifest,
+            "custom_addons/m/security/x.csv": "id,name\n",
+        },
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    reviewer.execute(_params())
+    assert "manifest_audit" in runner.last_params
+    assert "1.0" in runner.last_params["manifest_audit"]
+
+
+def test_manifest_audit_absent_without_manifest_change():
+    runner = FakeRunner(response=_claude_response_with_findings([]))  # default diff = app.py
+    reviewer, *_ = _make_reviewer(runner=runner)
+    reviewer.execute(_params())
+    assert "manifest_audit" not in runner.last_params
+
+
+def test_manifest_audit_skips_unparseable_manifest():
+    github = FakeGitHub(
+        diff=_LOGIC_DIFF,
+        files=[{"filename": "custom_addons/m/__manifest__.py"}],
+        file_contents={"custom_addons/m/__manifest__.py": "{'version': SERIES + '.1'}"},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert result.status == "completed"
+    assert "manifest_audit" not in runner.last_params
+
+
+def test_manifest_audit_skips_deleted_manifest():
+    github = FakeGitHub(
+        diff=_LOGIC_DIFF,
+        files=[{"filename": "custom_addons/m/__manifest__.py"}],
+        file_contents={},  # get_file_content -> None for the manifest
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert result.status == "completed"
+    assert "manifest_audit" not in runner.last_params

@@ -180,3 +180,18 @@ def test_test_coverage_guidance_present():
     assert "test_coverage" in text
     for skill in ("reva-diff-review.md", "reva-delta-review.md", "reva-full-review.md"):
         assert "test_coverage" in (SKILLS_DIR / skill).read_text(), skill
+
+
+def test_stated_intent_guidance_present():
+    assert "stated_intent" in (PROMPTS_DIR / "review_guidance.md").read_text()
+
+
+def test_manifest_guidance_present():
+    # diff/delta/full receive the deterministic manifest_audit param
+    for skill in ("reva-diff-review.md", "reva-delta-review.md", "reva-full-review.md"):
+        assert "manifest_audit" in (SKILLS_DIR / skill).read_text(), skill
+    # audit derives the manifest checks itself (no param)
+    assert "__manifest__.py" in (SKILLS_DIR / "reva-repo-audit.md").read_text()
+    odoo = (PROMPTS_DIR / "odoo19.md").read_text()
+    assert "exists in the module" in odoo            # missing-file check
+    assert "security before views" in odoo            # order check

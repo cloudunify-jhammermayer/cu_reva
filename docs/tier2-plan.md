@@ -13,7 +13,7 @@ below. Companion to [`FEATURE_ROADMAP.md`](../FEATURE_ROADMAP.md) and the
 | 2 | Force-push/rebase delta-base guard | S | high | unit | ✅ `05bbcf9` |
 | 3 | Test-coverage gate | M | high | unit | ✅ `a336002` |
 | 4 | Intent-grounded review | M | high* | unit | ✅ (GitHub-issue path; quality → staging) |
-| 5 | `__manifest__.py` validator | M | high | unit | ⬜ ready |
+| 5 | `__manifest__.py` validator | M | high | unit | ✅ (deterministic helper + skill guidance) |
 | 6 | Second-pass self-critique | M | high | unit + staging | ⬜ ready |
 | 7 | Migration-safety review skill | M | high | unit (routing) + **staging** | ⬜ ready |
 | 8 | XML/QWeb review skill | M | high* | unit (filter/routing) + **staging** | ⬜ ready |
@@ -38,6 +38,12 @@ comments" problem** (1 stops re-emitting duplicates; 2 stops a rebase from produ
   guidance let the model flag contradiction (bug) / unimplemented / scope creep (maintainability), scoped to
   new changes on delta reviews. GitHub-issue path only (ticket-AC enrichment deferred), default-on, advisory.
   **Owed: live-CLI staging validation of review quality** (false-positive rate) before fully trusting it.
+- **`__manifest__.py` validator (5)** — new pure `reva/odoo_manifest.py` (`parse_manifest` via
+  `ast.literal_eval`, `audit_manifest` for missing data files + view-before-security order,
+  `check_version_format`). `reviewer._build_manifest_audit` runs it when a changed `__manifest__.py`
+  is in the diff (existence via the contents API; fail-open) and passes a `manifest_audit` param to the
+  diff/delta/full skills; full/audit also do the LLM `depends` cross-check. Owed: live staging of the
+  LLM `depends`/version judgement and how the model merges the deterministic param.
 
 > **Exhaustive per-feature plans for 4–9** (files, approach, edge cases, test plan, verified
 > corrections) live in [`tier2-detailed-plans.md`](tier2-detailed-plans.md). The summaries below are the
