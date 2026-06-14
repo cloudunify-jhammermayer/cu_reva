@@ -1,16 +1,60 @@
 # REVA — Work Handoff
 
-**Updated:** 2026-06-05. Resume point.
+**Updated:** 2026-06-14. Resume point.
 **Replaces** the old slice-by-slice handoff (that described the original
 Messages-API design and is now history in git).
 
 ---
 
+## 🚀 RESUME HERE (2026-06-14 session) — roadmap Tiers 0–2
+
+This session built a feature roadmap and worked through it. **All work is on
+`main`** (see `git log`); whether it's pushed/PR'd is noted at the bottom.
+
+**Authoritative new docs (read these first):**
+- `FEATURE_ROADMAP.md` — the 6-tier roadmap (root).
+- `docs/tier0-plan.md`, `docs/tier1-plan.md`, `docs/tier2-plan.md` — per-tier plans + decisions.
+- `docs/tier2-detailed-plans.md` — **exhaustive, verified per-feature plans for the remaining
+  Tier-2 work (features 4–9)**; the next session implements from this.
+- `docs/tier0-tier1-implementation.md` — how to test Tiers 0–1 + what to expect + operator setup.
+- `docs/delta-resolution-analysis.md` — diagnosis of "REVA re-reviews instead of resolving old
+  comments"; features 1–2 of Tier 2 fix it.
+
+**Shipped & committed (tests green: worker 530, api 147, scheduler 28; ruff clean):**
+- **Tier 0 (done):** per-repo `block_on_severity` gating; deterministic Odoo severity calibration;
+  `reva-risk-*` PR labels; trivial-diff short-circuit (+ a reorder false-skip fix).
+- **Tier 1 (done):** prompt-version registry + drift guard; per-finding outcome ledger (migration
+  `015`); feedback capture via `pull_request_review_thread`.
+- **Tier 2 (3 of 9 done):** force-push/rebase delta-base guard; **delta-aware finding suppression**
+  (the headline bug fix); test-coverage gate.
+
+**⏭️ NEXT: implement Tier 2 features 4–9** from `docs/tier2-detailed-plans.md`, in this order
+(each = its own commit, `make test` + `ruff` green, then `/simplify`):
+1. **Structural batch (fully unit-testable here):** 4 intent-grounded review (GitHub-issue path
+   only — defer the ticket-AC enrichment), 5 `__manifest__.py` validator, 6 second-pass self-critique.
+2. **Skill batch (plumbing testable here; review *quality* needs live-CLI staging):** 7 migration-safety
+   skill, 8 XML/QWeb review, 9 security-model consistency.
+   Apply each feature's **`⚠️ Verified corrections`** — they override the plan body.
+
+**Prompt versioning:** all Tier-2 prompt/skill edits land under CHANGELOG version **v1.6** (the
+drift guard from Tier 1 will alert if a prompt changes without a version bump; `test_get_version`
+asserts the current string).
+
+**Operator actions owed (not code):**
+- **Enable the `Pull request review thread` webhook event** on the GitHub App — until then Tier-1
+  feedback capture is dormant (no permission change needed; uses `Pull requests: Read`).
+- The features 1–2 bug fix is partly prompt-quality (`reva-delta-review.md` guidance) — **validate on a
+  real re-review PR on staging** before fully trusting it (the A1/A2/CodeGraph live-gate pattern).
+
+**Local venvs:** `api/.venv` and `scheduler/.venv` were created this session; if missing, recreate per
+"Running tests". `ruff` was pip-installed into `worker/.venv` for local linting.
+
+---
+
 ## ⚠️ Read first — resuming on another workstation
 
-Everything below is **merged to `main` and pushed** (origin in sync at `499da2e`).
-There is no longer a `feature/production-readiness` branch. On a new workstation:
-`git clone`/`git pull`, then recreate the per-service venvs (see "Running tests").
+The 2026-06-14 work above is on `main`. On a new workstation: `git clone`/`git pull`, then recreate
+the per-service venvs (see "Running tests"). The pre-2026-06-14 baseline below was in sync at `499da2e`.
 
 ---
 

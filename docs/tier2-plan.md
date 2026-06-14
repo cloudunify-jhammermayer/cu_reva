@@ -34,6 +34,10 @@ comments" problem** (1 stops re-emitting duplicates; 2 stops a rebase from produ
 - **Test-coverage gate** — `diff_utils.analyze_test_coverage` flags modules adding logic with no `tests/`
   change; passed as `test_coverage` to the diff/delta/full skills.
 
+> **Exhaustive per-feature plans for 4–9** (files, approach, edge cases, test plan, verified
+> corrections) live in [`tier2-detailed-plans.md`](tier2-detailed-plans.md). The summaries below are the
+> index; implement from the detailed doc.
+
 ## Remaining (4–9) — plan + corrections to apply
 
 ### 4. Intent-grounded review (M, unit-testable)
