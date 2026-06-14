@@ -14,6 +14,7 @@ Cache strategy (see doc 07):
 
 from __future__ import annotations
 
+import hashlib
 import os
 
 from reva.types import ContentBlock, RepoConfig, ReviewMode
@@ -98,6 +99,37 @@ class PromptBuilder:
                 # avoids splitting a hyphenated version like "v1.2-beta" (MAIN-12).
                 return heading.split("—")[0].split("–")[0].split(" - ")[0].strip()
         raise ValueError("No ## heading found in CHANGELOG.md")
+
+    def compute_prompt_hashes(self, skills_dir: str) -> tuple[str, str]:
+        """Content hashes of the prompt files the CLI review path actually
+        assembles (see ClaudeCodeRunner._build_preamble / _read_skill).
+
+        Returns (system_prompt_hash, review_prompt_hash):
+          - system_prompt_hash = sha256(review_guidance.md), the always-on
+            governance preamble.
+          - review_prompt_hash = sha256 over odoo19.md plus every skills/*.md,
+            sorted by filename with each chunk prefixed by its name so a rename
+            or reorder also changes the hash.
+
+        The column names are inherited from an earlier Messages-API design (a
+        system.md / *_review.md split) and do NOT reflect the current CLI
+        pipeline — the CLI never reads system.md. A missing required file raises
+        FileNotFoundError: callers must NOT record a hash of an empty string,
+        which would mask a deleted file as 'unchanged'.
+        """
+        system_hash = hashlib.sha256(self._read("review_guidance.md").encode()).hexdigest()
+
+        h = hashlib.sha256()
+        h.update(b"odoo19.md\n")
+        h.update(self._read("odoo19.md").encode())
+        for fname in sorted(os.listdir(skills_dir)):
+            if not fname.endswith(".md"):
+                continue
+            with open(os.path.join(skills_dir, fname)) as f:
+                content = f.read()
+            h.update(f"\n{fname}\n".encode())
+            h.update(content.encode())
+        return system_hash, h.hexdigest()
 
     # --- IO -----------------------------------------------------------------
 

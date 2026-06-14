@@ -9,14 +9,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from unittest.mock import MagicMock, patch
 
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.errors import PermanentError, TransientError
-from worker.runner import WorkerContext, run_review, set_context
+from reva.prompt_builder import PromptBuilder
+from worker.runner import WorkerContext, _register_prompt_version, run_review, set_context
 from reva.types import Finding, JobParams, ReviewResult
+
+_PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
 
 
 SAMPLE_DIFF = """diff --git a/x.py b/x.py
@@ -1017,3 +1022,57 @@ def test_verify_and_resolve_skips_already_resolved_threads():
 
     ctx.verifier.is_resolved.assert_not_called()
     ctx.github.resolve_review_thread.assert_not_called()
+
+
+# --- prompt-version registration on worker startup ---------------------------
+
+
+def _fresh_db():
+    engine = create_engine_from_url("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    return Database(engine)
+
+
+def _prompt_settings():
+    return SimpleNamespace(
+        skills_dir=str(_PROMPTS_DIR / "skills"),
+        google_chat_webhook_url="https://chat.example/hook",
+    )
+
+
+def test_register_prompt_version_clean_db_no_alert(monkeypatch):
+    db = _fresh_db()
+    alerts = []
+    monkeypatch.setattr("worker.runner.notify_operational_alert",
+                        lambda url, title, detail: alerts.append(title))
+    _register_prompt_version(db, PromptBuilder(prompts_dir=str(_PROMPTS_DIR)), _prompt_settings())
+    assert alerts == []  # first registration of this version — no drift
+
+
+def test_register_prompt_version_drift_fires_alert(monkeypatch):
+    db = _fresh_db()
+    version = PromptBuilder(prompts_dir=str(_PROMPTS_DIR)).get_version()
+    # Seed a stale baseline for the current version so the real hashes differ.
+    writers.register_prompt_version(db, version, "stale-sys", "stale-rev")
+    alerts = []
+    monkeypatch.setattr("worker.runner.notify_operational_alert",
+                        lambda url, title, detail: alerts.append((title, detail)))
+    _register_prompt_version(db, PromptBuilder(prompts_dir=str(_PROMPTS_DIR)), _prompt_settings())
+    assert len(alerts) == 1
+    assert "drift" in alerts[0][0].lower()
+
+
+def test_register_prompt_version_swallows_get_version_error(monkeypatch):
+    db = _fresh_db()
+    monkeypatch.setattr("worker.runner.notify_operational_alert",
+                        lambda url, title, detail: pytest.fail("should not alert"))
+
+    class BadPrompts:
+        def get_version(self):
+            raise ValueError("no ## heading")
+
+        def compute_prompt_hashes(self, skills_dir):  # pragma: no cover - never reached
+            raise AssertionError("must not be called when get_version fails")
+
+    # Boot must never be blocked by a registry failure.
+    _register_prompt_version(db, BadPrompts(), _prompt_settings())

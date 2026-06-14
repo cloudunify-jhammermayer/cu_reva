@@ -31,6 +31,7 @@ from reva.db.models import (
     ClaudeSpend,
     GithubEvent,
     PendingReview,
+    PromptVersion,
     PullRequest,
     Repository,
     ReviewFinding,
@@ -394,6 +395,50 @@ def attach_github_ids(
 
 
 # --- repositories / pull_requests / pending_reviews / events -----------------
+
+
+@_retry_on_conflict
+def register_prompt_version(
+    db: Database,
+    version: str,
+    system_prompt_hash: str,
+    review_prompt_hash: str,
+    description: str | None = None,
+) -> str:
+    """Record the prompt content hashes for `version` in prompt_versions.
+
+    Returns one of:
+      "created"   — first time this version string is seen; row inserted.
+      "unchanged" — version exists and both hashes match the stored baseline.
+      "drift"     — version exists but a hash differs: a prompt file changed
+                    without bumping the version. The stored row is left untouched
+                    so the first-seen hashes remain the baseline for the version.
+
+    NOTE: system_prompt_hash stores sha256(review_guidance.md) and
+    review_prompt_hash stores sha256(odoo19.md + skills/*.md); the column names
+    are inherited from an earlier Messages-API design and do not reflect the
+    current CLI pipeline (see PromptBuilder.compute_prompt_hashes).
+    """
+    with db.session() as s:
+        row = s.execute(
+            select(PromptVersion).where(PromptVersion.version == version)
+        ).scalar_one_or_none()
+        if row is None:
+            s.add(
+                PromptVersion(
+                    version=version,
+                    system_prompt_hash=system_prompt_hash,
+                    review_prompt_hash=review_prompt_hash,
+                    description=description,
+                )
+            )
+            return "created"
+        if (
+            row.system_prompt_hash == system_prompt_hash
+            and row.review_prompt_hash == review_prompt_hash
+        ):
+            return "unchanged"
+        return "drift"
 
 
 @_retry_on_conflict

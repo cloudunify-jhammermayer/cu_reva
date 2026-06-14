@@ -1006,3 +1006,36 @@ def test_planning_basis_changes_when_doc_changes(db):
 
     assert basis_for("UEsDBABhAA==") == basis_for("UEsDBABhAA==")
     assert basis_for("UEsDBABhAA==") != basis_for("UEsDBABiBB==")
+
+
+# --- register_prompt_version (prompt-version drift detection) ----------------
+
+
+def test_register_prompt_version_created_then_unchanged(db: Database):
+    assert writers.register_prompt_version(db, "v1.5", "sysA", "revA") == "created"
+    # Identical re-registration is a no-op.
+    assert writers.register_prompt_version(db, "v1.5", "sysA", "revA") == "unchanged"
+    from reva.db.models import PromptVersion
+    with db.session() as s:
+        rows = s.query(PromptVersion).all()
+        assert len(rows) == 1
+        assert rows[0].version == "v1.5"
+        assert rows[0].system_prompt_hash == "sysA"
+
+
+def test_register_prompt_version_detects_drift_without_mutating_baseline(db: Database):
+    writers.register_prompt_version(db, "v1.5", "sysA", "revA")
+    # Same version, changed review hash -> drift, baseline preserved.
+    assert writers.register_prompt_version(db, "v1.5", "sysA", "revB") == "drift"
+    from reva.db.models import PromptVersion
+    with db.session() as s:
+        row = s.query(PromptVersion).filter_by(version="v1.5").one()
+        assert row.review_prompt_hash == "revA"  # baseline untouched
+
+
+def test_register_prompt_version_new_version_is_separate_row(db: Database):
+    writers.register_prompt_version(db, "v1.5", "sysA", "revA")
+    assert writers.register_prompt_version(db, "v1.6", "sysB", "revB") == "created"
+    from reva.db.models import PromptVersion
+    with db.session() as s:
+        assert s.query(PromptVersion).count() == 2

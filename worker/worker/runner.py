@@ -27,7 +27,7 @@ from rq import get_current_job
 from reva.claude_client import ClaudeClient
 from reva.claude_code_runner import ClaudeCodeRunner
 from reva.cost import estimate_cost
-from reva.notifications import notify_worker_error, post_to_chat
+from reva.notifications import notify_operational_alert, notify_worker_error, post_to_chat
 from reva.odoo_client import OdooCallbackClient
 from reva.ticket_analyzer import TicketAnalyzer
 from reva.ticket_issue_planner import TicketIssuePlanner
@@ -136,6 +136,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         base_url=settings.github_base_url,
     )
     prompts = PromptBuilder(prompts_dir=settings.prompts_dir)
+    _register_prompt_version(db, prompts, settings)
     repo_lookup = DatabaseRepoLookup(db)  # CODE-10: build once, share
     reviewer = Reviewer(
         runner=runner,
@@ -172,6 +173,32 @@ def build_worker_context(settings: Settings) -> WorkerContext:
     )
     set_context(context)
     return context
+
+
+def _register_prompt_version(db: Database, prompts: PromptBuilder, settings: Settings) -> None:
+    """Record the current prompt version's content hashes and alert on drift.
+
+    Drift = a prompt file changed without bumping the CHANGELOG version, which
+    makes reviews silently incomparable across the change. Best-effort: a
+    registry failure (e.g. a missing prompt file or no CHANGELOG heading) is
+    logged and never blocks worker boot.
+    """
+    try:
+        version = prompts.get_version()
+        system_hash, review_hash = prompts.compute_prompt_hashes(settings.skills_dir)
+        status = writers.register_prompt_version(db, version, system_hash, review_hash)
+        if status == "drift":
+            logger.warning("prompt_drift_detected", version=version)
+            notify_operational_alert(
+                settings.google_chat_webhook_url,
+                "Prompt drift detected",
+                f"Prompt files changed but the version is still {version}. "
+                f"Bump the CHANGELOG heading so reviews stay comparable across versions.",
+            )
+        else:
+            logger.info("prompt_version_registered", version=version, status=status)
+    except Exception:  # noqa: BLE001
+        logger.warning("prompt_version_registration_failed", exc_info=True)
 
 
 # ---------------------------------------------------------------- task entry

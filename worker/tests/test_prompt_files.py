@@ -15,6 +15,7 @@ from reva.types import RepoConfig
 from worker.reviewer import _ODOO_SEVERITY_RULES
 
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
+SKILLS_DIR = PROMPTS_DIR / "skills"
 
 # Each deterministic calibration rule must trace to a phrase that actually
 # appears in odoo19.md, so the rule table and the prompt can't silently drift.
@@ -125,3 +126,50 @@ def test_deep_review_template_adds_deep_sections(builder):
     assert "deep review" in out.lower()
     assert "Architectural impact" in out or "architectural" in out.lower()
     assert "Cross-file" in out or "cross-file" in out.lower()
+
+
+# --- compute_prompt_hashes (prompt-version drift detection) ------------------
+
+
+def test_compute_prompt_hashes_real_dir_is_deterministic(builder):
+    h1 = builder.compute_prompt_hashes(str(SKILLS_DIR))
+    h2 = builder.compute_prompt_hashes(str(SKILLS_DIR))
+    assert h1 == h2
+    system_hash, review_hash = h1
+    assert len(system_hash) == 64 and all(c in "0123456789abcdef" for c in system_hash)
+    assert len(review_hash) == 64 and system_hash != review_hash
+
+
+def _seed_prompts(tmp_path):
+    (tmp_path / "review_guidance.md").write_text("governance v1\n")
+    (tmp_path / "odoo19.md").write_text("odoo rules v1\n")
+    skills = tmp_path / "skills"
+    skills.mkdir()
+    (skills / "reva-diff-review.md").write_text("diff skill v1\n")
+    return PromptBuilder(prompts_dir=str(tmp_path)), str(skills)
+
+
+def test_changing_review_guidance_flips_only_system_hash(tmp_path):
+    pb, skills = _seed_prompts(tmp_path)
+    sys0, rev0 = pb.compute_prompt_hashes(skills)
+    (tmp_path / "review_guidance.md").write_text("governance v2 — edited\n")
+    sys1, rev1 = pb.compute_prompt_hashes(skills)
+    assert sys1 != sys0
+    assert rev1 == rev0
+
+
+def test_changing_a_skill_flips_only_review_hash(tmp_path):
+    pb, skills = _seed_prompts(tmp_path)
+    sys0, rev0 = pb.compute_prompt_hashes(skills)
+    (Path(skills) / "reva-diff-review.md").write_text("diff skill v2 — edited\n")
+    sys1, rev1 = pb.compute_prompt_hashes(skills)
+    assert rev1 != rev0
+    assert sys1 == sys0
+
+
+def test_compute_prompt_hashes_missing_file_raises(tmp_path):
+    # A missing required file must raise (never silently hash an empty string).
+    (tmp_path / "skills").mkdir()
+    pb = PromptBuilder(prompts_dir=str(tmp_path))  # no review_guidance.md
+    with pytest.raises(FileNotFoundError):
+        pb.compute_prompt_hashes(str(tmp_path / "skills"))
