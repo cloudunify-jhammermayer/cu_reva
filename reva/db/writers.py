@@ -802,6 +802,37 @@ def attach_finding_comment_ids(db: Database, finding_id_to_comment_id: dict[int,
                 finding.posted_to_github = True
 
 
+def set_finding_outcome(db: Database, finding_id: int, outcome: str) -> None:
+    """Set a single finding's outcome (e.g. 'resolved_by_fix'). Idempotent UPDATE by id."""
+    with db.session() as s:
+        s.execute(
+            update(ReviewFinding)
+            .where(ReviewFinding.id == finding_id)
+            .values(outcome=outcome, outcome_at=datetime.now(timezone.utc))
+        )
+
+
+def mark_open_findings_at_merge(db: Database, pull_request_id: int) -> int:
+    """Mark every still-open POSTED finding on a merged PR as 'still_open_at_merge'.
+
+    Only findings actually shown to the developer (github_comment_id IS NOT NULL)
+    and still 'open' (not already resolved_by_fix) are touched, so resolved_by_fix
+    wins and a redelivered merge webhook is a no-op. Returns the rows updated.
+    """
+    with db.session() as s:
+        run_ids = select(ReviewRun.id).where(ReviewRun.pull_request_id == pull_request_id)
+        result = s.execute(
+            update(ReviewFinding)
+            .where(
+                ReviewFinding.review_run_id.in_(run_ids),
+                ReviewFinding.outcome == "open",
+                ReviewFinding.github_comment_id.is_not(None),
+            )
+            .values(outcome="still_open_at_merge", outcome_at=datetime.now(timezone.utc))
+        )
+        return result.rowcount
+
+
 def lookup_finding_by_comment_id(db: Database, github_comment_id: int) -> dict | None:
     """Return finding details for a given github_comment_id, or None."""
     with db.session() as s:

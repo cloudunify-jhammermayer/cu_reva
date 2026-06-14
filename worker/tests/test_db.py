@@ -1039,3 +1039,67 @@ def test_register_prompt_version_new_version_is_separate_row(db: Database):
     from reva.db.models import PromptVersion
     with db.session() as s:
         assert s.query(PromptVersion).count() == 2
+
+
+# --- outcome ledger (set_finding_outcome / mark_open_findings_at_merge) -------
+
+
+def _seed_findings(db: Database, seeded: dict, n: int) -> list[int]:
+    """Record a completed review with n findings; return their ids in order."""
+    findings = [
+        Finding(
+            severity="major", category="bug", file=f"x{i}.py", line_start=1,
+            line_end=1, title=f"f{i}", body="b", confidence=0.8, is_odoo_specific=False,
+        )
+        for i in range(n)
+    ]
+    result = ReviewResult(
+        status="completed", summary="s", risk_level="high", findings=findings,
+        model="claude-sonnet-4-6", input_tokens=1, output_tokens=1,
+        estimated_cost_usd=0.0, started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc), duration_ms=1,
+    )
+    rid = writers.record_review_completed(db, _params(seeded), result)
+    with db.session() as s:
+        return [
+            r.id for r in
+            s.query(ReviewFinding).filter_by(review_run_id=rid).order_by(ReviewFinding.id).all()
+        ]
+
+
+def test_findings_default_to_open_outcome(db, seeded):
+    [fid] = _seed_findings(db, seeded, 1)
+    with db.session() as s:
+        assert s.get(ReviewFinding, fid).outcome == "open"
+
+
+def test_set_finding_outcome_sets_outcome_and_timestamp(db, seeded):
+    [fid] = _seed_findings(db, seeded, 1)
+    writers.set_finding_outcome(db, fid, "resolved_by_fix")
+    with db.session() as s:
+        f = s.get(ReviewFinding, fid)
+        assert f.outcome == "resolved_by_fix"
+        assert f.outcome_at is not None
+
+
+def test_mark_open_findings_at_merge_only_touches_open_posted(db, seeded):
+    ids = _seed_findings(db, seeded, 3)
+    # Post two of three; leave the third unposted (github_comment_id NULL).
+    writers.attach_finding_comment_ids(db, {ids[0]: 111, ids[1]: 222})
+    # One posted finding was already resolved_by_fix — must be left alone.
+    writers.set_finding_outcome(db, ids[0], "resolved_by_fix")
+
+    marked = writers.mark_open_findings_at_merge(db, seeded["pull_request_id"])
+    assert marked == 1  # only ids[1]: open AND posted
+
+    with db.session() as s:
+        assert s.get(ReviewFinding, ids[0]).outcome == "resolved_by_fix"   # untouched
+        assert s.get(ReviewFinding, ids[1]).outcome == "still_open_at_merge"
+        assert s.get(ReviewFinding, ids[2]).outcome == "open"              # never posted
+
+
+def test_mark_open_findings_at_merge_is_idempotent(db, seeded):
+    [fid] = _seed_findings(db, seeded, 1)
+    writers.attach_finding_comment_ids(db, {fid: 111})
+    assert writers.mark_open_findings_at_merge(db, seeded["pull_request_id"]) == 1
+    assert writers.mark_open_findings_at_merge(db, seeded["pull_request_id"]) == 0  # no-op

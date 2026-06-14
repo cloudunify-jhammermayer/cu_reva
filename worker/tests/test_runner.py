@@ -783,6 +783,51 @@ def test_verify_and_resolve_calls_resolve_for_fixed_finding():
         _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)
 
     ctx.github.resolve_review_thread.assert_called_once_with("tok", "THREAD_NODE_1")
+    # Outcome ledger: the resolved verdict is persisted (Tier 1).
+    mock_writers.set_finding_outcome.assert_called_once_with(ctx.db, 1, "resolved_by_fix")
+
+
+def _resolve_ctx_and_finding(is_resolved: bool):
+    ctx = MagicMock()
+    ctx.github.get_review_threads.return_value = {12345: "THREAD_NODE_1"}
+    ctx.github.get_file_content.return_value = "def foo(): pass"
+    ctx.verifier.is_resolved.return_value = is_resolved
+    params = MagicMock()
+    params.pull_request_id = 1
+    params.head_sha = "newsha"
+    result = MagicMock()
+    result.diff = (
+        "diff --git a/custom_addons/foo.py b/custom_addons/foo.py\n"
+        "+++ b/custom_addons/foo.py\n+fixed\n"
+    )
+    finding = {
+        "id": 1, "file_path": "custom_addons/foo.py", "line_start": 10,
+        "title": "t", "body": "b", "severity": "major", "category": "bug",
+        "github_comment_id": 12345,
+    }
+    return ctx, params, result, finding
+
+
+def test_verify_and_resolve_no_outcome_when_not_resolved():
+    from worker.runner import _verify_and_resolve_findings
+    ctx, params, result, finding = _resolve_ctx_and_finding(is_resolved=False)
+    with patch("worker.runner.writers") as mock_writers:
+        mock_writers.get_open_findings_for_pr.return_value = [finding]
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)
+    ctx.github.resolve_review_thread.assert_not_called()
+    mock_writers.set_finding_outcome.assert_not_called()
+
+
+def test_verify_and_resolve_no_outcome_when_resolve_raises():
+    # Ordering guarantee: set_finding_outcome runs AFTER resolve_review_thread,
+    # so a failed resolve must not mark the finding resolved_by_fix.
+    from worker.runner import _verify_and_resolve_findings
+    ctx, params, result, finding = _resolve_ctx_and_finding(is_resolved=True)
+    ctx.github.resolve_review_thread.side_effect = RuntimeError("graphql down")
+    with patch("worker.runner.writers") as mock_writers:
+        mock_writers.get_open_findings_for_pr.return_value = [finding]
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)
+    mock_writers.set_finding_outcome.assert_not_called()
 
 
 def test_backfill_pairs_same_line_findings_to_distinct_comments():

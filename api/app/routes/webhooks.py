@@ -115,29 +115,17 @@ def _process_delivery(
     return {"status": "accepted"}
 
 
-def _handle_pull_request(db: Database, payload: dict, settings: Settings, github=None) -> None:
-    action = payload.get("action", "")
-    if action not in _REVIEWABLE_ACTIONS:
-        logger.info("pr_event_ignored", reason="non-reviewable action", action=action)
-        return
-
-    pr_data = payload["pull_request"]
-    # Skip drafts unless this is the transition to ready_for_review.
-    if pr_data.get("draft", False) and action != "ready_for_review":
-        logger.info("pr_event_ignored", reason="draft PR", action=action,
-                    pr=pr_data.get("number"))
-        return
-
+def _upsert_repo_and_pr(db: Database, payload: dict) -> tuple[int, int]:
+    """Upsert the repo + PR rows from a pull_request payload; return (repo_id, pr_id)."""
     repo_data = payload["repository"]
-    installation_id = payload["installation"]["id"]
-
+    pr_data = payload["pull_request"]
     repo_id = writers.upsert_repository(
         db,
         github_repository_id=repo_data["id"],
         owner=repo_data["owner"]["login"],
         name=repo_data["name"],
         default_branch=repo_data.get("default_branch", "main"),
-        installation_id=installation_id,
+        installation_id=payload["installation"]["id"],
     )
     pr_id = writers.upsert_pull_request(
         db,
@@ -152,6 +140,36 @@ def _handle_pull_request(db: Database, payload: dict, settings: Settings, github
         state=pr_data["state"],
         draft=pr_data.get("draft", False),
     )
+    return repo_id, pr_id
+
+
+def _handle_pull_request(db: Database, payload: dict, settings: Settings, github=None) -> None:
+    action = payload.get("action", "")
+    pr_data = payload["pull_request"]
+
+    # A merged PR closes the loop on its findings: mark every still-open posted
+    # finding as 'shipped without an observed fix' (outcome ledger). Only merges
+    # count, not abandoned closes. Handled before the reviewable-action gate
+    # (which excludes 'closed').
+    if action == "closed" and pr_data.get("merged"):
+        _, pr_id = _upsert_repo_and_pr(db, payload)
+        marked = writers.mark_open_findings_at_merge(db, pr_id)
+        logger.info("findings_marked_at_merge", pr=pr_data.get("number"), count=marked)
+        return
+
+    if action not in _REVIEWABLE_ACTIONS:
+        logger.info("pr_event_ignored", reason="non-reviewable action", action=action)
+        return
+
+    # Skip drafts unless this is the transition to ready_for_review.
+    if pr_data.get("draft", False) and action != "ready_for_review":
+        logger.info("pr_event_ignored", reason="draft PR", action=action,
+                    pr=pr_data.get("number"))
+        return
+
+    repo_data = payload["repository"]
+    installation_id = payload["installation"]["id"]
+    repo_id, pr_id = _upsert_repo_and_pr(db, payload)
 
     scheduled_at = datetime.now(timezone.utc) + timedelta(seconds=settings.debounce_seconds)
     writers.upsert_pending_review(

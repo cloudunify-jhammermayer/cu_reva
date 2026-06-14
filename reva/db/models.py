@@ -212,6 +212,13 @@ class ReviewFinding(Base):
     is_odoo_specific: Mapped[bool] = mapped_column(Boolean, default=False)
     github_comment_id: Mapped[int | None] = mapped_column(BigInteger)
     posted_to_github: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Per-finding outcome ledger (migration 015): 'open' -> 'resolved_by_fix'
+    # (verifier confirmed a fix on a later push) or 'still_open_at_merge' (PR
+    # merged with the finding never observed fixed).
+    outcome: Mapped[str] = mapped_column(
+        Text, nullable=False, default="open", server_default=text("'open'")
+    )
+    outcome_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -227,6 +234,13 @@ class ReviewFinding(Base):
             "github_comment_id",
             postgresql_where=text("github_comment_id IS NOT NULL"),
             sqlite_where=text("github_comment_id IS NOT NULL"),
+        ),
+        # Partial index (migration 015) for the outcome-ledger dashboard.
+        Index(
+            "idx_findings_outcome",
+            "outcome",
+            postgresql_where=text("outcome <> 'open'"),
+            sqlite_where=text("outcome <> 'open'"),
         ),
     )
 

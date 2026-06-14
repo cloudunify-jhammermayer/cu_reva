@@ -777,6 +777,9 @@ def _verify_and_resolve_findings(
             )
             if ctx.verifier.is_resolved(stored, content):
                 ctx.github.resolve_review_thread(token, threads[f["github_comment_id"]])
+                # Persist the verdict the loop already computed (Tier 1 outcome
+                # ledger). After resolve, so a failed resolve never mislabels it.
+                writers.set_finding_outcome(ctx.db, f["id"], "resolved_by_fix")
                 resolved += 1
                 logger.info("finding_resolved", finding_id=f["id"], file=path)
             errors = 0

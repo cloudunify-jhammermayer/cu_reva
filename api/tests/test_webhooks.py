@@ -16,8 +16,9 @@ from sqlalchemy.pool import StaticPool
 from app.dependencies import get_db, get_settings
 from app.main import app
 from app.settings import Settings
-from reva.db import Base, Database, create_engine_from_url
-from reva.db.models import GithubEvent, PendingReview, PullRequest, Repository
+from reva.db import Base, Database, create_engine_from_url, writers
+from reva.db.models import GithubEvent, PendingReview, PullRequest, Repository, ReviewFinding
+from reva.types import Finding, JobParams, ReviewResult
 
 
 # --- helpers ------------------------------------------------------------------
@@ -140,6 +141,57 @@ def test_pr_closed_action_does_not_create_pending_review(client_and_db):
 
     with db.session() as s:
         assert s.query(PendingReview).count() == 0
+
+
+def _seed_posted_finding(db) -> int:
+    """Seed repo + PR (matching _pr_payload) + a completed review with one
+    posted finding. Returns the finding id."""
+    repo_id = writers.upsert_repository(
+        db, github_repository_id=1001, owner="acme", name="widgets",
+        default_branch="main", installation_id=99,
+    )
+    pr_id = writers.upsert_pull_request(
+        db, repository_id=repo_id, github_pr_id=5001, pr_number=42,
+        title="Add feature", author_login="alice", base_branch="main",
+        head_branch="feat/foo", head_sha="deadbeef", state="open", draft=False,
+    )
+    params = JobParams(
+        repository_id=repo_id, pull_request_id=pr_id, head_sha="deadbeef",
+        installation_id=99, review_mode="diff", trigger_event="opened",
+    )
+    result = ReviewResult(
+        status="completed", summary="s", risk_level="high",
+        findings=[Finding(severity="major", category="bug", file="x.py", line_start=1,
+                          line_end=1, title="t", body="b", confidence=0.8, is_odoo_specific=False)],
+        model="claude-sonnet-4-6", started_at=None, completed_at=None,
+    )
+    writers.record_review_completed(db, params, result)
+    with db.session() as s:
+        fid = s.query(ReviewFinding).one().id
+    writers.attach_finding_comment_ids(db, {fid: 777})  # mark posted
+    return fid
+
+
+def test_pr_closed_merged_marks_open_findings(client_and_db):
+    client, db = client_and_db
+    fid = _seed_posted_finding(db)
+    payload = _pr_payload("closed")
+    payload["pull_request"]["merged"] = True
+    _post(client, payload)
+
+    with db.session() as s:
+        assert s.get(ReviewFinding, fid).outcome == "still_open_at_merge"
+
+
+def test_pr_closed_unmerged_marks_nothing(client_and_db):
+    client, db = client_and_db
+    fid = _seed_posted_finding(db)
+    payload = _pr_payload("closed")
+    payload["pull_request"]["merged"] = False
+    _post(client, payload)
+
+    with db.session() as s:
+        assert s.get(ReviewFinding, fid).outcome == "open"
 
 
 def test_draft_pr_does_not_create_pending_review(client_and_db):
