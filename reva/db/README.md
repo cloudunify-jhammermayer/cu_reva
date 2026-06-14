@@ -12,7 +12,7 @@ without depending on the worker.
 |---|---|
 | `__init__.py` | Public API: `Database`, `DatabaseRepoLookup`, `writers`, models, `migrate`, `create_engine_from_url` |
 | `engine.py` | `create_engine_from_url`, the `Database` facade (context-managed sessions, commit-on-exit / rollback-on-exception), and `migrate(engine, dir)`. |
-| `models.py` | Typed declarative models for every table (repositories, pull_requests, pending_reviews, review_runs, review_findings, github_events, review_jobs, review_feedback, ticket_analyses, audit_runs, prompt_versions, weekly_reports). PK uses `BigInteger().with_variant(Integer, "sqlite")` so SQLite tests autoincrement. Partial / `DESC` indexes carry `postgresql_where` / explicit ordering to mirror the migrations. |
+| `models.py` | Typed declarative models for every table (repositories, pull_requests, pending_reviews, review_runs, review_findings, github_events, review_jobs, review_feedback, muted_categories, ticket_analyses, audit_runs, prompt_versions, weekly_reports). PK uses `BigInteger().with_variant(Integer, "sqlite")` so SQLite tests autoincrement. Partial / `DESC` indexes carry `postgresql_where` / explicit ordering to mirror the migrations. |
 | `repo_lookup.py` | `DatabaseRepoLookup` — implements the `reviewer.RepoLookup` Protocol (owner/name, PR basics, last completed review). |
 | `writers.py` | Idempotent writers + reads: `record_review_started/completed/declined/stale/failed`, `reap_stale_running_reviews`, `attach_github_ids`, `is_already_posted`, `get_posted_github_ids`, the `upsert_*` webhook entries, `record_github_event` + `mark_event_processed`, `sum_estimated_cost_since` (optionally advisory-locked for the spend cap), finding-comment lookups, and ticket/audit writers. |
 

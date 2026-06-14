@@ -102,3 +102,7 @@ class DatabaseRepoLookup:
         # threads). Local import avoids a package-init cycle with writers.
         from reva.db import writers
         return writers.get_open_findings_for_pr(self._db, pull_request_id)
+
+    def get_muted_categories(self, repository_id: int) -> set[str]:
+        from reva.db import writers
+        return writers.get_muted_categories(self._db, repository_id)

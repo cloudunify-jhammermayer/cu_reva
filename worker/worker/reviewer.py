@@ -208,6 +208,10 @@ class RepoLookup(Protocol):
         review — what already has an open inline comment thread. [] if none."""
         ...
 
+    def get_muted_categories(self, repository_id: int) -> set[str]:
+        """Finding categories a trusted user muted for this repo (/mute)."""
+        ...
+
 
 class Reviewer:
     def __init__(
@@ -506,6 +510,11 @@ class Reviewer:
         # Third-party odoo/ + enterprise/ are out of scope in every mode: full/deep
         # reviews explore the whole clone, so Claude can still cite them. Drop those.
         grounded = _drop_thirdparty_findings(grounded)
+        # Drop categories a trusted user muted for this repo (/mute) — before
+        # calibration/verification so we never pay to process a muted finding.
+        grounded = _drop_muted_findings(
+            grounded, self.repos.get_muted_categories(params.repository_id)
+        )
         # Floor Odoo anti-pattern severities to odoo19.md's documented minimums
         # before capping/risk so the Check Run conclusion reflects them.
         grounded = _calibrate_odoo_severity(grounded)
@@ -912,6 +921,18 @@ def _drop_thirdparty_findings(findings: list[Finding]) -> list[Finding]:
     dropped = len(findings) - len(kept)
     if dropped:
         logger.info("findings_dropped_thirdparty", count=dropped)
+    return kept
+
+
+def _drop_muted_findings(findings: list[Finding], muted: set[str]) -> list[Finding]:
+    """Drop findings whose category a trusted user muted for this repo (/mute).
+    A no-op when nothing is muted."""
+    if not muted:
+        return findings
+    kept = [f for f in findings if f.category not in muted]
+    dropped = len(findings) - len(kept)
+    if dropped:
+        logger.info("findings_dropped_muted", count=dropped, categories=sorted(muted))
     return kept
 
 

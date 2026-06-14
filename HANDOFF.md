@@ -35,9 +35,13 @@ This session built a feature roadmap and worked through it. **All work is on
   now populated (RQ `hostname.pid`, else container hostname) for per-replica attribution — it was
   blank before. Two known "P0" bugs turned out already fixed (see the roadmap exclusions).
 
-**⏭️ NEXT: Tier 3 (self-improvement)** per `FEATURE_ROADMAP.md` — now unblocked by the Tier-1 data loop
-(feedback capture + outcome ledger). But **first run the live-CLI staging gate** for the Tier-2 review
-features (below) before trusting their output in prod.
+**⏭️ Tier 3 (self-improvement) — STARTED** (`docs/tier3-plan.md`). **Feature A done:** `/dismiss`,
+`/mute <category>`, `/unmute` inline-comment commands — structured, zero-Claude-cost replies that
+short-circuit the paid reply. `/dismiss` writes a negative `review_feedback` row; `/mute` writes the
+new `muted_categories` table (migration `016`) and `reviewer._drop_muted_findings` suppresses those
+categories before posting. **Next Tier-3 step: B — per-repo learned memory** (consume the `dismissed`
+signals → inject a "what this team rejects" block into the prompt). Still **run the live-CLI staging
+gate** for the Tier-2 review features (below) before trusting their output in prod.
 
 **Owed staging validation (live-CLI gate, A1/A2 pattern) for Tier 2 features 4–9** — unit suites prove
 plumbing/routing only; review *quality* must be validated on a real Odoo repo. **Step-by-step setup +

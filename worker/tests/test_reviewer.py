@@ -102,6 +102,7 @@ class FakeRepos:
     last_completed_review: dict | None = None
     prior_open_findings: list[dict] = field(default_factory=list)
     prior_open_findings_calls: int = 0
+    muted_categories: set[str] = field(default_factory=set)
 
     def get_owner_name(self, repository_id: int) -> tuple[str, str]:
         return self.owner, self.name
@@ -115,6 +116,9 @@ class FakeRepos:
     def get_prior_open_findings(self, pull_request_id: int) -> list[dict]:
         self.prior_open_findings_calls += 1
         return self.prior_open_findings
+
+    def get_muted_categories(self, repository_id: int) -> set[str]:
+        return self.muted_categories
 
 
 @dataclass
@@ -1412,6 +1416,32 @@ def test_verify_adds_cost(tmp_path):
         return reviewer.execute(_params(review_mode="full")).estimated_cost_usd
 
     assert run(True) > run(False)  # verifier spend folded into estimated_cost_usd
+
+
+# --- muted categories (Tier 3 feature A) -------------------------------------
+
+
+def test_muted_category_findings_are_dropped():
+    findings = [
+        _finding("style nit", "custom_addons/app.py"),
+        _finding("real bug", "custom_addons/app.py"),
+    ]
+    findings[0]["category"] = "style"
+    findings[1]["category"] = "bug"
+    runner = FakeRunner(response=_claude_response_with_findings(findings))
+    repos = FakeRepos(muted_categories={"style"})
+    reviewer, *_ = _make_reviewer(runner=runner, repos=repos)
+    titles = {f.title for f in reviewer.execute(_params()).findings}
+    assert titles == {"real bug"}  # the muted `style` finding is suppressed
+
+
+def test_no_mute_leaves_findings_untouched():
+    findings = [_finding("style nit", "custom_addons/app.py")]
+    findings[0]["category"] = "style"
+    runner = FakeRunner(response=_claude_response_with_findings(findings))
+    reviewer, *_ = _make_reviewer(runner=runner, repos=FakeRepos(muted_categories=set()))
+    titles = {f.title for f in reviewer.execute(_params()).findings}
+    assert titles == {"style nit"}
 
 
 # --- migration-safety routing (feature 7) ------------------------------------

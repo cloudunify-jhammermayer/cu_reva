@@ -1154,3 +1154,29 @@ def test_get_prior_open_findings_returns_only_posted(db, seeded):
 
 def test_get_prior_open_findings_empty_when_no_completed_run(db, seeded):
     assert DatabaseRepoLookup(db).get_prior_open_findings(seeded["pull_request_id"]) == []
+
+
+# --- muted categories (Tier 3 feature A) -------------------------------------
+
+
+def test_set_and_get_muted_categories(db, seeded):
+    repo_id = seeded["repository_id"]
+    writers.set_category_mute(db, repo_id, "style", muted_by="alice", active=True)
+    writers.set_category_mute(db, repo_id, "docs", muted_by="bob", active=True)
+    assert writers.get_muted_categories(db, repo_id) == {"style", "docs"}
+
+
+def test_mute_is_idempotent_upsert(db, seeded):
+    repo_id = seeded["repository_id"]
+    writers.set_category_mute(db, repo_id, "style", muted_by="alice", active=True)
+    writers.set_category_mute(db, repo_id, "style", muted_by="alice", active=True)
+    from reva.db.models import MutedCategory
+    with db.session() as s:
+        assert s.query(MutedCategory).count() == 1  # one row per (repo, category)
+
+
+def test_unmute_excludes_from_active_set(db, seeded):
+    repo_id = seeded["repository_id"]
+    writers.set_category_mute(db, repo_id, "style", muted_by="alice", active=True)
+    writers.set_category_mute(db, repo_id, "style", muted_by="alice", active=False)
+    assert writers.get_muted_categories(db, repo_id) == set()  # active-only

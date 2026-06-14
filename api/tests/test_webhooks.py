@@ -504,6 +504,83 @@ def test_review_comment_reply_by_outsider_is_ignored(client_and_db):
     assert q.enqueued == []
 
 
+# --- inline commands: /dismiss, /mute, /unmute (Tier 3 feature A) -------------
+
+
+def _inline_command(db, body: str, *, delivery: str, repo_id_in_payload: bool = True):
+    """Seed a posted finding (comment id 777), POST an inline-command reply, and
+    return the FakeQueue so callers can assert no paid reply was enqueued."""
+    fid = _seed_posted_finding(db)
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    payload = _review_comment_payload(association="MEMBER", in_reply_to=777)
+    payload["comment"]["body"] = body
+    if repo_id_in_payload:
+        payload["repository"]["id"] = 1001  # upsert_repository needs the GitHub id
+    return fid, q, payload
+
+
+def test_dismiss_records_feedback_and_skips_reply(client_and_db):
+    client, db = client_and_db
+    fid, q, payload = _inline_command(db, "/dismiss not a real issue", delivery="dis1")
+    try:
+        resp = _post(client, payload, event="pull_request_review_comment", delivery="dis1")
+    finally:
+        app.state.rq_queue = None
+    assert resp.status_code == 202
+    assert q.enqueued == []  # zero Claude cost — no paid reply
+    from reva.db.models import ReviewFeedback
+    with db.session() as s:
+        fb = s.query(ReviewFeedback).one()
+    assert fb.review_finding_id == fid
+    assert fb.reaction == "dismissed" and fb.is_positive is False
+
+
+def test_mute_category_writes_active_row(client_and_db):
+    client, db = client_and_db
+    _, q, payload = _inline_command(db, "/mute style", delivery="mute1")
+    try:
+        resp = _post(client, payload, event="pull_request_review_comment", delivery="mute1")
+    finally:
+        app.state.rq_queue = None
+    assert resp.status_code == 202
+    assert q.enqueued == []
+    from reva.db.models import MutedCategory
+    with db.session() as s:
+        row = s.query(MutedCategory).one()
+    assert row.category == "style" and row.active is True
+
+
+def test_mute_invalid_category_is_ignored(client_and_db):
+    client, db = client_and_db
+    _, q, payload = _inline_command(db, "/mute nonsense", delivery="mute2")
+    try:
+        _post(client, payload, event="pull_request_review_comment", delivery="mute2")
+    finally:
+        app.state.rq_queue = None
+    from reva.db.models import MutedCategory
+    with db.session() as s:
+        assert s.query(MutedCategory).count() == 0
+
+
+def test_unmute_deactivates_existing_mute(client_and_db):
+    client, db = client_and_db
+    # mute, then unmute, the seeded finding's own category (bug) via default arg
+    _, _, mute_payload = _inline_command(db, "/mute", delivery="m3")  # defaults to "bug"
+    try:
+        _post(client, mute_payload, event="pull_request_review_comment", delivery="m3")
+        unmute_payload = _review_comment_payload(association="MEMBER", in_reply_to=777)
+        unmute_payload["comment"]["body"] = "/unmute bug"
+        unmute_payload["repository"]["id"] = 1001
+        _post(client, unmute_payload, event="pull_request_review_comment", delivery="m4")
+    finally:
+        app.state.rq_queue = None
+    from reva.db.models import MutedCategory
+    with db.session() as s:
+        row = s.query(MutedCategory).one()
+    assert row.category == "bug" and row.active is False
+
+
 class _FakeGitHub:
     def __init__(self, pr=None):
         self.comments = []

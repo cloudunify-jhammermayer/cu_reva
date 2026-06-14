@@ -332,6 +332,32 @@ class ReviewFeedback(Base):
     )
 
 
+# ----------------------------------------------------------- muted_categories
+
+
+class MutedCategory(Base):
+    __tablename__ = "muted_categories"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    repository_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    )
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    muted_by: Mapped[str] = mapped_column(Text, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("repository_id", "category", name="uq_muted_category"),
+        Index("idx_muted_categories_repo", "repository_id"),
+    )
+
+
 # --------------------------------------------------------- ticket_analyses
 
 

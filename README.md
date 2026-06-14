@@ -73,7 +73,7 @@ Required **webhook events**:
 |---|---|
 | `pull_request` | Auto-trigger on push / open / reopen |
 | `issue_comment` | `/review`, `/review-all`, `/full-review`, `/deep-review` commands |
-| `pull_request_review_comment` | REVA replies to developer questions on inline comments |
+| `pull_request_review_comment` | Replies to questions on inline comments; `/dismiss` `/mute` `/unmute` commands |
 
 ## Triggering reviews
 
@@ -87,9 +87,19 @@ Required **webhook events**:
 | Repository audit | TUI Repos tab `a`, or `POST /api/v1/repos/{id}/audit` | whole-repo audit on the default branch, **Opus 4.8** — see [Repository audits](#repository-audits) |
 | Requeue failed | Press `e` in the TUI Failures tab | re-runs the original mode |
 
-Automatic triggers have a 10-minute debounce so rapid pushes don't waste API calls. Comment triggers are immediate (no debounce).
+Automatic triggers have a 10-minute debounce so rapid pushes don't waste API calls. Comment triggers are immediate (no debounce). A command on a PR REVA has never seen (e.g. opened before the app was installed) is handled by fetching that PR from the GitHub API on the fly — no reopen/push needed.
 
-> **Comment commands act only on PRs REVA already knows** — i.e. ones registered from a prior `pull_request` event (`opened`/`synchronize`/`reopened`/`ready_for_review`). A PR opened before the app was installed isn't in the DB, so a command logs `comment_trigger_pr_not_found` and does nothing. Unblock it by reopening the PR or pushing a commit. (Auto-registering unknown PRs on comment is a planned enhancement — see `HANDOFF.md` → Next steps.)
+### Inline-comment commands (zero-cost feedback)
+
+Reply to one of REVA's **inline finding comments** with a command (trusted users only — owner/member/collaborator). These are recorded directly, with no paid Claude call:
+
+| Command | Effect |
+|---|---|
+| `/dismiss` `[reason]` | Record that this finding was wrong/unwanted (negative feedback for REVA's learning loop). |
+| `/mute <category>` | Stop posting findings in `<category>` **for this repo** (`bug`, `security`, `style`, …). Omit `<category>` to mute the replied-to finding's category. |
+| `/unmute <category>` | Lift a category mute. |
+
+Any other reply is treated as a question and gets a (paid) conversational answer. Muting is reversible and records who muted what; it can hide real issues (e.g. muting `security`), so it's a deliberate per-repo choice — `block_on_severity` still governs whatever remains.
 
 ## Comment replies
 

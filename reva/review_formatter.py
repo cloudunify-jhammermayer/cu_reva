@@ -261,7 +261,11 @@ def format_pr_review_body(
     if unmapped:
         parts.append(_format_unmapped_section(unmapped))
     parts.append(_footer(result, run_id))
-    parts.append("*Resolve a comment thread once you've addressed it — that tells me the finding landed.*")
+    parts.append(
+        "*Resolve a thread once addressed — that tells me the finding landed. "
+        "Reply `/dismiss` on a finding you disagree with, or `/mute <category>` "
+        "to stop flagging that category in this repo (`/unmute` to undo).*"
+    )
     return "\n\n".join(parts)
 
 

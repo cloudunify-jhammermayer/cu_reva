@@ -30,6 +30,7 @@ from reva.db.models import (
     AuditFinding,
     ClaudeSpend,
     GithubEvent,
+    MutedCategory,
     PendingReview,
     PromptVersion,
     PullRequest,
@@ -851,6 +852,7 @@ def lookup_finding_by_comment_id(db: Database, github_comment_id: int) -> dict |
                 ReviewFinding.line_start,
                 ReviewFinding.suggestion,
                 ReviewFinding.review_run_id,
+                ReviewFinding.category,
             ).where(ReviewFinding.github_comment_id == github_comment_id)
         ).first()
     if row is None:
@@ -864,6 +866,7 @@ def lookup_finding_by_comment_id(db: Database, github_comment_id: int) -> dict |
         "line_start": row[5],
         "suggestion": row[6],
         "review_run_id": row[7],
+        "category": row[8],
     }
 
 
@@ -903,6 +906,48 @@ def record_feedback(
             return row.id
     except IntegrityError:
         return None
+
+
+# --- muted categories (Tier 3) -----------------------------------------------
+
+
+def set_category_mute(
+    db: Database, repository_id: int, category: str, muted_by: str, active: bool
+) -> None:
+    """Mute (active=True) or unmute (active=False) a finding category for a repo.
+
+    Idempotent upsert on (repository_id, category): a repeated /mute is a no-op,
+    and /unmute flips the existing row's `active` rather than deleting it (keeps
+    the muted_by/created_at audit trail)."""
+    now = datetime.now(timezone.utc)
+    with db.session() as s:
+        existing = s.execute(
+            select(MutedCategory).where(
+                (MutedCategory.repository_id == repository_id)
+                & (MutedCategory.category == category)
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            s.add(MutedCategory(
+                repository_id=repository_id, category=category,
+                muted_by=muted_by, active=active,
+            ))
+        else:
+            existing.active = active
+            existing.muted_by = muted_by
+            existing.updated_at = now
+
+
+def get_muted_categories(db: Database, repository_id: int) -> set[str]:
+    """Return the set of actively-muted finding categories for a repo."""
+    with db.session() as s:
+        rows = s.execute(
+            select(MutedCategory.category).where(
+                (MutedCategory.repository_id == repository_id)
+                & (MutedCategory.active.is_(True))
+            )
+        ).all()
+    return {r[0] for r in rows}
 
 
 # --- ticket_analyses writers -------------------------------------------------

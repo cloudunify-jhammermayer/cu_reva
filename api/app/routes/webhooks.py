@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from typing import get_args
 
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -16,6 +17,7 @@ from app.settings import Settings
 from reva.claude_code_runner import REVIEW_JOB_TIMEOUT
 from reva.db import writers
 from reva.db.engine import Database
+from reva.types import Category
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -100,7 +102,7 @@ def _process_delivery(
         elif event == "issue_comment":
             _handle_issue_comment(db, payload, settings, github)
         elif event == "pull_request_review_comment":
-            _handle_review_comment(payload, settings, rq_queue)
+            _handle_review_comment(db, payload, settings, rq_queue)
         elif event == "pull_request_review_thread":
             _handle_review_thread(db, payload)
         elif event == "issues":
@@ -208,8 +210,74 @@ def _handle_pull_request(db: Database, payload: dict, settings: Settings, github
         )
 
 
-def _handle_review_comment(payload: dict, settings: Settings, rq_queue) -> None:
-    """Enqueue a reply when a developer replies to one of REVA's inline comments."""
+_INLINE_COMMANDS = frozenset({"/dismiss", "/mute", "/unmute"})
+# Canonical finding categories that may be muted (kept in sync with reva.types.Category).
+_MUTABLE_CATEGORIES = frozenset(get_args(Category))
+
+
+def _handle_inline_command(db: Database, payload: dict, body: str, in_reply_to_id: int) -> None:
+    """Record a structured inline command (zero Claude cost).
+
+    `/dismiss [reason]` writes a negative review_feedback row on the replied-to
+    finding. `/mute <category>` / `/unmute <category>` toggle a repo-wide category
+    mute (defaulting to the replied-to finding's category if none is given).
+    """
+    parts = body.split()
+    command = parts[0].lower()
+    sender = (payload.get("sender") or {}).get("login") or ""
+
+    if command == "/dismiss":
+        finding = writers.lookup_finding_by_comment_id(db, in_reply_to_id)
+        if finding is None:
+            logger.info("dismiss_no_finding", comment_id=in_reply_to_id)
+            return
+        written = writers.record_feedback(
+            db,
+            review_finding_id=finding["id"],
+            review_run_id=finding["review_run_id"],
+            github_comment_id=in_reply_to_id,
+            reactor_login=sender,
+            reaction="dismissed",
+            is_positive=False,
+        )
+        logger.info("finding_dismissed", finding_id=finding["id"], deduped=written is None)
+        return
+
+    # /mute | /unmute — resolve the category (explicit arg, else the finding's).
+    category = parts[1].lower() if len(parts) > 1 else None
+    if category is None:
+        finding = writers.lookup_finding_by_comment_id(db, in_reply_to_id)
+        category = finding["category"] if finding else None
+    if category not in _MUTABLE_CATEGORIES:
+        logger.info("mute_invalid_category", command=command, category=category)
+        return
+
+    repo_data = payload.get("repository") or {}
+    installation = payload.get("installation") or {}
+    if not repo_data.get("id") or not installation.get("id"):
+        return
+    repo_id = writers.upsert_repository(
+        db,
+        github_repository_id=repo_data["id"],
+        owner=repo_data["owner"]["login"],
+        name=repo_data["name"],
+        default_branch=repo_data.get("default_branch", "main"),
+        installation_id=installation["id"],
+    )
+    active = command == "/mute"
+    writers.set_category_mute(
+        db, repository_id=repo_id, category=category, muted_by=sender, active=active
+    )
+    logger.info(
+        "category_mute_set",
+        repo=repo_data.get("full_name"), category=category, active=active,
+    )
+
+
+def _handle_review_comment(db: Database, payload: dict, settings: Settings, rq_queue) -> None:
+    """Handle a reply to one of REVA's inline comments. A structured command
+    (`/dismiss`, `/mute`, `/unmute`) is recorded at zero Claude cost; anything
+    else enqueues the (paid) conversational reply."""
     if payload.get("action") != "created":
         return
 
@@ -236,6 +304,11 @@ def _handle_review_comment(payload: dict, settings: Settings, rq_queue) -> None:
 
     question = (comment.get("body") or "").strip()
     if not question:
+        return
+
+    # Structured zero-cost commands short-circuit the paid reply.
+    if question.split()[0].lower() in _INLINE_COMMANDS:
+        _handle_inline_command(db, payload, question, in_reply_to_id)
         return
 
     pr_data = payload.get("pull_request", {})
