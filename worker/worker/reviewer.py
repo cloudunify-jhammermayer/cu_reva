@@ -23,6 +23,7 @@ from reva.cost import estimate_cost
 from reva.diff_utils import (
     DEFAULT_EXCLUDE_EXTENSIONS,
     DEFAULT_REVIEW_PREFIXES,
+    ModuleCoverage,
     analyze_test_coverage,
     count_diff_lines,
     estimate_diff_tokens,
@@ -115,8 +116,12 @@ _ODOO_SEVERITY_RULES: list[tuple[str, Severity, Callable[[str], bool]]] = [
     (
         "csp_inline_script",  # odoo19.md: inline <script>/external CDN (CSP)
         "major",
-        lambda h: "script" in h
-        and _contains_any(h, ("inline <script", "external cdn", "csp")),
+        # Anchor on the specific anti-patterns, not a bare "script"/"csp" token:
+        # "script" is a substring of description/subscription, so the old form
+        # could false-floor an unrelated finding to major.
+        lambda h: _contains_any(
+            h, ("<script", "external cdn", "content-security-policy")
+        ),
     ),
     (
         "manifest_missing_depends",  # odoo19.md: __manifest__.py missing a dependency
@@ -526,7 +531,7 @@ class Reviewer:
 # --- Module-level helpers -----------------------------------------------------
 
 
-def _format_test_coverage(coverage: list) -> str:
+def _format_test_coverage(coverage: list[ModuleCoverage]) -> str:
     """One line per module that added new logic without touching tests/, for the
     `test_coverage` skill param. The model decides whether to emit a `test` finding."""
     lines = ["Modules that add new logic in this change but touch no tests/ files:"]

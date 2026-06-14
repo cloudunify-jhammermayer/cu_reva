@@ -668,6 +668,9 @@ class GitHubClient:
         except httpx.TransportError as exc:
             raise TransientError(f"GitHub transport error: {exc}") from exc
 
+        # NB: _delete returns None on a 404 with allow_404 (a missing resource is
+        # a true no-op for DELETE), unlike _get which raises NotFound — different
+        # contract for the same flag name, intentional. Callers discard the return.
         if response.status_code == 404 and allow_404:
             return None
         if response.status_code >= 300:
