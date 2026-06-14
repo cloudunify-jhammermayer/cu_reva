@@ -20,21 +20,24 @@ This session built a feature roadmap and worked through it. **All work is on
 - `docs/delta-resolution-analysis.md` — diagnosis of "REVA re-reviews instead of resolving old
   comments"; features 1–2 of Tier 2 fix it.
 
-**Shipped & committed (tests green: worker 530, api 147, scheduler 28; ruff clean):**
+**Shipped & committed (tests green: worker 580, api 147, scheduler 28; ruff clean):**
 - **Tier 0 (done):** per-repo `block_on_severity` gating; deterministic Odoo severity calibration;
   `reva-risk-*` PR labels; trivial-diff short-circuit (+ a reorder false-skip fix).
 - **Tier 1 (done):** prompt-version registry + drift guard; per-finding outcome ledger (migration
   `015`); feedback capture via `pull_request_review_thread`.
-- **Tier 2 (3 of 9 done):** force-push/rebase delta-base guard; **delta-aware finding suppression**
-  (the headline bug fix); test-coverage gate.
+- **Tier 2 (6 of 9 done):** force-push/rebase delta-base guard; **delta-aware finding suppression**
+  (the headline bug fix); test-coverage gate; **intent-grounded review** (4, `get_issue` + nonce-fenced
+  `stated_intent`); **`__manifest__.py` validator** (5, pure `reva/odoo_manifest.py` + `manifest_audit`
+  param); **second-pass self-critique** (6, `is_substantiated`, default-off behind `REVA_VERIFY_HIGH_COST`).
 
-**⏭️ NEXT: implement Tier 2 features 4–9** from `docs/tier2-detailed-plans.md`, in this order
-(each = its own commit, `make test` + `ruff` green, then `/simplify`):
-1. **Structural batch (fully unit-testable here):** 4 intent-grounded review (GitHub-issue path
-   only — defer the ticket-AC enrichment), 5 `__manifest__.py` validator, 6 second-pass self-critique.
-2. **Skill batch (plumbing testable here; review *quality* needs live-CLI staging):** 7 migration-safety
-   skill, 8 XML/QWeb review, 9 security-model consistency.
-   Apply each feature's **`⚠️ Verified corrections`** — they override the plan body.
+**⏭️ NEXT: implement Tier 2 features 7–9** from `docs/tier2-detailed-plans.md` — the **skill batch**
+(plumbing testable here; review *quality* needs live-CLI staging): 7 migration-safety skill, 8 XML/QWeb
+review, 9 security-model consistency. Each = its own commit, `make test` + `ruff` green, then `/simplify`.
+Apply each feature's **`⚠️ Verified corrections`** — they override the plan body.
+
+**Owed staging validation (live-CLI gate) for the shipped structural batch:** intent-grounding
+false-positive rate (4); the LLM `depends`/version judgement + how the model merges the deterministic
+`manifest_audit` param (5); the self-critique false-drop rate — the headline risk (6).
 
 **Prompt versioning:** all Tier-2 prompt/skill edits land under CHANGELOG version **v1.6** (the
 drift guard from Tier 1 will alert if a prompt changes without a version bump; `test_get_version`
