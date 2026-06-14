@@ -6,21 +6,35 @@ Messages-API design and is now history in git).
 
 ---
 
-## 🚀 RESUME HERE (2026-06-14 session) — roadmap Tiers 0–2
+## 🚀 RESUME HERE — Tiers 0–2 done, Tier 3 started; **next: Tier 3 step B**
 
-This session built a feature roadmap and worked through it. **All work is on
-`main`** (see `git log`); whether it's pushed/PR'd is noted at the bottom.
+**⏭️ TOMORROW: implement Tier 3 feature B — per-repo learned memory.** Everything it
+needs is already in place (statistic + TUI). Cold-start brief:
+- **What:** read the per-(repo, category) dismiss data, build a short "what this team
+  tends to reject" block, and inject it into the review prompt so REVA stops re-raising
+  findings a team keeps dismissing. Down-weight, don't hard-suppress (that's what `/mute` is for).
+- **Input (already shipped):** `GET /api/v1/metrics/learning` →
+  `queries.metrics.learning_stats` → per (repo, category): `findings`, `dismissed`,
+  `resolved_by_fix`, `still_open_at_merge` (90-day window). High `dismissed/findings` is the signal.
+- **Where it plugs in:** the reviewer assembles `skill_params` in `worker/worker/reviewer.py`
+  (see how `stated_intent` / `manifest_audit` are added); add a `learned_memory` param built from
+  a new `RepoLookup` method, plus guidance in `prompts/review_guidance.md` (→ prompt **v1.7**, bump
+  the CHANGELOG so the drift guard doesn't alert). Nonce-fence nothing here — it's REVA's own data.
+- **Plan/measure:** write the slice into `docs/tier3-plan.md` (feature B section), and watch the
+  dismiss rate fall on the **TUI Feedback tab (`9`)** as it takes effect.
 
-**Authoritative new docs (read these first):**
+**All work is on `main`** (see `git log`); everything below is committed **and pushed**.
+
+**Authoritative docs (read these first):**
 - `FEATURE_ROADMAP.md` — the 6-tier roadmap (root).
-- `docs/tier0-plan.md`, `docs/tier1-plan.md`, `docs/tier2-plan.md` — per-tier plans + decisions.
-- `docs/tier2-detailed-plans.md` — **exhaustive, verified per-feature plans for the remaining
-  Tier-2 work (features 4–9)**; the next session implements from this.
-- `docs/tier0-tier1-implementation.md` — how to test Tiers 0–1 + what to expect + operator setup.
-- `docs/delta-resolution-analysis.md` — diagnosis of "REVA re-reviews instead of resolving old
-  comments"; features 1–2 of Tier 2 fix it.
+- `docs/tier3-plan.md` — **Tier 3 plan + feature A (done) + the B brief**; implement B from here.
+- `docs/tier2-staging-runbook.md` — what to do before live-testing Tier-2 features 4–9.
+- `docs/tier0-plan.md`, `docs/tier1-plan.md`, `docs/tier2-plan.md`, `docs/tier2-detailed-plans.md` — per-tier plans + decisions.
+- **`CLAUDE.md` changed this session** — new working rules: #1 *treat docs as possibly stale, verify
+  against code*; #5 *keep the TUI in sync*; a definition-of-done (run every touched service's suite +
+  ruff, `go test` for `tui/`); migration conventions. Read them before resuming.
 
-**Shipped & committed (tests green: worker 609, api 147, scheduler 28; ruff clean):**
+**Shipped & committed (tests green: worker 615, api 154, scheduler 28; ruff clean; `tui` go test green):**
 - **Tier 0 (done):** per-repo `block_on_severity` gating; deterministic Odoo severity calibration;
   `reva-risk-*` PR labels; trivial-diff short-circuit (+ a reorder false-skip fix).
 - **Tier 1 (done):** prompt-version registry + drift guard; per-finding outcome ledger (migration
@@ -35,13 +49,18 @@ This session built a feature roadmap and worked through it. **All work is on
   now populated (RQ `hostname.pid`, else container hostname) for per-replica attribution — it was
   blank before. Two known "P0" bugs turned out already fixed (see the roadmap exclusions).
 
-**⏭️ Tier 3 (self-improvement) — STARTED** (`docs/tier3-plan.md`). **Feature A done:** `/dismiss`,
-`/mute <category>`, `/unmute` inline-comment commands — structured, zero-Claude-cost replies that
-short-circuit the paid reply. `/dismiss` writes a negative `review_feedback` row; `/mute` writes the
-new `muted_categories` table (migration `016`) and `reviewer._drop_muted_findings` suppresses those
-categories before posting. **Next Tier-3 step: B — per-repo learned memory** (consume the `dismissed`
-signals → inject a "what this team rejects" block into the prompt). Still **run the live-CLI staging
-gate** for the Tier-2 review features (below) before trusting their output in prod.
+**Tier 3 (self-improvement) — STARTED** (`docs/tier3-plan.md`):
+- **Feature A done:** `/dismiss`, `/mute <category>`, `/unmute` inline-comment commands —
+  structured, zero-Claude-cost replies that short-circuit the paid reply. `/dismiss` writes a
+  negative `review_feedback` row; `/mute` writes the new `muted_categories` table (migration `016`)
+  and `reviewer._drop_muted_findings` suppresses those categories before posting.
+- **Learning statistic + TUI shipped (the input/measurement for B):**
+  `GET /api/v1/metrics/learning` (per repo×category dismiss/fix counts) + `GET /api/v1/metrics/mutes`,
+  rendered in the new **TUI Feedback tab (`9`)**.
+- **Next: feature B — per-repo learned memory** (see the cold-start brief at the top).
+
+Still **run the live-CLI staging gate** for the Tier-2 review features (below) before trusting
+their output in prod.
 
 **Owed staging validation (live-CLI gate, A1/A2 pattern) for Tier 2 features 4–9** — unit suites prove
 plumbing/routing only; review *quality* must be validated on a real Odoo repo. **Step-by-step setup +
@@ -53,9 +72,9 @@ Summary of what to watch:
   (8) xpath/`inherit_id` resolution (false positives on valid xpath); (9) detection quality — esp. **not**
   false-flagging the `_inherit`-extension pattern (the most common Odoo change).
 
-**Prompt versioning:** all Tier-2 prompt/skill edits land under CHANGELOG version **v1.6** (the
-drift guard from Tier 1 will alert if a prompt changes without a version bump; `test_get_version`
-asserts the current string).
+**Prompt versioning:** all Tier-2 prompt/skill edits landed under CHANGELOG version **v1.6**. The
+next prompt change (feature B's `review_guidance.md` block) starts **v1.7** — add a CHANGELOG
+heading and update the `test_get_version` assertion, or the Tier-1 drift guard alerts on boot.
 
 **Operator actions owed (not code):**
 - **Enable the `Pull request review thread` webhook event** on the GitHub App — until then Tier-1
