@@ -894,6 +894,28 @@ def test_calibrate_no_false_floor_on_safe_cr_execute():
     assert out[0].severity == "minor"  # no injection cue -> not floored
 
 
+def test_calibrate_floors_missing_record_rule_to_major():
+    out = _calibrate_odoo_severity(
+        [_of("minor", "No record rule", "missing ir.rule for company-scoped model")]
+    )
+    assert out[0].severity == "major"
+
+
+def test_calibrate_no_false_floor_on_record_rule_mention():
+    # A finding that merely discusses ir.rule (no absence cue) must NOT be floored.
+    out = _calibrate_odoo_severity(
+        [_of("minor", "rule cleanup", "this ir.rule can be simplified with a native OR")]
+    )
+    assert out[0].severity == "minor"
+
+
+def test_calibrate_record_rule_skips_non_odoo():
+    out = _calibrate_odoo_severity(
+        [_of("minor", "rule", "missing ir.rule", is_odoo_specific=False)]
+    )
+    assert out[0].severity == "minor"
+
+
 def test_calibrate_empty_is_noop():
     assert _calibrate_odoo_severity([]) == []
 

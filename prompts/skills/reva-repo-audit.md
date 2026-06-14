@@ -29,8 +29,13 @@ not human-authored; auditing them is noise. Focus on source the team wrote.
    - controllers with `auth=['\"]none` 
 4. Use **Read** to confirm each candidate before reporting it — don't flag on a
    grep hit alone.
-5. Look for: security misuse, missing `ir.model.access.csv` / `ir.rule`, N+1 ORM
-   patterns, deprecated Odoo APIs, and missing test coverage.
+5. **Security-model consistency.** For each module, Grep `_name = ` to enumerate
+   the models it declares (a new `_name`, or an `_inherit` that creates a new model —
+   not a plain `_inherit` extending an existing one), then Read its
+   `security/ir.model.access.csv` and `security/*.xml`: report every model with no
+   access line (**major**) and every company-scoped model (`company_id` /
+   `_check_company_auto`) with no `ir.rule` (**major**). Also look for general
+   security misuse, N+1 ORM patterns, deprecated Odoo APIs, and missing test coverage.
 6. **For each module's `__manifest__.py`**, parse it and verify systematically:
    `depends` is complete for the addons the module actually uses; every `data`/`demo`
    file exists on disk; `data` loads `security/` before views; `version` is the

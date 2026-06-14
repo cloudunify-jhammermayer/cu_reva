@@ -45,6 +45,20 @@ files, security-before-views order, version format). Surface those as findings a
 the suggested severity — trust them, don't re-derive. Scope the check to the
 changes introduced by this delta.
 
+## Security-model consistency (when this delta adds a model)
+
+Only when **this delta** adds a model — a new `_name = '...'` or an `_inherit` that
+creates a new model (its own `_name`, not extending an existing one) — verify its
+access control. A plain `_inherit` extending an existing model needs no new ACL.
+
+1. Locate the module root (nearest ancestor `__manifest__.py`).
+2. Read `security/ir.model.access.csv`; flag a **major** `security` finding
+   (`is_odoo_specific: true`) if the new model's `_name` has no access line.
+3. If the model is company-scoped (`company_id` field / `_check_company_auto`),
+   Read `security/*.xml` and flag a **major** finding if no `ir.rule` references it.
+
+Read the files in the clone (the ACL row may be outside the delta diff).
+
 ## Output format
 
 Use the Write tool to write a JSON file to `output_path` with exactly this

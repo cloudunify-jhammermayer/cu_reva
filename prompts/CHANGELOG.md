@@ -22,6 +22,11 @@
   to it: resolves xpath/inherit_id/ref targets against the clone, applies the view
   rules (t-esc→t-out, inline `<script>`/CDN CSP, explicit inherit_id, `<card>`,
   noupdate). Per-repo `max_xml_diff_lines`/`max_xml_diff_tokens` cap view dumps.
+- All four review skills: added a "Security-model consistency" cross-check — when a
+  diff adds a model (`_name =` / new-table `_inherit`), check `ir.model.access.csv`
+  for a missing ACL (major) and `ir.rule` for a company-scoped model (major). Full/
+  delta/audit get the full procedure; diff gets a bounded variant. Backed by a new
+  deterministic `missing_record_rule` severity floor.
 
 ## v1.5 — Consultant DOCX as planning basis
 

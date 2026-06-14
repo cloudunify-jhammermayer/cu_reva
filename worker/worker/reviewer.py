@@ -98,6 +98,17 @@ _ODOO_SEVERITY_RULES: list[tuple[str, Severity, Callable[[str], bool]]] = [
         and _contains_any(h, ("missing", "no access", "without")),
     ),
     (
+        "missing_record_rule",  # odoo19.md: ir.rule for company-scoped models
+        "major",
+        # Tight cues: require an explicit absence phrase so a finding that merely
+        # mentions ir.rule (e.g. "this ir.rule can be simplified") isn't floored.
+        lambda h: "ir.rule" in h
+        and _contains_any(
+            h, ("missing", "no record rule", "no ir.rule", "without a record rule",
+                "lacks a record rule", "absent")
+        ),
+    ),
+    (
         "sudo_in_controller",  # odoo19.md: sudo() in controllers without validation
         "major",
         lambda h: "sudo()" in h

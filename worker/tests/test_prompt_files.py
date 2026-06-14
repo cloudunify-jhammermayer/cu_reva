@@ -29,6 +29,7 @@ _RULE_ANCHORS = {
     "api_onchange_writes_db": "@api.onchange",
     "csp_inline_script": "inline `<script>`",
     "manifest_missing_depends": "__manifest__.py",
+    "missing_record_rule": "ir.rule",
 }
 
 
@@ -200,6 +201,20 @@ def test_xml_skill_present_and_has_csp_anchor():
     assert "output_path" in text and "risk_level" in text
     # keep the CSP anchor so _ODOO_SEVERITY_RULES.csp_inline_script still floors it
     assert "<script" in text
+
+
+def test_repo_aware_skills_have_security_consistency_step():
+    # Guards against silent removal of the model->security cross-check guidance.
+    for skill in ("reva-full-review.md", "reva-delta-review.md", "reva-repo-audit.md"):
+        text = (SKILLS_DIR / skill).read_text()
+        assert "ir.model.access.csv" in text, skill
+        assert "_name =" in text, skill
+
+
+def test_diff_skill_has_bounded_security_check():
+    text = (SKILLS_DIR / "reva-diff-review.md").read_text()
+    assert "ir.model.access.csv" in text
+    assert "Only when" in text or "do not" in text.lower()  # the cheap path stays cheap
 
 
 def test_manifest_guidance_present():

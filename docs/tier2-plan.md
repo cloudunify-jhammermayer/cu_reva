@@ -17,7 +17,7 @@ below. Companion to [`FEATURE_ROADMAP.md`](../FEATURE_ROADMAP.md) and the
 | 6 | Second-pass self-critique | M | high | unit + staging | ✅ (default-off; quality → staging) |
 | 7 | Migration-safety review skill | M | high | unit (routing) + **staging** | ✅ (routing; quality → staging) |
 | 8 | XML/QWeb review skill | M | high* | unit (filter/routing) + **staging** | ✅ (filter+routing; quality → staging) |
-| 9 | Security-model consistency | S | medium | mostly **staging** | ⬜ ready |
+| 9 | Security-model consistency | S | medium | mostly **staging** | ✅ (guidance + floor; quality → staging) |
 
 `*` plan was accurate apart from the corrections noted below. "staging" = the review *quality* (does the
 model emit the right finding) can only be validated by the live `claude` CLI on a real Odoo repo — the
@@ -62,6 +62,14 @@ comments" problem** (1 stops re-emitting duplicates; 2 stops a rebase from produ
   mixed PRs keep the generic skill but now see XML. Per-repo `max_xml_diff_lines`/`max_xml_diff_tokens`
   cap. Delta stays on the delta skill (v1). Owed: live staging of xpath/inherit_id resolution quality
   (false positives on valid xpath are the risk).
+- **Security-model consistency (9)** — all four skills gained a "Security-model consistency"
+  cross-check (full/delta/audit: full procedure — find module root, Read `ir.model.access.csv` +
+  `security/*.xml`, flag missing ACL / missing `ir.rule` on company-scoped models; diff: bounded
+  variant). New deterministic `missing_record_rule` severity floor + `_RULE_ANCHORS` sync entry.
+  Owed: live staging of detection quality (the `_inherit`-extension false-positive is the headline risk).
+
+**Tier 2 complete (9/9).** All nine features shipped; the review *quality* of features 4–9 is owed
+live-CLI staging validation (each noted above) — the unit suites prove plumbing/routing only.
 
 > **Exhaustive per-feature plans for 4–9** (files, approach, edge cases, test plan, verified
 > corrections) live in [`tier2-detailed-plans.md`](tier2-detailed-plans.md). The summaries below are the

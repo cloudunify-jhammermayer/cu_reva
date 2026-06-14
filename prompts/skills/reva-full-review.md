@@ -41,6 +41,24 @@ If a module's `__manifest__.py` is in the diff:
    surface those as findings at the suggested severity rather than re-deriving them.
 3. Flag a `version` not in the 5-part `N.N.N.N.N` form as **minor**.
 
+## Security-model consistency (when the diff adds a model)
+
+When a hunk adds a model — a new `_name = '...'`, or an `_inherit` that creates a
+**new** model (it has its own `_name`, not merely extending an existing one) —
+verify its access control. A plain `_inherit` that extends an existing model is the
+common case and needs **no** new ACL; do not flag it.
+
+1. Locate the module root (nearest ancestor dir containing `__manifest__.py`).
+2. Read `security/ir.model.access.csv`; if the new model's `_name` has no access
+   line, flag a **major** `security` finding (`is_odoo_specific: true`).
+3. If the model is company-scoped (declares a `company_id` field or
+   `_check_company_auto`), Read `security/*.xml`; if no `<record model="ir.rule">`
+   references it, flag a **major** finding (missing `ir.rule`). Otherwise it is at
+   most `info`.
+
+Read the CSV/XML **in the clone**, not the diff — the ACL row may live in a file
+filtered out of the diff but present at head. Skip abstract/transient models.
+
 ## Output format
 
 Use the Write tool to write a JSON file to `output_path` with exactly this

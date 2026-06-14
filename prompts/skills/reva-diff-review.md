@@ -27,6 +27,15 @@ module, check that addons used in the changed files (`from odoo.addons.X`, cross
 `ref=`/`inherit_id`) are declared in `depends`; flag a missing one as **major**
 `is_odoo_specific: true`. Scope this to what the changed files reveal.
 
+## Security-model consistency (lightweight)
+
+**Only when** the diff adds a model (`_name = '...'` or a new-table `_inherit`,
+not a plain `_inherit` extending an existing model): Read just
+`security/ir.model.access.csv` and `security/*.xml` in the same module — **do not**
+sweep the whole module. Flag a missing ACL (**major** `security`) or, on a
+company-scoped model (`company_id`), a missing `ir.rule` (**major**). Keep this
+cheap — only the two security files, only when a model is actually added.
+
 ## Output format
 
 Use the Write tool to write a JSON file to `output_path` with exactly this
