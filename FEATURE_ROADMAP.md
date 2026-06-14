@@ -112,9 +112,9 @@ tiers hang off.
   v0.9.8 doesn't expose; gain judged moderate, not high.
 - **Team-rejected, not re-proposed** (per `HANDOFF.md` decisions): committable suggested-fixes
   (juniors learn by doing) and change-"walkthrough" summaries.
-- **Already-known P0 bugs (prerequisites, not features):** comment-commands on unknown PRs, and
-  the `deep→diff` downgrade (CORR-7). Fix these first — several Tier-4 lifecycle items assume
-  correct delta/base handling.
+- **Formerly-known P0 bugs — already fixed (verified 2026-06-14):** comment-commands on unknown PRs
+  (fetch+upsert on a DB miss, `004cd5c`) and the `deep→diff` downgrade (CORR-7, `_MODE_PRECEDENCE`
+  guard in `upsert_pending_review`, `11e601a`). Both have passing tests; no longer prerequisites.
 
 ## Recommended near-term sequence
 

@@ -106,7 +106,7 @@ Test counts now: **worker 339 · api 98 · scheduler 27**, ruff clean, **CI gree
 - **CodeGraph enabled** on the live worker (`REVA_CODEGRAPH_ENABLED=true`) + a positive `codegraph_index_ready` log. **Still owed (HANDOFF's standing CodeGraph gate): confirm the model actually calls `mcp__codegraph__*` on a real full/deep PR.**
 - **nginx → Cloudflare tunnel.** Plain HTTP on `127.0.0.1:8080`; TLS at the Cloudflare edge; real client IP via `CF-Connecting-IP`. Dropped certbot / Let's Encrypt / `:443` / `setup-letsencrypt.sh`. Added a branded cloud **404**. Prod compose + `docs/setup-production.md` rewritten for the tunnel.
 
-**👉 What's next — see [`docs/next-steps-plan.md`](docs/next-steps-plan.md)** (per-item P0/P1/P2 plans + a pre-deploy live-test checklist). Highest value: **deploy to the server and run the live-test checklist** — the only way to prove the tunnel, CodeGraph-in-use, the resolution cycle, and audits end-to-end. Then the two **P0** bugs: comment commands on unknown PRs, and the deep→diff downgrade (CORR-7).
+**👉 What's next — see [`docs/next-steps-plan.md`](docs/next-steps-plan.md)** (per-item P0/P1/P2 plans + a pre-deploy live-test checklist). Highest value: **deploy to the server and run the live-test checklist** — the only way to prove the tunnel, CodeGraph-in-use, the resolution cycle, and audits end-to-end. (The two **P0** bugs once listed here — comment commands on unknown PRs, and the deep→diff downgrade CORR-7 — are now both fixed; see the resume section above.)
 
 ---
 
@@ -148,14 +148,11 @@ Shipped this session (all on `main`):
   **keep test files in all modes.** Don't re-add a global `tests/` skip; if a repo
   wants it, use `skip_paths: ["*/tests/*"]` in its `.claude-review.yml`.
 
-**👉 Next step — comment commands on unknown PRs.** Comment commands only act on
-PRs REVA already has a row for (registered from a prior `pull_request` event); a
-PR opened before install logs `comment_trigger_pr_not_found` and is ignored
-(`_handle_issue_comment` only *looks up* the PR — `webhooks.py` → `lookup_pull_request`).
-Planned fix: on a DB miss, fetch the PR from the GitHub API (the handler already
-has a `github` client + installation id), upsert it, then proceed — so
-`/review` / `/review-all` work on any open PR without a reopen/push. Scoped, TDD.
-Until then the workaround is: reopen the PR or push a commit to register it.
+**✅ Resolved — comment commands on unknown PRs.** On a DB miss `_handle_issue_comment`
+now fetches the PR from the GitHub API and upserts it (`_fetch_and_upsert_pr`,
+`webhooks.py`), so `/review` / `/review-all` work on any open PR without a reopen/push
+(fixed in `004cd5c`, tested). The CORR-7 `deep→diff` downgrade is likewise fixed
+(`_MODE_PRECEDENCE` guard in `upsert_pending_review`, `11e601a`).
 
 ---
 
