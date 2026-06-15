@@ -268,6 +268,17 @@ class TicketAnalysisResult(BaseModel):
         return _unwrap_json_list(v)
 
 
+class Attachment(BaseModel):
+    """A file forwarded by Odoo ({filename, content_base64}). Accepted types are
+    .docx / .pdf / .txt — the filename extension is the authoritative gate (see
+    reva.attachment_text). Shared by the ticket-analysis attachment and the
+    create-issues description_docx; on a create-issues request it is THE basis
+    for the issue split."""
+
+    filename: str
+    content_base64: str
+
+
 class TicketJobParams(BaseModel):
     """Inputs handed to the ticket analysis RQ job."""
 
@@ -276,6 +287,7 @@ class TicketJobParams(BaseModel):
     model_name: str  # e.g. "helpdesk.ticket" or "project.task"
     field_name: str
     text: str
+    attachment: Attachment | None = None  # optional .docx/.pdf/.txt, folded into the prompt
 
 
 # --- Ticket issue creation types -----------------------------------------------
@@ -313,15 +325,6 @@ class TicketIssuePlan(BaseModel):
         return _unwrap_json_list(v)
 
 
-class DocxAttachment(BaseModel):
-    """A consultant Word document forwarded by Odoo (Contract 1,
-    description_docx). When present it is THE basis for the issue split —
-    description/analysis_html are ignored."""
-
-    filename: str
-    content_base64: str
-
-
 class TicketIssueJobParams(BaseModel):
     """Inputs handed to the create-issues RQ job: the Contract 1 payload from
     the Odoo addon (github-issues handoff) plus the ticket_issue_runs row id,
@@ -334,7 +337,7 @@ class TicketIssueJobParams(BaseModel):
     name: str
     description: str
     analysis_html: str  # "" when the record has no completed analysis
-    description_docx: DocxAttachment | None = None  # tasks only
+    description_docx: Attachment | None = None  # tasks only; .docx/.pdf/.txt
     priority: str  # Odoo priority key "0".."3"
     ticket_url: str
 

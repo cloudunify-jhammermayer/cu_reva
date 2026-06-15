@@ -6,6 +6,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from reva.types import Attachment
+
 
 class TicketAnalysisRequest(BaseModel):
     ticket_id: int
@@ -16,6 +18,11 @@ class TicketAnalysisRequest(BaseModel):
         description="Field on the Odoo record where the result will be written"
     )
     text: str = Field(description="Ticket description text to analyse")
+    attachment: Attachment | None = Field(
+        default=None,
+        description="Optional .docx/.pdf/.txt file; its text is extracted and "
+        "folded into the analysis prompt alongside `text`",
+    )
 
 
 class TicketAnalysisCreated(BaseModel):

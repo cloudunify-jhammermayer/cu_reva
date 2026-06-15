@@ -200,7 +200,7 @@ def _docx_b64(*paragraphs: str) -> str:
 def test_docx_replaces_description_and_analysis_as_basis():
     """Contract 1: when description_docx is present it is THE basis — the
     ticket description and analysis must not leak into the prompt."""
-    from reva.types import DocxAttachment
+    from reva.types import Attachment
 
     captured: dict = {}
 
@@ -212,7 +212,7 @@ def test_docx_replaces_description_and_analysis_as_basis():
     params = _params(analysis_html="<p>ANALYSIS-SENTINEL</p>")
     params = params.model_copy(update={
         "description": "DESCRIPTION-SENTINEL",
-        "description_docx": DocxAttachment(
+        "description_docx": Attachment(
             filename="spec.docx",
             content_base64=_docx_b64("The real requirement from the consultant."),
         ),
@@ -231,17 +231,49 @@ def test_docx_replaces_description_and_analysis_as_basis():
     assert "untrusted" in content.lower()
 
 
+def test_txt_attachment_used_as_basis():
+    """description_docx may now carry a .pdf/.txt; its extracted text becomes
+    THE basis just like a docx (extract_attachment_text is wired in)."""
+    import base64
+
+    from reva.types import Attachment
+
+    captured: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(req.content)
+        return _ok_handler(req)
+
+    planner = _make_planner(handler)
+    params = _params(analysis_html="<p>ANALYSIS-SENTINEL</p>").model_copy(update={
+        "description": "DESCRIPTION-SENTINEL",
+        "description_docx": Attachment(
+            filename="spec.txt",
+            content_base64=base64.b64encode(
+                b"Plain-text requirement from the consultant."
+            ).decode(),
+        ),
+    })
+    planner.plan_with_response(params)
+
+    content = captured["body"]["messages"][0]["content"]
+    assert "Plain-text requirement from the consultant." in content
+    assert "spec.txt" in content
+    assert "DESCRIPTION-SENTINEL" not in content
+    assert "ANALYSIS-SENTINEL" not in content
+
+
 def test_corrupt_docx_is_permanent():
     import base64
 
-    from reva.types import DocxAttachment
+    from reva.types import Attachment
 
     planner = _make_planner(_ok_handler)
     params = _params().model_copy(update={
-        "description_docx": DocxAttachment(
+        "description_docx": Attachment(
             filename="spec.docx",
             content_base64=base64.b64encode(b"not a zip").decode(),
         ),
     })
-    with pytest.raises(PermanentError, match="invalid description_docx"):
+    with pytest.raises(PermanentError, match="invalid attachment"):
         planner.plan_with_response(params)

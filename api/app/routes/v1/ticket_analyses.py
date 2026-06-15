@@ -19,6 +19,7 @@ from app.schemas.ticket_analyses import (
     TicketAnalysisSummary,
     TicketAnalysisStatus,
 )
+from reva.attachment_text import classify_attachment
 from reva.db import writers
 from reva.db.engine import Database
 from reva.types import TicketJobParams
@@ -40,6 +41,17 @@ def submit_ticket_analysis(
     db: Database = Depends(get_db),
 ) -> dict:
     """Accept a ticket text, enqueue the analysis job, and return immediately."""
+    if body.attachment is not None:
+        try:
+            classify_attachment(body.attachment.filename, body.attachment.content_base64)
+        except ValueError as exc:
+            # Accept-time 422 is ticket-analysis's only error channel to Odoo
+            # (worker failures only land in the DB), so reject unsupported or
+            # malformed attachments here while Odoo can still show the error.
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"attachment: {exc}",
+            ) from exc
     # Dedup: if a pending analysis already exists for this record, return it.
     existing = writers.get_pending_ticket_analysis(
         db, body.ticket_id, body.model_name, body.field_name
@@ -59,6 +71,7 @@ def submit_ticket_analysis(
         model_name=body.model_name,
         field_name=body.field_name,
         text=body.text,
+        attachment=body.attachment,
     )
     analysis_id = writers.record_ticket_analysis_created(db, stub_params)
 
@@ -69,6 +82,7 @@ def submit_ticket_analysis(
         model_name=body.model_name,
         field_name=body.field_name,
         text=body.text,
+        attachment=body.attachment,
     )
     rq_queue = request.app.state.rq_queue
     job = rq_queue.enqueue(
