@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from reva.types import DocxAttachment
+from reva.types import Attachment
 
 
 class CreateIssuesRequest(BaseModel):
@@ -21,10 +21,11 @@ class CreateIssuesRequest(BaseModel):
     name: str = Field(description="Ticket/task title")
     description: str = Field(description="Plain-text ticket description (HTML stripped by Odoo)")
     analysis_html: str = Field(description='Completed REVA analysis HTML, or "" if none')
-    description_docx: DocxAttachment | None = Field(
+    description_docx: Attachment | None = Field(
         default=None,
-        description="Consultant Word document (tasks only); when present it is "
-        "THE basis for the issue split instead of description/analysis_html",
+        description="Consultant file (tasks only): .docx, .pdf, or .txt. When "
+        "present it is THE basis for the issue split instead of "
+        "description/analysis_html. (Field name fixed by the Odoo addon.)",
     )
     priority: str = Field(description='Odoo priority key, "0" (low) … "3" (urgent)')
     ticket_url: str = Field(description="Deep link back to the Odoo record")

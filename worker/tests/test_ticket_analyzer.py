@@ -18,6 +18,7 @@ from reva.ticket_formatter import format_ticket_html
 from reva.ticket_tool import TICKET_TOOL_NAME
 from reva.types import (
     AcceptanceCriterion,
+    Attachment,
     MissingInfoItem,
     SourcedItem,
     TicketAnalysisResult,
@@ -106,6 +107,52 @@ def test_ticket_text_is_framed_as_untrusted_data():
     assert f"</ticket_{m.group(1)}>" in content
     assert "untrusted" in content.lower()
     assert params.text in content  # the actual ticket text is still present
+
+
+def test_attachment_text_is_folded_into_prompt():
+    """A .txt/.pdf/.docx attachment's text is extracted and included in the
+    analysis prompt alongside the ticket text, inside the untrusted fence."""
+    import base64
+
+    captured: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(req.content)
+        return httpx.Response(200, content=_fixture_response())
+
+    analyzer = _make_analyzer(handler)
+    params = TicketJobParams(
+        analysis_id=1, ticket_id=1, model_name="helpdesk.ticket",
+        field_name="description", text="Short ticket text.",
+        attachment=Attachment(
+            filename="extra.txt",
+            content_base64=base64.b64encode(b"Requirement only in the attachment").decode(),
+        ),
+    )
+    analyzer.analyze(params)
+
+    content = captured["body"]["messages"][0]["content"]
+    assert "Short ticket text." in content
+    assert "Requirement only in the attachment" in content
+    assert "extra.txt" in content
+    assert "untrusted" in content.lower()
+
+
+def test_attachment_without_extractable_text_is_permanent():
+    """A file that passes the accept-time sniff but yields no text (e.g. an
+    empty .txt) fails the worker with a PermanentError, not a silent success."""
+    import base64
+
+    analyzer = _make_analyzer(_ok_handler)
+    params = TicketJobParams(
+        analysis_id=1, ticket_id=1, model_name="helpdesk.ticket",
+        field_name="description", text="ticket",
+        attachment=Attachment(
+            filename="empty.txt", content_base64=base64.b64encode(b"   \n ").decode()
+        ),
+    )
+    with pytest.raises(PermanentError):
+        analyzer.analyze(params)
 
 
 def test_analyze_no_tool_call():

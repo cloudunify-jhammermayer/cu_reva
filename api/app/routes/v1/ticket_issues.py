@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from rq import Retry
 from sqlalchemy.exc import IntegrityError
 
-from app.dependencies import get_db
+from app.dependencies import get_db, get_github_client
 from app.pagination import clamp_limit, clamp_offset
 from app.queries import ticket_issues as q
 from app.schemas.ticket_issues import (
@@ -28,9 +28,11 @@ from app.schemas.ticket_issues import (
     TicketIssueRunSummary,
     TicketIssuesAccepted,
 )
+from reva.attachment_text import classify_attachment
 from reva.db import writers
 from reva.db.engine import Database
-from reva.docx_text import decode_docx_base64
+from reva.errors import PermanentError, TransientError
+from reva.github_client import GitHubClient
 from reva.github_urls import parse_github_repo_url
 from reva.types import TicketIssueJobParams
 
@@ -83,20 +85,44 @@ def submit_create_issues(
     body: CreateIssuesRequest,
     request: Request,
     db: Database = Depends(get_db),
+    github: GitHubClient = Depends(get_github_client),
 ) -> dict:
     """Accept an Odoo create-issues request, enqueue the job, return immediately.
 
     Odoo's outbound timeout is 10 s and any non-202 is shown to the user with a
     transaction rollback — so validation must happen here, not in the worker.
     """
-    if parse_github_repo_url(body.github_url) is None:
+    parsed = parse_github_repo_url(body.github_url)
+    if parsed is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="github_url must be an https://github.com/{owner}/{repo} URL",
         )
+    owner, repo = parsed
+    # Reachability: the App must be able to reach the repo to create issues
+    # there. A definitive "no" (404/forbidden → PermanentError) is rejected so
+    # Odoo shows it and rolls back; a GitHub blip (TransientError) is accepted —
+    # the worker re-checks before creating issues (ticket_issue_runner), so we
+    # don't turn a GitHub outage into a user-facing rejection.
+    try:
+        github.get_repo_installation_id(owner, repo)
+    except PermanentError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"github_url is not reachable: REVA's GitHub App is not installed "
+                f"on {owner}/{repo} (or the repo does not exist)"
+            ),
+        ) from exc
+    except TransientError:
+        logger.warning(
+            "create_issues_reachability_transient", github_url=body.github_url, exc_info=True
+        )
     if body.description_docx is not None:
         try:
-            decode_docx_base64(body.description_docx.content_base64)
+            classify_attachment(
+                body.description_docx.filename, body.description_docx.content_base64
+            )
         except ValueError as exc:
             # Fail at accept time: Odoo shows the error and rolls back, which
             # beats an async failed-callback for an obviously broken upload.
@@ -215,11 +241,12 @@ def requeue_ticket_issue_run(
             detail="Ticket text purged and no plan persisted; re-trigger from Odoo instead",
         )
     if (row.get("planning_basis") or "").startswith("docx:") and not row["issues"]:
-        # A docx run that never produced a plan can't be re-planned: the
-        # document only ever lived in the (now-gone) job params, not the DB.
+        # An attachment-based run (.docx/.pdf/.txt — all carry the "docx:"
+        # basis prefix) that never produced a plan can't be re-planned: the file
+        # only ever lived in the (now-gone) job params, not the DB.
         raise HTTPException(
             status_code=409,
-            detail="Consultant document not retained and no plan persisted; "
+            detail="Consultant file not retained and no plan persisted; "
             "re-trigger from Odoo instead",
         )
     other_pending = writers.get_pending_ticket_issue_run(db, row["ticket_id"], row["model_name"])

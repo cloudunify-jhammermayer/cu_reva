@@ -56,9 +56,12 @@ Content-Type: application/json
   "ticket_id":  123,
   "model_name": "helpdesk.ticket",
   "field_name": "description",
-  "text":       "Als Benutzer möchte ich..."
+  "text":       "Als Benutzer möchte ich...",
+  "attachment": {"filename": "spec.pdf", "content_base64": "..."}
 }
 ```
+
+`attachment` is optional (`null`/omitted for text-only tickets). When present it must be a `.docx`, `.pdf`, or `.txt` file; its text is extracted and folded into the prompt alongside `text`. An unsupported extension, bad base64, or content/extension mismatch is rejected with `422` at accept time (`reva/attachment_text.py`).
 
 **Response `202 Accepted`:**
 
@@ -76,6 +79,7 @@ Content-Type: application/json
 | `model_name` | `"helpdesk.ticket"` or `"project.task"` |
 | `field_name` | Field on the record where REVA writes the result |
 | `text` | Full ticket description text. German and English are supported. |
+| `attachment` | Optional `{filename, content_base64}` — a `.docx`/`.pdf`/`.txt` file folded into the analysis. Omit or `null` for text-only. |
 
 ---
 

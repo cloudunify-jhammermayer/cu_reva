@@ -978,10 +978,10 @@ def test_update_ticket_issue_state_no_match_returns_empty(db):
 
 
 def test_planning_basis_stored_not_the_doc(db):
-    from reva.types import DocxAttachment
+    from reva.types import Attachment
 
     docx = _issue_params(ticket_id=1).model_copy(update={
-        "description_docx": DocxAttachment(filename="spec.docx", content_base64="UEsDBABzZQ=="),
+        "description_docx": Attachment(filename="spec.docx", content_base64="UEsDBABzZQ=="),
     })
     docx_id = writers.record_ticket_issue_run_created(db, docx)
     text_id = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=2))
@@ -996,11 +996,11 @@ def test_planning_basis_stored_not_the_doc(db):
 
 
 def test_planning_basis_changes_when_doc_changes(db):
-    from reva.types import DocxAttachment
+    from reva.types import Attachment
 
     def basis_for(content):
         p = _issue_params(ticket_id=1).model_copy(update={
-            "description_docx": DocxAttachment(filename="s.docx", content_base64=content),
+            "description_docx": Attachment(filename="s.docx", content_base64=content),
         })
         return writers.compute_planning_basis(p)
 

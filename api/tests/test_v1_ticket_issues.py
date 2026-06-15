@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 
-from app.dependencies import get_db, get_settings
+from app.dependencies import get_db, get_github_client, get_settings
 from app.main import app
 from app.settings import Settings
 from reva.db import Base, Database, create_engine_from_url, writers
@@ -40,6 +40,23 @@ class FakeQueue:
         return FakeJob(id=f"rq:job:fake-{len(self.enqueued)}")
 
 
+@dataclass
+class FakeGitHub:
+    """Stands in for the GitHubClient used by the accept-time reachability
+    check. Succeeds by default; set `error` to simulate an unreachable repo
+    (PermanentError → 422) or a GitHub blip (TransientError → accepted)."""
+
+    installation_id: int = 99
+    error: Exception | None = None
+    calls: list = field(default_factory=list)
+
+    def get_repo_installation_id(self, owner: str, repo: str) -> int:
+        self.calls.append((owner, repo))
+        if self.error is not None:
+            raise self.error
+        return self.installation_id
+
+
 @pytest.fixture()
 def client_db_queue():
     engine = create_engine_from_url(
@@ -56,6 +73,7 @@ def client_db_queue():
     )
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_github_client] = lambda: FakeGitHub()
     queue = FakeQueue()
     prev_queue = getattr(app.state, "rq_queue", None)
     app.state.rq_queue = queue
@@ -414,3 +432,84 @@ def test_docx_run_requeue_without_plan_is_409(client_db_queue):
     r = client.post(f"/api/v1/create-issues/{run_id}/requeue")
     assert r.status_code == 409
     assert "re-trigger from Odoo" in r.json()["detail"]
+
+
+# --- generalized attachment intake (.docx already covered above; + .pdf/.txt) -
+
+
+def test_pdf_attachment_accepted(client_db_queue):
+    """description_docx may now carry a .pdf (accept-time only sniffs the
+    %PDF- magic; the worker does the full extraction)."""
+    import base64
+
+    client, _, queue = client_db_queue
+    payload = {
+        **CONTRACT_PAYLOAD, "model_name": "project.task",
+        "description_docx": {
+            "filename": "spec.pdf",
+            "content_base64": base64.b64encode(b"%PDF-1.4\nminimal").decode(),
+        },
+    }
+    r = client.post("/api/v1/create-issues", json=payload)
+    assert r.status_code == 202
+    _, params, _ = queue.enqueued[0]
+    assert params["description_docx"]["filename"] == "spec.pdf"
+
+
+def test_txt_attachment_accepted(client_db_queue):
+    import base64
+
+    client, _, _ = client_db_queue
+    payload = {
+        **CONTRACT_PAYLOAD, "model_name": "project.task",
+        "description_docx": {
+            "filename": "spec.txt",
+            "content_base64": base64.b64encode(b"plain text spec").decode(),
+        },
+    }
+    assert client.post("/api/v1/create-issues", json=payload).status_code == 202
+
+
+def test_unsupported_attachment_type_is_422(client_db_queue):
+    import base64
+
+    client, _, queue = client_db_queue
+    payload = {
+        **CONTRACT_PAYLOAD,
+        "description_docx": {
+            "filename": "sheet.xlsx",
+            "content_base64": base64.b64encode(b"PK\x03\x04ziplike").decode(),
+        },
+    }
+    r = client.post("/api/v1/create-issues", json=payload)
+    assert r.status_code == 422
+    assert "description_docx" in r.json()["detail"]
+    assert queue.enqueued == []
+
+
+def test_unreachable_repo_is_422_and_not_enqueued(client_db_queue):
+    """github_url parses but our App can't access the repo (GitHub 404 →
+    PermanentError) — reject at accept time so Odoo shows it and rolls back."""
+    from reva.errors import PermanentError
+
+    client, _, queue = client_db_queue
+    app.dependency_overrides[get_github_client] = lambda: FakeGitHub(
+        error=PermanentError("GitHub 404 (installation)")
+    )
+    r = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD)
+    assert r.status_code == 422
+    assert queue.enqueued == []
+
+
+def test_transient_github_error_still_accepts(client_db_queue):
+    """A GitHub blip at accept time must not become a user-facing rejection —
+    accept and let the worker's own reachability check be the backstop."""
+    from reva.errors import TransientError
+
+    client, _, queue = client_db_queue
+    app.dependency_overrides[get_github_client] = lambda: FakeGitHub(
+        error=TransientError("GitHub 503")
+    )
+    r = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD)
+    assert r.status_code == 202
+    assert len(queue.enqueued) == 1

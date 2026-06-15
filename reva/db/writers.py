@@ -1108,11 +1108,13 @@ def get_ticket_analysis(db: Database, analysis_id: int) -> dict | None:
 def compute_planning_basis(params: TicketIssueJobParams) -> str:
     """Content-addressed digest of WHAT a run plans from.
 
-    "docx:<sha1[:16]>" when a consultant document is attached (its content is
-    the basis), else "text:<sha1[:16]>" over description + analysis. The prefix
-    lets requeue tell a docx run apart without keeping the document; the hash
-    lets a re-run detect a revised spec. NOT a security hash — stability across
-    a run and its requeues is the only requirement."""
+    "docx:<sha1[:16]>" when a consultant file is attached (.docx/.pdf/.txt — its
+    content is the basis), else "text:<sha1[:16]>" over description + analysis.
+    The "docx:" prefix is kept for any attachment (not just .docx) so the dedup
+    digest and the GitHub marker stay stable across the .pdf/.txt rollout; it
+    lets requeue tell an attachment run apart without keeping the file, and the
+    hash lets a re-run detect a revised spec. NOT a security hash — stability
+    across a run and its requeues is the only requirement."""
     if params.description_docx is not None:
         key = "docx\x00" + params.description_docx.content_base64
         prefix = "docx:"
