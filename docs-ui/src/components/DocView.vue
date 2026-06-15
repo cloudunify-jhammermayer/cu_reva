@@ -1,13 +1,15 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { store } from '../store.js'
 import { route, navigate } from '../location.js'
 import * as api from '../api.js'
 import { renderMarkdown } from '../markdown.js'
 
 const html = ref('')
+const toc = ref([])
 const loading = ref(false)
 const error = ref('')
+const pendingAnchor = ref('')
 
 const repo = computed(() => store.repos.find((r) => r.id === route.value.repoId))
 const path = computed(() => route.value.path)
@@ -18,23 +20,45 @@ const ghUrl = computed(() =>
     : '',
 )
 
+function scrollToId(id) {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+async function renderMermaid() {
+  try {
+    const { default: mermaid } = await import('mermaid')
+    mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' })
+    await mermaid.run({ querySelector: '.markdown-body .mermaid' })
+  } catch { /* a bad diagram shouldn't break the page */ }
+}
+
 async function load() {
   const { repoId, path: filePath, ref: routeRef } = route.value
   if (!repoId || !filePath) return
   loading.value = true
   error.value = ''
   html.value = ''
+  toc.value = []
   try {
     const r = repo.value
     const useRef = routeRef || r?.default_branch
     const data = await api.getFile(repoId, filePath, useRef)
-    html.value = renderMarkdown(data.content, {
+    const result = renderMarkdown(data.content, {
       repoId,
       path: filePath,
       owner: r?.owner,
       name: r?.name,
       branch: useRef,
     })
+    html.value = result.html
+    toc.value = result.toc
+    await nextTick()
+    if (result.hasMermaid) renderMermaid()
+    // Cross-doc link that carried a #section — scroll once rendered.
+    if (pendingAnchor.value) {
+      scrollToId(pendingAnchor.value)
+      pendingAnchor.value = ''
+    }
   } catch (e) {
     error.value = String(e.message || e)
   } finally {
@@ -44,13 +68,21 @@ async function load() {
 
 watch(route, load, { immediate: true })
 
-// Intercept clicks on rewritten in-app doc links (set in markdown.js); keep the
-// current branch.
 function onClick(ev) {
-  const a = ev.target.closest('a[data-doc-path]')
+  const a = ev.target.closest('a')
   if (!a) return
-  ev.preventDefault()
-  navigate(route.value.repoId, a.getAttribute('data-doc-path'), route.value.ref)
+  const docPath = a.getAttribute('data-doc-path')
+  if (docPath) {
+    ev.preventDefault()
+    pendingAnchor.value = a.getAttribute('data-doc-anchor') || ''
+    navigate(route.value.repoId, docPath, route.value.ref)
+    return
+  }
+  const href = a.getAttribute('href') || ''
+  if (href.startsWith('#')) {
+    ev.preventDefault()
+    scrollToId(href.slice(1))
+  }
 }
 </script>
 
@@ -65,7 +97,21 @@ function onClick(ev) {
     </div>
     <p v-if="loading" class="muted">Loading…</p>
     <p v-else-if="error" class="error">{{ error }}</p>
-    <!-- html is DOMPurify-sanitized in renderMarkdown before it reaches v-html -->
-    <div v-else class="markdown-body" v-html="html" @click="onClick"></div>
+    <template v-else>
+      <nav v-if="toc.length >= 3" class="toc">
+        <div class="toc-title">On this page</div>
+        <a
+          v-for="t in toc"
+          :key="t.id"
+          class="toc-link"
+          :class="{ 'toc-sub': t.level === 3 }"
+          href="#"
+          @click.prevent="scrollToId(t.id)"
+          >{{ t.text }}</a
+        >
+      </nav>
+      <!-- html is DOMPurify-sanitized in renderMarkdown before it reaches v-html -->
+      <div class="markdown-body" v-html="html" @click="onClick"></div>
+    </template>
   </article>
 </template>

@@ -25,6 +25,9 @@ export const listRepos = () => getJSON(`${BASE}/repos`)
 
 export const getBranches = (repoId) => getJSON(`${BASE}/repos/${repoId}/branches`)
 
+export const searchDocs = (repoId, q, ref) =>
+  getJSON(`${BASE}/repos/${repoId}/search?${withRef(new URLSearchParams({ q }), ref)}`)
+
 // Tree is fetched by the branch HEAD SHA (the Git Trees API wants a tree-ish).
 export const getTree = (repoId, ref) =>
   getJSON(`${BASE}/repos/${repoId}/tree?${withRef(new URLSearchParams(), ref)}`)

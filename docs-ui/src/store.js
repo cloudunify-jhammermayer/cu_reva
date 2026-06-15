@@ -13,8 +13,38 @@ export const store = reactive({
   branches: {}, // repoId -> { items:[{name,sha,is_default}], loading, error, loaded }
   selectedRef: {}, // repoId -> branch name
   trees: {}, // repoId -> { entries, truncated, loading, error, loaded }
+  contentHits: {}, // repoId -> { q, paths: [] }  (full-text matches for the live filter)
   filter: '',
 })
+
+const _searchTimers = {}
+
+// Debounced full-text search for one repo; merged into its tree by RepoTree.
+export function searchContent(repoId, q, ref) {
+  clearTimeout(_searchTimers[repoId])
+  _searchTimers[repoId] = setTimeout(async () => {
+    const query = q.trim()
+    if (store.filter.trim() !== query) return // stale
+    try {
+      const data = await api.searchDocs(repoId, query, ref)
+      store.contentHits[repoId] = { q: query, paths: data.items.map((i) => i.path) }
+    } catch { /* ignore search errors — filename filter still works */ }
+  }, 350)
+}
+
+// Every loaded doc across all repos — backs the Ctrl+K quick-open palette.
+export function allLoadedDocs() {
+  const out = []
+  for (const repo of store.repos) {
+    const t = store.trees[repo.id]
+    if (!t?.entries) continue
+    const ref = store.selectedRef[repo.id] || repo.default_branch
+    for (const e of t.entries) {
+      out.push({ repoId: repo.id, repoName: repo.full_name, path: e.path, ref })
+    }
+  }
+  return out
+}
 
 export async function loadRepos() {
   store.reposLoading = true

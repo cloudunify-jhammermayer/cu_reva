@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 
 from app.dependencies import get_db, get_github_client, get_settings
+from app.doc_cache import clear_all
 from app.main import app
 from app.settings import Settings
 from reva.db import Base, Database, create_engine_from_url, writers
@@ -56,8 +57,10 @@ def env():
     )
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_settings] = lambda: settings
+    clear_all()  # the docs caches are module-level — reset to avoid cross-test bleed
     yield TestClient(app), db, settings
     app.dependency_overrides.clear()
+    clear_all()
 
 
 def _seed_repo(db, owner="acme", name="widgets", branch="main", enabled=True):
@@ -120,6 +123,7 @@ def test_tree_returns_only_markdown_under_custom_addons(env):
         "tree": [
             {"path": "custom_addons/cu_x/docs/consultant.md", "type": "blob", "size": 10},
             {"path": "custom_addons/cu_x/README.md", "type": "blob", "size": 5},
+            {"path": "custom_addons/cu_x/CLAUDE.md", "type": "blob", "size": 4},  # agent file, hidden
             {"path": "custom_addons/cu_x/app.py", "type": "blob", "size": 99},  # not markdown
             {"path": "custom_addons/cu_x/docs", "type": "tree"},                # directory
             {"path": "docs/architecture.md", "type": "blob", "size": 7},        # out of scope
@@ -188,6 +192,51 @@ def test_file_path_traversal_is_422(env):
     rid = _seed_repo(db)
     _use_github(_FakeGitHub())
     assert client.get(f"/repo-docs/repos/{rid}/file?path=../../etc/passwd.md").status_code == 422
+
+
+# --- GET /repo-docs/repos/{id}/search -----------------------------------------
+
+def test_search_matches_content_with_snippet(env):
+    client, db, _ = env
+    rid = _seed_repo(db)
+    _use_github(_FakeGitHub(
+        tree={"tree": [
+            {"path": "custom_addons/cu_x/docs/a.md", "type": "blob", "size": 1},
+            {"path": "custom_addons/cu_x/docs/b.md", "type": "blob", "size": 1},
+        ], "truncated": False},
+        files={
+            "custom_addons/cu_x/docs/a.md": "# Alpha\nthe kardex ledger tracks moves\n",
+            "custom_addons/cu_x/docs/b.md": "# Beta\nnothing relevant\n",
+        },
+    ))
+    body = client.get(f"/repo-docs/repos/{rid}/search?q=kardex").json()
+    assert [h["path"] for h in body["items"]] == ["custom_addons/cu_x/docs/a.md"]
+    assert "kardex" in body["items"][0]["snippet"].lower()
+
+
+def test_search_matches_filename_with_empty_snippet(env):
+    client, db, _ = env
+    rid = _seed_repo(db)
+    _use_github(_FakeGitHub(
+        tree={"tree": [
+            {"path": "custom_addons/cu_x/docs/testguide.md", "type": "blob", "size": 1},
+            {"path": "custom_addons/cu_x/docs/other.md", "type": "blob", "size": 1},
+        ], "truncated": False},
+        files={
+            "custom_addons/cu_x/docs/testguide.md": "# Guide\nbody\n",
+            "custom_addons/cu_x/docs/other.md": "# Other\nbody\n",
+        },
+    ))
+    body = client.get(f"/repo-docs/repos/{rid}/search?q=testguide").json()
+    assert [h["path"] for h in body["items"]] == ["custom_addons/cu_x/docs/testguide.md"]
+    assert body["items"][0]["snippet"] == ""
+
+
+def test_search_requires_min_length(env):
+    client, db, _ = env
+    rid = _seed_repo(db)
+    _use_github(_FakeGitHub())
+    assert client.get(f"/repo-docs/repos/{rid}/search?q=a").status_code == 422
 
 
 # --- GET /repo-docs/repos/{id}/raw --------------------------------------------

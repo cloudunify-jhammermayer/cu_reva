@@ -47,3 +47,15 @@ class DocBranchList(BaseModel):
     repository_id: int
     default_branch: str
     items: list[DocBranch]
+
+
+class DocSearchHit(BaseModel):
+    path: str
+    snippet: str
+
+
+class DocSearch(BaseModel):
+    repository_id: int
+    ref: str
+    q: str
+    items: list[DocSearchHit]

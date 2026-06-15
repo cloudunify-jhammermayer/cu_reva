@@ -1,7 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue'
-import { store, loadTree, setBranch } from '../store.js'
-import { route } from '../location.js'
+import { ref, computed, watch } from 'vue'
+import { store, loadTree, setBranch, searchContent } from '../store.js'
 import { buildDocTree } from '../tree.js'
 import DocTreeNode from './DocTreeNode.vue'
 
@@ -13,15 +12,18 @@ const branches = computed(() => store.branches[props.repo.id])
 const selectedRef = computed(() => store.selectedRef[props.repo.id] || props.repo.default_branch)
 const filtering = computed(() => store.filter.trim() !== '')
 
-// Files matching the filter (substring on full path), then folded into a tree.
+// Files matching the filter — by path, plus full-text hits from the backend.
 const filteredEntries = computed(() => {
   const entries = tree.value?.entries ?? []
-  const f = store.filter.trim().toLowerCase()
-  return f ? entries.filter((e) => e.path.toLowerCase().includes(f)) : entries
+  const q = store.filter.trim()
+  if (!q) return entries
+  const f = q.toLowerCase()
+  const hits = store.contentHits[props.repo.id]
+  const contentPaths = hits && hits.q === q ? new Set(hits.paths) : null
+  return entries.filter((e) => e.path.toLowerCase().includes(f) || contentPaths?.has(e.path))
 })
 const nodes = computed(() => buildDocTree(filteredEntries.value))
 
-// Open when manually expanded, or when a filter is active and this repo matches.
 const open = computed(() => manualOpen.value || (filtering.value && nodes.value.length > 0))
 
 function toggle() {
@@ -32,13 +34,23 @@ function toggle() {
 function onBranchChange(e) {
   setBranch(props.repo.id, e.target.value)
 }
+
+// Run a (debounced) full-text search whenever this repo is open and the query
+// changes. Guarded so content-hit updates don't re-trigger it.
+watch(
+  () => (open.value ? store.filter.trim() : ''),
+  (q) => {
+    if (q.length >= 2) searchContent(props.repo.id, q, selectedRef.value)
+  },
+)
 </script>
 
 <template>
   <div class="repo">
-    <button class="repo-name" @click="toggle">
+    <button class="repo-name" :class="{ empty: tree?.loaded && !tree.entries.length }" @click="toggle">
       <span class="chev">{{ open ? '▾' : '▸' }}</span>
       <span class="repo-label">{{ repo.full_name }}</span>
+      <span v-if="tree?.loaded" class="repo-count">{{ tree.entries.length || 'no docs' }}</span>
     </button>
     <div v-if="open" class="files">
       <div v-if="branches?.items?.length" class="branch-row">

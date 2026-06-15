@@ -16,12 +16,21 @@ docs site across all repos).
 from __future__ import annotations
 
 import mimetypes
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.dependencies import get_db, get_github_client
+from app.doc_cache import branches_cache, file_cache, tree_cache
 from app.queries import repos as repo_q
-from app.schemas.docs import DocBranchList, DocFile, DocsRepo, DocsRepoList, DocTree
+from app.schemas.docs import (
+    DocBranchList,
+    DocFile,
+    DocSearch,
+    DocsRepo,
+    DocsRepoList,
+    DocTree,
+)
 from reva.db.engine import Database
 from reva.db.repo_lookup import get_repo_meta
 from reva.errors import PermanentError, TransientError
@@ -39,6 +48,11 @@ ASSET_EXTENSIONS = (
 # reva/diff_utils.py). Top-level docs/, 3rd_party_addons/, .claude/, etc. are
 # intentionally excluded — consultants only want the custom addons' docs.
 SCOPE_PREFIXES = ("custom_addons/", "custom-addons/")
+# CLAUDE.md files are agent instructions, not consultant docs — hide them.
+EXCLUDED_BASENAMES = ("CLAUDE.md",)
+# Bounds for full-text search (first call fetches files; cached thereafter).
+MAX_SEARCH_FILES = 300
+MAX_SEARCH_RESULTS = 50
 
 
 def _safe_path(path: str) -> str:
@@ -58,6 +72,58 @@ def _meta_and_token(db: Database, github, repository_id: int):
         raise HTTPException(status_code=404, detail=f"Repository {repository_id} not found")
     token = github.get_installation_token(meta["installation_id"])
     return meta, token
+
+
+def _in_scope(path: str) -> bool:
+    return (
+        path.lower().endswith(DOC_EXTENSIONS)
+        and path.startswith(SCOPE_PREFIXES)
+        and not path.endswith(tuple("/" + b for b in EXCLUDED_BASENAMES))
+    )
+
+
+def _cached_tree(github, repository_id, owner, name, ref, token) -> dict:
+    """{entries, truncated} for a repo+ref, cached. Raises Permanent/Transient
+    on the underlying GitHub call (caller maps to 404/502)."""
+    key = (repository_id, ref)
+    hit = tree_cache.get(key)
+    if hit is not None:
+        return hit
+    tree = github.get_tree(token, owner, name, ref)
+    entries = sorted(
+        (
+            {"path": e["path"], "size": e.get("size")}
+            for e in tree.get("tree", [])
+            if e.get("type") == "blob" and _in_scope(e["path"])
+        ),
+        key=lambda e: e["path"],
+    )
+    result = {"entries": entries, "truncated": bool(tree.get("truncated"))}
+    tree_cache.set(key, result)
+    return result
+
+
+def _cached_file(github, repository_id, owner, name, path, ref, token) -> str | None:
+    """Markdown text for a file, cached. None on 404 (not cached)."""
+    key = (repository_id, ref, path)
+    hit = file_cache.get(key)
+    if hit is not None:
+        return hit
+    content = github.get_file_content(token, owner, name, path, ref)
+    if content is not None:
+        file_cache.set(key, content)
+    return content
+
+
+def _snippet(content: str | None, q_lower: str) -> str:
+    """First content line containing the query, trimmed — '' if only the
+    filename matched."""
+    if not content:
+        return ""
+    for line in content.splitlines():
+        if q_lower in line.lower():
+            return line.strip()[:160]
+    return ""
 
 
 @router.get("/repos", response_model=DocsRepoList)
@@ -87,6 +153,9 @@ def doc_branches(
 ) -> dict:
     """Branches for the repo's branch picker — default branch flagged and sorted
     first, then the rest alphabetically."""
+    hit = branches_cache.get(repository_id)
+    if hit is not None:
+        return hit
     meta, token = _meta_and_token(db, github, repository_id)
     try:
         branches = github.get_branches(token, meta["owner"], meta["name"])
@@ -100,7 +169,9 @@ def doc_branches(
         for b in branches
     ]
     items.sort(key=lambda b: (not b["is_default"], b["name"].lower()))
-    return {"repository_id": repository_id, "default_branch": default, "items": items}
+    result = {"repository_id": repository_id, "default_branch": default, "items": items}
+    branches_cache.set(repository_id, result)
+    return result
 
 
 @router.get("/repos/{repository_id}/tree", response_model=DocTree)
@@ -116,27 +187,12 @@ def doc_tree(
     meta, token = _meta_and_token(db, github, repository_id)
     ref = ref or meta["default_branch"]
     try:
-        tree = github.get_tree(token, meta["owner"], meta["name"], ref)
+        result = _cached_tree(github, repository_id, meta["owner"], meta["name"], ref, token)
     except PermanentError:
         raise HTTPException(status_code=404, detail=f"Tree not found for ref {ref!r}")
     except TransientError:
         raise HTTPException(status_code=502, detail="Upstream GitHub error")
-    entries = sorted(
-        (
-            {"path": e["path"], "size": e.get("size")}
-            for e in tree.get("tree", [])
-            if e.get("type") == "blob"
-            and e["path"].lower().endswith(DOC_EXTENSIONS)
-            and e["path"].startswith(SCOPE_PREFIXES)
-        ),
-        key=lambda e: e["path"],
-    )
-    return {
-        "repository_id": repository_id,
-        "ref": ref,
-        "entries": entries,
-        "truncated": bool(tree.get("truncated")),
-    }
+    return {"repository_id": repository_id, "ref": ref, **result}
 
 
 @router.get("/repos/{repository_id}/file", response_model=DocFile)
@@ -155,12 +211,55 @@ def doc_file(
     meta, token = _meta_and_token(db, github, repository_id)
     ref = ref or meta["default_branch"]
     try:
-        content = github.get_file_content(token, meta["owner"], meta["name"], safe, ref)
+        content = _cached_file(github, repository_id, meta["owner"], meta["name"], safe, ref, token)
     except TransientError:
         raise HTTPException(status_code=502, detail="Upstream GitHub error")
     if content is None:
         raise HTTPException(status_code=404, detail="File not found")
     return {"repository_id": repository_id, "path": safe, "ref": ref, "content": content}
+
+
+@router.get("/repos/{repository_id}/search", response_model=DocSearch)
+def doc_search(
+    repository_id: int,
+    q: str = Query(..., min_length=2),
+    ref: str | None = None,
+    db: Database = Depends(get_db),
+    github=Depends(get_github_client),
+) -> dict:
+    """Full-text search within one repo+ref: match the query against doc paths
+    and contents, returning a snippet per hit. Files are fetched concurrently and
+    cached, so the first search of a repo is the slow one."""
+    meta, token = _meta_and_token(db, github, repository_id)
+    ref = ref or meta["default_branch"]
+    owner, name = meta["owner"], meta["name"]
+    try:
+        tree = _cached_tree(github, repository_id, owner, name, ref, token)
+    except PermanentError:
+        raise HTTPException(status_code=404, detail=f"Tree not found for ref {ref!r}")
+    except TransientError:
+        raise HTTPException(status_code=502, detail="Upstream GitHub error")
+
+    ql = q.lower()
+    paths = [e["path"] for e in tree["entries"]][:MAX_SEARCH_FILES]
+
+    def check(path):
+        try:
+            content = _cached_file(github, repository_id, owner, name, path, ref, token)
+        except TransientError:
+            content = None
+        if ql in path.lower() or (content and ql in content.lower()):
+            return {"path": path, "snippet": _snippet(content, ql)}
+        return None
+
+    items = []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for hit in pool.map(check, paths):
+            if hit:
+                items.append(hit)
+                if len(items) >= MAX_SEARCH_RESULTS:
+                    break
+    return {"repository_id": repository_id, "ref": ref, "q": q, "items": items}
 
 
 @router.get("/repos/{repository_id}/raw")
