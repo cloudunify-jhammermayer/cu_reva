@@ -1,7 +1,9 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { store, loadTree, setBranch } from '../store.js'
-import { route, navigate } from '../location.js'
+import { route } from '../location.js'
+import { buildDocTree } from '../tree.js'
+import DocTreeNode from './DocTreeNode.vue'
 
 const props = defineProps({ repo: { type: Object, required: true } })
 
@@ -11,14 +13,16 @@ const branches = computed(() => store.branches[props.repo.id])
 const selectedRef = computed(() => store.selectedRef[props.repo.id] || props.repo.default_branch)
 const filtering = computed(() => store.filter.trim() !== '')
 
-const filtered = computed(() => {
+// Files matching the filter (substring on full path), then folded into a tree.
+const filteredEntries = computed(() => {
   const entries = tree.value?.entries ?? []
   const f = store.filter.trim().toLowerCase()
   return f ? entries.filter((e) => e.path.toLowerCase().includes(f)) : entries
 })
+const nodes = computed(() => buildDocTree(filteredEntries.value))
 
 // Open when manually expanded, or when a filter is active and this repo matches.
-const open = computed(() => manualOpen.value || (filtering.value && filtered.value.length > 0))
+const open = computed(() => manualOpen.value || (filtering.value && nodes.value.length > 0))
 
 function toggle() {
   manualOpen.value = !manualOpen.value
@@ -28,8 +32,6 @@ function toggle() {
 function onBranchChange(e) {
   setBranch(props.repo.id, e.target.value)
 }
-
-const isActive = (path) => route.value.repoId === props.repo.id && route.value.path === path
 </script>
 
 <template>
@@ -53,15 +55,15 @@ const isActive = (path) => route.value.repoId === props.repo.id && route.value.p
       <p v-else-if="tree?.error" class="error">{{ tree.error }}</p>
       <template v-else>
         <p v-if="tree?.truncated" class="muted warn">⚠ tree truncated by GitHub</p>
-        <p v-if="!filtered.length" class="muted">{{ filtering ? 'No matches.' : 'No docs.' }}</p>
-        <a
-          v-for="e in filtered"
-          :key="e.path"
-          class="file"
-          :class="{ active: isActive(e.path) }"
-          :href="`?repo=${repo.id}&path=${encodeURIComponent(e.path)}&ref=${encodeURIComponent(selectedRef)}`"
-          @click.prevent="navigate(repo.id, e.path, selectedRef)"
-        >{{ e.path }}</a>
+        <p v-if="!nodes.length" class="muted">{{ filtering ? 'No matches.' : 'No docs.' }}</p>
+        <DocTreeNode
+          v-for="node in nodes"
+          :key="node.path || node.name"
+          :node="node"
+          :repo-id="repo.id"
+          :branch-ref="selectedRef"
+          :force-open="filtering"
+        />
       </template>
     </div>
   </div>

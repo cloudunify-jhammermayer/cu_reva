@@ -95,7 +95,26 @@ body {
 .chev { color: var(--text-faint); width: 10px; flex: 0 0 10px; font-size: 10px; }
 .repo-label { overflow-wrap: anywhere; }
 
-.files { padding: 0 0 6px 16px; }
+.files { padding: 0 0 6px 0; } /* indentation is per-node (DocTreeNode inline padding) */
+
+.folder {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.folder:hover { background: rgba(255, 255, 255, 0.05); color: var(--text-normal); }
+.folder-name { overflow-wrap: anywhere; }
+
 .file {
   display: block;
   padding: 4px 8px;

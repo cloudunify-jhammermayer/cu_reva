@@ -35,6 +35,10 @@ DOC_EXTENSIONS = (".md", ".markdown")
 ASSET_EXTENSIONS = (
     ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".ico", ".bmp", ".pdf",
 )
+# The tree is scoped to addon paths (mirrors REVA's review scope in
+# reva/diff_utils.py). Top-level docs/, 3rd_party_addons/, .claude/, etc. are
+# intentionally excluded — consultants only want the custom addons' docs.
+SCOPE_PREFIXES = ("custom_addons/", "custom-addons/")
 
 
 def _safe_path(path: str) -> str:
@@ -121,7 +125,9 @@ def doc_tree(
         (
             {"path": e["path"], "size": e.get("size")}
             for e in tree.get("tree", [])
-            if e.get("type") == "blob" and e["path"].lower().endswith(DOC_EXTENSIONS)
+            if e.get("type") == "blob"
+            and e["path"].lower().endswith(DOC_EXTENSIONS)
+            and e["path"].startswith(SCOPE_PREFIXES)
         ),
         key=lambda e: e["path"],
     )
