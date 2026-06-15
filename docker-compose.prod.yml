@@ -9,7 +9,10 @@
 
 services:
   nginx:
-    build: ./nginx
+    build:
+      # Root context so the image can also build the docs SPA from docs-ui/.
+      context: .
+      dockerfile: nginx/Dockerfile
     ports:
       # Loopback only — the Cloudflare tunnel (cloudflared on the host) is the
       # sole ingress; nothing is exposed publicly. Point cloudflared at this.

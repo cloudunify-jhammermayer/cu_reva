@@ -76,8 +76,39 @@ server {
         proxy_pass http://api:8080;
     }
 
-    # No browser dashboard is served — operations use the Go TUI against the
-    # internal API. Everything else is closed off.
+    # --- Consultant docs site -------------------------------------------------
+    # The SPA (/docs) and its data API (/repo-docs) are the only human-facing
+    # surface. Gate BOTH with a Cloudflare Access application at the edge; leave
+    # /webhooks (GitHub can't SSO), /api, and /health untouched.
+
+    # Docs data API — browser-driven, so reuse the per-IP api rate-limit zone.
+    location /repo-docs/ {
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://api:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    # Hashed, immutable Vite assets — cache hard. (Listed before /docs/ so the
+    # regex wins for asset files; index.html stays uncached so deploys take.)
+    location ~* ^/docs/assets/.*\.(js|css|svg|png|woff2?)$ {
+        root /usr/share/nginx/html;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+
+    # Docs SPA static files (built into the image at /usr/share/nginx/html/docs).
+    location = /docs { return 301 /docs/; }
+    location /docs/ {
+        root /usr/share/nginx/html;
+        try_files $uri $uri/ /docs/index.html;
+    }
+
+    # No other browser surface — operations use the Go TUI against the internal
+    # API. Everything else is closed off.
     location / {
         return 404;
     }

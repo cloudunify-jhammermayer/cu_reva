@@ -177,6 +177,60 @@ class GitHubClient:
             return None
         return response.text
 
+    def get_tree(
+        self, token: str, owner: str, repo: str, ref: str, recursive: bool = True
+    ) -> dict:
+        """Full git tree at `ref` (branch name or commit SHA).
+
+        Returns the raw GitHub payload: ``{"tree": [...], "truncated": bool}``,
+        where each entry is ``{"path", "type" ("blob"|"tree"), "sha", "size"?}``.
+        Lets the docs surface enumerate a repo's files without cloning it.
+        `ref` is a single path segment (default branch / SHA); slashed branch
+        names aren't supported here — the docs endpoints only pass the default
+        branch."""
+        params = {"recursive": "1"} if recursive else None
+        response = self._get(
+            token, f"/repos/{owner}/{repo}/git/trees/{quote(ref, safe='')}", params=params
+        )
+        return response.json()
+
+    def get_raw_file(
+        self, token: str, owner: str, repo: str, path: str, ref: str
+    ) -> bytes | None:
+        """Raw bytes of a file at `ref` (for doc-embedded images/assets), or None
+        on 404. Mirrors get_file_content's path-encoding and 404 handling but
+        returns bytes rather than decoded text."""
+        try:
+            response = self._get(
+                token,
+                f"/repos/{owner}/{repo}/contents/{quote(path, safe='/')}",
+                params={"ref": ref},
+                extra_headers={"Accept": "application/vnd.github.raw"},
+                allow_404=True,
+            )
+        except NotFound:
+            return None
+        return response.content
+
+    def get_branches(self, token: str, owner: str, repo: str) -> list[dict]:
+        """All branches as ``[{"name", "sha"}]`` (paginated). Backs the docs UI
+        branch picker; the head SHA is what the tree endpoint needs, since the
+        Git Trees API wants a tree-ish, not a (possibly slashed) branch name."""
+        out: list[dict] = []
+        for page in range(1, MAX_FILE_PAGES + 1):
+            response = self._get(
+                token,
+                f"/repos/{owner}/{repo}/branches",
+                params={"per_page": PAGE_SIZE, "page": page},
+            )
+            batch = response.json()
+            if not batch:
+                break
+            out.extend({"name": b["name"], "sha": b["commit"]["sha"]} for b in batch)
+            if len(batch) < PAGE_SIZE:
+                break
+        return out
+
     def get_issue(
         self, token: str, owner: str, repo: str, issue_number: int
     ) -> dict | None:
