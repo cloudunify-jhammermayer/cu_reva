@@ -113,21 +113,25 @@ def test_branches_unknown_repo_404(env):
 
 # --- GET /repo-docs/repos/{id}/tree -------------------------------------------
 
-def test_tree_returns_only_markdown_blobs_sorted(env):
+def test_tree_returns_only_markdown_under_custom_addons(env):
     client, db, _ = env
     rid = _seed_repo(db)
     _use_github(_FakeGitHub(tree={
         "tree": [
-            {"path": "docs/intro.md", "type": "blob", "size": 10},
-            {"path": "README.md", "type": "blob", "size": 5},
-            {"path": "src/app.py", "type": "blob", "size": 99},
-            {"path": "docs", "type": "tree"},
-            {"path": "GUIDE.MARKDOWN", "type": "blob", "size": 7},
+            {"path": "custom_addons/cu_x/docs/consultant.md", "type": "blob", "size": 10},
+            {"path": "custom_addons/cu_x/README.md", "type": "blob", "size": 5},
+            {"path": "custom_addons/cu_x/app.py", "type": "blob", "size": 99},  # not markdown
+            {"path": "custom_addons/cu_x/docs", "type": "tree"},                # directory
+            {"path": "docs/architecture.md", "type": "blob", "size": 7},        # out of scope
+            {"path": "README.md", "type": "blob", "size": 3},                   # out of scope
         ],
         "truncated": False,
     }))
     body = client.get(f"/repo-docs/repos/{rid}/tree").json()
-    assert [e["path"] for e in body["entries"]] == ["GUIDE.MARKDOWN", "README.md", "docs/intro.md"]
+    assert [e["path"] for e in body["entries"]] == [
+        "custom_addons/cu_x/README.md",
+        "custom_addons/cu_x/docs/consultant.md",
+    ]
     assert body["ref"] == "main"
     assert body["truncated"] is False
 
