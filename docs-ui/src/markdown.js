@@ -1,10 +1,9 @@
-// Markdown -> sanitized HTML, with repo-relative links/images rewritten so docs
-// render correctly outside their repo:
-//   - relative <img> -> the /raw proxy (private repos can't use github raw URLs)
-//   - relative *.md links -> in-app navigation (data-doc-path, handled in DocView)
-//   - relative non-doc links -> GitHub blob URL in a new tab
-//   - external/anchor links left intact (anchors scroll natively under our
-//     query-param router)
+// Markdown -> { html (sanitized), toc, hasMermaid }.
+//
+// - Repo-relative links/images are rewritten so docs render outside their repo
+//   (images -> /raw proxy; *.md links -> in-app nav; other -> GitHub blob).
+// - Headings get GitHub-style slug ids + a click-to-anchor, and feed the TOC.
+// - ```mermaid blocks become <div class="mermaid"> for DocView to render lazily.
 // DOMPurify runs before any rewrite, so doc content can never inject script.
 
 import MarkdownIt from 'markdown-it'
@@ -16,16 +15,16 @@ const md = new MarkdownIt({
   html: true,
   linkify: true,
   highlight(code, lang) {
-    if (lang && hljs.getLanguage(lang)) {
+    // Leave mermaid for DocView; highlight known languages, escape the rest.
+    if (lang && lang !== 'mermaid' && hljs.getLanguage(lang)) {
       try {
         return hljs.highlight(code, { language: lang }).value
-      } catch { /* fall through to default escaping */ }
+      } catch { /* fall through */ }
     }
     return ''
   },
 })
 
-// http:, https:, mailto:, data:, protocol-relative //, or in-page #anchor.
 const EXTERNAL = /^([a-z][a-z0-9+.-]*:|\/\/|#)/i
 
 function dirname(p) {
@@ -33,7 +32,6 @@ function dirname(p) {
   return i === -1 ? '' : p.slice(0, i)
 }
 
-// Resolve a relative ref against the directory of the current doc.
 function resolvePath(baseDir, rel) {
   const stack = baseDir ? baseDir.split('/') : []
   for (const part of rel.split('/')) {
@@ -44,6 +42,16 @@ function resolvePath(baseDir, rel) {
   return stack.join('/')
 }
 
+// GitHub-style heading slug, deduped with -1/-2 suffixes.
+function slugify(text, seen) {
+  const base = text.toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-') || 'section'
+  let slug = base
+  let n = 1
+  while (seen.has(slug)) slug = `${base}-${n++}`
+  seen.add(slug)
+  return slug
+}
+
 export function renderMarkdown(markdown, { repoId, path, owner, name, branch }) {
   const baseDir = dirname(path)
   const clean = DOMPurify.sanitize(md.render(markdown || ''), { USE_PROFILES: { html: true } })
@@ -51,6 +59,7 @@ export function renderMarkdown(markdown, { repoId, path, owner, name, branch }) 
   const tpl = document.createElement('template')
   tpl.innerHTML = clean
 
+  // Relative images -> /raw proxy.
   for (const img of tpl.content.querySelectorAll('img[src]')) {
     const src = img.getAttribute('src')
     if (src && !EXTERNAL.test(src)) {
@@ -59,6 +68,7 @@ export function renderMarkdown(markdown, { repoId, path, owner, name, branch }) 
     }
   }
 
+  // Links: in-repo .md -> in-app nav; other repo files -> GitHub; external -> new tab.
   for (const a of tpl.content.querySelectorAll('a[href]')) {
     const href = a.getAttribute('href')
     if (!href) continue
@@ -75,6 +85,7 @@ export function renderMarkdown(markdown, { repoId, path, owner, name, branch }) 
       const r = branch ? `&ref=${encodeURIComponent(branch)}` : ''
       a.setAttribute('href', `?repo=${repoId}&path=${encodeURIComponent(resolved)}${r}${anchor ? '#' + anchor : ''}`)
       a.setAttribute('data-doc-path', resolved)
+      if (anchor) a.setAttribute('data-doc-anchor', anchor)
     } else if (owner && name) {
       a.setAttribute('href', `https://github.com/${owner}/${name}/blob/${branch}/${resolved}`)
       a.setAttribute('target', '_blank')
@@ -82,5 +93,31 @@ export function renderMarkdown(markdown, { repoId, path, owner, name, branch }) 
     }
   }
 
-  return tpl.innerHTML
+  // Heading anchors + table of contents (h2/h3).
+  const seen = new Set()
+  const toc = []
+  for (const h of tpl.content.querySelectorAll('h1, h2, h3, h4')) {
+    const id = slugify(h.textContent || '', seen)
+    h.id = id
+    const link = document.createElement('a')
+    link.className = 'heading-anchor'
+    link.setAttribute('href', `#${id}`)
+    link.setAttribute('aria-label', 'Link to this section')
+    link.textContent = '#'
+    h.prepend(link)
+    const level = Number(h.tagName[1])
+    if (level === 2 || level === 3) toc.push({ level, text: (h.textContent || '').replace(/^#/, ''), id })
+  }
+
+  // Fenced ```mermaid -> <div class="mermaid"> (rendered lazily in DocView).
+  let hasMermaid = false
+  for (const code of tpl.content.querySelectorAll('pre > code.language-mermaid')) {
+    const div = document.createElement('div')
+    div.className = 'mermaid'
+    div.textContent = code.textContent || ''
+    code.parentElement.replaceWith(div)
+    hasMermaid = true
+  }
+
+  return { html: tpl.innerHTML, toc, hasMermaid }
 }

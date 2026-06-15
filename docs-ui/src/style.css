@@ -51,7 +51,17 @@ body {
   overflow: hidden;
 }
 
-.brand { padding: 14px 16px 6px; }
+.brand { padding: 14px 16px 6px; display: flex; align-items: center; justify-content: space-between; }
+.kbd-hint {
+  background: var(--bg-code);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+.kbd-hint:hover { color: var(--text-normal); border-color: var(--accent); }
 .brand h1 {
   font-size: 12px;
   font-weight: 600;
@@ -218,3 +228,103 @@ body {
 .markdown-body th, .markdown-body td { border: 1px solid var(--border-strong); padding: 7px 13px; }
 .markdown-body th { background: rgba(255, 255, 255, 0.04); }
 .markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 2em 0; }
+
+/* Repo doc-count badge (#docs once the tree is loaded). */
+.repo-count {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-faint);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 0 7px;
+}
+.repo-name.empty { color: var(--text-faint); }
+.repo-name.empty .repo-count { background: none; }
+
+/* Heading anchors. */
+.markdown-body :is(h1, h2, h3, h4) { position: relative; }
+.heading-anchor {
+  position: absolute;
+  left: -0.9em;
+  opacity: 0;
+  text-decoration: none;
+  color: var(--text-faint);
+  font-weight: 400;
+}
+.markdown-body :is(h1, h2, h3, h4):hover .heading-anchor { opacity: 1; }
+
+/* On-this-page TOC. */
+.toc {
+  float: right;
+  width: 200px;
+  margin: 0 0 16px 24px;
+  padding: 10px 14px;
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+.toc-title { color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10.5px; margin-bottom: 6px; }
+.toc-link { display: block; color: var(--text-muted); text-decoration: none; padding: 2px 0; }
+.toc-link:hover { color: var(--accent); }
+.toc-sub { padding-left: 12px; }
+
+/* Mermaid diagrams. */
+.markdown-body .mermaid { margin: 1em 0; text-align: center; }
+
+/* Ctrl+K command palette. */
+.palette-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  z-index: 50;
+}
+.palette {
+  width: min(640px, 92vw);
+  background: var(--bg-sidebar);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+.palette-input {
+  width: 100%;
+  padding: 14px 16px;
+  background: var(--bg-code);
+  color: var(--text-normal);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+  outline: none;
+}
+.palette-results { max-height: 50vh; overflow-y: auto; padding: 6px; }
+.palette-item {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text-normal);
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.palette-item.active { background: var(--accent-bg); }
+.palette-path { overflow-wrap: anywhere; }
+.palette-repo { margin-left: auto; color: var(--text-faint); font-size: 11.5px; white-space: nowrap; }
+
+.placeholder kbd {
+  background: var(--bg-code);
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  padding: 1px 6px;
+  font-size: 12px;
+}
