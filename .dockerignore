@@ -1,0 +1,7 @@
+# Keep build contexts lean (all services build from the repo root). These are
+# deps/artifacts never needed inside any image.
+**/node_modules
+**/.venv
+**/__pycache__
+**/*.pyc
+docs-ui/dist
