@@ -1,3 +1,15 @@
+## v1.7 — Re-baseline Tier 2 prompt set
+
+- No new prompt behaviour. The Tier 2 additions promised under v1.6
+  ("Further Tier 2 skill/prompt additions land under this version.") —
+  `reva-migration-review.md`, `reva-xml-review.md`, the `__manifest__.py`
+  checks, intent grounding, and the security-model consistency cross-check —
+  were committed *after* v1.6's content-hash baseline was first recorded, so
+  the worker flagged `prompt_drift_detected` on every boot. Bumping the
+  version snapshots the current files as a fresh immutable baseline and
+  clears the warning; the prompt content itself is unchanged from what v1.6
+  already describes below.
+
 ## v1.6 — Tier 2 review-intelligence prompts
 
 - `reva-delta-review.md`: added an "Already-reported findings" block. Delta
