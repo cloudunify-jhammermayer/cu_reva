@@ -457,6 +457,36 @@ def test_transient_error_bubbles_without_failed_record(ctx_and_fakes):
     # The review_run row exists in "running" state (record_review_started succeeded).
 
 
+def test_task_boundary_swallows_permanent_error_so_rq_does_not_retry(ctx_and_fakes):
+    # The RQ task boundary (worker.tasks.run_review) must NOT re-raise a
+    # PermanentError: RQ's Retry is exception-type-blind, so re-raising would
+    # retry the doomed job and re-alert on each attempt (e.g. a deleted/force-
+    # pushed SHA whose tree can never check out).
+    from worker import tasks
+
+    s = ctx_and_fakes
+    s["reviewer"].raise_exc = PermanentError("git checkout failed: unable to read tree")
+
+    out = tasks.run_review(_params(s))
+
+    assert out["status"] == "failed"
+    assert out["error_class"] == "permanent"
+    # The failure was still recorded + a failure Check Run posted by runner.
+    assert len(s["github"].created_check_runs) == 1
+    assert s["github"].created_check_runs[0]["conclusion"] == "failure"
+
+
+def test_task_boundary_propagates_transient_error_for_rq_retry(ctx_and_fakes):
+    # TransientError must still bubble out of the task boundary so RQ retries.
+    from worker import tasks
+
+    s = ctx_and_fakes
+    s["reviewer"].raise_exc = TransientError("rate limited", retry_after=30)
+
+    with pytest.raises(TransientError):
+        tasks.run_review(_params(s))
+
+
 def test_idempotent_retry_skips_post(ctx_and_fakes):
     s = ctx_and_fakes
     s["reviewer"].result = _completed_result()
