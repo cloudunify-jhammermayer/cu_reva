@@ -19,6 +19,9 @@ class Settings:
     migrations_dir: str = "/app/db/migrations"
     queue_name: str = "reviews"
     default_review_mode: str = "diff"
+    # Auto-audit every repo a newly-installed/added installation grants. When
+    # false, those repos are still registered but no audit job is enqueued.
+    auto_audit_repos: bool = True
     odoo_callback_url: str = ""
     odoo_callback_api_key: str = ""
     api_key: str = ""
@@ -50,6 +53,9 @@ class Settings:
             migrations_dir=os.environ.get("REVA_MIGRATIONS_DIR", "/app/db/migrations"),
             queue_name=os.environ.get("REVA_QUEUE_NAME", "reviews"),
             default_review_mode=os.environ.get("REVA_DEFAULT_REVIEW_MODE", "diff"),
+            auto_audit_repos=os.environ.get("REVA_AUTO_AUDIT_REPOS", "true").lower() in (
+                "1", "true", "yes",
+            ),
             odoo_callback_url=os.environ.get("ODOO_CALLBACK_URL", ""),
             odoo_callback_api_key=env_or_file("ODOO_CALLBACK_API_KEY", "") or "",
             api_key=api_key,

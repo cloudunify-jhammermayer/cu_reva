@@ -851,6 +851,34 @@ def test_installation_repositories_added_audits_new_repos(client_and_db):
     assert [e["func"] for e in q.enqueued] == ["worker.audit_tasks.run_audit"]
 
 
+def test_installation_auto_audit_disabled_registers_but_does_not_enqueue(client_and_db):
+    client, db = client_and_db
+    disabled = Settings(
+        database_url="sqlite:///:memory:",
+        github_app_id=12345,
+        github_webhook_secret=_SECRET,
+        github_private_key="fake",
+        redis_url="redis://localhost:6379/0",
+        debounce_seconds=600,
+        auto_audit_repos=False,
+    )
+    app.dependency_overrides[get_settings] = lambda: disabled
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    app.state.github = _FakeGitHub()
+    try:
+        resp = _post(client, _installation_payload(), event="installation",
+                     delivery="instnoaudit")
+    finally:
+        app.state.rq_queue = None
+        app.state.github = None
+    assert resp.status_code == 202
+    # Repos still registered, but no audit jobs enqueued.
+    with db.session() as s:
+        assert s.query(Repository).count() == 2
+    assert q.enqueued == []
+
+
 def test_installation_repo_fetch_failure_skips_repo_not_delivery(client_and_db):
     client, db = client_and_db
 

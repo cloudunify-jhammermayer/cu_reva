@@ -108,9 +108,9 @@ def _process_delivery(
         elif event == "issues":
             _handle_issues(payload, rq_queue)
         elif event == "installation":
-            _handle_installation(db, payload, github, rq_queue)
+            _handle_installation(db, payload, settings, github, rq_queue)
         elif event == "installation_repositories":
-            _handle_installation_repositories(db, payload, github, rq_queue)
+            _handle_installation_repositories(db, payload, settings, github, rq_queue)
     except (KeyError, TypeError) as exc:
         # A malformed/partial payload shape (missing key, wrong type) is not
         # fixable by redelivery — mark it processed so GitHub doesn't loop the
@@ -589,7 +589,8 @@ def _handle_issue_comment(db: Database, payload: dict, settings: Settings, githu
     )
 
 
-def _handle_installation(db: Database, payload: dict, github, rq_queue) -> None:
+def _handle_installation(db: Database, payload: dict, settings: Settings, github,
+                         rq_queue) -> None:
     """App freshly installed → register and audit every repo it was granted.
 
     Only the 'created' action matters; 'deleted'/'suspend'/etc. are stored but
@@ -601,10 +602,12 @@ def _handle_installation(db: Database, payload: dict, github, rq_queue) -> None:
     installation_id = (payload.get("installation") or {}).get("id")
     if not installation_id:
         return
-    _audit_installed_repos(db, github, rq_queue, installation_id, payload.get("repositories"))
+    _audit_installed_repos(db, settings, github, rq_queue, installation_id,
+                           payload.get("repositories"))
 
 
-def _handle_installation_repositories(db: Database, payload: dict, github, rq_queue) -> None:
+def _handle_installation_repositories(db: Database, payload: dict, settings: Settings,
+                                      github, rq_queue) -> None:
     """Repos added to an existing installation → audit the newly-added ones."""
     if payload.get("action") != "added":
         return
@@ -612,17 +615,21 @@ def _handle_installation_repositories(db: Database, payload: dict, github, rq_qu
     if not installation_id:
         return
     _audit_installed_repos(
-        db, github, rq_queue, installation_id, payload.get("repositories_added")
+        db, settings, github, rq_queue, installation_id,
+        payload.get("repositories_added"),
     )
 
 
-def _audit_installed_repos(db: Database, github, rq_queue, installation_id: int,
-                           repos: list | None) -> None:
+def _audit_installed_repos(db: Database, settings: Settings, github, rq_queue,
+                           installation_id: int, repos: list | None) -> None:
     """Register each repo and enqueue a full audit job (which clones it itself).
 
     Best-effort per repo: a missing client or a GitHub fetch failure skips that
     repo and logs, never the whole delivery — the same resilience as the ack and
     PR-fetch paths. The audit job clones the repo and respects the spend cap.
+
+    When `settings.auto_audit_repos` is false the repos are still registered, but
+    the audit job is not enqueued.
     """
     repos = repos or []
     if not repos:
@@ -660,6 +667,10 @@ def _audit_installed_repos(db: Database, github, rq_queue, installation_id: int,
             default_branch=meta.get("default_branch") or "main",
             installation_id=installation_id,
         )
+        if not settings.auto_audit_repos:
+            logger.info("installation_audit_disabled", repo=meta["full_name"],
+                        repository_id=repo_id)
+            continue
         job = rq_queue.enqueue(
             "worker.audit_tasks.run_audit",
             {
