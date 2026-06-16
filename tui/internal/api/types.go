@@ -3,13 +3,15 @@ package api
 import "time"
 
 type FindingSummary struct {
-	ID         int      `json:"id"`
-	Severity   string   `json:"severity"`
-	Category   string   `json:"category"`
-	Title      string   `json:"title"`
-	Confidence *float64 `json:"confidence"`
-	FilePath   *string  `json:"file_path"`
-	LineStart  *int     `json:"line_start"`
+	ID           int      `json:"id"`
+	Severity     string   `json:"severity"`
+	Category     string   `json:"category"`
+	Title        string   `json:"title"`
+	Confidence   *float64 `json:"confidence"`
+	FilePath     *string  `json:"file_path"`
+	LineStart    *int     `json:"line_start"`
+	RepoFullName string   `json:"repo_full_name"`
+	PRNumber     int      `json:"pr_number"`
 }
 
 type FindingPage struct {

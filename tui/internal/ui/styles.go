@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -149,9 +150,173 @@ func moveCursor(cursor, offset, total, visibleRows int, down bool) (int, int) {
 	return cursor, offset
 }
 
+// clampOffset bounds a scroll offset to [0, max(0, total-visible)] so a
+// free-flowing panel can't scroll past its content. It's the companion to
+// moveCursor: that windows a *selectable* list around a cursor, this windows
+// rendered text lines that have no cursor (detail / findings / feedback panes).
+func clampOffset(offset, total, visible int) int {
+	if visible < 1 {
+		visible = 1
+	}
+	maxOff := total - visible
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if offset < 0 {
+		return 0
+	}
+	if offset > maxOff {
+		return maxOff
+	}
+	return offset
+}
+
+// scrollHint renders a "↑↓ 3–20 of 57" position indicator for a scrollable
+// panel, or "" when all `total` lines already fit in `visible` rows. The arrows
+// show which directions still have hidden content.
+func scrollHint(offset, visible, total int) string {
+	if total <= visible {
+		return ""
+	}
+	end := offset + visible
+	if end > total {
+		end = total
+	}
+	up, down := " ", " "
+	if offset > 0 {
+		up = "↑"
+	}
+	if end < total {
+		down = "↓"
+	}
+	return styleSubtitle.Render(fmt.Sprintf("  %s%s %d–%d of %d", up, down, offset+1, end, total))
+}
+
+// padCell right-pads s to `width` *visible* columns. Unlike fmt's %-*s, it
+// measures with lipgloss.Width, so embedded ANSI color codes (and wide runes)
+// don't count toward the width — the cause of columns shifting when a styled
+// cell sits in a fixed-width table row (only the unselected, colored rows;
+// the selected row pads plain text and stayed aligned).
+func padCell(s string, width int) string {
+	if gap := width - lipgloss.Width(s); gap > 0 {
+		return s + strings.Repeat(" ", gap)
+	}
+	return s
+}
+
+// pageCursor moves the cursor by delta rows (negative = up), clamps it to the
+// list, and recomputes offset so the cursor stays within the visible window.
+// delta may exceed the list size (g/G jumps). Companion to moveCursor's
+// single-step move.
+func pageCursor(cursor, offset, total, visibleRows, delta int) (int, int) {
+	if total <= 0 {
+		return 0, 0
+	}
+	if visibleRows < 1 {
+		visibleRows = 1
+	}
+	cursor += delta
+	if cursor < 0 {
+		cursor = 0
+	} else if cursor > total-1 {
+		cursor = total - 1
+	}
+	if cursor < offset {
+		offset = cursor
+	} else if cursor >= offset+visibleRows {
+		offset = cursor - visibleRows + 1
+	}
+	maxOff := total - visibleRows
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if offset > maxOff {
+		offset = maxOff
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return cursor, offset
+}
+
+// listNav applies the standard list-navigation keys to a (cursor, offset) over
+// `total` rows showing `visibleRows` at once: j/k + arrows (single step),
+// ctrl+d/ctrl+u (half page), pgdown/pgup (full page), g/home and G/end
+// (top/bottom). Returns the new cursor/offset and whether the key was handled,
+// so a tab can `if c, o, ok := listNav(...); ok { ...; return }`.
+func listNav(key string, cursor, offset, total, visibleRows int) (int, int, bool) {
+	half := visibleRows / 2
+	if half < 1 {
+		half = 1
+	}
+	var delta int
+	switch key {
+	case "j", "down":
+		delta = 1
+	case "k", "up":
+		delta = -1
+	case "ctrl+d":
+		delta = half
+	case "ctrl+u":
+		delta = -half
+	case "pgdown":
+		delta = visibleRows
+	case "pgup":
+		delta = -visibleRows
+	case "g", "home":
+		delta = -total
+	case "G", "end":
+		delta = total
+	default:
+		return cursor, offset, false
+	}
+	c, o := pageCursor(cursor, offset, total, visibleRows, delta)
+	return c, o, true
+}
+
+// ensureVisible nudges a scroll offset so display line `line` stays within a
+// `budget`-tall window over `total` lines (top-anchored). Used by grouped lists
+// where group-header lines make the visible count differ from the row count.
+func ensureVisible(offset, line, budget, total int) int {
+	if budget < 1 {
+		budget = 1
+	}
+	if line < offset {
+		offset = line
+	}
+	if line >= offset+budget {
+		offset = line - budget + 1
+	}
+	maxOff := total - budget
+	if maxOff < 0 {
+		maxOff = 0
+	}
+	if offset > maxOff {
+		offset = maxOff
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return offset
+}
+
+// cappedNote returns " · showing N of M" when a list was truncated to fewer
+// rows than exist server-side (the fetch hit its limit), or "" when complete.
+func cappedNote(shown, total int) string {
+	if total > shown {
+		return styleSubtitle.Render(fmt.Sprintf("   ·  showing %d of %d", shown, total))
+	}
+	return ""
+}
+
 // truncate shortens s to at most n characters, counting by runes so multibyte
 // UTF-8 (e.g. accented or CJK text) isn't sliced mid-codepoint (CORR-16).
 func truncate(s string, n int) string {
+	if n <= 0 {
+		// A caller passed a column width that underflowed (e.g. a fixed-column
+		// table on a very narrow terminal). Returning "" beats panicking on r[:n].
+		return ""
+	}
 	r := []rune(s)
 	if len(r) <= n {
 		return s

@@ -168,23 +168,25 @@ def list_findings(
     limit: int = 100,
 ) -> tuple[list[dict], int]:
     with db.session() as s:
-        base = select(ReviewFinding)
+        # Join review_run + repository unconditionally so every finding carries
+        # its repo + PR number (the dashboard filters/links on them).
+        base = (
+            select(ReviewFinding, Repository.full_name, PullRequest.pr_number)
+            .join(ReviewRun, ReviewFinding.review_run_id == ReviewRun.id)
+            .join(Repository, ReviewRun.repository_id == Repository.id)
+            .join(PullRequest, ReviewRun.pull_request_id == PullRequest.id)
+        )
         if severities:
             base = base.where(ReviewFinding.severity.in_(severities))
         if category:
             base = base.where(ReviewFinding.category == category)
         if repo:
-            base = (
-                base
-                .join(ReviewRun, ReviewFinding.review_run_id == ReviewRun.id)
-                .join(Repository, ReviewRun.repository_id == Repository.id)
-                .where(Repository.full_name == repo)
-            )
+            base = base.where(Repository.full_name == repo)
 
         total = s.execute(select(func.count()).select_from(base.subquery())).scalar_one()
-        findings = s.execute(
+        rows = s.execute(
             base.order_by(_SEVERITY_ORDER, ReviewFinding.id.desc()).limit(limit)
-        ).scalars().all()
+        ).all()
 
         items = [
             {
@@ -195,8 +197,10 @@ def list_findings(
                 "confidence": float(f.confidence) if f.confidence is not None else None,
                 "file_path": f.file_path,
                 "line_start": f.line_start,
+                "repo_full_name": full_name,
+                "pr_number": pr_number,
             }
-            for f in findings
+            for f, full_name, pr_number in rows
         ]
     return items, total
 

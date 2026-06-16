@@ -55,11 +55,11 @@ func (p Pending) update(msg tea.Msg) (Pending, tea.Cmd) {
 		if visibleRows < 1 {
 			visibleRows = 1
 		}
+		if c, o, ok := listNav(m.String(), p.cursor, p.offset, len(p.items), visibleRows); ok {
+			p.cursor, p.offset = c, o
+			return p, nil
+		}
 		switch m.String() {
-		case "j", "down":
-			p.cursor, p.offset = moveCursor(p.cursor, p.offset, len(p.items), visibleRows, true)
-		case "k", "up":
-			p.cursor, p.offset = moveCursor(p.cursor, p.offset, len(p.items), visibleRows, false)
 		case "r":
 			p.loading = true
 			return p, p.load()
@@ -129,8 +129,11 @@ func (p Pending) view(w, h int) string {
 				colWhen, formatPendingTimePlain(item),
 			))
 		} else {
-			line = fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s",
-				colStatus, pendingStatusStyle(item.Status).Render(item.Status),
+			// The status cell is colored (ANSI), so pad it by visible width
+			// (padCell) instead of %-*s, or the escape bytes shift every column
+			// after it. formatPendingTime is also colored but is the last column.
+			line = fmt.Sprintf("  %s  %-*s  %-*s  %-*s  %-*s",
+				padCell(pendingStatusStyle(item.Status).Render(item.Status), colStatus),
 				colRepo, repo,
 				colPR, prNum,
 				colEvent, event,

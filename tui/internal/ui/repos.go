@@ -12,11 +12,11 @@ import (
 )
 
 type Repos struct {
-	client  api.ClientIface
-	items   []api.RepoSummary
-	total   int
-	err     error
-	loading bool
+	client    api.ClientIface
+	items     []api.RepoSummary
+	total     int
+	err       error
+	loading   bool
 	cursor    int
 	offset    int
 	width     int
@@ -24,10 +24,28 @@ type Repos struct {
 	statusMsg string
 	adding    bool   // capturing owner/name text input
 	input     string // the add-repo buffer
+	filtering bool   // capturing the `/` filter text
+	filter    string // case-insensitive substring on full_name
 }
 
 func newRepos(client api.ClientIface) Repos {
 	return Repos{client: client, loading: true}
+}
+
+// filtered returns the repos matching the active `/` filter (case-insensitive
+// substring on owner/name), or all of them when no filter is set.
+func (r Repos) filtered() []api.RepoSummary {
+	if r.filter == "" {
+		return r.items
+	}
+	q := strings.ToLower(r.filter)
+	out := make([]api.RepoSummary, 0, len(r.items))
+	for _, it := range r.items {
+		if strings.Contains(strings.ToLower(it.FullName), q) {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 func (r Repos) load() tea.Cmd {
@@ -99,25 +117,48 @@ func (r Repos) update(msg tea.Msg) (Repos, tea.Cmd) {
 			return r, nil
 		}
 
+		// Filter-input mode: capture keys for the `/` substring filter.
+		if r.filtering {
+			switch m.Type {
+			case tea.KeyEsc:
+				r.filtering, r.filter = false, ""
+				r.cursor, r.offset = 0, 0
+			case tea.KeyEnter:
+				r.filtering = false
+			case tea.KeyBackspace:
+				if len(r.filter) > 0 {
+					r.filter = r.filter[:len(r.filter)-1]
+					r.cursor, r.offset = 0, 0
+				}
+			case tea.KeyRunes, tea.KeySpace:
+				r.filter += string(m.Runes)
+				r.cursor, r.offset = 0, 0
+			}
+			return r, nil
+		}
+
 		visibleRows := r.height - 5
 		if visibleRows < 1 {
 			visibleRows = 1
 		}
+		items := r.filtered()
+		if c, o, ok := listNav(m.String(), r.cursor, r.offset, len(items), visibleRows); ok {
+			r.cursor, r.offset = c, o
+			return r, nil
+		}
 		switch m.String() {
+		case "/":
+			r.filtering, r.statusMsg = true, ""
 		case "n":
 			r.adding, r.input, r.statusMsg = true, "", ""
-		case "j", "down":
-			r.cursor, r.offset = moveCursor(r.cursor, r.offset, len(r.items), visibleRows, true)
-		case "k", "up":
-			r.cursor, r.offset = moveCursor(r.cursor, r.offset, len(r.items), visibleRows, false)
 		case "o":
-			if r.cursor < len(r.items) {
-				url := "https://github.com/" + r.items[r.cursor].FullName
+			if r.cursor < len(items) {
+				url := "https://github.com/" + items[r.cursor].FullName
 				_ = exec.Command("xdg-open", url).Start()
 			}
 		case "a":
-			if r.cursor < len(r.items) {
-				id := r.items[r.cursor].ID
+			if r.cursor < len(items) {
+				id := items[r.cursor].ID
 				client := r.client
 				r.statusMsg = styleSubtitle.Render("triggering audit...")
 				return r, func() tea.Msg {
@@ -135,7 +176,12 @@ func (r Repos) update(msg tea.Msg) (Repos, tea.Cmd) {
 }
 
 func (r Repos) view(w, h int) string {
-	header := styleTitle.Padding(0, 1).Render(fmt.Sprintf("Repos (%d)", r.total))
+	items := r.filtered()
+	title := fmt.Sprintf("Repos (%d)", r.total)
+	if r.filter != "" {
+		title = fmt.Sprintf("Repos (%d/%d)", len(items), r.total)
+	}
+	header := styleTitle.Padding(0, 1).Render(title)
 
 	if r.loading && len(r.items) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
@@ -150,6 +196,11 @@ func (r Repos) view(w, h int) string {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
 			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
 				styleSubtitle.Render("No repos configured")))
+	}
+	if len(items) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "",
+			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
+				styleSubtitle.Render("No repos match \""+r.filter+"\"  ( / edit · esc clear )")))
 	}
 
 	visibleRows := h - 5
@@ -180,11 +231,11 @@ func (r Repos) view(w, h int) string {
 	rows = append(rows, hdr)
 
 	end := r.offset + visibleRows
-	if end > len(r.items) {
-		end = len(r.items)
+	if end > len(items) {
+		end = len(items)
 	}
 	for i := r.offset; i < end; i++ {
-		item := r.items[i]
+		item := items[i]
 		name := truncate(item.FullName, colName)
 		branch := "—"
 		if item.DefaultBranch != nil {
@@ -232,9 +283,17 @@ func (r Repos) view(w, h int) string {
 
 	table := strings.Join(rows, "\n")
 
-	posLine := styleSubtitle.Render(fmt.Sprintf("  %d/%d", r.cursor+1, len(r.items)))
+	posLine := styleSubtitle.Render(fmt.Sprintf("  %d/%d", r.cursor+1, len(items)))
+	if r.filter != "" && !r.filtering {
+		posLine = styleSubtitle.Render(fmt.Sprintf("  filter %q  ", r.filter)) + posLine
+	}
 	if r.statusMsg != "" {
 		posLine = "  " + r.statusMsg
+	}
+	if r.filtering {
+		posLine = "  " + styleTitle.Render(" filter ") +
+			"  " + r.filter + "█" +
+			styleSubtitle.Render("    [enter] keep   [esc] clear")
 	}
 	if r.adding {
 		posLine = "  " + styleTitle.Render(" add repo ") +

@@ -81,7 +81,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = m.Width
 		a.height = m.Height
-		contentH := m.Height - 3
+		// The tab bar wraps to multiple lines on narrow terminals, so derive the
+		// content budget from its actual rendered height rather than assuming 2
+		// lines. Reserve 1 line for the status bar (View clamps to the real value).
+		contentH := m.Height - lipgloss.Height(a.tabBar()) - 1
 		if contentH < 1 {
 			contentH = 1
 		}
@@ -99,14 +102,26 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.tickets.height = contentH
 		a.audits.width = m.Width
 		a.audits.height = contentH
+		a.feedback.width = m.Width
+		a.feedback.height = contentH
 		return a, nil
 
 	case tea.KeyMsg:
-		// While the Repos tab is capturing text (add-repo), route every key to
-		// it so digits/letters type instead of switching tabs. ctrl+c still quits.
-		if a.active == viewRepos && a.repos.adding && m.String() != "ctrl+c" {
+		// While the active tab is capturing text (add-repo or a `/` filter),
+		// route every key to it so digits/letters type instead of switching
+		// tabs or quitting. ctrl+c still quits.
+		if a.capturingText() && m.String() != "ctrl+c" {
 			var cmd tea.Cmd
-			a.repos, cmd = a.repos.update(msg)
+			switch a.active {
+			case viewReviews:
+				a.reviews, cmd = a.reviews.update(msg)
+			case viewFindings:
+				a.findings, cmd = a.findings.update(msg)
+			case viewRepos:
+				a.repos, cmd = a.repos.update(msg)
+			case viewTickets:
+				a.tickets, cmd = a.tickets.update(msg)
+			}
 			return a, cmd
 		}
 		switch m.String() {
@@ -277,9 +292,12 @@ func (a *App) View() string {
 		return ""
 	}
 
-	// tabBar = 1 line text + 1 line bottom border = 2 lines
-	// statusBar = 1 line
-	contentH := a.height - 3
+	// Both bars can wrap on narrow terminals (the tab bar in particular), so the
+	// content budget is whatever's left after the *actual* chrome — never a fixed
+	// guess. This, plus the MaxHeight clamp below, keeps the bars on screen.
+	tabBar := a.tabBar()
+	statusBar := a.statusBar()
+	contentH := a.height - lipgloss.Height(tabBar) - lipgloss.Height(statusBar)
 	if contentH < 1 {
 		contentH = 1
 	}
@@ -306,10 +324,16 @@ func (a *App) View() string {
 		content = a.feedback.view(a.width, contentH)
 	}
 
+	// Safety net: no tab may emit more than contentH lines. lipgloss Height() is
+	// a minimum, not a clip, so without this a long detail pane / findings list
+	// would push the status (and tab) bar off-screen. Tabs scroll their own
+	// content; this guarantees the chrome stays put even if one miscounts.
+	content = lipgloss.NewStyle().MaxHeight(contentH).MaxWidth(a.width).Render(content)
+
 	return lipgloss.JoinVertical(lipgloss.Left,
-		a.tabBar(),
+		tabBar,
 		content,
-		a.statusBar(),
+		statusBar,
 	)
 }
 
@@ -359,6 +383,23 @@ func (a *App) tabBar() string {
 		Render(bar)
 }
 
+// capturingText reports whether the active tab is in a text-entry mode (add-repo
+// or a `/` filter), in which case the global key handler must forward keys to it
+// rather than treating digits as tab switches or `q` as quit.
+func (a *App) capturingText() bool {
+	switch a.active {
+	case viewReviews:
+		return a.reviews.filterMode
+	case viewFindings:
+		return a.findings.filtering
+	case viewRepos:
+		return a.repos.adding || a.repos.filtering
+	case viewTickets:
+		return a.tickets.filtering
+	}
+	return false
+}
+
 func (a *App) clearStatusMsgs() {
 	a.reviews.statusMsg = ""
 	a.failures.statusMsg = ""
@@ -372,21 +413,21 @@ func (a *App) statusBar() string {
 	case viewDashboard:
 		hint = "1-9 switch tabs | r=refresh | q quit"
 	case viewReviews:
-		hint = "j/k navigate | / filter | s=status | c=clear | e=requeue | o=browser | r=refresh | q quit"
+		hint = "j/k navigate | J/K scroll detail | / filter | s=status | c=clear | e=requeue | o=browser | r=refresh | q quit"
 	case viewFindings:
-		hint = "j/k navigate | a=all | c=critical | m=major | n=minor | i=info | r=refresh | q quit"
+		hint = "j/k·g/G·pgup/dn nav | / filter | o=open PR | a/c/m/n/i severity | r=refresh | q quit"
 	case viewFailures:
 		hint = "j/k navigate | e=requeue | r=refresh | q quit"
 	case viewRepos:
-		hint = "j/k navigate | n=add repo | a=audit | o=open in browser | r=refresh | q quit"
+		hint = "j/k·g/G nav | / filter | n=add repo | a=audit | o=open in browser | r=refresh | q quit"
 	case viewPending:
 		hint = "j/k navigate | r=refresh | q quit"
 	case viewTickets:
-		hint = "j/k navigate | enter=issues | e=requeue | o=open in Odoo | r=refresh | q quit"
+		hint = "j/k·g/G nav | / filter | enter=issues/fold · space · z=fold all | e=requeue | o=open | r=refresh | q quit"
 	case viewAudits:
-		hint = "j/k navigate | enter=findings | esc=back | r=refresh | q quit"
+		hint = "j/k navigate/scroll | enter=findings | esc=back | r=refresh | q quit"
 	case viewFeedback:
-		hint = "dismissals & mutes per repo/category | r=refresh | q quit"
+		hint = "j/k scroll | dismissals & mutes per repo/category | r=refresh | q quit"
 	default:
 		hint = "1 Dash | 2 Reviews | 3 Findings | 4 Failures | 5 Repos | 6 Pending | 7 Tickets | 8 Audits | q quit"
 	}

@@ -62,11 +62,11 @@ func (f Failures) update(msg tea.Msg) (Failures, tea.Cmd) {
 		if visibleRows < 1 {
 			visibleRows = 1
 		}
+		if c, o, ok := listNav(m.String(), f.cursor, f.offset, len(f.items), visibleRows); ok {
+			f.cursor, f.offset = c, o
+			return f, nil
+		}
 		switch m.String() {
-		case "j", "down":
-			f.cursor, f.offset = moveCursor(f.cursor, f.offset, len(f.items), visibleRows, true)
-		case "k", "up":
-			f.cursor, f.offset = moveCursor(f.cursor, f.offset, len(f.items), visibleRows, false)
 		case "r":
 			f.loading = true
 			f.statusMsg = ""
@@ -172,7 +172,8 @@ func (f Failures) view(w, h int) string {
 	if f.statusMsg != "" {
 		posLine = f.statusMsg
 	} else {
-		posLine = styleSubtitle.Render(fmt.Sprintf("  %d/%d", f.cursor+1, len(f.items)))
+		posLine = styleSubtitle.Render(fmt.Sprintf("  %d/%d", f.cursor+1, len(f.items))) +
+			cappedNote(len(f.items), f.total)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", detail, "", posLine)

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,6 +21,31 @@ type Findings struct {
 	width          int
 	height         int
 	severityFilter string
+	filtering      bool   // capturing the `/` text filter
+	filter         string // case-insensitive substring on repo/category/title/file
+}
+
+// filtered returns the loaded findings matching the active `/` filter
+// (case-insensitive substring on repo · category · title · file), or all of
+// them when unset. Operates over what's already fetched (severity-filtered,
+// capped at the fetch limit).
+func (f Findings) filtered() []api.FindingSummary {
+	if f.filter == "" {
+		return f.items
+	}
+	q := strings.ToLower(f.filter)
+	out := make([]api.FindingSummary, 0, len(f.items))
+	for _, it := range f.items {
+		file := ""
+		if it.FilePath != nil {
+			file = *it.FilePath
+		}
+		hay := strings.ToLower(it.RepoFullName + " " + it.Category + " " + it.Title + " " + file)
+		if strings.Contains(hay, q) {
+			out = append(out, it)
+		}
+	}
+	return out
 }
 
 func newFindings(client api.ClientIface) Findings {
@@ -47,21 +73,50 @@ func (f Findings) update(msg tea.Msg) (Findings, tea.Cmd) {
 			f.items = m.data.Items
 			f.total = m.data.Total
 		}
-		if f.cursor >= len(f.items) {
+		if f.cursor >= len(f.filtered()) {
 			f.cursor = 0
 			f.offset = 0
 		}
 
 	case tea.KeyMsg:
+		// Filter-input mode: capture keys for the `/` text filter.
+		if f.filtering {
+			switch m.Type {
+			case tea.KeyEsc:
+				f.filtering, f.filter = false, ""
+				f.cursor, f.offset = 0, 0
+			case tea.KeyEnter:
+				f.filtering = false
+			case tea.KeyBackspace:
+				if len(f.filter) > 0 {
+					f.filter = f.filter[:len(f.filter)-1]
+					f.cursor, f.offset = 0, 0
+				}
+			case tea.KeyRunes, tea.KeySpace:
+				f.filter += string(m.Runes)
+				f.cursor, f.offset = 0, 0
+			}
+			return f, nil
+		}
+
 		visibleRows := f.height - 5
 		if visibleRows < 1 {
 			visibleRows = 1
 		}
+		items := f.filtered()
+		if c, o, ok := listNav(m.String(), f.cursor, f.offset, len(items), visibleRows); ok {
+			f.cursor, f.offset = c, o
+			return f, nil
+		}
 		switch m.String() {
-		case "j", "down":
-			f.cursor, f.offset = moveCursor(f.cursor, f.offset, len(f.items), visibleRows, true)
-		case "k", "up":
-			f.cursor, f.offset = moveCursor(f.cursor, f.offset, len(f.items), visibleRows, false)
+		case "/":
+			f.filtering = true
+		case "o":
+			if f.cursor < len(items) && items[f.cursor].RepoFullName != "" {
+				url := fmt.Sprintf("https://github.com/%s/pull/%d",
+					items[f.cursor].RepoFullName, items[f.cursor].PRNumber)
+				_ = exec.Command("xdg-open", url).Start()
+			}
 		case "r":
 			f.loading = true
 			return f, f.load()
@@ -91,13 +146,16 @@ func (f Findings) update(msg tea.Msg) (Findings, tea.Cmd) {
 }
 
 func (f Findings) view(w, h int) string {
-	filterLabel := f.severityFilter
-	if filterLabel == "" {
-		filterLabel = "all"
+	sev := f.severityFilter
+	if sev == "" {
+		sev = "all"
 	}
-	header := styleTitle.Padding(0, 1).Render(
-		fmt.Sprintf("Findings (%d)  filter: %s", f.total, filterLabel),
-	)
+	items := f.filtered()
+	title := fmt.Sprintf("Findings (%d)  severity: %s", f.total, sev)
+	if f.filter != "" {
+		title = fmt.Sprintf("Findings (%d/%d)  severity: %s", len(items), f.total, sev)
+	}
+	header := styleTitle.Padding(0, 1).Render(title)
 
 	if f.loading && len(f.items) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
@@ -113,26 +171,33 @@ func (f Findings) view(w, h int) string {
 			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
 				styleSubtitle.Render("No findings")))
 	}
+	if len(items) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "",
+			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
+				styleSubtitle.Render("No findings match \""+f.filter+"\"  ( / edit · esc clear )")))
+	}
 
 	visibleRows := h - 5
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
 
-	// dot column is just 1 visible char (colored), no width padding needed
-	colTitle := 40
-	colCategory := 16
-	colFile := 28
+	// dot column is 1 visible char (colored), no width padding needed.
+	colRepo := 20
+	colCategory := 13
+	colFile := 22
 	colConf := 5
-	// dot=1 + spacing=2+2+2+2 = 9 extra chars
-	remaining := w - 1 - colCategory - colFile - colConf - 10
+	colTitle := 26
+	// dot=1 + 5 gaps of 2 = 11 + leading 2
+	remaining := w - 1 - colRepo - colCategory - colFile - colConf - 13
 	if remaining > colTitle {
 		colTitle = remaining
 	}
 
 	hdr := lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
-		fmt.Sprintf("   %-*s  %-*s  %-*s  %-*s",
+		fmt.Sprintf("   %-*s  %-*s  %-*s  %-*s  %-*s",
 			colTitle, "Title",
+			colRepo, "Repository",
 			colCategory, "Category",
 			colFile, "File:Line",
 			colConf, "Conf%"),
@@ -142,12 +207,13 @@ func (f Findings) view(w, h int) string {
 	rows = append(rows, hdr)
 
 	end := f.offset + visibleRows
-	if end > len(f.items) {
-		end = len(f.items)
+	if end > len(items) {
+		end = len(items)
 	}
 	for i := f.offset; i < end; i++ {
-		item := f.items[i]
+		item := items[i]
 		title := truncate(item.Title, colTitle)
+		repo := truncate(item.RepoFullName, colRepo)
 		category := truncate(item.Category, colCategory)
 		fileLine := ""
 		if item.FilePath != nil {
@@ -164,17 +230,19 @@ func (f Findings) view(w, h int) string {
 
 		var line string
 		if i == f.cursor {
-			line = styleSelected.Width(w - 2).Render(fmt.Sprintf("  %s  %-*s  %-*s  %-*s  %-*s",
+			line = styleSelected.Width(w - 2).Render(fmt.Sprintf("  %s  %-*s  %-*s  %-*s  %-*s  %-*s",
 				"●",
 				colTitle, title,
+				colRepo, repo,
 				colCategory, category,
 				colFile, fileLine,
 				colConf, conf,
 			))
 		} else {
-			line = fmt.Sprintf("  %s  %-*s  %-*s  %-*s  %-*s",
+			line = fmt.Sprintf("  %s  %-*s  %-*s  %-*s  %-*s  %-*s",
 				severityDot(item.Severity),
 				colTitle, title,
+				colRepo, repo,
 				colCategory, category,
 				colFile, fileLine,
 				colConf, conf,
@@ -185,7 +253,16 @@ func (f Findings) view(w, h int) string {
 
 	table := strings.Join(rows, "\n")
 
-	pos := styleSubtitle.Render(fmt.Sprintf("  %d/%d", f.cursor+1, len(f.items)))
+	pos := styleSubtitle.Render(fmt.Sprintf("  %d/%d", f.cursor+1, len(items))) +
+		cappedNote(len(f.items), f.total)
+	if f.filter != "" && !f.filtering {
+		pos = styleSubtitle.Render(fmt.Sprintf("  filter %q  ", f.filter)) + pos
+	}
+	if f.filtering {
+		pos = "  " + styleTitle.Render(" filter ") +
+			"  " + f.filter + "█" +
+			styleSubtitle.Render("    [enter] keep   [esc] clear")
+	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", pos)
 }

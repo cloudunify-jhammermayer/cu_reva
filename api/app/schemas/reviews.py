@@ -17,6 +17,10 @@ class FindingSummary(BaseModel):
     confidence: float | None
     file_path: str | None
     line_start: int | None
+    # Populated by the findings list (joins review_run + repository); left None on
+    # the review-detail path, which already knows its repo/PR.
+    repo_full_name: str | None = None
+    pr_number: int | None = None
 
 
 class FindingDetail(FindingSummary):

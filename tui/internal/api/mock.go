@@ -362,6 +362,17 @@ func (m *MockClient) Findings(severity, category string, limit int) (*FindingPag
 		},
 	}
 
+	// Spread findings across a few repos/PRs so the demo exercises the repo
+	// column, the `/` filter, and `o` (open PR).
+	repos := []struct {
+		name string
+		pr   int
+	}{{"acme/odoo-modules", 312}, {"acme/widgets", 88}, {"acme/api", 145}}
+	for i := range all {
+		all[i].RepoFullName = repos[i%len(repos)].name
+		all[i].PRNumber = repos[i%len(repos)].pr
+	}
+
 	var filtered []FindingSummary
 	for _, f := range all {
 		if severity == "" || f.Severity == severity {
@@ -493,6 +504,15 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 			InputTokens: nil, OutputTokens: nil,
 			EstimatedCostUSD: nil, CreatedAt: now.Add(-30 * time.Second), CompletedAt: nil,
 		},
+		{
+			// Analysis-only ticket (no create-issues run) — groups under
+			// "(no repo yet)" in the Tickets tab.
+			ID: 4, TicketID: 777, ModelName: "helpdesk.ticket", FieldName: "description",
+			Status: "completed", Model: strPtr("claude-sonnet-4-6"),
+			InputTokens: intPtr(920), OutputTokens: intPtr(204),
+			EstimatedCostUSD: f64Ptr(0.0011), CreatedAt: now.Add(-45 * time.Minute),
+			CompletedAt: &t1,
+		},
 	}
 	n := limit
 	if n > len(items) {
@@ -526,10 +546,10 @@ func (m *MockClient) TicketIssueRuns(limit int) (*TicketIssueRunPage, error) {
 		},
 		{
 			ID: 2, TicketID: 123, ModelName: "project.task",
-			GithubURL: "https://github.com/acme/widgets", Status: "failed",
+			GithubURL: "https://github.com/acme/odoo-modules", Status: "failed",
 			Issues: []TicketIssueRef{
 				{Number: intPtr(40), Title: "Create export wizard",
-					URL: strPtr("https://github.com/acme/widgets/issues/40")},
+					URL: strPtr("https://github.com/acme/odoo-modules/issues/40")},
 				{Number: nil, Title: "Add export cron", URL: nil},
 			},
 			ErrorMessage: strPtr("GitHub 403 secondary rate limit"),
@@ -537,7 +557,7 @@ func (m *MockClient) TicketIssueRuns(limit int) (*TicketIssueRunPage, error) {
 		},
 		{
 			ID: 1, TicketID: 99, ModelName: "helpdesk.ticket",
-			GithubURL: "https://github.com/acme/widgets", Status: "pending",
+			GithubURL: "https://github.com/acme/api", Status: "pending",
 			CreatedAt: now.Add(-20 * time.Second),
 		},
 	}

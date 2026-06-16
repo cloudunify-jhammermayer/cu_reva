@@ -37,14 +37,18 @@ type Tickets struct {
 	width     int
 	height    int
 	statusMsg string
+	filtering bool            // capturing the `/` filter text
+	filter    string          // case-insensitive substring on ticket id / model
+	expanded  map[string]bool // repo keys whose group is unfolded (default: collapsed)
 	// Issue drill-down: the full issue list for the selected ticket's run.
 	detail       bool
 	detailIssues []api.TicketIssueRef
 	detailCursor int
+	detailOffset int
 }
 
 func newTickets(client api.ClientIface, odooURL string) Tickets {
-	return Tickets{client: client, odooURL: odooURL, loading: true}
+	return Tickets{client: client, odooURL: odooURL, loading: true, expanded: map[string]bool{}}
 }
 
 func issueRunKey(modelName string, ticketID int) string {
@@ -112,6 +116,118 @@ func (t *Tickets) rebuildRows() {
 	}
 }
 
+// filteredRows returns the union rows matching the active `/` filter
+// (case-insensitive substring on "#<id> <model>"), or all rows when unset.
+func (t Tickets) filteredRows() []ticketRow {
+	if t.filter == "" {
+		return t.rows
+	}
+	q := strings.ToLower(t.filter)
+	out := make([]ticketRow, 0, len(t.rows))
+	for _, row := range t.rows {
+		hay := strings.ToLower(fmt.Sprintf("#%d %s", row.ticketID, row.modelName))
+		if strings.Contains(hay, q) {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// repoKey is the grouping key for a row: "owner/repo" parsed from its
+// create-issues run's github_url, or "" when the ticket has no run yet
+// (analysis-only — it carries no repo).
+func (t Tickets) repoKey(r ticketRow) string {
+	if r.issueRun == nil || r.issueRun.GithubURL == "" {
+		return ""
+	}
+	owner, name, ok := parseOwnerName(r.issueRun.GithubURL)
+	if !ok {
+		return ""
+	}
+	return owner + "/" + name
+}
+
+// groupedRows clusters the filtered rows by repo. Groups appear most-recently-
+// active first (rows arrive newest-first, so first-seen == most-recent); the
+// "no repo yet" bucket (analysis-only tickets) always sorts last.
+func (t Tickets) groupedRows() []ticketRow {
+	rows := t.filteredRows()
+	var order []string
+	buckets := map[string][]ticketRow{}
+	for _, r := range rows {
+		k := t.repoKey(r)
+		if _, ok := buckets[k]; !ok {
+			order = append(order, k)
+		}
+		buckets[k] = append(buckets[k], r)
+	}
+	out := make([]ticketRow, 0, len(rows))
+	for _, k := range order {
+		if k != "" {
+			out = append(out, buckets[k]...)
+		}
+	}
+	return append(out, buckets[""]...)
+}
+
+// ticketItem is one selectable line in the grouped list: a repo group header or
+// a ticket row under it. The cursor moves over these — headers are selectable so
+// they can be folded. Each item renders as exactly one display line, so the
+// cursor index doubles as the display line (simple windowing).
+type ticketItem struct {
+	header bool
+	key    string    // repo key; the row's group for rows, the group for headers
+	count  int       // tickets in the group (headers only)
+	row    ticketRow // valid when !header
+}
+
+// visibleItems flattens the grouped rows into selectable lines: every group
+// header, plus the rows of expanded groups. Groups are collapsed by default
+// (absent from `expanded`), so a fresh tab shows just one line per repo.
+func (t Tickets) visibleItems() []ticketItem {
+	grouped := t.groupedRows()
+	sizes := map[string]int{}
+	for _, r := range grouped {
+		sizes[t.repoKey(r)]++
+	}
+	var items []ticketItem
+	prev := "\x00"
+	for _, r := range grouped {
+		k := t.repoKey(r)
+		if k != prev {
+			items = append(items, ticketItem{header: true, key: k, count: sizes[k]})
+			prev = k
+		}
+		if t.expanded[k] {
+			items = append(items, ticketItem{key: k, row: r})
+		}
+	}
+	return items
+}
+
+// headerIndexOf finds the header line for key (-1 if absent) — used to park the
+// cursor on a group's header after folding it.
+func headerIndexOf(items []ticketItem, key string) int {
+	for i, it := range items {
+		if it.header && it.key == key {
+			return i
+		}
+	}
+	return -1
+}
+
+// groupKeys lists the distinct repo keys in display order (for collapse/expand
+// all).
+func (t Tickets) groupKeys() []string {
+	var keys []string
+	for _, it := range t.visibleItems() {
+		if it.header {
+			keys = append(keys, it.key)
+		}
+	}
+	return keys
+}
+
 func (t Tickets) requeueCmd(id int) tea.Cmd {
 	return func() tea.Msg {
 		err := t.client.RequeueTicket(id)
@@ -154,6 +270,26 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		// Filter-input mode (main list only): capture keys for the `/` filter.
+		if t.filtering {
+			switch m.Type {
+			case tea.KeyEsc:
+				t.filtering, t.filter = false, ""
+				t.cursor, t.offset = 0, 0
+			case tea.KeyEnter:
+				t.filtering = false
+			case tea.KeyBackspace:
+				if len(t.filter) > 0 {
+					t.filter = t.filter[:len(t.filter)-1]
+					t.cursor, t.offset = 0, 0
+				}
+			case tea.KeyRunes, tea.KeySpace:
+				t.filter += string(m.Runes)
+				t.cursor, t.offset = 0, 0
+			}
+			return t, nil
+		}
+
 		t.statusMsg = ""
 		visibleRows := t.height - 5
 		if visibleRows < 1 {
@@ -162,17 +298,17 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 
 		// Issue drill-down: navigate/open the selected ticket's issues.
 		if t.detail {
+			detailRows := t.height - 4 // header + blank + blank + pos
+			if detailRows < 1 {
+				detailRows = 1
+			}
+			if c, o, ok := listNav(m.String(), t.detailCursor, t.detailOffset, len(t.detailIssues), detailRows); ok {
+				t.detailCursor, t.detailOffset = c, o
+				return t, nil
+			}
 			switch m.String() {
 			case "esc", "left", "h":
 				t.detail = false
-			case "j", "down":
-				if t.detailCursor < len(t.detailIssues)-1 {
-					t.detailCursor++
-				}
-			case "k", "up":
-				if t.detailCursor > 0 {
-					t.detailCursor--
-				}
 			case "o", "enter":
 				if t.detailCursor < len(t.detailIssues) {
 					ref := t.detailIssues[t.detailCursor]
@@ -184,41 +320,82 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 			return t, nil
 		}
 
+		// Items (group headers + rows of expanded groups) are one line each, so
+		// the cursor index is the display line — plain cursor/offset windowing.
+		items := t.visibleItems()
+		if c, o, ok := listNav(m.String(), t.cursor, t.offset, len(items), visibleRows); ok {
+			t.cursor, t.offset = c, o
+			return t, nil
+		}
+		var cur ticketItem
+		if t.cursor >= 0 && t.cursor < len(items) {
+			cur = items[t.cursor]
+		}
+		// park keeps the cursor on a group's header (and the window) after a fold.
+		park := func(key string) {
+			vi := t.visibleItems()
+			if idx := headerIndexOf(vi, key); idx >= 0 {
+				t.cursor = idx
+			}
+			t.offset = ensureVisible(t.offset, t.cursor, visibleRows, len(vi))
+		}
 		switch m.String() {
-		case "j", "down":
-			t.cursor, t.offset = moveCursor(t.cursor, t.offset, len(t.rows), visibleRows, true)
-		case "k", "up":
-			t.cursor, t.offset = moveCursor(t.cursor, t.offset, len(t.rows), visibleRows, false)
+		case "/":
+			t.filtering = true
 		case "enter":
-			if t.cursor < len(t.rows) {
-				row := t.rows[t.cursor]
-				if row.issueRun != nil && len(row.issueRun.Issues) > 0 {
-					t.detail = true
-					t.detailIssues = row.issueRun.Issues
-					t.detailCursor = 0
-				} else {
-					t.statusMsg = "no GitHub issues for this ticket"
+			if cur.header {
+				t.expanded[cur.key] = !t.expanded[cur.key]
+				park(cur.key)
+			} else if cur.row.issueRun != nil && len(cur.row.issueRun.Issues) > 0 {
+				t.detail = true
+				t.detailIssues = cur.row.issueRun.Issues
+				t.detailCursor, t.detailOffset = 0, 0
+			} else {
+				t.statusMsg = "no GitHub issues for this ticket"
+			}
+		case " ":
+			t.expanded[cur.key] = !t.expanded[cur.key]
+			park(cur.key)
+		case "h", "left":
+			t.expanded[cur.key] = false
+			park(cur.key)
+		case "l", "right":
+			t.expanded[cur.key] = true
+			park(cur.key)
+		case "z":
+			// Toggle all: expand every group if any is collapsed, else collapse all.
+			expandAll := false
+			for _, k := range t.groupKeys() {
+				if !t.expanded[k] {
+					expandAll = true
+					break
 				}
 			}
+			for _, k := range t.groupKeys() {
+				t.expanded[k] = expandAll
+			}
+			park(cur.key)
 		case "r":
 			t.loading = true
 			return t, t.load()
 		case "e":
-			if t.cursor < len(t.rows) {
-				row := t.rows[t.cursor]
-				if row.analysis == nil {
+			if !cur.header {
+				if cur.row.analysis == nil {
 					t.statusMsg = "no analysis to requeue for this ticket"
-				} else if row.analysis.Status == "failed" || row.analysis.Status == "completed" {
-					return t, t.requeueCmd(row.analysis.ID)
+				} else if cur.row.analysis.Status == "failed" || cur.row.analysis.Status == "completed" {
+					return t, t.requeueCmd(cur.row.analysis.ID)
 				} else {
 					t.statusMsg = "only failed or completed analyses can be requeued"
 				}
 			}
 		case "o":
-			if t.cursor < len(t.rows) {
-				row := t.rows[t.cursor]
+			if cur.header {
+				if cur.key != "" {
+					_ = exec.Command("xdg-open", "https://github.com/"+cur.key).Start()
+				}
+			} else {
 				url := fmt.Sprintf("%s/web#model=%s&id=%d&view_type=form",
-					t.odooURL, row.modelName, row.ticketID)
+					t.odooURL, cur.row.modelName, cur.row.ticketID)
 				_ = exec.Command("xdg-open", url).Start()
 			}
 		}
@@ -231,7 +408,13 @@ func (t Tickets) view(w, h int) string {
 		return t.detailView(w, h)
 	}
 
-	header := styleTitle.Padding(0, 1).Render(fmt.Sprintf("Tickets  (%d)", len(t.rows)))
+	grouped := t.groupedRows()
+	items := t.visibleItems()
+	title := fmt.Sprintf("Tickets  (%d)", len(t.rows))
+	if t.filter != "" {
+		title = fmt.Sprintf("Tickets  (%d/%d)", len(grouped), len(t.rows))
+	}
+	header := styleTitle.Padding(0, 1).Render(title)
 
 	if t.loading && len(t.rows) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
@@ -247,10 +430,10 @@ func (t Tickets) view(w, h int) string {
 			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
 				styleSubtitle.Render("No tickets")))
 	}
-
-	visibleRows := h - 5
-	if visibleRows < 1 {
-		visibleRows = 1
+	if len(grouped) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "",
+			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
+				styleSubtitle.Render("No tickets match \""+t.filter+"\"  ( / edit · esc clear )")))
 	}
 
 	colTicket := 9
@@ -270,15 +453,8 @@ func (t Tickets) view(w, h int) string {
 			colWhen, "When"),
 	)
 
-	var rows []string
-	rows = append(rows, hdr)
-
-	end := t.offset + visibleRows
-	if end > len(t.rows) {
-		end = len(t.rows)
-	}
-	for i := t.offset; i < end; i++ {
-		row := t.rows[i]
+	// rowText renders one ticket row (selected = highlighted).
+	rowText := func(row ticketRow, selected bool) string {
 		ticket := fmt.Sprintf("#%d", row.ticketID)
 		module := truncate(strings.SplitN(row.modelName, ".", 2)[0], colModule)
 
@@ -304,8 +480,8 @@ func (t Tickets) view(w, h int) string {
 
 		when := truncate(relativeTime(row.activity), colWhen)
 
-		if i == t.cursor {
-			rows = append(rows, styleSelected.Width(w-2).Render(
+		if selected {
+			return styleSelected.Width(w - 2).Render(
 				fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s  %-*s",
 					colTicket, ticket,
 					colModule, module,
@@ -313,25 +489,44 @@ func (t Tickets) view(w, h int) string {
 					colIssues, issuesPlain,
 					colCost, cost,
 					colWhen, when),
-			))
-		} else {
-			rows = append(rows, fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s  %-*s",
-				colTicket, ticket,
-				colModule, module,
-				colAnalysis, analysisColored,
-				colIssues, issuesColored,
-				colCost, cost,
-				colWhen, when,
-			))
+			)
 		}
+		// analysisColored/issuesColored carry ANSI codes, so they must be padded
+		// by visible width (padCell), not %-*s — otherwise the escape bytes count
+		// toward the field and the later columns shift.
+		return fmt.Sprintf("  %-*s  %-*s  %s  %s  %-*s  %-*s",
+			colTicket, ticket,
+			colModule, module,
+			padCell(analysisColored, colAnalysis),
+			padCell(issuesColored, colIssues),
+			colCost, cost,
+			colWhen, when,
+		)
 	}
 
-	table := strings.Join(rows, "\n")
-	pos := styleSubtitle.Render(fmt.Sprintf("  %d/%d", t.cursor+1, len(t.rows)))
+	var cur ticketItem
+	if t.cursor >= 0 && t.cursor < len(items) {
+		cur = items[t.cursor]
+	}
+
+	groups := 0
+	for _, it := range items {
+		if it.header {
+			groups++
+		}
+	}
+	pos := styleSubtitle.Render(fmt.Sprintf("  %d tickets · %d repos  (enter/space fold · z fold all)", len(grouped), groups))
+	if t.filter != "" && !t.filtering {
+		pos = styleSubtitle.Render(fmt.Sprintf("  filter %q  ", t.filter)) + pos
+	}
+	if t.filtering {
+		pos = "  " + styleTitle.Render(" filter ") + "  " + t.filter + "█" +
+			styleSubtitle.Render("    [enter] keep   [esc] clear")
+	}
 
 	var extras []string
-	if t.cursor < len(t.rows) {
-		sel := t.rows[t.cursor]
+	if !cur.header {
+		sel := cur.row
 		if a := sel.analysis; a != nil {
 			var meta []string
 			meta = append(meta, fmt.Sprintf("analysis #%d", a.ID), "field:"+a.FieldName)
@@ -359,6 +554,44 @@ func (t Tickets) view(w, h int) string {
 		extras = append(extras, styleSubtitle.Render("  "+t.statusMsg))
 	}
 
+	// Each item is one display line, so the cursor index is the line. Window to
+	// what's left after header+blank+colHdr+blank+pos and the extras.
+	budget := h - 5 - len(extras)
+	if budget < 1 {
+		budget = 1
+	}
+	off := ensureVisible(t.offset, t.cursor, budget, len(items))
+	end := off + budget
+	if end > len(items) {
+		end = len(items)
+	}
+
+	body := []string{hdr}
+	for i := off; i < end; i++ {
+		it := items[i]
+		if !it.header {
+			body = append(body, rowText(it.row, i == t.cursor))
+			continue
+		}
+		arrow := "▸ "
+		if t.expanded[it.key] {
+			arrow = "▾ "
+		}
+		label := it.key
+		if label == "" {
+			label = "(no repo yet)"
+		}
+		if i == t.cursor {
+			body = append(body, styleSelected.Width(w-2).Render(
+				fmt.Sprintf("%s%s  (%d)", arrow, label, it.count)))
+		} else {
+			body = append(body, styleStatusCompleted.Render(arrow)+
+				styleTitle.Render(label)+
+				styleSubtitle.Render(fmt.Sprintf("  (%d)", it.count)))
+		}
+	}
+	table := strings.Join(body, "\n")
+
 	parts := []string{header, "", table, "", pos}
 	parts = append(parts, extras...)
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
@@ -377,8 +610,20 @@ func (t Tickets) detailView(w, h int) string {
 	header := styleTitle.Padding(0, 1).Render(
 		fmt.Sprintf("GitHub Issues  (%d created / %d planned)", created, len(t.detailIssues)))
 
+	// Window the issue list around the cursor so a long list scrolls.
+	vis := h - 4 // header + blank + blank + pos
+	if vis < 1 {
+		vis = 1
+	}
+	off := clampOffset(t.detailOffset, len(t.detailIssues), vis)
+	end := off + vis
+	if end > len(t.detailIssues) {
+		end = len(t.detailIssues)
+	}
+
 	var rows []string
-	for i, ref := range t.detailIssues {
+	for i := off; i < end; i++ {
+		ref := t.detailIssues[i]
 		num := "  —"
 		if ref.Number != nil {
 			num = fmt.Sprintf("#%d", *ref.Number)
@@ -402,6 +647,9 @@ func (t Tickets) detailView(w, h int) string {
 
 	body := strings.Join(rows, "\n")
 	pos := styleSubtitle.Render(fmt.Sprintf("  %d/%d", t.detailCursor+1, len(t.detailIssues)))
+	if sh := scrollHint(off, vis, len(t.detailIssues)); sh != "" {
+		pos += sh
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, "", body, "", pos)
 }
 

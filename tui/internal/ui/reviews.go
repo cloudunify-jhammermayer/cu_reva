@@ -22,6 +22,7 @@ type Reviews struct {
 	errDetail     error
 	cursor        int
 	offset        int
+	detailOffset  int // scroll position within the right-hand detail pane
 	width         int
 	height        int
 	focusLeft     bool
@@ -77,6 +78,7 @@ func (r Reviews) update(msg tea.Msg) (Reviews, tea.Cmd) {
 		r.loadingDetail = false
 		r.errDetail = m.err
 		r.detail = m.data
+		r.detailOffset = 0
 
 	case requeuedMsg:
 		if m.err != nil {
@@ -145,22 +147,40 @@ func (r Reviews) update(msg tea.Msg) (Reviews, tea.Cmd) {
 					r.detail.RepoFullName, r.detail.PRNumber)
 				_ = exec.Command("xdg-open", url).Start()
 			}
-		case "j", "down":
+		case "j", "down", "k", "up", "g", "G", "home", "end", "ctrl+d", "ctrl+u":
+			// List nav moves the cursor and (re)loads that review's detail.
+			// pgup/pgdn and J/K are reserved below for scrolling the detail pane.
+			half := visibleRows / 2
+			if half < 1 {
+				half = 1
+			}
+			delta := 0
+			switch m.String() {
+			case "j", "down":
+				delta = 1
+			case "k", "up":
+				delta = -1
+			case "ctrl+d":
+				delta = half
+			case "ctrl+u":
+				delta = -half
+			case "g", "home":
+				delta = -len(r.items)
+			case "G", "end":
+				delta = len(r.items)
+			}
 			prev := r.cursor
-			r.cursor, r.offset = moveCursor(r.cursor, r.offset, len(r.items), visibleRows, true)
+			r.cursor, r.offset = pageCursor(r.cursor, r.offset, len(r.items), visibleRows, delta)
 			if r.cursor != prev && r.cursor < len(r.items) {
 				r.loadingDetail = true
 				r.detail = nil
+				r.detailOffset = 0
 				return r, r.loadDetail(r.items[r.cursor].ID)
 			}
-		case "k", "up":
-			prev := r.cursor
-			r.cursor, r.offset = moveCursor(r.cursor, r.offset, len(r.items), visibleRows, false)
-			if r.cursor != prev && r.cursor < len(r.items) {
-				r.loadingDetail = true
-				r.detail = nil
-				return r, r.loadDetail(r.items[r.cursor].ID)
-			}
+		case "J", "pgdown":
+			r.detailOffset = r.scrollDetail(r.detailOffset, true)
+		case "K", "pgup":
+			r.detailOffset = r.scrollDetail(r.detailOffset, false)
 		case "r":
 			r.loadingList = true
 			r.items = nil
@@ -282,7 +302,8 @@ func (r Reviews) renderList(w, h int) string {
 	if r.statusMsg != "" {
 		statusContent = r.statusMsg
 	} else {
-		statusContent = styleSubtitle.Render(fmt.Sprintf("  %d/%d", r.cursor+1, len(r.items)))
+		statusContent = styleSubtitle.Render(fmt.Sprintf("  %d/%d", r.cursor+1, len(r.items))) +
+			cappedNote(len(r.items), r.total)
 	}
 
 	innerH := h - 6 // header + filterLine + blank + border-top + pos + border-bottom
@@ -299,6 +320,41 @@ func (r Reviews) renderList(w, h int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, header, filterLine, "", list)
 }
 
+// detailWidth / detailBodyArea mirror the geometry renderDetail uses, so the
+// scroll clamp in update() bounds detailOffset against exactly what's rendered.
+func (r Reviews) detailWidth() int {
+	leftW := r.width * 2 / 5
+	return r.width - leftW - 1
+}
+
+func (r Reviews) detailBodyArea() int {
+	innerH := r.height - 2 - 1 // border (2) + reserved scroll-indicator line
+	if innerH < 1 {
+		innerH = 1
+	}
+	return innerH
+}
+
+// scrollDetail moves the detail pane by half a page and returns the clamped
+// offset. A no-op when there's no detail loaded.
+func (r Reviews) scrollDetail(off int, down bool) int {
+	if r.detail == nil {
+		return off
+	}
+	total := len(strings.Split(r.detailBody(r.detailWidth()), "\n"))
+	area := r.detailBodyArea()
+	step := area / 2
+	if step < 1 {
+		step = 1
+	}
+	if down {
+		off += step
+	} else {
+		off -= step
+	}
+	return clampOffset(off, total, area)
+}
+
 func (r Reviews) renderDetail(w, h int) string {
 	if r.loadingDetail && r.detail == nil {
 		return styleBorder.Width(w - 2).Height(h - 2).Render(
@@ -313,6 +369,34 @@ func (r Reviews) renderDetail(w, h int) string {
 		return styleBorder.Width(w - 2).Height(h - 2).Render("")
 	}
 
+	lines := strings.Split(r.detailBody(w), "\n")
+	innerH := h - 2 // inside the rounded border
+	if innerH < 1 {
+		innerH = 1
+	}
+	bodyArea := innerH
+	overflow := len(lines) > innerH
+	if overflow {
+		bodyArea = innerH - 1 // reserve a line for the scroll indicator
+		if bodyArea < 1 {
+			bodyArea = 1
+		}
+	}
+	off := clampOffset(r.detailOffset, len(lines), bodyArea)
+	end := off + bodyArea
+	if end > len(lines) {
+		end = len(lines)
+	}
+	inner := strings.Join(lines[off:end], "\n")
+	if overflow {
+		inner = lipgloss.JoinVertical(lipgloss.Left, inner, scrollHint(off, bodyArea, len(lines)))
+	}
+	return styleBorder.Width(w - 2).Height(innerH).Render(inner)
+}
+
+// detailBody renders the review detail as plain (border-less) text, wrapped to
+// width w. renderDetail windows the returned lines into the scroll pane.
+func (r Reviews) detailBody(w int) string {
 	d := r.detail
 	var b strings.Builder
 
@@ -388,7 +472,7 @@ func (r Reviews) renderDetail(w, h int) string {
 		}
 	}
 
-	return styleBorder.Width(w - 2).Height(h - 2).Render(b.String())
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func wordWrap(s string, width int) string {

@@ -25,17 +25,30 @@ func keyMsg(s string) tea.KeyMsg {
 	}
 }
 
-func intPtr(i int) *int    { return &i }
+func intPtr(i int) *int       { return &i }
 func strPtr(s string) *string { return &s }
 
-// rowOf returns the union-row index for a ticket id (-1 if absent).
+// rowOf returns the cursor index of a ticket's row in the visible (grouped,
+// foldable) item list the cursor navigates (-1 if absent / collapsed).
 func rowOf(tab Tickets, ticketID int) int {
-	for i, r := range tab.rows {
-		if r.ticketID == ticketID {
+	for i, it := range tab.visibleItems() {
+		if !it.header && it.row.ticketID == ticketID {
 			return i
 		}
 	}
 	return -1
+}
+
+// onRow expands the ticket's repo group and parks the cursor on its row. Groups
+// are collapsed by default, so row-level tests must open the group first.
+func onRow(tab Tickets, ticketID int) Tickets {
+	for _, r := range tab.groupedRows() {
+		if r.ticketID == ticketID {
+			tab.expanded[tab.repoKey(r)] = true
+		}
+	}
+	tab.cursor = rowOf(tab, ticketID)
+	return tab
 }
 
 func ticketsWithData() Tickets {
@@ -100,7 +113,7 @@ func TestIssueRunCounts(t *testing.T) {
 func TestTicketsViewShowsIssueColumnAndDetails(t *testing.T) {
 	tab := ticketsWithData()
 	// ticket 456 has a completed run with issues #42/#43; select its row
-	tab.cursor = rowOf(tab, 456)
+	tab = onRow(tab, 456)
 	out := tab.view(120, 30)
 
 	if !strings.Contains(out, "Issues") {
@@ -121,7 +134,7 @@ func TestTicketsViewShowsIssueColumnAndDetails(t *testing.T) {
 func TestEnterDrillsIntoIssueListAndEscReturns(t *testing.T) {
 	tab := ticketsWithData()
 	// ticket 456 has a completed run with 2 issues
-	tab.cursor = rowOf(tab, 456)
+	tab = onRow(tab, 456)
 	tab, _ = tab.update(keyMsg("enter"))
 	if !tab.detail {
 		t.Fatal("enter did not open the issue drill-down")
@@ -157,6 +170,7 @@ func TestEnterWithoutIssuesShowsStatus(t *testing.T) {
 		},
 		Total: 1,
 	}})
+	tab = onRow(tab, 777) // expand its group and land on the row
 	tab, _ = tab.update(keyMsg("enter"))
 	if tab.detail {
 		t.Fatal("opened drill-down for a ticket with no issues")
@@ -169,7 +183,7 @@ func TestEnterWithoutIssuesShowsStatus(t *testing.T) {
 func TestTicketsViewShowsPartialAndErrorForFailedRun(t *testing.T) {
 	tab := ticketsWithData()
 	// select the project.task 123 row (failed run, 1/2 created)
-	tab.cursor = rowOf(tab, 123)
+	tab = onRow(tab, 123)
 	out := tab.view(120, 30)
 	if !strings.Contains(out, "1/2") {
 		t.Fatalf("view missing partial count 1/2, got:\n%s", out)
@@ -200,7 +214,9 @@ func TestIssueRunWithoutAnalysisStillAppears(t *testing.T) {
 		Total: 1,
 	}})
 
-	if rowOf(tab, 2112) < 0 {
+	// Groups are collapsed by default; open the "(no repo yet)" group it lands in.
+	tab = onRow(tab, 2112)
+	if tab.cursor < 0 {
 		t.Fatal("issue-only ticket 2112 is missing from the tab")
 	}
 	out := tab.view(120, 30)
@@ -208,9 +224,86 @@ func TestIssueRunWithoutAnalysisStillAppears(t *testing.T) {
 		t.Fatalf("view missing issue-only ticket, got:\n%s", out)
 	}
 	// its analysis cell is blank, issues column shows the count
-	tab.cursor = rowOf(tab, 2112)
 	if !strings.Contains(tab.view(120, 30), "Scaffold module") {
 		t.Fatal("enter-less detail line missing the issue")
+	}
+}
+
+func TestTicketsGroupedByRepo(t *testing.T) {
+	tab := ticketsWithData()
+	out := tab.view(120, 30)
+
+	// Groups are collapsed by default (→ ▸); one header per repo plus the
+	// analysis-only bucket, and no ticket rows are shown until a group is opened.
+	for _, want := range []string{"▸ acme/widgets", "▸ acme/odoo-modules", "▸ acme/api", "(no repo yet)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("view missing group header %q, got:\n%s", want, out)
+		}
+	}
+	for _, it := range tab.visibleItems() {
+		if !it.header {
+			t.Fatal("a ticket row is visible despite all groups being collapsed by default")
+		}
+	}
+
+	g := tab.groupedRows()
+	// Each repo's rows are contiguous (a group is never split).
+	seen := map[string]bool{}
+	prev := "\x00"
+	for _, r := range g {
+		if k := tab.repoKey(r); k != prev {
+			if seen[k] {
+				t.Fatalf("repo group %q is not contiguous", k)
+			}
+			seen[k] = true
+			prev = k
+		}
+	}
+	// Analysis-only tickets (no repo) come last.
+	if k := tab.repoKey(g[len(g)-1]); k != "" {
+		t.Fatalf("expected the (no repo yet) group last, got %q", k)
+	}
+}
+
+func TestTicketsFoldGroup(t *testing.T) {
+	tab := ticketsWithData()
+	// All groups start collapsed; land on a repo header and expand it. Its rows
+	// must appear, the header flips to ▾, and the cursor parks on the header.
+	hdr := headerIndexOf(tab.visibleItems(), "acme/widgets")
+	if hdr < 0 {
+		t.Fatal("acme/widgets header not found")
+	}
+	before := len(tab.visibleItems())
+	tab.cursor = hdr
+	tab, _ = tab.update(keyMsg("enter")) // toggle fold on the header
+
+	if !tab.expanded["acme/widgets"] {
+		t.Fatal("enter on header did not expand the group")
+	}
+	if got := len(tab.visibleItems()); got <= before {
+		t.Fatalf("expanding didn't reveal rows: %d -> %d", before, got)
+	}
+	out := tab.view(120, 30)
+	if !strings.Contains(out, "▾ acme/widgets") {
+		t.Fatalf("expanded header missing ▾ arrow:\n%s", out)
+	}
+	if it := tab.visibleItems()[tab.cursor]; !it.header || it.key != "acme/widgets" {
+		t.Fatal("cursor did not park on the toggled group's header")
+	}
+
+	// z expands all when any group is collapsed (the others still are).
+	tab, _ = tab.update(keyMsg("z"))
+	for _, k := range tab.groupKeys() {
+		if !tab.expanded[k] {
+			t.Fatalf("z did not expand all (group %q still collapsed)", k)
+		}
+	}
+	// z again collapses all.
+	tab, _ = tab.update(keyMsg("z"))
+	for _, k := range tab.groupKeys() {
+		if tab.expanded[k] {
+			t.Fatalf("second z did not collapse all (group %q still open)", k)
+		}
 	}
 }
 

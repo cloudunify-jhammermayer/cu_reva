@@ -190,14 +190,15 @@ REVA_API_URL=http://localhost:8080/api/v1 REVA_API_KEY=<key> go run .
 |---|---|---|
 | Dashboard | `1` | 24 h / 7 d stats, finding counts, cost, queue depth, active workers |
 | Reviews | `2` | All reviews — filter `/`, cycle status `s`, clear filter `c`, requeue `e`, open PR `o` |
-| Findings | `3` | All findings — filter by severity: `a` all · `c` critical · `m` major · `n` minor · `i` info |
+| Findings | `3` | All findings (with repo + PR) — `/` text filter (repo · category · title · file), `o` opens the PR, severity filter `a/c/m/n/i` |
 | Failures | `4` | Failed / stale reviews — requeue with `e` · badge shows count |
-| Repos | `5` | Registered repos — add one with `n` (type `owner/name`), trigger an audit with `a`, open on GitHub with `o` |
+| Repos | `5` | Registered repos — `/` filter by name, add one with `n` (type `owner/name`), trigger an audit with `a`, open on GitHub with `o` |
 | Pending | `6` | Reviews waiting in the debounce queue · badge shows count |
-| Tickets | `7` | Odoo ticket analyses — requeue `e`, open in Odoo `o` |
-| Audits | `8` | Repo-audit findings — severity filter `a/c/m/n/i`, shows the GitHub issue # |
+| Tickets | `7` | Odoo ticket analyses, grouped by GitHub repo into foldable sections, **collapsed by default** (analysis-only tickets under "no repo yet") — `enter`/`space` open a group · `z` toggles all · `/` filter · `e` requeue · `o` open in Odoo (or the repo on a header) · `enter` on a row drills into issues |
+| Audits | `8` | Repo-audit findings — `enter` views a run's findings, severity filter `a/c/m/n/i`, shows the GitHub issue # |
+| Feedback | `9` | Per-(repo, category) learning signals (findings / dismissals / fixes) + active `/mute`s |
 
-Global keys: `1–8` switch tabs · `r` refresh · `q` quit.
+Global keys: `1–9` switch tabs · `j`/`k` (or arrows) move · `g`/`G` top/bottom · `Ctrl+D`/`Ctrl+U` half-page · PgUp/PgDn page · `r` refresh · `q` quit. Lists that hit their fetch limit show "showing N of M"; narrow with `/`. The free-flowing panels scroll too — the **Reviews** detail pane with `J`/`K` (or PgUp/PgDn), the **Audits** findings and **Feedback** lists with `j`/`k`/PgUp/PgDn.
 
 ## Error notifications
 

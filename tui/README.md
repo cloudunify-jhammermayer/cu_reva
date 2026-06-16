@@ -35,7 +35,11 @@ that the key would travel in plaintext.
 | `internal/ui/*.go` | One file per tab (dashboard, reviews, findings, failures, repos, pending, tickets, audits, feedback) plus `app.go` (tab routing), `styles.go`, `messages.go`. |
 
 Tabs `1`–`9` (Dashboard, Reviews, Findings, Failures, Repos, Pending, Tickets,
-Audits, Feedback); global keys `r` refresh, `q` quit. The **Feedback** tab (`9`)
+Audits, Feedback); navigate lists with `j`/`k`, `g`/`G` (top/bottom),
+`Ctrl+D`/`Ctrl+U` (half-page) and PgUp/PgDn; `/` filters the Findings, Repos and
+Tickets lists; global keys `r` refresh, `q` quit. The **Tickets** tab groups by
+GitHub repo into foldable sections, collapsed by default — `enter`/`space`
+toggles the group at the cursor, `z` expands/collapses all. The **Feedback** tab (`9`)
 shows the Tier-3 learning signals — per (repo, category) findings / dismissals
 (`/dismiss`) / fixes from `GET /metrics/learning`, plus active `/mute`s from
 `GET /metrics/mutes`. The Repos tab adds `n` to register a
