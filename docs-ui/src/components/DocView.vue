@@ -24,6 +24,21 @@ function scrollToId(id) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
+// Print-to-PDF: the @media print stylesheet reformats the page for paper; the
+// browser's "Save as PDF" filename comes from document.title, so set a
+// meaningful one for the duration of the dialog and restore it afterwards.
+function downloadPdf() {
+  const prev = document.title
+  const r = repo.value
+  document.title = r ? `${r.full_name} — ${path.value}` : path.value || prev
+  const restore = () => {
+    document.title = prev
+    window.removeEventListener('afterprint', restore)
+  }
+  window.addEventListener('afterprint', restore)
+  window.print()
+}
+
 async function renderMermaid() {
   try {
     const { default: mermaid } = await import('mermaid')
@@ -88,12 +103,15 @@ function onClick(ev) {
 
 <template>
   <article class="doc">
+    <!-- Print-only header so the saved PDF is self-identifying (hidden on screen). -->
+    <div class="print-header" v-if="repo">{{ repo.full_name }} · {{ path }} · ⎇ {{ branch }}</div>
     <div class="crumbs" v-if="repo">
       <span class="crumb-repo">{{ repo.full_name }}</span>
       <span class="crumb-branch">⎇ {{ branch }}</span>
       <span class="crumb-sep">/</span>
       <span class="crumb-path">{{ path }}</span>
       <a class="gh" :href="ghUrl" target="_blank" rel="noopener noreferrer">View on GitHub ↗</a>
+      <button class="pdf-btn" type="button" @click="downloadPdf">Download PDF</button>
     </div>
     <p v-if="loading" class="muted">Loading…</p>
     <p v-else-if="error" class="error">{{ error }}</p>

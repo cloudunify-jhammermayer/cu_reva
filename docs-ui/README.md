@@ -65,8 +65,5 @@ complete an SSO login, and the TUI authenticates to `/api` with a Bearer key.
 - Repo-relative links/images rewritten: images through the `/raw` proxy,
   in-repo `.md` links to in-app navigation, other repo files to GitHub.
 - Deep-linkable: the selected doc lives in the URL.
-
-## Not yet (future)
-
-- Full-text search (today's filter matches file paths/titles only).
-- Scroll-to-heading for `…#anchor` links into another doc.
+- **Download PDF** — reformats the current doc for clean light-paper print
+  (`@media print`) and opens the browser's print dialog ("Save as PDF").
