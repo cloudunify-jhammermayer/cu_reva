@@ -662,3 +662,48 @@ def test_issue_state_odoo_transient_reraises_for_retry(ctx_and_fakes):
         sync_ticket_issue_state(
             {"owner": "acme", "repo": "widgets", "number": 102, "state": "closed"}
         )
+
+
+def test_reconcile_splits_parent_from_children(ctx_and_fakes):
+    """DB has no plan (e.g. wiped) but the marked issues still exist on GitHub:
+    the marker search returns parent + children; the parent must be removed from
+    the set sent to Odoo and recorded as parent_issue."""
+    s = ctx_and_fakes
+    s["github"].existing_issues = [
+        {"number": 50, "title": "[Ticket 123] Login page broken", "id": 9050,
+         "url": "https://github.com/acme/widgets/issues/50", "state": "open"},   # parent
+        {"number": 51, "title": "[Ticket 123] 1/2 — A", "id": 9051,
+         "url": "https://github.com/acme/widgets/issues/51", "state": "open"},
+        {"number": 52, "title": "[Ticket 123] 2/2 — B", "id": 9052,
+         "url": "https://github.com/acme/widgets/issues/52", "state": "open"},
+    ]
+    s["github"].existing_parent = [s["github"].existing_issues[0]]   # parent-marker hit
+    params = _make_params(s["db"])
+
+    out = run_ticket_issues(params)
+    assert out["status"] == "completed"
+    assert s["planner"].call_count == 0          # reconciled, not re-planned
+    assert s["github"].created == []             # nothing created
+
+    cb = s["odoo"].calls[-1]
+    assert [i["number"] for i in cb["issues"]] == [51, 52]   # parent (50) excluded
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["parent_issue"]["number"] == 50
+    # children get re-attached (idempotent)
+    assert sorted(s["github"].sub_issues) == [(50, 9051), (50, 9052)]
+
+
+def test_reconcile_single_issue_has_no_parent(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["github"].existing_issues = [
+        {"number": 60, "title": "[Ticket 123] only", "id": 9060,
+         "url": "https://github.com/acme/widgets/issues/60", "state": "open"},
+    ]
+    s["github"].existing_parent = []
+    params = _make_params(s["db"])
+
+    out = run_ticket_issues(params)
+    assert out["status"] == "completed"
+    assert [i["number"] for i in s["odoo"].calls[-1]["issues"]] == [60]
+    assert writers.get_ticket_issue_run(s["db"], params["run_id"])["parent_issue"] is None
+    assert s["github"].sub_issues == []          # single issue, nothing attached
