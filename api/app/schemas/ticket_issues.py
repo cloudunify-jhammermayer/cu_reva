@@ -60,6 +60,7 @@ class TicketIssueRunSummary(BaseModel):
     github_url: str
     status: str
     issues: list[TicketIssueRef]
+    parent_issue: TicketIssueRef | None = None
     error_message: str | None
     model: str | None
     estimated_cost_usd: float | None

@@ -50,6 +50,15 @@ def list_ticket_issue_runs(
                     }
                     for i in (r.issues or [])
                 ],
+                "parent_issue": (
+                    {
+                        "number": r.parent_issue.get("number"),
+                        "title": r.parent_issue.get("title", ""),
+                        "url": r.parent_issue.get("url"),
+                        "state": r.parent_issue.get("state"),
+                    }
+                    if r.parent_issue else None
+                ),
                 "error_message": r.error_message,
                 "model": r.model,
                 "estimated_cost_usd": (

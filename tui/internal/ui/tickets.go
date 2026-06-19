@@ -40,9 +40,11 @@ type Tickets struct {
 	filtering bool            // capturing the `/` filter text
 	filter    string          // case-insensitive substring on ticket id / model
 	expanded  map[string]bool // repo keys whose group is unfolded (default: collapsed)
-	// Issue drill-down: the full issue list for the selected ticket's run.
+	// Issue drill-down: the full issue list for the selected ticket's run,
+	// plus its parent ("epic") issue if the run synthesized one (else nil).
 	detail       bool
 	detailIssues []api.TicketIssueRef
+	detailParent *api.TicketIssueRef
 	detailCursor int
 	detailOffset int
 }
@@ -349,6 +351,7 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 			} else if cur.row.issueRun != nil && len(cur.row.issueRun.Issues) > 0 {
 				t.detail = true
 				t.detailIssues = cur.row.issueRun.Issues
+				t.detailParent = cur.row.issueRun.ParentIssue
 				t.detailCursor, t.detailOffset = 0, 0
 			} else {
 				t.statusMsg = "no GitHub issues for this ticket"
@@ -650,7 +653,16 @@ func (t Tickets) detailView(w, h int) string {
 	if sh := scrollHint(off, vis, len(t.detailIssues)); sh != "" {
 		pos += sh
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", body, "", pos)
+
+	parts := []string{header, ""}
+	// When the run grouped its issues under a parent ("epic") issue, surface it
+	// as one muted line above the list.
+	if p := t.detailParent; p != nil && p.Number != nil {
+		parts = append(parts, styleSubtitle.Render(
+			truncate(fmt.Sprintf("  Epic: #%d %s", *p.Number, p.Title), w-2)))
+	}
+	parts = append(parts, body, "", pos)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 func ticketStatusSymbol(status string, createdAt time.Time) string {

@@ -160,6 +160,49 @@ func TestEnterDrillsIntoIssueListAndEscReturns(t *testing.T) {
 	}
 }
 
+func TestDetailViewShowsParentEpicWhenPresent(t *testing.T) {
+	tab := ticketsWithData()
+	// ticket 456's mock run carries a parent ("epic") issue #41.
+	tab = onRow(tab, 456)
+	tab, _ = tab.update(keyMsg("enter"))
+	if tab.detailParent == nil {
+		t.Fatal("entering detail did not capture the run's parent issue")
+	}
+	out := tab.view(120, 30)
+	if !strings.Contains(out, "Epic: #41") {
+		t.Fatalf("detail view missing the parent epic line, got:\n%s", out)
+	}
+}
+
+func TestDetailViewOmitsEpicLineWithoutParent(t *testing.T) {
+	// A run without a parent (the common single-issue / legacy case) must render
+	// the issue list unchanged — no Epic line.
+	tab := newTickets(&api.MockClient{}, "")
+	tab.width, tab.height = 120, 30
+	tab, _ = tab.update(ticketAnalysesLoadedMsg{data: &api.TicketAnalysisPage{Total: 0}})
+	tab, _ = tab.update(ticketIssueRunsLoadedMsg{data: &api.TicketIssueRunPage{
+		Items: []api.TicketIssueRunSummary{{
+			ID: 7, TicketID: 3030, ModelName: "project.task", Status: "completed",
+			Issues: []api.TicketIssueRef{
+				{Number: intPtr(50), Title: "Lone issue", State: strPtr("open")},
+			},
+			CreatedAt: time.Now(),
+		}},
+		Total: 1,
+	}})
+	tab = onRow(tab, 3030)
+	tab, _ = tab.update(keyMsg("enter"))
+	if !tab.detail {
+		t.Fatal("did not drill into the run with one issue")
+	}
+	if tab.detailParent != nil {
+		t.Fatal("captured a parent for a parentless run")
+	}
+	if strings.Contains(tab.view(120, 30), "Epic:") {
+		t.Fatal("detail view rendered an Epic line for a parentless run")
+	}
+}
+
 func TestEnterWithoutIssuesShowsStatus(t *testing.T) {
 	tab := newTickets(&api.MockClient{}, "")
 	tab.width, tab.height = 120, 30

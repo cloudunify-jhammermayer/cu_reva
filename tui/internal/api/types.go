@@ -192,6 +192,7 @@ type TicketIssueRunSummary struct {
 	GithubURL        string           `json:"github_url"`
 	Status           string           `json:"status"`
 	Issues           []TicketIssueRef `json:"issues"`
+	ParentIssue      *TicketIssueRef  `json:"parent_issue"`
 	ErrorMessage     *string          `json:"error_message"`
 	Model            *string          `json:"model"`
 	EstimatedCostUSD *float64         `json:"estimated_cost_usd"`

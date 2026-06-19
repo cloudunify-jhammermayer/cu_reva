@@ -317,6 +317,48 @@ def test_list_ticket_issue_runs_strips_plan_bodies(client_db_queue):
     assert "description" not in item
 
 
+def test_list_ticket_issue_runs_surfaces_parent_issue(client_db_queue):
+    """A run with a synthesized "epic" parent surfaces it as parent_issue; a run
+    without one (legacy / single-issue) serializes parent_issue: null."""
+    client, db, _ = client_db_queue
+    # Run WITH a parent (newest -> sorts first).
+    with_parent = client.post(
+        "/api/v1/create-issues", json={**CONTRACT_PAYLOAD, "ticket_id": 222}
+    ).json()
+    writers.set_ticket_issue_parent(
+        db,
+        with_parent["request_id"],
+        {
+            "number": 900,
+            "id": 555000,
+            "url": "https://github.com/org/repo/issues/900",
+            "title": "[Ticket 222] Build the thing",
+            "state": "open",
+        },
+    )
+    # Run WITHOUT a parent.
+    without_parent = client.post(
+        "/api/v1/create-issues", json={**CONTRACT_PAYLOAD, "ticket_id": 111}
+    ).json()
+
+    data = client.get("/api/v1/ticket-issue-runs").json()
+    by_id = {i["id"]: i for i in data["items"]}
+
+    parent = by_id[with_parent["request_id"]]["parent_issue"]
+    assert parent == {
+        "number": 900,
+        "title": "[Ticket 222] Build the thing",
+        "url": "https://github.com/org/repo/issues/900",
+        "state": "open",
+    }
+    # The parent stays OUT of the issues list (separate field).
+    assert by_id[with_parent["request_id"]]["issues"] == []
+    # internal id is stripped (not in the TicketIssueRef shape).
+    assert "id" not in parent
+
+    assert by_id[without_parent["request_id"]]["parent_issue"] is None
+
+
 def test_list_ticket_issue_runs_status_filter_and_order(client_db_queue):
     client, db, _ = client_db_queue
     first = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD).json()
