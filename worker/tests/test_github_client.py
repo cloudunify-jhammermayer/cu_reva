@@ -1034,6 +1034,20 @@ def test_add_sub_issue_swallows_422_already_attached(rsa_key_pair):
     client.add_sub_issue("tok", "acme", "widgets", parent_number=10, sub_issue_id=9001)
 
 
+def test_add_sub_issue_raises_on_403_permission(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(req):
+        if req.url.path.endswith("/access_tokens"):
+            return httpx.Response(201, json={"token": "tok", "expires_at": "2099-01-01T00:00:00Z"})
+        return httpx.Response(403, json={"message": "Resource not accessible by integration"})
+
+    client = _make_client(handler, private_pem)
+    # a token/permission failure must surface, not be masked as success
+    with pytest.raises(PermanentError):
+        client.add_sub_issue("tok", "acme", "widgets", parent_number=10, sub_issue_id=9001)
+
+
 def test_find_issues_with_marker_returns_id(rsa_key_pair):
     private_pem, _ = rsa_key_pair
 

@@ -326,7 +326,9 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             log.info("ticket_issues_plan_adopted", from_run=prior["id"])
 
     if issues is not None:
-        need_parent = len(issues) >= 2
+        need_parent = len(issues) >= 2 and (
+            parent is not None or any(i.get("number") is None for i in issues)
+        )
         done = all(i.get("number") is not None for i in issues)
         if need_parent:
             done = done and parent is not None and all(i.get("attached") for i in issues)
@@ -345,6 +347,10 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
         if existing:
             # DB-wiped reconcile: the marker matches parent + children. Split the
             # parent out (Task 4) so it never reaches the Odoo payload.
+            # Assumes the parent's revaticketparent marker is indexed by GitHub
+            # search by the time we reconcile; if it lags, the parent is treated
+            # as a child (accepted — narrow DB-loss window, consistent with the
+            # existing GitHub search-lag handling elsewhere).
             parent_hits = ctx.github.find_issues_with_marker(token, owner, repo, parent_marker)
             parent_numbers = {h["number"] for h in parent_hits}
             children = [e for e in existing if e["number"] not in parent_numbers]
@@ -377,7 +383,13 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             cost = writers.record_ticket_issue_plan(ctx.db, params.run_id, issues, response)
             writers.record_claude_spend(ctx.db, "ticket_issues", cost)
 
-    need_parent = len(issues) >= 2
+    # Only group under a parent when this run creates issues itself, or a parent
+    # already exists (resume). Pre-feature runs reconciled/adopted with all
+    # issues already created stay flat — we don't backfill epics (spec scope),
+    # and attaching them is impossible anyway (no GitHub id on legacy items).
+    need_parent = len(issues) >= 2 and (
+        parent is not None or any(i.get("number") is None for i in issues)
+    )
 
     ctx.github.ensure_label(
         token, owner, repo, _TICKET_ISSUE_LABEL,

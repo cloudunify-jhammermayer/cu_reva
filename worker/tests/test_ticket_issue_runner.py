@@ -488,6 +488,51 @@ def test_reclick_adopts_prior_plan_and_creates_missing(ctx_and_fakes):
     assert [i["number"] for i in cb["issues"]] == [55, 102]
 
 
+def test_legacy_prior_plan_without_id_creates_no_parent(ctx_and_fakes):
+    """Pre-feature prior plan: children have numbers but no id/attached. A
+    re-click must NOT backfill a parent (would be an empty epic) — stays flat."""
+    s = ctx_and_fakes
+    prior = _make_params(s["db"])
+    prior_plan = [
+        {"title": "A", "body": "b", "acceptance_criteria": [], "number": 70,
+         "url": "https://github.com/acme/widgets/issues/70"},
+        {"title": "B", "body": "b", "acceptance_criteria": [], "number": 71,
+         "url": "https://github.com/acme/widgets/issues/71"},
+    ]
+    writers.update_ticket_issue_progress(s["db"], prior["run_id"], prior_plan)
+    writers.record_ticket_issue_run_failed(s["db"], prior["run_id"], "x")
+
+    fresh = _make_params(s["db"])
+    out = run_ticket_issues(fresh)
+    assert out["status"] == "completed"
+    assert s["github"].created == []
+    assert s["github"].sub_issues == []
+    row = writers.get_ticket_issue_run(s["db"], fresh["run_id"])
+    assert row["parent_issue"] is None
+    assert [i["number"] for i in s["odoo"].calls[-1]["issues"]] == [70, 71]
+
+
+def test_reconcile_pre_feature_flat_issues_no_parent_backfill(ctx_and_fakes):
+    """DB wiped, pre-feature ticket: child marker finds flat issues, parent
+    marker finds nothing -> do NOT synthesize a parent; all go to Odoo."""
+    s = ctx_and_fakes
+    s["github"].existing_issues = [
+        {"number": 80, "title": "[Ticket 123] 1/2 — A", "id": 9080,
+         "url": "https://github.com/acme/widgets/issues/80", "state": "open"},
+        {"number": 81, "title": "[Ticket 123] 2/2 — B", "id": 9081,
+         "url": "https://github.com/acme/widgets/issues/81", "state": "open"},
+    ]
+    s["github"].existing_parent = []
+    params = _make_params(s["db"])
+    out = run_ticket_issues(params)
+    assert out["status"] == "completed"
+    assert s["github"].created == []
+    assert s["github"].sub_issues == []
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["parent_issue"] is None
+    assert [i["number"] for i in s["odoo"].calls[-1]["issues"]] == [80, 81]
+
+
 def test_prior_plan_for_different_repo_is_not_adopted(ctx_and_fakes):
     s = ctx_and_fakes
     prior = _make_params(s["db"])

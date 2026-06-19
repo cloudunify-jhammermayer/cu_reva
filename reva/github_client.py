@@ -454,18 +454,16 @@ class GitHubClient:
         """Attach an existing issue as a sub-issue of `parent_number`.
 
         The GitHub sub-issues API keys on the child's database `id` (the value
-        create_issue returns), NOT its number. A 422 "already added" is a no-op:
-        a resume/requeue must be able to re-run this without erroring."""
-        try:
-            self._post(
-                token,
-                f"/repos/{owner}/{repo}/issues/{parent_number}/sub_issues",
-                {"sub_issue_id": sub_issue_id},
-            )
-        except PermanentError:
-            # 4xx → PermanentError (map_github_status); 422 means it is already a
-            # sub-issue of this parent, which is exactly the resumed-attach case.
-            pass
+        create_issue returns), NOT its number. A 422 means it is ALREADY a
+        sub-issue of this parent (the resume/requeue case) and is a no-op; any
+        other failure — notably 403/404 if the App token cannot reach the
+        sub-issues endpoint — must surface, not be masked as success."""
+        self._post(
+            token,
+            f"/repos/{owner}/{repo}/issues/{parent_number}/sub_issues",
+            {"sub_issue_id": sub_issue_id},
+            allow_status=frozenset({422}),
+        )
 
     def ensure_label(
         self,
@@ -705,7 +703,13 @@ class GitHubClient:
             raise map_github_status(response, action=path)
         return response
 
-    def _post(self, token: str, path: str, json_body: dict) -> httpx.Response:
+    def _post(
+        self,
+        token: str,
+        path: str,
+        json_body: dict,
+        allow_status: frozenset[int] = frozenset(),
+    ) -> httpx.Response:
         url = f"{self.base_url}{path}"
         headers = {
             "Authorization": f"Bearer {token}",
@@ -720,6 +724,8 @@ class GitHubClient:
         except httpx.TransportError as exc:
             raise TransientError(f"GitHub transport error: {exc}") from exc
 
+        if response.status_code in allow_status:
+            return response
         if response.status_code >= 300:
             raise map_github_status(response, action=path)
         return response
