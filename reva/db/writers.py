@@ -1201,6 +1201,7 @@ def get_ticket_issue_run(db: Database, run_id: int) -> dict | None:
             "ticket_url": row.ticket_url,
             "status": row.status,
             "issues": row.issues,
+            "parent_issue": row.parent_issue,
             "error_message": row.error_message,
             "model": row.model,
             "input_tokens": row.input_tokens,
@@ -1288,6 +1289,18 @@ def update_ticket_issue_progress(db: Database, run_id: int, issues: list[dict]) 
             update(TicketIssueRun)
             .where(TicketIssueRun.id == run_id)
             .values(issues=list(issues))
+        )
+
+
+def set_ticket_issue_parent(db: Database, run_id: int, parent: dict) -> None:
+    """Persist the parent ("epic") issue for a run. Statement-level UPDATE for
+    the same reason as update_ticket_issue_progress: avoid dragging the full
+    row (ticket text) over the wire to set one column."""
+    with db.session() as s:
+        s.execute(
+            update(TicketIssueRun)
+            .where(TicketIssueRun.id == run_id)
+            .values(parent_issue=dict(parent))
         )
 
 
