@@ -7,6 +7,7 @@ exercise the actual signing/verification path.
 
 from __future__ import annotations
 
+import json
 import time
 
 import httpx
@@ -531,7 +532,8 @@ def test_create_issue_opens_issue(rsa_key_pair):
         captured["path"] = req.url.path
         captured["body"] = json.loads(req.content)
         return httpx.Response(
-            201, json={"number": 77, "html_url": "https://github.com/acme/widgets/issues/77"}
+            201, json={"number": 77, "html_url": "https://github.com/acme/widgets/issues/77",
+                       "id": 7700}
         )
 
     client = _make_client(handler, private_pem)
@@ -541,7 +543,7 @@ def test_create_issue_opens_issue(rsa_key_pair):
         labels=["reva-audit"],
     )
     # url is GitHub's canonical html_url, not reconstructed from owner/repo
-    assert created == {"number": 77, "url": "https://github.com/acme/widgets/issues/77"}
+    assert created == {"number": 77, "url": "https://github.com/acme/widgets/issues/77", "id": 7700}
     assert captured["method"] == "POST"
     assert captured["path"] == "/repos/acme/widgets/issues"
     assert captured["body"]["title"] == "[REVA audit] RCE"
@@ -956,9 +958,9 @@ def test_find_issues_with_marker_returns_items_any_state(rsa_key_pair):
             "total_count": 2,
             "items": [
                 {"number": 5, "title": "Open one", "state": "open",
-                 "html_url": "https://github.com/acme/widgets/issues/5"},
+                 "html_url": "https://github.com/acme/widgets/issues/5", "id": 500},
                 {"number": 3, "title": "Closed one", "state": "closed",
-                 "html_url": "https://github.com/acme/widgets/issues/3"},
+                 "html_url": "https://github.com/acme/widgets/issues/3", "id": 300},
             ],
         })
 
@@ -971,9 +973,9 @@ def test_find_issues_with_marker_returns_items_any_state(rsa_key_pair):
     assert "state:open" not in captured["q"]
     assert issues == [
         {"number": 5, "title": "Open one",
-         "url": "https://github.com/acme/widgets/issues/5", "state": "open"},
+         "url": "https://github.com/acme/widgets/issues/5", "state": "open", "id": 500},
         {"number": 3, "title": "Closed one",
-         "url": "https://github.com/acme/widgets/issues/3", "state": "closed"},
+         "url": "https://github.com/acme/widgets/issues/3", "state": "closed", "id": 300},
     ]
 
 
@@ -985,3 +987,65 @@ def test_find_issues_with_marker_empty(rsa_key_pair):
 
     client = _make_client(handler, private_pem)
     assert client.find_issues_with_marker("tok", "acme", "widgets", "revaticketabc") == []
+
+
+def test_create_issue_returns_id(rsa_key_pair):
+    _, private_pem = rsa_key_pair
+
+    def handler(req):
+        if req.url.path.endswith("/access_tokens"):
+            return httpx.Response(201, json={"token": "tok", "expires_at": "2099-01-01T00:00:00Z"})
+        assert req.url.path == "/repos/acme/widgets/issues"
+        return httpx.Response(201, json={
+            "number": 42, "html_url": "https://github.com/acme/widgets/issues/42", "id": 9001,
+        })
+
+    client = _make_client(handler, private_pem)
+    out = client.create_issue("tok", "acme", "widgets", title="t", body="b", labels=["reva-ticket"])
+    assert out == {"number": 42, "url": "https://github.com/acme/widgets/issues/42", "id": 9001}
+
+
+def test_add_sub_issue_posts_sub_issue_id(rsa_key_pair):
+    _, private_pem = rsa_key_pair
+    seen = {}
+
+    def handler(req):
+        if req.url.path.endswith("/access_tokens"):
+            return httpx.Response(201, json={"token": "tok", "expires_at": "2099-01-01T00:00:00Z"})
+        assert req.url.path == "/repos/acme/widgets/issues/10/sub_issues"
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(201, json={"id": 1})
+
+    client = _make_client(handler, private_pem)
+    client.add_sub_issue("tok", "acme", "widgets", parent_number=10, sub_issue_id=9001)
+    assert seen["body"] == {"sub_issue_id": 9001}
+
+
+def test_add_sub_issue_swallows_422_already_attached(rsa_key_pair):
+    _, private_pem = rsa_key_pair
+
+    def handler(req):
+        if req.url.path.endswith("/access_tokens"):
+            return httpx.Response(201, json={"token": "tok", "expires_at": "2099-01-01T00:00:00Z"})
+        return httpx.Response(422, json={"message": "Sub-issue already added to this issue"})
+
+    client = _make_client(handler, private_pem)
+    # must not raise — re-attach on resume is a no-op
+    client.add_sub_issue("tok", "acme", "widgets", parent_number=10, sub_issue_id=9001)
+
+
+def test_find_issues_with_marker_returns_id(rsa_key_pair):
+    _, private_pem = rsa_key_pair
+
+    def handler(req):
+        if req.url.path.endswith("/access_tokens"):
+            return httpx.Response(201, json={"token": "tok", "expires_at": "2099-01-01T00:00:00Z"})
+        return httpx.Response(200, json={"items": [
+            {"number": 7, "title": "Old", "html_url": "https://github.com/acme/widgets/issues/7",
+             "state": "open", "id": 700},
+        ]})
+
+    client = _make_client(handler, private_pem)
+    out = client.find_issues_with_marker("tok", "acme", "widgets", "revaticketabc")
+    assert out == [{"number": 7, "title": "Old",
+                    "url": "https://github.com/acme/widgets/issues/7", "state": "open", "id": 700}]

@@ -446,7 +446,26 @@ class GitHubClient:
             payload["labels"] = labels
         response = self._post(token, f"/repos/{owner}/{repo}/issues", payload)
         data = response.json()
-        return {"number": data["number"], "url": data["html_url"]}
+        return {"number": data["number"], "url": data["html_url"], "id": data["id"]}
+
+    def add_sub_issue(
+        self, token: str, owner: str, repo: str, parent_number: int, sub_issue_id: int
+    ) -> None:
+        """Attach an existing issue as a sub-issue of `parent_number`.
+
+        The GitHub sub-issues API keys on the child's database `id` (the value
+        create_issue returns), NOT its number. A 422 "already added" is a no-op:
+        a resume/requeue must be able to re-run this without erroring."""
+        try:
+            self._post(
+                token,
+                f"/repos/{owner}/{repo}/issues/{parent_number}/sub_issues",
+                {"sub_issue_id": sub_issue_id},
+            )
+        except PermanentError:
+            # 4xx → PermanentError (map_github_status); 422 means it is already a
+            # sub-issue of this parent, which is exactly the resumed-attach case.
+            pass
 
     def ensure_label(
         self,
@@ -542,6 +561,7 @@ class GitHubClient:
                 "title": item["title"],
                 "url": item["html_url"],
                 "state": item.get("state", "open"),
+                "id": item["id"],
             }
             for item in response.json().get("items", [])
         ]
