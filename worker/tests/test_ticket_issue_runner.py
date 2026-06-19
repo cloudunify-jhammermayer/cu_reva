@@ -49,8 +49,10 @@ class FakePlanner:
 
 @dataclass
 class FakeGitHub:
-    existing_issues: list[dict] = field(default_factory=list)
+    existing_issues: list[dict] = field(default_factory=list)        # child-marker search hits
+    existing_parent: list[dict] = field(default_factory=list)        # parent-marker search hits
     created: list[dict] = field(default_factory=list)
+    sub_issues: list[tuple[int, int]] = field(default_factory=list)  # (parent_number, sub_issue_id)
     labels_ensured: list[str] = field(default_factory=list)
     installation_exc: Exception | None = None
     create_exc_on_call: int | None = None  # 1-based index of create_issue call that raises
@@ -71,6 +73,9 @@ class FakeGitHub:
 
     def find_issues_with_marker(self, token, owner, repo, marker) -> list[dict]:
         self.search_calls += 1
+        # the parent carries an extra, ticket-specific "revaticketparent<digest>" token
+        if "parent" in marker:
+            return list(self.existing_parent)
         return list(self.existing_issues)
 
     def ensure_label(self, token, owner, repo, name, color="5319e7", description="") -> None:
@@ -88,7 +93,11 @@ class FakeGitHub:
         return {
             "number": self.next_number,
             "url": f"https://github.com/{owner}/{repo}/issues/{self.next_number}",
+            "id": 900_000 + self.next_number,
         }
+
+    def add_sub_issue(self, token, owner, repo, parent_number, sub_issue_id) -> None:
+        self.sub_issues.append((parent_number, sub_issue_id))
 
 
 @dataclass
@@ -183,18 +192,19 @@ def test_happy_path_creates_issues_and_calls_back(ctx_and_fakes):
     assert out["status"] == "completed"
     assert s["planner"].call_count == 1
     assert s["github"].labels_ensured == ["reva-ticket"]
-    assert len(s["github"].created) == 2
-    body = s["github"].created[0]["body"]
+    # 1 parent (index 0) + 2 children
+    assert len(s["github"].created) == 3
+    body = s["github"].created[1]["body"]  # index 0 is now the parent
     assert "Body 1" in body
     assert "- [ ] criterion 1" in body
     # mandatory Odoo back-link + hidden ticket-level dedup marker
     assert params["ticket_url"] in body
     assert "<!-- revaticket" in body
-    assert s["github"].created[0]["labels"] == ["reva-ticket"]
+    assert s["github"].created[1]["labels"] == ["reva-ticket"]
 
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
     assert row["status"] == "completed"
-    assert [i["number"] for i in row["issues"]] == [101, 102]
+    assert [i["number"] for i in row["issues"]] == [102, 103]
     assert row["model"] == "claude-sonnet-4-6"
     assert row["estimated_cost_usd"] > 0
 
@@ -204,11 +214,76 @@ def test_happy_path_creates_issues_and_calls_back(ctx_and_fakes):
     assert cb["request_id"] == params["run_id"]
     # Titles carry the Odoo record id and the implementation order (n/total)
     assert cb["issues"] == [
-        {"number": 101, "title": "[Ticket 123] 1/2 — Issue 1",
-         "url": "https://github.com/acme/widgets/issues/101"},
-        {"number": 102, "title": "[Ticket 123] 2/2 — Issue 2",
+        {"number": 102, "title": "[Ticket 123] 1/2 — Issue 1",
          "url": "https://github.com/acme/widgets/issues/102"},
+        {"number": 103, "title": "[Ticket 123] 2/2 — Issue 2",
+         "url": "https://github.com/acme/widgets/issues/103"},
     ]
+
+
+def test_two_issues_creates_parent_and_attaches_children(ctx_and_fakes):
+    s = ctx_and_fakes
+    params = _make_params(s["db"])
+
+    out = run_ticket_issues(params)
+    assert out["status"] == "completed"
+
+    # 1 parent + 2 children created
+    assert len(s["github"].created) == 3
+    parent_create = s["github"].created[0]
+    assert parent_create["title"] == "[Ticket 123] Login page broken"   # _parent_title
+    assert "<!-- revaticketparent" in parent_create["body"]              # parent-only tag
+    assert "<!-- revaticket" in parent_create["body"]                    # shared marker too
+
+    # both children attached to the parent (number 101), by their database id
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    pnum = row["parent_issue"]["number"]
+    assert pnum == 101
+    assert sorted(s["github"].sub_issues) == [(101, 900_000 + 102), (101, 900_000 + 103)]
+    assert all(i["attached"] for i in row["issues"])
+
+    # Odoo callback carries ONLY the children, no parent
+    cb = s["odoo"].calls[0]
+    assert [i["number"] for i in cb["issues"]] == [102, 103]
+    assert all(i["number"] != pnum for i in cb["issues"])
+
+
+def test_single_issue_creates_no_parent(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["planner"].plan = _plan(1)
+    params = _make_params(s["db"])
+
+    out = run_ticket_issues(params)
+    assert out["status"] == "completed"
+    assert len(s["github"].created) == 1            # no parent
+    assert s["github"].sub_issues == []
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["parent_issue"] is None
+    assert len(s["odoo"].calls[0]["issues"]) == 1
+
+
+def test_resume_reattaches_only_unattached_children(ctx_and_fakes):
+    """A requeue after children were created but before all were attached must
+    not duplicate the parent or re-create children — only finish the attaching."""
+    s = ctx_and_fakes
+    # first run: child #2 attach is the failure point — simulate by failing the
+    # SECOND create so only one child exists, then requeue.
+    s["github"].create_exc_on_call = 3   # parent(1) + child1(2) ok, child2(3) raises
+    params = _make_params(s["db"])
+    with pytest.raises(PermanentError):
+        run_ticket_issues(params)
+
+    writers.reset_ticket_issue_run(s["db"], params["run_id"])
+    s["github"].create_exc_on_call = None
+    created_before = len(s["github"].created)
+
+    out = run_ticket_issues(params)
+    assert out["status"] == "completed"
+    # parent (already created) NOT re-created; only the missing child is created
+    assert len(s["github"].created) == created_before + 1
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert all(i["attached"] for i in row["issues"])
+    assert len(s["github"].sub_issues) == 2          # both children end up attached
 
 
 def test_issue_title_format():
@@ -289,7 +364,8 @@ def test_transient_planner_error_also_fails_and_calls_back(ctx_and_fakes):
 
 def test_partial_failure_persists_progress_then_requeue_resumes(ctx_and_fakes):
     s = ctx_and_fakes
-    s["github"].create_exc_on_call = 2  # second create_issue raises
+    # call 1 = parent, call 2 = child 1 (ok), call 3 = child 2 (raises)
+    s["github"].create_exc_on_call = 3
     params = _make_params(s["db"])
 
     with pytest.raises(PermanentError):
@@ -297,7 +373,7 @@ def test_partial_failure_persists_progress_then_requeue_resumes(ctx_and_fakes):
 
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
     assert row["status"] == "failed"
-    assert row["issues"][0]["number"] == 101  # first create persisted
+    assert row["issues"][0]["number"] == 102  # first child persisted (parent took 101)
     assert row["issues"][1]["number"] is None
     assert s["odoo"].calls[-1]["status"] == "failed"
 
@@ -311,7 +387,7 @@ def test_partial_failure_persists_progress_then_requeue_resumes(ctx_and_fakes):
     assert out["status"] == "completed"
     assert s["planner"].call_count == planner_calls_before  # no re-plan
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
-    assert [i["number"] for i in row["issues"]] == [101, 102]
+    assert [i["number"] for i in row["issues"]] == [102, 103]
     cb = s["odoo"].calls[-1]
     assert cb["status"] == "created"
     assert len(cb["issues"]) == 2  # FULL set, not just the resumed one
@@ -331,7 +407,7 @@ def test_permanent_callback_error_after_creation_is_swallowed(ctx_and_fakes):
     assert out["status"] == "completed"
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
     assert row["status"] == "completed"
-    assert [i["number"] for i in row["issues"]] == [101, 102]
+    assert [i["number"] for i in row["issues"]] == [102, 103]  # parent took 101
 
 
 def test_transient_callback_error_after_creation_reraises_for_rq_retry(ctx_and_fakes):
@@ -354,7 +430,7 @@ def test_transient_callback_error_after_creation_reraises_for_rq_retry(ctx_and_f
     out = run_ticket_issues(params)
     assert out["status"] == "completed"
     assert s["github"].installation_calls == installation_calls_before  # short-circuit
-    assert len(s["github"].created) == 2  # nothing re-created
+    assert len(s["github"].created) == 3  # nothing re-created (parent + 2 children)
     assert s["odoo"].calls[-1]["status"] == "created"
     assert len(s["odoo"].calls[-1]["issues"]) == 2
 
@@ -389,9 +465,10 @@ def test_reclick_adopts_prior_plan_and_creates_missing(ctx_and_fakes):
     prior = _make_params(s["db"])
     prior_plan = [
         {"title": "Issue 1", "body": "Body 1", "acceptance_criteria": [],
-         "number": 55, "url": "https://github.com/acme/widgets/issues/55"},
+         "number": 55, "url": "https://github.com/acme/widgets/issues/55",
+         "id": 900_055, "attached": True},
         {"title": "Issue 2", "body": "Body 2", "acceptance_criteria": [],
-         "number": None, "url": None},
+         "number": None, "url": None, "id": None, "attached": False},
     ]
     writers.update_ticket_issue_progress(s["db"], prior["run_id"], prior_plan)
     writers.record_ticket_issue_run_failed(s["db"], prior["run_id"], "GitHub 403")
@@ -402,10 +479,13 @@ def test_reclick_adopts_prior_plan_and_creates_missing(ctx_and_fakes):
     assert out["status"] == "completed"
     assert s["planner"].call_count == 0  # no re-plan
     assert s["github"].search_calls == 0  # DB beat the search
-    assert len(s["github"].created) == 1  # only the missing one
+    assert len(s["github"].created) == 2  # parent + the missing child
     cb = s["odoo"].calls[-1]
     assert cb["request_id"] == fresh["run_id"]
-    assert [i["number"] for i in cb["issues"]] == [55, 101]  # full set: kept + created
+    # full set: kept child (#55) + newly-created child. The parent is created
+    # FIRST and takes #101, so the new child takes #102 (the brief's [55, 101]
+    # predates the parent-first ordering — see report).
+    assert [i["number"] for i in cb["issues"]] == [55, 102]
 
 
 def test_prior_plan_for_different_repo_is_not_adopted(ctx_and_fakes):
@@ -425,7 +505,7 @@ def test_prior_plan_for_different_repo_is_not_adopted(ctx_and_fakes):
 
     # different repo -> prior plan ignored, normal plan+create path
     assert s["planner"].call_count == 1
-    assert len(s["github"].created) == 2
+    assert len(s["github"].created) == 3  # parent + 2 children
 
 
 def test_marker_is_stable_across_url_casing():
@@ -461,7 +541,7 @@ def test_changed_description_prevents_stale_plan_adoption(ctx_and_fakes):
 
     assert out["status"] == "completed"
     assert s["planner"].call_count == 1  # re-planned from the new basis
-    assert len(s["github"].created) == 2  # fresh set, old plan not adopted
+    assert len(s["github"].created) == 3  # fresh set (parent + 2), old plan not adopted
 
 
 def test_failed_callback_error_never_masks_original_error(ctx_and_fakes):
@@ -492,7 +572,10 @@ def test_invalid_github_url_is_permanent(ctx_and_fakes):
 
 
 def _seed_completed_run(s) -> dict:
-    """A completed run for acme/widgets with two open issues (101, 102)."""
+    """A completed run for acme/widgets with two open child issues (102, 103).
+
+    The parent ("epic") took number 101 — children follow it.
+    """
     params = _make_params(s["db"])
     run_ticket_issues(params)
     return params
@@ -506,7 +589,7 @@ def test_issue_closed_updates_db_and_notifies_odoo(ctx_and_fakes):
     s["odoo"].calls.clear()
 
     out = sync_ticket_issue_state(
-        {"owner": "Acme", "repo": "Widgets", "number": 101, "state": "closed"}
+        {"owner": "Acme", "repo": "Widgets", "number": 102, "state": "closed"}
     )
 
     assert out == {"status": "completed", "records": 1, "notified": 1}
@@ -516,12 +599,12 @@ def test_issue_closed_updates_db_and_notifies_odoo(ctx_and_fakes):
 
     cb = s["odoo"].calls[0]
     assert cb["ticket_id"] == 123 and cb["model_name"] == "helpdesk.ticket"
-    assert cb["number"] == 101 and cb["state"] == "closed"
+    assert cb["number"] == 102 and cb["state"] == "closed"
     assert cb["issues"] == [
-        {"number": 101, "title": "[Ticket 123] 1/2 — Issue 1",
-         "url": "https://github.com/acme/widgets/issues/101", "state": "closed"},
-        {"number": 102, "title": "[Ticket 123] 2/2 — Issue 2",
-         "url": "https://github.com/acme/widgets/issues/102", "state": "open"},
+        {"number": 102, "title": "[Ticket 123] 1/2 — Issue 1",
+         "url": "https://github.com/acme/widgets/issues/102", "state": "closed"},
+        {"number": 103, "title": "[Ticket 123] 2/2 — Issue 2",
+         "url": "https://github.com/acme/widgets/issues/103", "state": "open"},
     ]
 
 
@@ -530,8 +613,8 @@ def test_issue_reopened_syncs_back_to_open(ctx_and_fakes):
 
     s = ctx_and_fakes
     params = _seed_completed_run(s)
-    sync_ticket_issue_state({"owner": "acme", "repo": "widgets", "number": 101, "state": "closed"})
-    sync_ticket_issue_state({"owner": "acme", "repo": "widgets", "number": 101, "state": "open"})
+    sync_ticket_issue_state({"owner": "acme", "repo": "widgets", "number": 102, "state": "closed"})
+    sync_ticket_issue_state({"owner": "acme", "repo": "widgets", "number": 102, "state": "open"})
 
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
     assert row["issues"][0]["state"] == "open"
@@ -560,7 +643,7 @@ def test_issue_state_odoo_409_is_swallowed_db_still_updated(ctx_and_fakes):
     s["odoo"].raise_exc = PermanentError("Odoo /issue-state 409 (permanent)")
 
     out = sync_ticket_issue_state(
-        {"owner": "acme", "repo": "widgets", "number": 101, "state": "closed"}
+        {"owner": "acme", "repo": "widgets", "number": 102, "state": "closed"}
     )
 
     assert out["notified"] == 0
@@ -577,5 +660,5 @@ def test_issue_state_odoo_transient_reraises_for_retry(ctx_and_fakes):
 
     with pytest.raises(TransientError):
         sync_ticket_issue_state(
-            {"owner": "acme", "repo": "widgets", "number": 101, "state": "closed"}
+            {"owner": "acme", "repo": "widgets", "number": 102, "state": "closed"}
         )

@@ -49,10 +49,22 @@ def _retries_remaining() -> bool:
     return bool(job is not None and getattr(job, "retries_left", None))
 
 
+def _ticket_digest(
+    owner: str, repo: str, model_name: str, ticket_id: int, basis: str
+) -> str:
+    """16-hex content-addressed digest of a ticket + planning basis (see
+    _ticket_marker for why each field is in the key)."""
+    key = f"{owner.lower()}/{repo.lower()}\x00{model_name}\x00{ticket_id}\x00{basis}"
+    return hashlib.sha1(  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
+        key.encode(), usedforsecurity=False
+    ).hexdigest()[:16]
+
+
 def _ticket_marker(
     owner: str, repo: str, model_name: str, ticket_id: int, basis: str
 ) -> str:
-    """Stable, plain-alphanumeric token identifying a ticket + planning basis.
+    """Stable token in EVERY issue body for this ticket (children + parent).
+    Frozen string: changing it orphans every existing ticket's issues.
 
     Ticket-level on purpose: issue titles are Claude-generated and change
     between plans, so a title-keyed marker (the audit pattern) would stop
@@ -62,13 +74,16 @@ def _ticket_marker(
     change the key. The basis digest IS part of the key: when the planning
     input changes, the old issues are deliberately not reconciled — a fresh
     set is created for the new content."""
-    key = f"{owner.lower()}/{repo.lower()}\x00{model_name}\x00{ticket_id}\x00{basis}"
-    # SHA-1 is a content-addressed dedup key, NOT a security hash — and the
-    # value must stay stable so existing issues keep matching.
-    digest = hashlib.sha1(  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
-        key.encode(), usedforsecurity=False
-    ).hexdigest()
-    return "revaticket" + digest[:16]
+    return "revaticket" + _ticket_digest(owner, repo, model_name, ticket_id, basis)
+
+
+def _parent_marker(
+    owner: str, repo: str, model_name: str, ticket_id: int, basis: str
+) -> str:
+    """Additional token in the PARENT body only — same digest, distinct prefix.
+    Lets reconciliation (DB-wiped) tell the parent apart from its children via a
+    second, ticket-specific search."""
+    return "revaticketparent" + _ticket_digest(owner, repo, model_name, ticket_id, basis)
 
 
 def _same_repo(github_url: str, owner: str, repo: str) -> bool:
@@ -107,6 +122,29 @@ def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str) ->
         f"<!-- {marker} -->",
     ]
     return "\n".join(lines)
+
+
+def _parent_title(params: TicketIssueJobParams) -> str:
+    """Parent ("epic") title: '[Task 2010] <ticket name>' — same id prefix as the
+    children, without the n/total order marker."""
+    label = params.model_name.rsplit(".", 1)[-1].capitalize()
+    return f"[{label} {params.ticket_id}] {params.name}"
+
+
+def _format_parent_body(params: TicketIssueJobParams, marker: str, parent_marker: str) -> str:
+    """Synthesized locally (no Claude): a back-link + both hidden markers. GitHub
+    renders the sub-issue checklist itself, so we don't list children here."""
+    return "\n".join([
+        "Tracking issue for the linked Odoo ticket. "
+        "Its work items are attached below as sub-issues.",
+        "",
+        "---",
+        f"**Odoo ticket:** [{params.name}]({params.ticket_url})",
+        "",
+        "<sub>🤖 Created by REVA from an Odoo ticket.</sub>",
+        f"<!-- {marker} -->",
+        f"<!-- {parent_marker} -->",
+    ])
 
 
 def _issues_payload(issues: list[dict]) -> list[dict]:
@@ -267,6 +305,7 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
     # marker is stable across this run and its requeues.
     basis = (row or {}).get("planning_basis") or "text:none"
     issues = (row or {}).get("issues") or None
+    parent = (row or {}).get("parent_issue") or None
 
     if issues is None:
         prior = writers.get_latest_ticket_issue_plan(
@@ -286,45 +325,79 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             writers.update_ticket_issue_progress(ctx.db, params.run_id, issues)
             log.info("ticket_issues_plan_adopted", from_run=prior["id"])
 
-    if issues is not None and all(i.get("number") is not None for i in issues):
-        # Nothing to create (callback resend / fully-created adoption): skip
-        # the GitHub setup round-trips entirely.
-        return issues
+    if issues is not None:
+        need_parent = len(issues) >= 2
+        done = all(i.get("number") is not None for i in issues)
+        if need_parent:
+            done = done and parent is not None and all(i.get("attached") for i in issues)
+        if done:
+            # Nothing to create/attach (callback resend / fully-created adoption):
+            # skip the GitHub round-trips entirely.
+            return issues
 
     marker = _ticket_marker(owner, repo, params.model_name, params.ticket_id, basis)
+    parent_marker = _parent_marker(owner, repo, params.model_name, params.ticket_id, basis)
     installation_id = ctx.github.get_repo_installation_id(owner, repo)
     token = ctx.github.get_installation_token(installation_id)
 
     if issues is None:
         existing = ctx.github.find_issues_with_marker(token, owner, repo, marker)
         if existing:
-            # No plan anywhere in our DB but marked issues exist (e.g. DB
-            # reset): re-link them instead of duplicating.
-            log.info("ticket_issues_reconciled", existing=len(existing))
-            return [dict(issue) for issue in existing]
+            # DB-wiped reconcile: the marker matches parent + children. Split the
+            # parent out (Task 4) so it never reaches the Odoo payload.
+            parent_hits = ctx.github.find_issues_with_marker(token, owner, repo, parent_marker)
+            parent_numbers = {h["number"] for h in parent_hits}
+            children = [e for e in existing if e["number"] not in parent_numbers]
+            if parent_hits and parent is None:
+                h = parent_hits[0]
+                parent = {"number": h["number"], "id": h["id"], "url": h["url"],
+                          "title": h["title"], "state": h.get("state", "open")}
+                writers.set_ticket_issue_parent(ctx.db, params.run_id, parent)
+            issues = [dict(c) for c in children]
+            writers.update_ticket_issue_progress(ctx.db, params.run_id, issues)
+            log.info("ticket_issues_reconciled", existing=len(existing), children=len(children))
+        else:
+            response, plan = ctx.ticket_issue_planner.plan_with_response(params)
+            issues = [
+                {
+                    "title": item.title,
+                    "body": item.body,
+                    "acceptance_criteria": item.acceptance_criteria,
+                    "number": None,
+                    "url": None,
+                    "state": None,
+                    "id": None,
+                    "attached": False,
+                }
+                for item in plan.issues
+            ]
+            # Plan + spend persist BEFORE any GitHub call: a partial failure must
+            # resume from this plan, never re-plan (titles would drift and the
+            # issue set would duplicate).
+            cost = writers.record_ticket_issue_plan(ctx.db, params.run_id, issues, response)
+            writers.record_claude_spend(ctx.db, "ticket_issues", cost)
 
-        response, plan = ctx.ticket_issue_planner.plan_with_response(params)
-        issues = [
-            {
-                "title": item.title,
-                "body": item.body,
-                "acceptance_criteria": item.acceptance_criteria,
-                "number": None,
-                "url": None,
-                "state": None,
-            }
-            for item in plan.issues
-        ]
-        # Plan + spend persist BEFORE any GitHub call: a partial failure must
-        # resume from this plan, never re-plan (titles would drift and the
-        # issue set would duplicate).
-        cost = writers.record_ticket_issue_plan(ctx.db, params.run_id, issues, response)
-        writers.record_claude_spend(ctx.db, "ticket_issues", cost)
+    need_parent = len(issues) >= 2
 
     ctx.github.ensure_label(
         token, owner, repo, _TICKET_ISSUE_LABEL,
         description="Issues created from Odoo tickets by REVA",
     )
+
+    # 1) parent first, so children can be attached to it
+    if need_parent and parent is None:
+        created = ctx.github.create_issue(
+            token, owner, repo,
+            title=_parent_title(params),
+            body=_format_parent_body(params, marker, parent_marker),
+            labels=[_TICKET_ISSUE_LABEL],
+        )
+        parent = {"number": created["number"], "id": created["id"],
+                  "url": created["url"], "title": _parent_title(params), "state": "open"}
+        writers.set_ticket_issue_parent(ctx.db, params.run_id, parent)
+        log.info("ticket_issue_parent_created", issue=created["number"])
+
+    # 2) children
     for idx, item in enumerate(issues):
         if item.get("number") is not None:
             continue
@@ -343,10 +416,22 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
         issues[idx] = {
             "title": title,
             "number": created["number"],
+            "id": created["id"],
             "url": created["url"],
             "state": "open",
+            "attached": False,
         }
         writers.update_ticket_issue_progress(ctx.db, params.run_id, issues)
         log.info("ticket_issue_created", issue=created["number"], title=title)
+
+    # 3) attach each child to the parent (idempotent; 422 swallowed in client)
+    if need_parent and parent is not None:
+        for idx, item in enumerate(issues):
+            if item.get("attached") or item.get("id") is None:
+                continue
+            ctx.github.add_sub_issue(token, owner, repo, parent["number"], item["id"])
+            issues[idx] = {**item, "attached": True}
+            writers.update_ticket_issue_progress(ctx.db, params.run_id, issues)
+            log.info("ticket_issue_attached", issue=item["number"], parent=parent["number"])
 
     return issues
