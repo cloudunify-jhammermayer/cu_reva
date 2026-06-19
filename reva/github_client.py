@@ -438,7 +438,7 @@ class GitHubClient:
         body: str,
         labels: list[str] | None = None,
     ) -> dict:
-        """Open a new issue. Returns {"number", "url"} — url is GitHub's
+        """Open a new issue. Returns {"number", "url", "id"} — url is GitHub's
         canonical html_url, not reconstructed from the (possibly mis-cased)
         owner/repo the caller was given."""
         payload: dict = {"title": title, "body": body}

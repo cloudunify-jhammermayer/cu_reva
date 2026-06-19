@@ -990,7 +990,7 @@ def test_find_issues_with_marker_empty(rsa_key_pair):
 
 
 def test_create_issue_returns_id(rsa_key_pair):
-    _, private_pem = rsa_key_pair
+    private_pem, _ = rsa_key_pair
 
     def handler(req):
         if req.url.path.endswith("/access_tokens"):
@@ -1006,7 +1006,7 @@ def test_create_issue_returns_id(rsa_key_pair):
 
 
 def test_add_sub_issue_posts_sub_issue_id(rsa_key_pair):
-    _, private_pem = rsa_key_pair
+    private_pem, _ = rsa_key_pair
     seen = {}
 
     def handler(req):
@@ -1022,7 +1022,7 @@ def test_add_sub_issue_posts_sub_issue_id(rsa_key_pair):
 
 
 def test_add_sub_issue_swallows_422_already_attached(rsa_key_pair):
-    _, private_pem = rsa_key_pair
+    private_pem, _ = rsa_key_pair
 
     def handler(req):
         if req.url.path.endswith("/access_tokens"):
@@ -1035,7 +1035,7 @@ def test_add_sub_issue_swallows_422_already_attached(rsa_key_pair):
 
 
 def test_find_issues_with_marker_returns_id(rsa_key_pair):
-    _, private_pem = rsa_key_pair
+    private_pem, _ = rsa_key_pair
 
     def handler(req):
         if req.url.path.endswith("/access_tokens"):
