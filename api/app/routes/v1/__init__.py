@@ -1,10 +1,15 @@
-"""Aggregate all /api/v1 sub-routers into a single router."""
+"""Aggregate all /api/v1 sub-routers, split by auth gate.
+
+- master gate (require_api_key): every admin/read/management route, incl. the
+  ticket read/list/requeue handlers and the odoo-instances CRUD.
+- instance gate (require_odoo_instance): ONLY the two Odoo create routes.
+"""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.dependencies import require_api_key
+from app.dependencies import require_api_key, require_odoo_instance
 from app.ratelimit import rate_limit
 from app.routes.v1 import (
     admin,
@@ -20,15 +25,24 @@ from app.routes.v1 import (
     ticket_issues,
 )
 
-router = APIRouter(dependencies=[Depends(require_api_key), Depends(rate_limit)])
-router.include_router(reviews.router)
-router.include_router(findings.router)
-router.include_router(repos.router)
-router.include_router(failures.router)
-router.include_router(metrics.router)
-router.include_router(pending.router)
-router.include_router(admin.router)
-router.include_router(ticket_analyses.router)
-router.include_router(ticket_issues.router)
-router.include_router(audits.router)
-router.include_router(odoo_instances.router)
+router = APIRouter()
+
+_master = APIRouter(dependencies=[Depends(require_api_key), Depends(rate_limit)])
+_master.include_router(reviews.router)
+_master.include_router(findings.router)
+_master.include_router(repos.router)
+_master.include_router(failures.router)
+_master.include_router(metrics.router)
+_master.include_router(pending.router)
+_master.include_router(admin.router)
+_master.include_router(ticket_analyses.router)
+_master.include_router(ticket_issues.router)
+_master.include_router(audits.router)
+_master.include_router(odoo_instances.router)
+
+_instance = APIRouter(dependencies=[Depends(require_odoo_instance), Depends(rate_limit)])
+_instance.include_router(ticket_analyses.create_router)
+_instance.include_router(ticket_issues.create_router)
+
+router.include_router(_master)
+router.include_router(_instance)

@@ -25,12 +25,13 @@ from reva.db.engine import Database
 from reva.types import TicketJobParams
 
 router = APIRouter()
+create_router = APIRouter()  # instance-key gated (see routes/v1/__init__.py)
 logger = structlog.get_logger()
 
 _JOB_TIMEOUT = 300  # seconds
 
 
-@router.post(
+@create_router.post(
     "/ticket-analysis",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=TicketAnalysisCreated,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
@@ -52,6 +53,32 @@ def actor_from_request(request: Request) -> str:
 
 def get_github_client(request: Request):
     return request.app.state.github
+
+
+@dataclass(frozen=True)
+class ResolvedOdooInstance:
+    id: int
+    name: str
+
+
+def require_odoo_instance(
+    request: Request, db: Database = Depends(get_db)
+) -> ResolvedOdooInstance:
+    """Resolve the calling Odoo instance from its Bearer key, or 401.
+
+    The instance key IS the identity. The master key does not resolve here (it
+    is not an instance), so it is correctly rejected on the create routes.
+    """
+    from app.queries import odoo_instances as q  # local import: avoid a cycle
+
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing Odoo instance key")
+    token = auth[len("Bearer "):]
+    resolved = q.resolve_odoo_instance_by_key(db, token)
+    if resolved is None:
+        raise HTTPException(status_code=401, detail="Invalid Odoo instance key")
+    return ResolvedOdooInstance(id=resolved[0], name=resolved[1])
 
 
 def require_api_key(request: Request, settings: Settings = Depends(get_settings)) -> None:

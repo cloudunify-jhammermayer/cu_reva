@@ -37,6 +37,7 @@ from reva.github_urls import parse_github_repo_url
 from reva.types import TicketIssueJobParams
 
 router = APIRouter()
+create_router = APIRouter()  # instance-key gated (see routes/v1/__init__.py)
 logger = structlog.get_logger()
 
 _JOB_TIMEOUT = 300  # seconds
@@ -76,7 +77,7 @@ def _enqueue(request: Request, db: Database, run_id: int, params: TicketIssueJob
     return job.id
 
 
-@router.post(
+@create_router.post(
     "/create-issues",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=TicketIssuesAccepted,

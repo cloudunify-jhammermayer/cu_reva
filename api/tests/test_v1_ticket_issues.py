@@ -59,6 +59,9 @@ class FakeGitHub:
 
 @pytest.fixture()
 def client_db_queue():
+    import os
+    from cryptography.fernet import Fernet
+    os.environ["REVA_SECRET_KEY"] = Fernet.generate_key().decode()
     engine = create_engine_from_url(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -77,15 +80,19 @@ def client_db_queue():
     queue = FakeQueue()
     prev_queue = getattr(app.state, "rq_queue", None)
     app.state.rq_queue = queue
-    yield TestClient(app), db, queue
+    tc = TestClient(app)
+    key = tc.post("/api/v1/odoo-instances", json={
+        "name": "test", "callback_url": "", "callback_api_key": "",
+    }).json()["api_key"]
+    yield tc, db, queue, {"Authorization": f"Bearer {key}"}
     app.state.rq_queue = prev_queue
     app.dependency_overrides.clear()
 
 
 def test_contract_payload_accepted_with_request_id(client_db_queue):
-    client, db, queue = client_db_queue
+    client, db, queue, headers = client_db_queue
 
-    r = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD)
+    r = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers)
 
     assert r.status_code == 202
     data = r.json()
@@ -104,9 +111,9 @@ def test_contract_payload_accepted_with_request_id(client_db_queue):
 
 
 def test_empty_analysis_html_accepted(client_db_queue):
-    client, _, _ = client_db_queue
+    client, _, _, headers = client_db_queue
     payload = {**CONTRACT_PAYLOAD, "analysis_html": ""}
-    assert client.post("/api/v1/create-issues", json=payload).status_code == 202
+    assert client.post("/api/v1/create-issues", json=payload, headers=headers).status_code == 202
 
 
 @pytest.mark.parametrize(
@@ -120,17 +127,17 @@ def test_empty_analysis_html_accepted(client_db_queue):
     ],
 )
 def test_invalid_github_url_is_422_and_not_enqueued(client_db_queue, bad_url):
-    client, _, queue = client_db_queue
+    client, _, queue, headers = client_db_queue
     payload = {**CONTRACT_PAYLOAD, "github_url": bad_url}
-    r = client.post("/api/v1/create-issues", json=payload)
+    r = client.post("/api/v1/create-issues", json=payload, headers=headers)
     assert r.status_code == 422
     assert queue.enqueued == []
 
 
 def test_missing_contract_field_is_422(client_db_queue):
-    client, _, queue = client_db_queue
+    client, _, queue, headers = client_db_queue
     payload = {k: v for k, v in CONTRACT_PAYLOAD.items() if k != "ticket_url"}
-    assert client.post("/api/v1/create-issues", json=payload).status_code == 422
+    assert client.post("/api/v1/create-issues", json=payload, headers=headers).status_code == 422
     assert queue.enqueued == []
 
 
@@ -138,18 +145,18 @@ def test_pending_dedup_returns_same_request_id(client_db_queue):
     """A re-click while a run is still pending must return the SAME request_id —
     Odoo overwrites its stored id, so a new one would orphan the in-flight
     run's callback (409 stale request_id)."""
-    client, _, queue = client_db_queue
-    first = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD).json()
-    second = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD).json()
+    client, _, queue, headers = client_db_queue
+    first = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers).json()
+    second = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers).json()
     assert second["request_id"] == first["request_id"]
     assert len(queue.enqueued) == 1  # no second job
 
 
 def test_get_run_404_and_hides_pii(client_db_queue):
-    client, _, _ = client_db_queue
+    client, _, _, headers = client_db_queue
     assert client.get("/api/v1/create-issues/999").status_code == 404
 
-    created = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD).json()
+    created = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers).json()
     r = client.get(f"/api/v1/create-issues/{created['request_id']}")
     assert r.status_code == 200
     data = r.json()
@@ -161,8 +168,8 @@ def test_get_run_404_and_hides_pii(client_db_queue):
 
 
 def test_requeue_guards_and_resume(client_db_queue):
-    client, db, queue = client_db_queue
-    created = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD).json()
+    client, db, queue, headers = client_db_queue
+    created = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers).json()
     run_id = created["request_id"]
 
     # pending runs cannot be requeued
@@ -193,8 +200,8 @@ def test_requeue_guards_and_resume(client_db_queue):
 def test_requeue_409_when_text_purged_and_no_plan(client_db_queue):
     """Without a persisted plan, a requeue would re-plan from the purge
     sentinel and create garbage issues on GitHub — refuse it."""
-    client, db, _ = client_db_queue
-    created = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD).json()
+    client, db, _, headers = client_db_queue
+    created = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers).json()
     run_id = created["request_id"]
     writers.record_ticket_issue_run_failed(db, run_id, "boom")
 
@@ -210,8 +217,8 @@ def test_requeue_409_when_text_purged_and_no_plan(client_db_queue):
 def test_enqueue_includes_contract_retry_policy(client_db_queue):
     """Contract 2 mandates retrying the Odoo callback on 5xx with 30/120/300s
     backoff — implemented as rq.Retry on the job, which resumes idempotently."""
-    client, _, queue = client_db_queue
-    client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD)
+    client, _, queue, headers = client_db_queue
+    client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers)
     _, _, kwargs = queue.enqueued[0]
     assert kwargs["retry"] is not None
     assert kwargs["retry"].max == 3
@@ -220,13 +227,13 @@ def test_enqueue_includes_contract_retry_policy(client_db_queue):
 def test_enqueue_failure_marks_run_failed_and_returns_503(client_db_queue):
     """A queue outage must not leave a pending row no worker will ever process
     — the dedup would pin every future click to it (dead request_id)."""
-    client, db, queue = client_db_queue
+    client, db, queue, headers = client_db_queue
 
     def boom(*a, **k):
         raise ConnectionError("redis down")
 
     queue.enqueue = boom
-    r = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD)
+    r = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers)
     assert r.status_code == 503
 
     # the row is failed (not pending), so the next click starts a fresh run
@@ -243,8 +250,8 @@ def test_requeue_allowed_for_stale_pending(client_db_queue):
     recoverable via requeue, not require manual DB surgery."""
     from datetime import datetime, timedelta, timezone
 
-    client, db, queue = client_db_queue
-    created = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD).json()
+    client, db, queue, headers = client_db_queue
+    created = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers).json()
     run_id = created["request_id"]
 
     # fresh pending -> still protected
@@ -263,8 +270,8 @@ def test_requeue_allowed_for_stale_pending(client_db_queue):
 
 
 def test_requeue_409_when_another_run_is_pending(client_db_queue):
-    client, db, _ = client_db_queue
-    first = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD).json()
+    client, db, _, headers = client_db_queue
+    first = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers).json()
     writers.record_ticket_issue_run_failed(db, first["request_id"], "boom")
     # plan persisted so the purge guard doesn't trip
     from reva.db.models import TicketIssueRun
@@ -272,7 +279,7 @@ def test_requeue_409_when_another_run_is_pending(client_db_queue):
         s.get(TicketIssueRun, first["request_id"]).issues = [
             {"title": "A", "number": 1, "url": "https://github.com/org/repo/issues/1"}
         ]
-    second = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD).json()
+    second = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers).json()
     assert second["request_id"] != first["request_id"]
 
     r = client.post(f"/api/v1/create-issues/{first['request_id']}/requeue")
@@ -283,8 +290,8 @@ def test_requeue_409_when_another_run_is_pending(client_db_queue):
 def test_list_ticket_issue_runs_strips_plan_bodies(client_db_queue):
     """The runs feed (TUI) gets {number, title, url} refs only — plan bodies
     carry customer-derived text and must not leave via the list endpoint."""
-    client, db, _ = client_db_queue
-    created = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD).json()
+    client, db, _, headers = client_db_queue
+    created = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers).json()
     run_id = created["request_id"]
 
     from reva.db.models import TicketIssueRun
@@ -320,10 +327,10 @@ def test_list_ticket_issue_runs_strips_plan_bodies(client_db_queue):
 def test_list_ticket_issue_runs_surfaces_parent_issue(client_db_queue):
     """A run with a synthesized "epic" parent surfaces it as parent_issue; a run
     without one (legacy / single-issue) serializes parent_issue: null."""
-    client, db, _ = client_db_queue
+    client, db, _, headers = client_db_queue
     # Run WITH a parent (newest -> sorts first).
     with_parent = client.post(
-        "/api/v1/create-issues", json={**CONTRACT_PAYLOAD, "ticket_id": 222}
+        "/api/v1/create-issues", json={**CONTRACT_PAYLOAD, "ticket_id": 222}, headers=headers
     ).json()
     writers.set_ticket_issue_parent(
         db,
@@ -338,7 +345,7 @@ def test_list_ticket_issue_runs_surfaces_parent_issue(client_db_queue):
     )
     # Run WITHOUT a parent.
     without_parent = client.post(
-        "/api/v1/create-issues", json={**CONTRACT_PAYLOAD, "ticket_id": 111}
+        "/api/v1/create-issues", json={**CONTRACT_PAYLOAD, "ticket_id": 111}, headers=headers
     ).json()
 
     data = client.get("/api/v1/ticket-issue-runs").json()
@@ -360,11 +367,11 @@ def test_list_ticket_issue_runs_surfaces_parent_issue(client_db_queue):
 
 
 def test_list_ticket_issue_runs_status_filter_and_order(client_db_queue):
-    client, db, _ = client_db_queue
-    first = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD).json()
+    client, db, _, headers = client_db_queue
+    first = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers).json()
     writers.record_ticket_issue_run_failed(db, first["request_id"], "boom")
     payload2 = {**CONTRACT_PAYLOAD, "ticket_id": 456}
-    second = client.post("/api/v1/create-issues", json=payload2).json()
+    second = client.post("/api/v1/create-issues", json=payload2, headers=headers).json()
 
     data = client.get("/api/v1/ticket-issue-runs").json()
     assert [i["id"] for i in data["items"]] == [second["request_id"], first["request_id"]]
@@ -402,10 +409,10 @@ def _docx_payload() -> dict:
 def test_docx_passed_to_job_but_not_stored(client_db_queue):
     """The document rides the RQ job params (Redis) at plan time, but is NOT
     persisted server-side — only a small basis digest is."""
-    client, db, queue = client_db_queue
+    client, db, queue, headers = client_db_queue
     payload = _docx_payload()
 
-    r = client.post("/api/v1/create-issues", json=payload)
+    r = client.post("/api/v1/create-issues", json=payload, headers=headers)
 
     assert r.status_code == 202
     _, params, _ = queue.enqueued[0]
@@ -416,16 +423,16 @@ def test_docx_passed_to_job_but_not_stored(client_db_queue):
 
 
 def test_docx_null_accepted(client_db_queue):
-    client, _, _ = client_db_queue
+    client, _, _, headers = client_db_queue
     payload = {**CONTRACT_PAYLOAD, "description_docx": None}
-    assert client.post("/api/v1/create-issues", json=payload).status_code == 202
+    assert client.post("/api/v1/create-issues", json=payload, headers=headers).status_code == 202
 
 
 def test_docx_invalid_base64_is_422(client_db_queue):
-    client, _, queue = client_db_queue
+    client, _, queue, headers = client_db_queue
     payload = _docx_payload()
     payload["description_docx"]["content_base64"] = "%%%not-base64%%%"
-    r = client.post("/api/v1/create-issues", json=payload)
+    r = client.post("/api/v1/create-issues", json=payload, headers=headers)
     assert r.status_code == 422
     assert "description_docx" in r.json()["detail"]
     assert queue.enqueued == []
@@ -434,16 +441,16 @@ def test_docx_invalid_base64_is_422(client_db_queue):
 def test_docx_non_zip_is_422(client_db_queue):
     import base64
 
-    client, _, queue = client_db_queue
+    client, _, queue, headers = client_db_queue
     payload = _docx_payload()
     payload["description_docx"]["content_base64"] = base64.b64encode(b"plain").decode()
-    assert client.post("/api/v1/create-issues", json=payload).status_code == 422
+    assert client.post("/api/v1/create-issues", json=payload, headers=headers).status_code == 422
     assert queue.enqueued == []
 
 
 def test_docx_run_requeue_resumes_plan_without_the_doc(client_db_queue):
-    client, db, queue = client_db_queue
-    created = client.post("/api/v1/create-issues", json=_docx_payload()).json()
+    client, db, queue, headers = client_db_queue
+    created = client.post("/api/v1/create-issues", json=_docx_payload(), headers=headers).json()
     run_id = created["request_id"]
 
     # not exposed on the ops endpoint (customer content + size)
@@ -466,8 +473,8 @@ def test_docx_run_requeue_resumes_plan_without_the_doc(client_db_queue):
 def test_docx_run_requeue_without_plan_is_409(client_db_queue):
     """A docx run that never planned can't be re-planned (doc is gone) — refuse
     rather than silently re-plan from the empty description."""
-    client, db, _ = client_db_queue
-    created = client.post("/api/v1/create-issues", json=_docx_payload()).json()
+    client, db, _, headers = client_db_queue
+    created = client.post("/api/v1/create-issues", json=_docx_payload(), headers=headers).json()
     run_id = created["request_id"]
     writers.record_ticket_issue_run_failed(db, run_id, "boom")  # no plan persisted
 
@@ -484,7 +491,7 @@ def test_pdf_attachment_accepted(client_db_queue):
     %PDF- magic; the worker does the full extraction)."""
     import base64
 
-    client, _, queue = client_db_queue
+    client, _, queue, headers = client_db_queue
     payload = {
         **CONTRACT_PAYLOAD, "model_name": "project.task",
         "description_docx": {
@@ -492,7 +499,7 @@ def test_pdf_attachment_accepted(client_db_queue):
             "content_base64": base64.b64encode(b"%PDF-1.4\nminimal").decode(),
         },
     }
-    r = client.post("/api/v1/create-issues", json=payload)
+    r = client.post("/api/v1/create-issues", json=payload, headers=headers)
     assert r.status_code == 202
     _, params, _ = queue.enqueued[0]
     assert params["description_docx"]["filename"] == "spec.pdf"
@@ -501,7 +508,7 @@ def test_pdf_attachment_accepted(client_db_queue):
 def test_txt_attachment_accepted(client_db_queue):
     import base64
 
-    client, _, _ = client_db_queue
+    client, _, _, headers = client_db_queue
     payload = {
         **CONTRACT_PAYLOAD, "model_name": "project.task",
         "description_docx": {
@@ -509,13 +516,13 @@ def test_txt_attachment_accepted(client_db_queue):
             "content_base64": base64.b64encode(b"plain text spec").decode(),
         },
     }
-    assert client.post("/api/v1/create-issues", json=payload).status_code == 202
+    assert client.post("/api/v1/create-issues", json=payload, headers=headers).status_code == 202
 
 
 def test_unsupported_attachment_type_is_422(client_db_queue):
     import base64
 
-    client, _, queue = client_db_queue
+    client, _, queue, headers = client_db_queue
     payload = {
         **CONTRACT_PAYLOAD,
         "description_docx": {
@@ -523,7 +530,7 @@ def test_unsupported_attachment_type_is_422(client_db_queue):
             "content_base64": base64.b64encode(b"PK\x03\x04ziplike").decode(),
         },
     }
-    r = client.post("/api/v1/create-issues", json=payload)
+    r = client.post("/api/v1/create-issues", json=payload, headers=headers)
     assert r.status_code == 422
     assert "description_docx" in r.json()["detail"]
     assert queue.enqueued == []
@@ -534,11 +541,11 @@ def test_unreachable_repo_is_422_and_not_enqueued(client_db_queue):
     PermanentError) — reject at accept time so Odoo shows it and rolls back."""
     from reva.errors import PermanentError
 
-    client, _, queue = client_db_queue
+    client, _, queue, headers = client_db_queue
     app.dependency_overrides[get_github_client] = lambda: FakeGitHub(
         error=PermanentError("GitHub 404 (installation)")
     )
-    r = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD)
+    r = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers)
     assert r.status_code == 422
     assert queue.enqueued == []
 
@@ -548,10 +555,10 @@ def test_transient_github_error_still_accepts(client_db_queue):
     accept and let the worker's own reachability check be the backstop."""
     from reva.errors import TransientError
 
-    client, _, queue = client_db_queue
+    client, _, queue, headers = client_db_queue
     app.dependency_overrides[get_github_client] = lambda: FakeGitHub(
         error=TransientError("GitHub 503")
     )
-    r = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD)
+    r = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers)
     assert r.status_code == 202
     assert len(queue.enqueued) == 1
