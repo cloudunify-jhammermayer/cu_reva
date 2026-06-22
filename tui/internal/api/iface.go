@@ -19,4 +19,8 @@ type ClientIface interface {
 	RequeueTicket(id int) error
 	Learning() ([]LearningStat, error)
 	Mutes() ([]MuteEntry, error)
+	OdooInstances() (*OdooInstancePage, error)
+	CreateOdooInstance(name, callbackURL, callbackKey string) (*OdooInstanceCreated, error)
+	RotateOdooInstanceKey(id int) (*OdooInstanceCreated, error)
+	SetOdooInstanceActive(id int, active bool) error
 }

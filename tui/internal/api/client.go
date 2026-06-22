@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -197,4 +198,67 @@ func (c *Client) Learning() ([]LearningStat, error) {
 func (c *Client) Mutes() ([]MuteEntry, error) {
 	var out []MuteEntry
 	return out, c.get("/metrics/mutes", &out)
+}
+
+// postJSON sends `body` as JSON and decodes the response into `out` (any 2xx).
+func (c *Client) postJSON(method, path string, body any, out any, wantStatus int) error {
+	var reader io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		reader = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, c.base+path, reader)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.authHeader(req)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != wantStatus {
+		var e struct {
+			Detail string `json:"detail"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&e) == nil && e.Detail != "" {
+			return fmt.Errorf("%s", e.Detail)
+		}
+		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, path)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func (c *Client) OdooInstances() (*OdooInstancePage, error) {
+	var p OdooInstancePage
+	return &p, c.get("/odoo-instances", &p)
+}
+
+func (c *Client) CreateOdooInstance(name, callbackURL, callbackKey string) (*OdooInstanceCreated, error) {
+	body := map[string]string{
+		"name": name, "callback_url": callbackURL, "callback_api_key": callbackKey,
+	}
+	var out OdooInstanceCreated
+	return &out, c.postJSON(http.MethodPost, "/odoo-instances", body, &out, http.StatusCreated)
+}
+
+func (c *Client) RotateOdooInstanceKey(id int) (*OdooInstanceCreated, error) {
+	var out OdooInstanceCreated
+	return &out, c.postJSON(
+		http.MethodPost, fmt.Sprintf("/odoo-instances/%d/rotate-key", id), nil, &out, http.StatusOK,
+	)
+}
+
+func (c *Client) SetOdooInstanceActive(id int, active bool) error {
+	return c.postJSON(
+		http.MethodPatch, fmt.Sprintf("/odoo-instances/%d", id),
+		map[string]bool{"active": active}, nil, http.StatusOK,
+	)
 }

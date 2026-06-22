@@ -599,6 +599,41 @@ func (m *MockClient) Mutes() ([]MuteEntry, error) {
 	}, nil
 }
 
+func (m *MockClient) OdooInstances() (*OdooInstancePage, error) {
+	now := time.Now()
+	mk := func(c float64, in, out, n int) TaskCost {
+		return TaskCost{CostUSD: c, InputTokens: in, OutputTokens: out, Count: n}
+	}
+	items := []OdooInstanceSummary{
+		{
+			ID: 1, Name: "ACME Production", KeyPrefix: "reva_odoo_a1b2",
+			CallbackURL: "https://odoo.acme.example/write-field", Active: true,
+			CreatedAt: now.Add(-30 * 24 * time.Hour),
+			Cost: OdooInstanceCost{
+				Lifetime: WindowCost{Analysis: mk(12.40, 900000, 120000, 320), Issues: mk(8.10, 400000, 90000, 55)},
+				Last24h:  WindowCost{Analysis: mk(0.42, 30000, 4000, 11), Issues: mk(0.15, 8000, 1500, 2)},
+				Last30d:  WindowCost{Analysis: mk(6.20, 450000, 60000, 160), Issues: mk(3.90, 200000, 45000, 28)},
+			},
+		},
+		{
+			ID: 2, Name: "Beta Staging", KeyPrefix: "reva_odoo_c3d4",
+			CallbackURL: "", Active: false, CreatedAt: now.Add(-3 * 24 * time.Hour),
+			Cost: OdooInstanceCost{},
+		},
+	}
+	return &OdooInstancePage{Items: items, Total: len(items)}, nil
+}
+
+func (m *MockClient) CreateOdooInstance(name, callbackURL, callbackKey string) (*OdooInstanceCreated, error) {
+	return &OdooInstanceCreated{ID: 99, Name: name, KeyPrefix: "reva_odoo_new9", APIKey: "reva_odoo_DEMOKEYdonotuse"}, nil
+}
+
+func (m *MockClient) RotateOdooInstanceKey(id int) (*OdooInstanceCreated, error) {
+	return &OdooInstanceCreated{ID: id, Name: "ACME Production", KeyPrefix: "reva_odoo_rot8", APIKey: "reva_odoo_ROTATEDdemo"}, nil
+}
+
+func (m *MockClient) SetOdooInstanceActive(id int, active bool) error { return nil }
+
 func min(a, b int) int {
 	if a < b {
 		return a

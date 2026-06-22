@@ -233,3 +233,43 @@ type MuteEntry struct {
 	MutedBy   string    `json:"muted_by"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+type TaskCost struct {
+	CostUSD      float64 `json:"cost_usd"`
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	Count        int     `json:"count"`
+}
+
+type WindowCost struct {
+	Analysis TaskCost `json:"analysis"`
+	Issues   TaskCost `json:"issues"`
+}
+
+type OdooInstanceCost struct {
+	Lifetime WindowCost `json:"lifetime"`
+	Last24h  WindowCost `json:"last_24h"`
+	Last30d  WindowCost `json:"last_30d"`
+}
+
+type OdooInstanceSummary struct {
+	ID          int              `json:"id"`
+	Name        string           `json:"name"`
+	KeyPrefix   string           `json:"key_prefix"`
+	CallbackURL string           `json:"callback_url"`
+	Active      bool             `json:"active"`
+	CreatedAt   time.Time        `json:"created_at"`
+	Cost        OdooInstanceCost `json:"cost"`
+}
+
+type OdooInstancePage struct {
+	Items []OdooInstanceSummary `json:"items"`
+	Total int                   `json:"total"`
+}
+
+type OdooInstanceCreated struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	KeyPrefix string `json:"key_prefix"`
+	APIKey    string `json:"api_key"`
+}
