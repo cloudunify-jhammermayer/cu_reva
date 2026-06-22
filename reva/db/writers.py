@@ -31,6 +31,7 @@ from reva.db.models import (
     ClaudeSpend,
     GithubEvent,
     MutedCategory,
+    OdooInstance,
     PendingReview,
     PromptVersion,
     PullRequest,
@@ -1476,3 +1477,74 @@ def _replace_findings(s, review_run_id: int, findings: list[Finding]) -> None:
             )
         )
     s.flush()
+
+
+def create_odoo_instance(
+    db: Database,
+    *,
+    name: str,
+    key_hash: str,
+    key_prefix: str,
+    callback_url: str,
+    callback_api_key_enc: str,
+) -> int:
+    """Insert an odoo_instances row and return its id."""
+    with db.session() as s:
+        row = OdooInstance(
+            name=name,
+            key_hash=key_hash,
+            key_prefix=key_prefix,
+            callback_url=callback_url,
+            callback_api_key_enc=callback_api_key_enc,
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def get_odoo_instance(db: Database, instance_id: int) -> dict | None:
+    """Return an odoo_instances row as a dict (incl. callback config), or None."""
+    with db.session() as s:
+        row = s.get(OdooInstance, instance_id)
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "name": row.name,
+            "key_prefix": row.key_prefix,
+            "key_hash": row.key_hash,
+            "callback_url": row.callback_url,
+            "callback_api_key_enc": row.callback_api_key_enc,
+            "active": row.active,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        }
+
+
+def rotate_odoo_instance_key(
+    db: Database, instance_id: int, *, key_hash: str, key_prefix: str
+) -> bool:
+    """Replace the inbound key hash/prefix. Returns False if the row is missing."""
+    with db.session() as s:
+        row = s.get(OdooInstance, instance_id)
+        if row is None:
+            return False
+        row.key_hash = key_hash
+        row.key_prefix = key_prefix
+        row.updated_at = datetime.now(timezone.utc)
+        return True
+
+
+def update_odoo_instance(db: Database, instance_id: int, **fields: object) -> bool:
+    """Update name/callback_url/callback_api_key_enc/active. Returns False if missing."""
+    allowed = {"name", "callback_url", "callback_api_key_enc", "active"}
+    with db.session() as s:
+        row = s.get(OdooInstance, instance_id)
+        if row is None:
+            return False
+        for key, value in fields.items():
+            if key not in allowed:
+                raise ValueError(f"update_odoo_instance: unknown field {key!r}")
+            setattr(row, key, value)
+        row.updated_at = datetime.now(timezone.utc)
+        return True
