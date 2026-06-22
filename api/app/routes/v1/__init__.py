@@ -12,6 +12,7 @@ from app.routes.v1 import (
     failures,
     findings,
     metrics,
+    odoo_instances,
     pending,
     repos,
     reviews,
@@ -30,3 +31,4 @@ router.include_router(admin.router)
 router.include_router(ticket_analyses.router)
 router.include_router(ticket_issues.router)
 router.include_router(audits.router)
+router.include_router(odoo_instances.router)
