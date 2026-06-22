@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from rq import Retry
 from sqlalchemy.exc import IntegrityError
 
-from app.dependencies import get_db, get_github_client
+from app.dependencies import get_db, get_github_client, require_odoo_instance, ResolvedOdooInstance
 from app.pagination import clamp_limit, clamp_offset
 from app.queries import ticket_issues as q
 from app.schemas.ticket_issues import (
@@ -87,6 +87,7 @@ def submit_create_issues(
     request: Request,
     db: Database = Depends(get_db),
     github: GitHubClient = Depends(get_github_client),
+    instance: ResolvedOdooInstance = Depends(require_odoo_instance),
 ) -> dict:
     """Accept an Odoo create-issues request, enqueue the job, return immediately.
 
@@ -134,7 +135,7 @@ def submit_create_issues(
 
     # Dedup: a re-click while a run is still pending returns the SAME
     # request_id, so the in-flight run's callback still matches in Odoo.
-    existing = writers.get_pending_ticket_issue_run(db, body.ticket_id, body.model_name)
+    existing = writers.get_pending_ticket_issue_run(db, body.ticket_id, body.model_name, instance.id)
     if existing is not None:
         logger.info(
             "ticket_issues_dedup",
@@ -145,20 +146,20 @@ def submit_create_issues(
 
     # Build a stub with run_id=0 to create the DB row first (the row id IS the
     # request_id), then the real params for the queue.
-    stub = TicketIssueJobParams(run_id=0, **body.model_dump())
+    stub = TicketIssueJobParams(run_id=0, odoo_instance_id=instance.id, **body.model_dump())
     try:
         run_id = writers.record_ticket_issue_run_created(db, stub)
     except IntegrityError:
         # Two concurrent POSTs raced past the dedup check; the partial unique
         # index (one pending run per record) lost us the race — return the
         # winner's request_id.
-        existing = writers.get_pending_ticket_issue_run(db, body.ticket_id, body.model_name)
+        existing = writers.get_pending_ticket_issue_run(db, body.ticket_id, body.model_name, instance.id)
         if existing is not None:
             logger.info("ticket_issues_dedup_race", request_id=existing["id"])
             return {"request_id": existing["id"], "job_id": existing["job_id"], "status": "pending"}
         raise
 
-    params = TicketIssueJobParams(run_id=run_id, **body.model_dump())
+    params = TicketIssueJobParams(run_id=run_id, odoo_instance_id=instance.id, **body.model_dump())
     job_id = _enqueue(request, db, run_id, params)
 
     logger.info("ticket_issues_enqueued", request_id=run_id, job_id=job_id)
@@ -261,6 +262,7 @@ def requeue_ticket_issue_run(
 
     params = TicketIssueJobParams(
         run_id=request_id,
+        odoo_instance_id=row["odoo_instance_id"],
         ticket_id=row["ticket_id"],
         model_name=row["model_name"],
         github_url=row["github_url"],

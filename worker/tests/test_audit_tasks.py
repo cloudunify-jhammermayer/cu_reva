@@ -27,7 +27,7 @@ def _ctx(db, auditor, budget=None, github=None) -> WorkerContext:
     return WorkerContext(
         db=db, claude=None, runner=None, github=github,  # type: ignore[arg-type]
         reviewer=None, auditor=auditor, ticket_analyzer=None,  # type: ignore[arg-type]
-        verifier=None, odoo=None, daily_budget_usd=budget,  # type: ignore[arg-type]
+        verifier=None, daily_budget_usd=budget,  # type: ignore[arg-type]
     )
 
 

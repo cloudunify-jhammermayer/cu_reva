@@ -178,7 +178,6 @@ def ctx_and_fakes():
         auditor=None,  # type: ignore[arg-type]
         ticket_analyzer=None,  # type: ignore[arg-type] — unused in review tests
         verifier=None,  # type: ignore[arg-type] — unused in review tests
-        odoo=None,  # type: ignore[arg-type] — unused in review tests
     )
     set_context(context)
     return {
@@ -778,7 +777,7 @@ def test_run_repo_cache_eviction_calls_evict_with_ttl():
     runner = MagicMock()
     ctx = WorkerContext(
         db=None, claude=None, runner=runner, github=None,  # type: ignore[arg-type]
-        reviewer=None, auditor=None, ticket_analyzer=None, verifier=None, odoo=None,  # type: ignore[arg-type]
+        reviewer=None, auditor=None, ticket_analyzer=None, verifier=None,  # type: ignore[arg-type]
         repo_cache_ttl_days=14,
     )
     set_context(ctx)

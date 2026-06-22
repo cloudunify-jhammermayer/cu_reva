@@ -1138,6 +1138,7 @@ def record_ticket_issue_run_created(db: Database, params: TicketIssueJobParams) 
         row = TicketIssueRun(
             ticket_id=params.ticket_id,
             model_name=params.model_name,
+            odoo_instance_id=params.odoo_instance_id,
             github_url=params.github_url,
             name=params.name,
             description=params.description,
@@ -1161,20 +1162,23 @@ def attach_ticket_issue_job_id(db: Database, run_id: int, job_id: str) -> None:
 
 
 def get_pending_ticket_issue_run(
-    db: Database, ticket_id: int, model_name: str
+    db: Database, ticket_id: int, model_name: str, odoo_instance_id: int | None = None
 ) -> dict | None:
     """Return the most recent pending run for this record, or None.
 
     Request dedup: a re-click while a run is in flight gets the SAME
     request_id back, so the in-flight run's callback still matches in Odoo."""
     with db.session() as s:
+        filters = [
+            TicketIssueRun.ticket_id == ticket_id,
+            TicketIssueRun.model_name == model_name,
+            TicketIssueRun.status == "pending",
+        ]
+        if odoo_instance_id is not None:
+            filters.append(TicketIssueRun.odoo_instance_id == odoo_instance_id)
         row = s.execute(
             select(TicketIssueRun)
-            .where(
-                TicketIssueRun.ticket_id == ticket_id,
-                TicketIssueRun.model_name == model_name,
-                TicketIssueRun.status == "pending",
-            )
+            .where(*filters)
             .order_by(TicketIssueRun.created_at.desc())
             .limit(1)
         ).scalar_one_or_none()
@@ -1194,6 +1198,7 @@ def get_ticket_issue_run(db: Database, run_id: int) -> dict | None:
             "job_id": row.job_id,
             "ticket_id": row.ticket_id,
             "model_name": row.model_name,
+            "odoo_instance_id": row.odoo_instance_id,
             "github_url": row.github_url,
             "name": row.name,
             "description": row.description,
@@ -1383,6 +1388,7 @@ def update_ticket_issue_state(
             affected.setdefault((row.ticket_id, row.model_name), {
                 "ticket_id": row.ticket_id,
                 "model_name": row.model_name,
+                "odoo_instance_id": row.odoo_instance_id,
                 "issues": items,
             })
     return list(affected.values())

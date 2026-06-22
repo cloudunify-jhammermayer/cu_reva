@@ -48,7 +48,7 @@ def _ctx(db, *, budget=None, reply="Sure, here's why."):
     github.get_installation_token.return_value = "tok"
     ctx = WorkerContext(
         db=db, claude=claude, runner=None, github=github,  # type: ignore[arg-type]
-        reviewer=None, auditor=None, ticket_analyzer=None, verifier=None, odoo=None,  # type: ignore[arg-type]
+        reviewer=None, auditor=None, ticket_analyzer=None, verifier=None,  # type: ignore[arg-type]
         daily_budget_usd=budget,
     )
     set_context(ctx)

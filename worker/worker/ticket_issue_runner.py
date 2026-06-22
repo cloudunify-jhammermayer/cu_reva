@@ -34,7 +34,7 @@ from reva.db import writers
 from reva.errors import PermanentError, TransientError
 from reva.github_urls import parse_github_repo_url
 from reva.types import TicketIssueJobParams
-from worker.runner import get_context
+from worker.runner import build_odoo_client, get_context
 
 logger = structlog.get_logger()
 
@@ -160,7 +160,8 @@ def _send_failed_callback(ctx, params: TicketIssueJobParams, error: str, log) ->
     """Best-effort failure callback so Odoo leaves 'pending' and re-enables the
     Create Issues button. Must never mask the original error."""
     try:
-        ctx.odoo.issues_created(
+        odoo = build_odoo_client(ctx, params.odoo_instance_id)
+        odoo.issues_created(
             ticket_id=params.ticket_id,
             model_name=params.model_name,
             request_id=params.run_id,
@@ -176,6 +177,7 @@ def run_ticket_issues(job_params: dict) -> dict:
     """RQ task entry point for ticket issue creation."""
     ctx = get_context()
     params = TicketIssueJobParams.model_validate(job_params)
+    odoo = build_odoo_client(ctx, params.odoo_instance_id)
 
     log = logger.bind(
         run_id=params.run_id,
@@ -211,7 +213,7 @@ def run_ticket_issues(job_params: dict) -> dict:
 
     payload = _issues_payload(issues)
     try:
-        ctx.odoo.issues_created(
+        odoo.issues_created(
             ticket_id=params.ticket_id,
             model_name=params.model_name,
             request_id=params.run_id,
@@ -268,7 +270,8 @@ def sync_ticket_issue_state(job_params: dict) -> dict:
             if i.get("number") is not None
         ]
         try:
-            ctx.odoo.issue_state(
+            odoo = build_odoo_client(ctx, record["odoo_instance_id"])
+            odoo.issue_state(
                 ticket_id=record["ticket_id"],
                 model_name=record["model_name"],
                 number=number,

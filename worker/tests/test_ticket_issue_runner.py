@@ -139,7 +139,7 @@ def _plan(n: int = 2) -> TicketIssuePlan:
 
 
 @pytest.fixture()
-def ctx_and_fakes():
+def ctx_and_fakes(monkeypatch):
     engine = create_engine_from_url("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     db = Database(engine)
@@ -156,9 +156,9 @@ def ctx_and_fakes():
         auditor=None,  # type: ignore[arg-type]
         ticket_analyzer=None,  # type: ignore[arg-type]
         verifier=None,  # type: ignore[arg-type]
-        odoo=odoo,  # type: ignore[arg-type]
         ticket_issue_planner=planner,  # type: ignore[arg-type]
     )
+    monkeypatch.setattr("worker.ticket_issue_runner.build_odoo_client", lambda ctx, _id: odoo)
     set_context(ctx)
     return {"ctx": ctx, "db": db, "planner": planner, "github": github, "odoo": odoo}
 
@@ -166,6 +166,7 @@ def ctx_and_fakes():
 def _make_params(db: Database) -> dict:
     stub = TicketIssueJobParams(
         run_id=0,
+        odoo_instance_id=1,
         ticket_id=123,
         model_name="helpdesk.ticket",
         github_url="https://github.com/acme/widgets",
@@ -290,7 +291,7 @@ def test_issue_title_format():
     from worker.ticket_issue_runner import _issue_title
 
     params = TicketIssueJobParams(
-        run_id=1, ticket_id=2010, model_name="project.task",
+        run_id=1, odoo_instance_id=1, ticket_id=2010, model_name="project.task",
         github_url="https://github.com/acme/widgets", name="n", description="d",
         analysis_html="", priority="1", ticket_url="https://odoo.example.com/web#id=2010",
     )
@@ -576,7 +577,7 @@ def test_changed_description_prevents_stale_plan_adoption(ctx_and_fakes):
     writers.record_ticket_issue_run_failed(s["db"], prior["run_id"], "boom")
 
     revised = TicketIssueJobParams(
-        run_id=0, ticket_id=123, model_name="helpdesk.ticket",
+        run_id=0, odoo_instance_id=1, ticket_id=123, model_name="helpdesk.ticket",
         github_url="https://github.com/acme/widgets", name="Login page broken",
         description="A completely revised requirement.", analysis_html="",
         priority="1", ticket_url="https://odoo.example.com/web#id=123",

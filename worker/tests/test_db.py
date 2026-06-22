@@ -762,6 +762,7 @@ def _issue_params(ticket_id: int = 7, run_id: int = 0) -> "TicketIssueJobParams"
     from reva.types import TicketIssueJobParams
     return TicketIssueJobParams(
         run_id=run_id,
+        odoo_instance_id=1,
         ticket_id=ticket_id,
         model_name="helpdesk.ticket",
         github_url="https://github.com/acme/widgets",

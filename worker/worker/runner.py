@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 import structlog
 from rq import get_current_job
 
+from reva import secrets_crypto
 from reva.claude_client import ClaudeClient
 from reva.claude_code_runner import ClaudeCodeRunner
 from reva.cost import estimate_cost
@@ -87,7 +88,6 @@ class WorkerContext:
     auditor: Auditor
     ticket_analyzer: TicketAnalyzer
     verifier: FindingVerifier
-    odoo: OdooCallbackClient
     # Default None keeps existing WorkerContext call sites/fixtures valid;
     # build_worker_context always wires it.
     ticket_issue_planner: TicketIssuePlanner | None = None
@@ -112,6 +112,15 @@ def get_context() -> WorkerContext:
             "WorkerContext not initialized; call set_context() at process startup"
         )
     return _CONTEXT
+
+
+def build_odoo_client(ctx: "WorkerContext", odoo_instance_id: int) -> OdooCallbackClient:
+    """Construct an OdooCallbackClient for one instance (decrypts its key)."""
+    inst = writers.get_odoo_instance(ctx.db, odoo_instance_id)
+    if inst is None:
+        raise PermanentError(f"odoo_instance {odoo_instance_id} not found")
+    api_key = secrets_crypto.decrypt(inst["callback_api_key_enc"])
+    return OdooCallbackClient(callback_url=inst["callback_url"], api_key=api_key)
 
 
 def build_worker_context(settings: Settings) -> WorkerContext:
@@ -155,10 +164,6 @@ def build_worker_context(settings: Settings) -> WorkerContext:
     )
     ticket_analyzer = TicketAnalyzer(claude=claude, prompts_dir=settings.prompts_dir)
     ticket_issue_planner = TicketIssuePlanner(claude=claude, prompts_dir=settings.prompts_dir)
-    odoo = OdooCallbackClient(
-        callback_url=settings.odoo_callback_url,
-        api_key=settings.odoo_callback_api_key,
-    )
     context = WorkerContext(
         db=db,
         claude=claude,
@@ -169,7 +174,6 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         ticket_analyzer=ticket_analyzer,
         ticket_issue_planner=ticket_issue_planner,
         verifier=verifier,
-        odoo=odoo,
         google_chat_webhook_url=settings.google_chat_webhook_url,
         daily_budget_usd=settings.daily_budget_usd,
         repo_cache_ttl_days=settings.repo_cache_ttl_days,

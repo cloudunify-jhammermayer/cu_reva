@@ -31,6 +31,7 @@ def _make_planner(handler) -> TicketIssuePlanner:
 def _params(analysis_html: str = "<h2>Summary</h2><p>ok</p>") -> TicketIssueJobParams:
     return TicketIssueJobParams(
         run_id=1,
+        odoo_instance_id=1,
         ticket_id=123,
         model_name="helpdesk.ticket",
         github_url="https://github.com/org/repo",

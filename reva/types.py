@@ -332,6 +332,7 @@ class TicketIssueJobParams(BaseModel):
     which doubles as the request_id Odoo correlates callbacks with."""
 
     run_id: int
+    odoo_instance_id: int
     ticket_id: int
     model_name: str  # e.g. "helpdesk.ticket" or "project.task"
     github_url: str

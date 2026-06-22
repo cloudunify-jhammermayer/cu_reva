@@ -92,7 +92,7 @@ def _good_result() -> TicketAnalysisResult:
 
 
 @pytest.fixture()
-def ctx_and_fakes():
+def ctx_and_fakes(monkeypatch):
     engine = create_engine_from_url("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     db = Database(engine)
@@ -108,8 +108,8 @@ def ctx_and_fakes():
         auditor=None,  # type: ignore[arg-type]
         ticket_analyzer=analyzer,  # type: ignore[arg-type]
         verifier=None,  # type: ignore[arg-type] — unused in ticket tests
-        odoo=odoo,  # type: ignore[arg-type]
     )
+    monkeypatch.setattr("worker.ticket_runner.build_odoo_client", lambda ctx, _id: odoo)
     set_context(ctx)
     return {"ctx": ctx, "db": db, "analyzer": analyzer, "odoo": odoo}
 

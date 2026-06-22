@@ -15,7 +15,7 @@ def _db() -> Database:
 
 def _params() -> TicketIssueJobParams:
     return TicketIssueJobParams(
-        run_id=0, ticket_id=123, model_name="helpdesk.ticket",
+        run_id=0, odoo_instance_id=1, ticket_id=123, model_name="helpdesk.ticket",
         github_url="https://github.com/acme/widgets", name="n", description="d",
         analysis_html="a", priority="1", ticket_url="https://odoo.example/web#id=123",
     )

@@ -56,7 +56,7 @@ def test_purge_also_scrubs_ticket_issue_runs(db):
 
     run_id = writers.record_ticket_issue_run_created(
         db, TicketIssueJobParams(
-            run_id=0, ticket_id=1, model_name="helpdesk.ticket",
+            run_id=0, odoo_instance_id=1, ticket_id=1, model_name="helpdesk.ticket",
             github_url="https://github.com/acme/widgets", name="t",
             description="raw customer PII", analysis_html="<p>derived PII</p>",
             priority="1", ticket_url="https://odoo.example.com/web#id=1",
