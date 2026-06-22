@@ -251,7 +251,9 @@ def requeue_ticket_issue_run(
             detail="Consultant file not retained and no plan persisted; "
             "re-trigger from Odoo instead",
         )
-    other_pending = writers.get_pending_ticket_issue_run(db, row["ticket_id"], row["model_name"])
+    other_pending = writers.get_pending_ticket_issue_run(
+        db, row["ticket_id"], row["model_name"], row["odoo_instance_id"]
+    )
     if other_pending is not None and other_pending["id"] != request_id:
         # The unique pending-per-record index would reject the reset anyway;
         # fail with a meaningful message instead of a 500.

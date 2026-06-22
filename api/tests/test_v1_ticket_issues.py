@@ -562,3 +562,45 @@ def test_transient_github_error_still_accepts(client_db_queue):
     r = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers)
     assert r.status_code == 202
     assert len(queue.enqueued) == 1
+
+
+def test_requeue_collision_check_is_instance_scoped(client_db_queue):
+    """Requeue pre-check must be scoped to the run's own Odoo instance.
+
+    Instance B having a pending run for ticket_id=42 must NOT block requeue of
+    instance A's failed run for the same ticket_id (ticket ids collide across
+    instances — that's the whole point of the multi-instance feature).
+    """
+    import os
+    from cryptography.fernet import Fernet
+    from reva.db.models import TicketIssueRun
+
+    client, db, queue, headers_a = client_db_queue
+
+    # Create a second instance (instance B) using the master key.
+    os.environ["REVA_SECRET_KEY"] = os.environ["REVA_SECRET_KEY"]  # already set by fixture
+    master_key = os.environ["REVA_SECRET_KEY"]
+    key_b = client.post(
+        "/api/v1/odoo-instances",
+        json={"name": "instance-b", "callback_url": "", "callback_api_key": ""},
+        headers={"Authorization": f"Bearer {master_key}"},
+    ).json()["api_key"]
+    headers_b = {"Authorization": f"Bearer {key_b}"}
+
+    # Instance A: create a run for ticket 42, then fail it (with a plan so the
+    # purge-sentinel guard doesn't trip).
+    r_a = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers_a).json()
+    run_id_a = r_a["request_id"]
+    with db.session() as s:
+        s.get(TicketIssueRun, run_id_a).issues = [
+            {"title": "A", "number": 1, "url": "https://github.com/org/repo/issues/1"}
+        ]
+    writers.record_ticket_issue_run_failed(db, run_id_a, "boom")
+
+    # Instance B: create a *pending* run for the SAME ticket_id 42.
+    client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers_b)
+
+    # Requeuing instance A's failed run must succeed (202), not spuriously 409.
+    r = client.post(f"/api/v1/create-issues/{run_id_a}/requeue")
+    assert r.status_code == 202, r.json()
+    assert r.json()["request_id"] == run_id_a
