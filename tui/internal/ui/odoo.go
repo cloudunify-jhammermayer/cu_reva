@@ -145,27 +145,32 @@ func (o Odoo) updateCreate(m tea.KeyMsg) (Odoo, tea.Cmd) {
 			return odooCreatedMsg{created: created, err: err}
 		}
 	case tea.KeyBackspace:
-		o.editField(func(s string) string {
+		f := func(s string) string {
 			if len(s) > 0 {
 				return s[:len(s)-1]
 			}
 			return s
-		})
+		}
+		switch o.createStep {
+		case 0:
+			o.createName = f(o.createName)
+		case 1:
+			o.createURL = f(o.createURL)
+		case 2:
+			o.createKey = f(o.createKey)
+		}
 	case tea.KeyRunes, tea.KeySpace:
-		o.editField(func(s string) string { return s + string(m.Runes) })
+		appended := string(m.Runes)
+		switch o.createStep {
+		case 0:
+			o.createName += appended
+		case 1:
+			o.createURL += appended
+		case 2:
+			o.createKey += appended
+		}
 	}
 	return o, nil
-}
-
-func (o *Odoo) editField(f func(string) string) {
-	switch o.createStep {
-	case 0:
-		o.createName = f(o.createName)
-	case 1:
-		o.createURL = f(o.createURL)
-	case 2:
-		o.createKey = f(o.createKey)
-	}
 }
 
 func (o Odoo) view(w, h int) string {

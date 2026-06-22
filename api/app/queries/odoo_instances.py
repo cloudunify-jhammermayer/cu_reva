@@ -24,10 +24,6 @@ def resolve_odoo_instance_by_key(db: Database, token: str) -> tuple[int, str] | 
         return (row[0], row[1]) if row is not None else None
 
 
-def _zero_task() -> dict:
-    return {"cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0, "count": 0}
-
-
 def _sum_for(s, model, instance_id: int, since: datetime | None) -> dict:
     q = select(
         func.coalesce(func.sum(model.estimated_cost_usd), 0),

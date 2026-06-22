@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from reva.config import env_or_file, required_env_or_file
+from reva.config import required_env_or_file
 
 
 @dataclass(frozen=True)

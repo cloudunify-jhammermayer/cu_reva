@@ -58,10 +58,9 @@ class FakeGitHub:
 
 
 @pytest.fixture()
-def client_db_queue():
-    import os
+def client_db_queue(monkeypatch):
     from cryptography.fernet import Fernet
-    os.environ["REVA_SECRET_KEY"] = Fernet.generate_key().decode()
+    monkeypatch.setenv("REVA_SECRET_KEY", Fernet.generate_key().decode())
     engine = create_engine_from_url(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -571,19 +570,16 @@ def test_requeue_collision_check_is_instance_scoped(client_db_queue):
     instance A's failed run for the same ticket_id (ticket ids collide across
     instances — that's the whole point of the multi-instance feature).
     """
-    import os
-    from cryptography.fernet import Fernet
     from reva.db.models import TicketIssueRun
 
     client, db, queue, headers_a = client_db_queue
 
-    # Create a second instance (instance B) using the master key.
-    os.environ["REVA_SECRET_KEY"] = os.environ["REVA_SECRET_KEY"]  # already set by fixture
-    master_key = os.environ["REVA_SECRET_KEY"]
+    # Create a second instance (instance B). Auth is disabled in this fixture
+    # (no api_key / require_api_key configured), so any bearer works.
     key_b = client.post(
         "/api/v1/odoo-instances",
         json={"name": "instance-b", "callback_url": "", "callback_api_key": ""},
-        headers={"Authorization": f"Bearer {master_key}"},
+        headers={"Authorization": "Bearer admin"},
     ).json()["api_key"]
     headers_b = {"Authorization": f"Bearer {key_b}"}
 

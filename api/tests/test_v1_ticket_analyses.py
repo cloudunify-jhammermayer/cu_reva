@@ -42,10 +42,9 @@ class FakeQueue:
 
 
 @pytest.fixture()
-def client_db_queue():
-    import os
+def client_db_queue(monkeypatch):
     from cryptography.fernet import Fernet
-    os.environ["REVA_SECRET_KEY"] = Fernet.generate_key().decode()
+    monkeypatch.setenv("REVA_SECRET_KEY", Fernet.generate_key().decode())
     engine = create_engine_from_url(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},

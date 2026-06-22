@@ -10,7 +10,7 @@ import hashlib
 import secrets
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.dependencies import actor_from_request, get_db
 from app.queries import odoo_instances as q
