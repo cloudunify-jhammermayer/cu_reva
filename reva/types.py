@@ -283,6 +283,7 @@ class TicketJobParams(BaseModel):
     """Inputs handed to the ticket analysis RQ job."""
 
     analysis_id: int
+    odoo_instance_id: int
     ticket_id: int
     model_name: str  # e.g. "helpdesk.ticket" or "project.task"
     field_name: str

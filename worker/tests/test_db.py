@@ -299,7 +299,7 @@ def test_purge_old_ticket_text_scrubs_pii_keeps_analysis(db):
     are untouched and the purge is idempotent."""
     def _mk(ticket_id, text_):
         return writers.record_ticket_analysis_created(
-            db, TicketJobParams(analysis_id=0, ticket_id=ticket_id,
+            db, TicketJobParams(analysis_id=0, odoo_instance_id=1, ticket_id=ticket_id,
                                 model_name="helpdesk.ticket", field_name="description", text=text_)
         )
 

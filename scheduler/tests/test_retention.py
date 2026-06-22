@@ -25,7 +25,7 @@ def _now() -> datetime:
 
 def _seed_old_ticket(db) -> int:
     tid = writers.record_ticket_analysis_created(
-        db, TicketJobParams(analysis_id=0, ticket_id=1, model_name="helpdesk.ticket",
+        db, TicketJobParams(analysis_id=0, odoo_instance_id=1, ticket_id=1, model_name="helpdesk.ticket",
                             field_name="description", text="raw customer PII")
     )
     with db.session() as s:

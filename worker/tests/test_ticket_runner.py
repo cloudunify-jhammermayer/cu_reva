@@ -117,6 +117,7 @@ def ctx_and_fakes():
 def _make_params(db: Database) -> dict:
     params = TicketJobParams(
         analysis_id=0,
+        odoo_instance_id=1,
         ticket_id=42,
         model_name="helpdesk.ticket",
         field_name="description",
@@ -126,6 +127,7 @@ def _make_params(db: Database) -> dict:
     writers.attach_ticket_job_id(db, analysis_id, "rq:job:test-123")
     return TicketJobParams(
         analysis_id=analysis_id,
+        odoo_instance_id=1,
         ticket_id=params.ticket_id,
         model_name=params.model_name,
         field_name=params.field_name,
@@ -229,6 +231,7 @@ def test_dedup_pending(ctx_and_fakes):
         ticket_id=42,
         model_name="helpdesk.ticket",
         field_name="description",
+        odoo_instance_id=1,
     )
     assert existing is not None
     assert existing["id"] == params["analysis_id"]

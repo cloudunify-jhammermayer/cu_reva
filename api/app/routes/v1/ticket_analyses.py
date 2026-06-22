@@ -9,7 +9,7 @@ from __future__ import annotations
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from app.dependencies import get_db
+from app.dependencies import get_db, require_odoo_instance, ResolvedOdooInstance
 from app.pagination import clamp_limit, clamp_offset
 from app.queries import ticket_analyses as q
 from app.schemas.ticket_analyses import (
@@ -40,6 +40,7 @@ def submit_ticket_analysis(
     body: TicketAnalysisRequest,
     request: Request,
     db: Database = Depends(get_db),
+    instance: ResolvedOdooInstance = Depends(require_odoo_instance),
 ) -> dict:
     """Accept a ticket text, enqueue the analysis job, and return immediately."""
     if body.attachment is not None:
@@ -55,7 +56,7 @@ def submit_ticket_analysis(
             ) from exc
     # Dedup: if a pending analysis already exists for this record, return it.
     existing = writers.get_pending_ticket_analysis(
-        db, body.ticket_id, body.model_name, body.field_name
+        db, body.ticket_id, body.model_name, body.field_name, instance.id
     )
     if existing is not None:
         logger.info(
@@ -68,6 +69,7 @@ def submit_ticket_analysis(
     # Build a stub TicketJobParams with analysis_id=0 to create the DB row first.
     stub_params = TicketJobParams(
         analysis_id=0,
+        odoo_instance_id=instance.id,
         ticket_id=body.ticket_id,
         model_name=body.model_name,
         field_name=body.field_name,
@@ -79,6 +81,7 @@ def submit_ticket_analysis(
     # Now build the real params with the correct analysis_id and enqueue.
     params = TicketJobParams(
         analysis_id=analysis_id,
+        odoo_instance_id=instance.id,
         ticket_id=body.ticket_id,
         model_name=body.model_name,
         field_name=body.field_name,
@@ -152,6 +155,7 @@ def requeue_ticket_analysis(
 
     params = TicketJobParams(
         analysis_id=analysis_id,
+        odoo_instance_id=row["odoo_instance_id"],
         ticket_id=row["ticket_id"],
         model_name=row["model_name"],
         field_name=row["field_name"],

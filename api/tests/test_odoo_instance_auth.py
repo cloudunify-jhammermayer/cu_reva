@@ -32,9 +32,13 @@ def ctx(monkeypatch):
     app.dependency_overrides[get_settings] = lambda: settings
 
     class FakeQueue:
-        def enqueue(self, *a, **k):
-            class J:  # noqa: D401
-                id = "rq:job:1"
+        def __init__(self):
+            self.enqueued = []
+
+        def enqueue(self, func_path, params, **kwargs):
+            self.enqueued.append((func_path, params, kwargs))
+            class J:
+                id = f"rq:job:{len(self.enqueued)}"
             return J()
 
     prev = getattr(app.state, "rq_queue", None)
@@ -80,3 +84,13 @@ def test_instance_key_rejected_on_read_routes(ctx):
                       headers={"Authorization": f"Bearer {key}"}).status_code == 401
     assert client.get("/api/v1/ticket-analyses",
                       headers={"Authorization": f"Bearer {key}"}).status_code == 401
+
+
+def test_analysis_stamps_instance_id(ctx):
+    client, key = ctx
+    r = client.post("/api/v1/ticket-analysis",
+                    headers={"Authorization": f"Bearer {key}"}, json=PAYLOAD)
+    assert r.status_code == 202
+    # The enqueued job params carry the resolved instance id.
+    func_path, params, _ = app.state.rq_queue.enqueued[-1]
+    assert params["odoo_instance_id"] >= 1

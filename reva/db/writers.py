@@ -958,6 +958,7 @@ def record_ticket_analysis_created(db: Database, params: TicketJobParams) -> int
     """Insert a pending ticket_analyses row and return its id."""
     with db.session() as s:
         row = TicketAnalysis(
+            odoo_instance_id=params.odoo_instance_id,
             ticket_id=params.ticket_id,
             model_name=params.model_name,
             field_name=params.field_name,
@@ -1058,21 +1059,20 @@ def purge_old_ticket_text(db: Database, older_than_days: int) -> int:
 
 
 def get_pending_ticket_analysis(
-    db: Database, ticket_id: int, model_name: str, field_name: str
+    db: Database, ticket_id: int, model_name: str, field_name: str, odoo_instance_id: int
 ) -> dict | None:
-    """Return the most recent pending analysis for this record, or None."""
+    """Return the pending analysis for (instance, ticket, model, field), or None."""
     with db.session() as s:
         row = s.execute(
             select(TicketAnalysis)
             .where(
+                TicketAnalysis.odoo_instance_id == odoo_instance_id,
                 TicketAnalysis.ticket_id == ticket_id,
                 TicketAnalysis.model_name == model_name,
                 TicketAnalysis.field_name == field_name,
                 TicketAnalysis.status == "pending",
             )
-            .order_by(TicketAnalysis.created_at.desc())
-            .limit(1)
-        ).scalar_one_or_none()
+        ).scalars().first()
         if row is None:
             return None
         return {"id": row.id, "job_id": row.job_id, "status": row.status}
@@ -1087,6 +1087,7 @@ def get_ticket_analysis(db: Database, analysis_id: int) -> dict | None:
         return {
             "id": row.id,
             "job_id": row.job_id,
+            "odoo_instance_id": row.odoo_instance_id,
             "ticket_id": row.ticket_id,
             "model_name": row.model_name,
             "field_name": row.field_name,
