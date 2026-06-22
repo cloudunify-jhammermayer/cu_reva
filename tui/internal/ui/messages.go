@@ -68,4 +68,15 @@ type feedbackLoadedMsg struct {
 	mutes []api.MuteEntry
 	err   error
 }
+type odooLoadedMsg struct {
+	data *api.OdooInstancePage
+	err  error
+}
+type odooCreatedMsg struct {
+	created *api.OdooInstanceCreated
+	err     error
+}
+type odooActionMsg struct {
+	err error
+}
 type tickMsg struct{}

@@ -21,6 +21,7 @@ const (
 	viewTickets  // tab 7
 	viewAudits   // tab 8
 	viewFeedback // tab 9
+	viewOdoo     // tab 0
 )
 
 type App struct {
@@ -35,6 +36,7 @@ type App struct {
 	tickets   Tickets
 	audits    Audits
 	feedback  Feedback
+	odoo      Odoo
 	width     int
 	height    int
 }
@@ -52,6 +54,7 @@ func NewApp(client api.ClientIface, odooURL string) *App {
 		tickets:   newTickets(client, odooURL),
 		audits:    newAudits(client),
 		feedback:  newFeedback(client),
+		odoo:      newOdoo(client),
 	}
 }
 
@@ -66,6 +69,7 @@ func (a *App) Init() tea.Cmd {
 		a.tickets.load(),
 		a.audits.load(),
 		a.feedback.load(),
+		a.odoo.load(),
 		tick(),
 	)
 }
@@ -104,6 +108,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.audits.height = contentH
 		a.feedback.width = m.Width
 		a.feedback.height = contentH
+		a.odoo.width = m.Width
+		a.odoo.height = contentH
 		return a, nil
 
 	case tea.KeyMsg:
@@ -121,6 +127,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.repos, cmd = a.repos.update(msg)
 			case viewTickets:
 				a.tickets, cmd = a.tickets.update(msg)
+			case viewOdoo:
+				a.odoo, cmd = a.odoo.update(msg)
 			}
 			return a, cmd
 		}
@@ -163,6 +171,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.clearStatusMsgs()
 			a.active = viewFeedback
 			return a, nil
+		case "0":
+			a.clearStatusMsgs()
+			a.active = viewOdoo
+			return a, nil
 		}
 		if a.active == viewReviews {
 			var cmd tea.Cmd
@@ -204,6 +216,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.feedback, cmd = a.feedback.update(msg)
 			return a, cmd
 		}
+		if a.active == viewOdoo {
+			var cmd tea.Cmd
+			a.odoo, cmd = a.odoo.update(msg)
+			return a, cmd
+		}
 
 	case tickMsg:
 		var cmd tea.Cmd
@@ -222,7 +239,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.audits, auditCmd = a.audits.update(msg)
 		var fbCmd tea.Cmd
 		a.feedback, fbCmd = a.feedback.update(msg)
-		return a, tea.Batch(cmd, findCmd, failCmd, repoCmd, pendCmd, ticketCmd, auditCmd, fbCmd, tick())
+		var odooCmd tea.Cmd
+		a.odoo, odooCmd = a.odoo.update(msg)
+		return a, tea.Batch(cmd, findCmd, failCmd, repoCmd, pendCmd, ticketCmd, auditCmd, fbCmd, odooCmd, tick())
 
 	case dashboardLoadedMsg:
 		a.dashboard, _ = a.dashboard.update(msg)
@@ -275,6 +294,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ticketRequeuedMsg:
 		a.tickets, _ = a.tickets.update(msg)
 
+	case odooLoadedMsg:
+		a.odoo, _ = a.odoo.update(msg)
+
+	case odooCreatedMsg:
+		var cmd tea.Cmd
+		a.odoo, cmd = a.odoo.update(msg)
+		return a, cmd
+
+	case odooActionMsg:
+		var cmd tea.Cmd
+		a.odoo, cmd = a.odoo.update(msg)
+		return a, cmd
+
 	case requeuedMsg:
 		// Deliver to whichever view is active so the status message lands there.
 		if a.active == viewReviews {
@@ -322,6 +354,8 @@ func (a *App) View() string {
 		content = a.audits.view(a.width, contentH)
 	case viewFeedback:
 		content = a.feedback.view(a.width, contentH)
+	case viewOdoo:
+		content = a.odoo.view(a.width, contentH)
 	}
 
 	// Safety net: no tab may emit more than contentH lines. lipgloss Height() is
@@ -354,6 +388,7 @@ func (a *App) tabBar() string {
 		{"7", "Tickets", 0, viewTickets},
 		{"8", "Audits", 0, viewAudits},
 		{"9", "Feedback", 0, viewFeedback},
+		{"0", "Odoo", 0, viewOdoo},
 	}
 
 	var parts []string
@@ -396,6 +431,8 @@ func (a *App) capturingText() bool {
 		return a.repos.adding || a.repos.filtering
 	case viewTickets:
 		return a.tickets.filtering
+	case viewOdoo:
+		return a.odoo.creating
 	}
 	return false
 }
@@ -428,6 +465,8 @@ func (a *App) statusBar() string {
 		hint = "j/k navigate/scroll | enter=findings | esc=back | r=refresh | q quit"
 	case viewFeedback:
 		hint = "j/k scroll | dismissals & mutes per repo/category | r=refresh | q quit"
+	case viewOdoo:
+		hint = "j/k navigate | n=add · r=rotate key · t=toggle active · R=refresh | q quit"
 	default:
 		hint = "1 Dash | 2 Reviews | 3 Findings | 4 Failures | 5 Repos | 6 Pending | 7 Tickets | 8 Audits | q quit"
 	}
