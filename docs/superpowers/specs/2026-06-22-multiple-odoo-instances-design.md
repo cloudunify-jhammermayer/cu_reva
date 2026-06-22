@@ -158,11 +158,16 @@ write and by the worker to open it when constructing the callback client.
   helper/CLI note documents `Fernet.generate_key()` for ops. The feature cannot
   operate without it (outbound callbacks are per-instance and sealed).
 - If `REVA_SECRET_KEY` is unset: creating/editing an instance **with** a
-  non-empty outbound key fails fast (clear error); an instance with an empty
-  outbound key works (callbacks disabled). The worker, on an instance with a
-  sealed key but no `REVA_SECRET_KEY`, raises `PermanentError` (surfaced as a
-  failed run, not a silent no-op) — consistent with the existing
-  "disabled-callback raises" contract.
+  non-empty outbound key fails fast (clear 400); an instance with an empty
+  outbound key works (callbacks disabled). On the worker, `build_odoo_client`
+  decrypts the sealed key eagerly at the start of the job; if `REVA_SECRET_KEY`
+  is absent (or the instance row is gone) it raises before the job's
+  try-block, so RQ marks the job failed and the run row is left for the
+  stale-`running` reaper / a manual requeue rather than being marked failed
+  with an Odoo failure-callback. (As-built limitation — not a silent no-op: the
+  job fails loudly. A missing-key build failure also can't notify Odoo, since
+  sending the failure callback would itself need a client. Deployments wire
+  `REVA_SECRET_KEY` via compose, so this is the degenerate-misconfig path.)
 
 ### 3. Inbound auth + scoping (`api`)
 
