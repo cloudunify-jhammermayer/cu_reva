@@ -907,13 +907,37 @@ def test_purge_old_ticket_issue_text_scrubs_inputs_keeps_issues(db):
 
 
 def test_ticket_issue_pending_unique_per_record(db):
-    """Partial unique index: only one pending run per (ticket_id, model_name) —
-    closes the dedup check-then-insert race between concurrent POSTs."""
+    """Partial unique index: only one pending run per instance per
+    (ticket_id, model_name) — closes the dedup check-then-insert race.
+
+    Uses direct ORM inserts with an explicit odoo_instance_id so the index
+    fires (NULL != NULL in SQLite unique indexes, so the writer path — which
+    doesn't yet stamp odoo_instance_id — cannot exercise this constraint).
+    """
     from sqlalchemy.exc import IntegrityError
 
-    writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=7))
+    from reva.db.models import OdooInstance, TicketIssueRun
+
+    def _add_pending(s, *, instance_id: int, ticket_id: int) -> None:
+        s.add(TicketIssueRun(
+            odoo_instance_id=instance_id, ticket_id=ticket_id,
+            model_name="helpdesk.ticket", github_url="https://github.com/o/r",
+            name="n", description="d", analysis_html="", priority="1",
+            ticket_url="https://odoo/1", status="pending",
+        ))
+        s.flush()
+
+    with db.session() as s:
+        inst = OdooInstance(name="x", key_hash="h", key_prefix="p")
+        s.add(inst)
+        s.flush()
+        iid = inst.id
+        _add_pending(s, instance_id=iid, ticket_id=7)
+
     with pytest.raises(IntegrityError):
-        writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=7))
+        with db.session() as s:
+            _add_pending(s, instance_id=iid, ticket_id=7)
+
     # a non-pending sibling doesn't block a new run
     run2 = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=8))
     writers.record_ticket_issue_run_failed(db, run2, "boom")

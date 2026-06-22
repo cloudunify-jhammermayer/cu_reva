@@ -369,6 +369,9 @@ class TicketAnalysis(Base):
     ticket_id: Mapped[int] = mapped_column(Integer, nullable=False)
     model_name: Mapped[str] = mapped_column(Text, nullable=False)
     field_name: Mapped[str] = mapped_column(Text, nullable=False)
+    odoo_instance_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("odoo_instances.id")
+    )
     input_text: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     result_html: Mapped[str | None] = mapped_column(Text)
@@ -408,6 +411,9 @@ class TicketIssueRun(Base):
     job_id: Mapped[str | None] = mapped_column(Text)
     ticket_id: Mapped[int] = mapped_column(Integer, nullable=False)
     model_name: Mapped[str] = mapped_column(Text, nullable=False)
+    odoo_instance_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("odoo_instances.id")
+    )
     github_url: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
@@ -448,9 +454,10 @@ class TicketIssueRun(Base):
             postgresql_where=text("job_id IS NOT NULL"),
             sqlite_where=text("job_id IS NOT NULL"),
         ),
-        # One in-flight run per Odoo record (closes the dedup check-then-insert race).
+        # One in-flight run per Odoo INSTANCE per record (migration 018).
         Index(
             "idx_ticket_issue_runs_pending",
+            "odoo_instance_id",
             "ticket_id",
             "model_name",
             unique=True,
@@ -460,6 +467,34 @@ class TicketIssueRun(Base):
         Index("idx_ticket_issue_runs_status", "status"),
         Index("idx_ticket_issue_runs_ticket_id", "ticket_id"),
         Index("idx_ticket_issue_runs_created_at", "created_at"),
+    )
+
+
+# --------------------------------------------------------------- odoo_instances
+
+
+class OdooInstance(Base):
+    """An Odoo instance that sends work to REVA. Mirrors db/migrations/018.
+
+    `key_hash` is the SHA-256 of the REVA-minted inbound key (plaintext shown
+    once at create/rotate). `callback_api_key_enc` is the Fernet-encrypted
+    outbound Bearer REVA sends to this Odoo's callback endpoints.
+    """
+
+    __tablename__ = "odoo_instances"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    key_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    key_prefix: Mapped[str] = mapped_column(Text, nullable=False)
+    callback_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    callback_api_key_enc: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
 
