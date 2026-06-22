@@ -25,8 +25,6 @@ class Settings:
     migrations_dir: str = "/app/db/migrations"
     queue_name: str = "reviews"
     google_chat_webhook_url: str = ""  # empty = notifications disabled
-    odoo_callback_url: str = ""        # empty = Odoo callback disabled
-    odoo_callback_api_key: str = ""
     repo_cache_dir: str = "/repos"
     repo_cache_ttl_days: int = 30
     skills_dir: str = "/app/prompts/skills"
@@ -66,8 +64,6 @@ class Settings:
             migrations_dir=os.environ.get("REVA_MIGRATIONS_DIR", "/app/db/migrations"),
             queue_name=os.environ.get("REVA_QUEUE_NAME", "reviews"),
             google_chat_webhook_url=os.environ.get("GOOGLE_CHAT_WEBHOOK_URL", ""),
-            odoo_callback_url=os.environ.get("ODOO_CALLBACK_URL", ""),
-            odoo_callback_api_key=env_or_file("ODOO_CALLBACK_API_KEY", "") or "",
             repo_cache_dir=os.environ.get("REVA_REPO_CACHE_DIR", "/repos"),
             repo_cache_ttl_days=int(os.environ.get("REVA_REPO_CACHE_TTL_DAYS", "30")),
             skills_dir=os.environ.get("REVA_SKILLS_DIR", "/app/prompts/skills"),

@@ -268,8 +268,7 @@ Notifications fire on `PermanentError` and unexpected exceptions. Transient erro
 | `REVA_STALE_RUNNING_SECONDS` | — | `2 × job timeout` (3600) | Scheduler reaps `review_runs` stuck in `running` longer than this (worker killed mid-review) and marks them failed |
 | `REVA_API_RATE_LIMIT_PER_MINUTE` | — | `0` (off) | Per-client (API key / IP) request cap on `/api/v1` over a rolling minute; per-instance, in addition to nginx's limit |
 | `REVA_QUEUE_DEPTH_ALERT` / `REVA_FAILED_JOBS_ALERT` / `REVA_REPO_CACHE_DISK_PCT_ALERT` | — | `50` / `10` / `90` | Scheduler operational-alert thresholds (need `GOOGLE_CHAT_WEBHOOK_URL`) |
-| `ODOO_CALLBACK_URL` | — | _(off)_ | Odoo endpoint REVA writes ticket-analysis results back to |
-| `ODOO_CALLBACK_API_KEY` | — | — | Auth key for the Odoo callback |
+| `REVA_SECRET_KEY` | — | — | Fernet key for encrypting per-instance Odoo callback keys at rest; required to use the Odoo-instances feature |
 | `REVA_REPORT_WEEKDAY` | — | `0` | Day to send weekly report (0 = Monday, 6 = Sunday) |
 | `REVA_REPORT_HOUR_UTC` | — | `8` | Hour (UTC) to send weekly report (0–23) |
 | `REVA_TICKET_TEXT_RETENTION_DAYS` | — | `30` | Days before raw customer ticket text is scrubbed from `ticket_analyses` |

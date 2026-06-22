@@ -4,7 +4,7 @@
 # Prereqs:
 #   1. Copy .env.example to .env and fill in values (REVA_DOMAIN=reva.dev.cloudunify.org).
 #   2. Place GitHub App private key at ./secrets/github-app-private-key.pem
-#      (and secrets/odoo_callback_api_key if ODOO_CALLBACK_URL is set)
+#      (and secrets/reva_secret_key for the Odoo-instances Fernet key)
 #   3. Point your cloudflared ingress at http://localhost:8080
 #   4. docker compose -f docker-compose.prod.yml up -d
 
@@ -167,11 +167,9 @@ services:
       GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_private_key
       ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
       GOOGLE_CHAT_WEBHOOK_URL: ${GOOGLE_CHAT_WEBHOOK_URL:-}
-      # Odoo write-back (ticket analysis + github-issue handoff callbacks).
-      # URL from .env; bearer key as a tmpfs secret (see secrets: below).
-      # Unset URL = callbacks disabled (results still stored in DB).
-      ODOO_CALLBACK_URL: ${ODOO_CALLBACK_URL:-}
-      ODOO_CALLBACK_API_KEY_FILE: /run/secrets/odoo_callback_api_key
+      # Fernet key for decrypting per-instance Odoo callback keys at rest.
+      # Provided as a tmpfs secret (see secrets: below).
+      REVA_SECRET_KEY_FILE: /run/secrets/reva_secret_key
       REVA_REPO_CACHE_DIR: /repos
       REVA_DEFAULT_MODEL: ${REVA_DEFAULT_MODEL:-claude-sonnet-4-6}
       REVA_DEEP_MODEL: ${REVA_DEEP_MODEL:-claude-opus-4-8}
@@ -184,7 +182,7 @@ services:
     secrets:
       - github_private_key
       - anthropic_api_key
-      - odoo_callback_api_key
+      - reva_secret_key
     # On deploy/stop, give RQ's warm shutdown time to finish an in-flight review
     # before Docker SIGKILLs it. Matches the review job timeout (1800s) plus a
     # small margin. A review still in flight past this is SIGKILLed and then
@@ -276,5 +274,5 @@ secrets:
     file: ./secrets/reva_api_key
   anthropic_api_key:
     file: ./secrets/anthropic_api_key
-  odoo_callback_api_key:
-    file: ./secrets/odoo_callback_api_key
+  reva_secret_key:
+    file: ./secrets/reva_secret_key

@@ -22,8 +22,6 @@ class Settings:
     # Auto-audit every repo a newly-installed/added installation grants. When
     # false, those repos are still registered but no audit job is enqueued.
     auto_audit_repos: bool = True
-    odoo_callback_url: str = ""
-    odoo_callback_api_key: str = ""
     api_key: str = ""
     require_api_key: bool = False
     # Per-client (API key / IP) request cap for /api/v1 over a rolling minute.
@@ -56,8 +54,6 @@ class Settings:
             auto_audit_repos=os.environ.get("REVA_AUTO_AUDIT_REPOS", "true").lower() in (
                 "1", "true", "yes",
             ),
-            odoo_callback_url=os.environ.get("ODOO_CALLBACK_URL", ""),
-            odoo_callback_api_key=env_or_file("ODOO_CALLBACK_API_KEY", "") or "",
             api_key=api_key,
             require_api_key=require_api_key,
             rate_limit_per_minute=int(os.environ.get("REVA_API_RATE_LIMIT_PER_MINUTE", "0")),
