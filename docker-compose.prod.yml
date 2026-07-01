@@ -67,6 +67,8 @@ services:
       # Secrets injected as files (tmpfs), not env — see secrets: below.
       GITHUB_WEBHOOK_SECRET_FILE: /run/secrets/github_webhook_secret
       REVA_API_KEY_FILE: /run/secrets/reva_api_key
+      # Fernet key: the API encrypts Odoo instances' outbound callback keys at rest.
+      REVA_SECRET_KEY_FILE: /run/secrets/reva_secret_key
       # Production fails closed: the API refuses to start without REVA_API_KEY.
       REVA_REQUIRE_API_KEY: "true"
       # Auto-audit repos when an installation is created / repos are added.
@@ -76,6 +78,7 @@ services:
       - github_private_key
       - github_webhook_secret
       - reva_api_key
+      - reva_secret_key
     depends_on:
       postgres:
         condition: service_healthy
