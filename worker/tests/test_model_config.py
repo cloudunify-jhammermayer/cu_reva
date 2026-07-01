@@ -39,5 +39,5 @@ def test_models_default_when_env_unset():
     """With no env override, the pinned production defaults are unchanged."""
     import reva.config as config
 
-    assert config.DEFAULT_MODEL == "claude-sonnet-4-6"
+    assert config.DEFAULT_MODEL == "claude-sonnet-5"
     assert config.DEEP_MODEL == "claude-opus-4-8"

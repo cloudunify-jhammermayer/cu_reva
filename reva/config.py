@@ -14,7 +14,7 @@ import os
 # (`reva.claude_client`) and the Claude Code CLI runner (`reva.claude_code_runner`)
 # always use the same models. Override per-deployment via env; the defaults are
 # the pinned production models.
-DEFAULT_MODEL = os.environ.get("REVA_DEFAULT_MODEL", "claude-sonnet-4-6")
+DEFAULT_MODEL = os.environ.get("REVA_DEFAULT_MODEL", "claude-sonnet-5")
 DEEP_MODEL = os.environ.get("REVA_DEEP_MODEL", "claude-opus-4-8")
 
 

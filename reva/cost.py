@@ -1,14 +1,21 @@
 """Cost estimation for Claude API calls.
 
-Rates reflect Anthropic public pricing for Sonnet 4.6 and Opus 4.8 as of
-May 2026. Verify against https://www.anthropic.com/pricing if billing
-accuracy matters.
+Rates reflect Anthropic public pricing for Sonnet 5, Sonnet 4.6, and Opus 4.8.
+Verify against https://www.anthropic.com/pricing if billing accuracy matters.
+Sonnet 5 uses its standard $3/$15 rate; the $2/$10 introductory rate (through
+Aug 31, 2026) is intentionally not used so the budget cap estimates conservatively.
 """
 
 from __future__ import annotations
 
 # Per-token USD rates. (Per million tokens / 1_000_000.)
 PRICING: dict[str, dict[str, float]] = {
+    "claude-sonnet-5": {
+        "input": 3.00 / 1_000_000,
+        "output": 15.00 / 1_000_000,
+        "cache_read": 0.30 / 1_000_000,
+        "cache_write_5m": 3.75 / 1_000_000,
+    },
     "claude-sonnet-4-6": {
         "input": 3.00 / 1_000_000,
         "output": 15.00 / 1_000_000,

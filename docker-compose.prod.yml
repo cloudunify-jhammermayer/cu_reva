@@ -174,7 +174,7 @@ services:
       # Provided as a tmpfs secret (see secrets: below).
       REVA_SECRET_KEY_FILE: /run/secrets/reva_secret_key
       REVA_REPO_CACHE_DIR: /repos
-      REVA_DEFAULT_MODEL: ${REVA_DEFAULT_MODEL:-claude-sonnet-4-6}
+      REVA_DEFAULT_MODEL: ${REVA_DEFAULT_MODEL:-claude-sonnet-5}
       REVA_DEEP_MODEL: ${REVA_DEEP_MODEL:-claude-opus-4-8}
       REVA_CODEGRAPH_ENABLED: ${REVA_CODEGRAPH_ENABLED:-false}
       REVA_CODEGRAPH_INDEX_TIMEOUT: ${REVA_CODEGRAPH_INDEX_TIMEOUT:-180}
