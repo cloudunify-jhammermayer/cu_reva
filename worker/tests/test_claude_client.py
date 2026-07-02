@@ -225,4 +225,4 @@ def test_review_defaults_to_sonnet_when_no_model_passed():
     client = _make_client(handler)
     client.review(**_review_args())
 
-    assert captured["body"]["model"] == "claude-sonnet-4-6"
+    assert captured["body"]["model"] == "claude-sonnet-5"

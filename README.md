@@ -25,8 +25,8 @@ Each directory has its own `README.md` explaining how it works and why.
 ├── frontend/             Vue 3 web dashboard — RETIRED (decommissioned from the stack; TUI is the dashboard)
 ├── prompts/              API-path prompt templates + headless-CLI skills (prompts/skills/)
 ├── db/migrations/        Plain-SQL migrations applied at startup
-├── nginx/                Reverse proxy (TLS, rate limiting) for production
-├── scripts/              deploy.sh, setup-letsencrypt.sh, fake-webhook.py
+├── nginx/                Reverse proxy (rate limiting) for production; TLS terminates at the Cloudflare edge
+├── scripts/              deploy.sh, backup.sh, restore.sh, fake-webhook.py
 ├── secrets/              GitHub App private key (gitignored, not committed)
 ├── docs/                 Setup & operations guides + design specs (docs/superpowers/)
 ├── docker-compose.yml    Local development stack
@@ -39,7 +39,7 @@ Each directory has its own `README.md` explaining how it works and why.
 |---|---|
 | Webhook + Internal API | Python / FastAPI |
 | Job queue | Redis + RQ |
-| PR review / audit engine | Headless **Claude Code CLI** against a local repo clone (Sonnet 4.6 default, **Opus 4.8** for deep + audits; env-configurable) |
+| PR review / audit engine | Headless **Claude Code CLI** against a local repo clone (Sonnet 5 default, **Opus 4.8** for deep + audits; env-configurable) |
 | Ticket analysis / comment replies | Claude **Messages API** (`reva/claude_client.py`) |
 | Database | PostgreSQL 16 |
 | Dashboard | Go / Bubble Tea TUI (the Vue web frontend is retired) |
@@ -252,13 +252,13 @@ Notifications fire on `PermanentError` and unexpected exceptions. Transient erro
 | `GITHUB_APP_ID` | ✅ | — | GitHub App numeric ID |
 | `GITHUB_WEBHOOK_SECRET` | ✅ | — | HMAC secret set in GitHub App webhook settings |
 | `ANTHROPIC_API_KEY` | ✅ | — | Anthropic API key (console.anthropic.com) |
-| `REVA_DOMAIN` | prod | — | Public hostname for Nginx + Let's Encrypt |
+| `REVA_DOMAIN` | prod | — | Public hostname; TLS terminates at the Cloudflare edge (no certs on the server) |
 | `REVA_API_KEY` | prod | — | Bearer token protecting `/api/v1/*` (the TUI sends it). Required in production |
 | `REVA_REQUIRE_API_KEY` | — | `false` | When `true`, the API refuses to start unless `REVA_API_KEY` is set (prod compose sets this) |
 | `GOOGLE_CHAT_WEBHOOK_URL` | — | _(off)_ | Incoming webhook URL for error notifications and weekly report |
 | `REVA_DEBOUNCE_SECONDS` | — | `600` | Debounce window in seconds |
 | `REVA_DEFAULT_REVIEW_MODE` | — | `diff` | Auto-review mode: `diff`, `diff-all`, `full`, or `deep` |
-| `REVA_DEFAULT_MODEL` | — | `claude-sonnet-4-6` | Model for diff/full reviews, ticket analysis, comment replies |
+| `REVA_DEFAULT_MODEL` | — | `claude-sonnet-5` | Model for diff/full reviews, ticket analysis, comment replies |
 | `REVA_DEEP_MODEL` | — | `claude-opus-4-8` | Model for `/deep-review` and all repo audits |
 | `REVA_CODEGRAPH_ENABLED` | — | `false` | Expose a pre-indexed CodeGraph (MCP) to repo-aware reviews + audits |
 | `REVA_CODEGRAPH_INDEX_TIMEOUT` | — | `180` | Seconds bounding the CodeGraph index step |
@@ -290,13 +290,13 @@ Each Python service has its own venv (all install the shared `reva` package as e
 
 ```bash
 cd worker && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/        # worker: 336
+.venv/bin/python -m pytest tests/        # worker: ~658
 
 cd ../api && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/        # api: 98
+.venv/bin/python -m pytest tests/        # api: ~194
 
 cd ../scheduler && python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/        # scheduler: 27
+.venv/bin/python -m pytest tests/        # scheduler: ~28
 ```
 
 Tests use SQLite in-memory, `httpx` MockTransport, and subprocess mocks for the Claude CLI; no Docker or network required. The Go TUI: `cd tui && go test ./...`.

@@ -2,7 +2,7 @@
 
 This guide deploys REVA to a Linux server behind a **Cloudflare tunnel**.
 Cloudflare terminates TLS at its edge and a `cloudflared` connector (running on
-the host) forwards `reva.dev.cloudunify.org` to nginx on `127.0.0.1:8080` — so
+the host) forwards `reva.dev.cloudunify.org` to nginx on `127.0.0.1:80` — so
 **no public ports, no certificates, and no inbound firewall rules** are needed.
 nginx runs plain HTTP as the internal reverse proxy; the PEM key and other
 secrets are passed as Docker secret files instead of bind mounts / env vars.
@@ -16,7 +16,7 @@ secrets are passed as Docker secret files instead of bind mounts / env vars.
 | Linux VPS | 1 vCPU / 1 GB RAM minimum; 2 vCPU / 2 GB recommended |
 | Docker + Docker Compose v2 | `docker compose version` must work |
 | Cloudflare account | Managing the `dev.cloudunify.org` zone |
-| A Cloudflare tunnel + `cloudflared` on the host | Routes `reva.dev.cloudunify.org` → `http://localhost:8080`. **No public IP / DNS A record / open ports needed** — the tunnel connects outbound. |
+| A Cloudflare tunnel + `cloudflared` on the host | Routes `reva.dev.cloudunify.org` → `http://localhost:80`. **No public IP / DNS A record / open ports needed** — the tunnel connects outbound. |
 | GitHub App | Create one per the [local setup guide](setup-local.md#1-create-a-github-app), using `https://reva.dev.cloudunify.org/webhooks/github` as the webhook URL |
 
 ---
@@ -94,8 +94,8 @@ openssl rand -hex 32
 
 ## 4. Create the secret files
 
-The production compose mounts four Docker secrets from `./secrets/` (see the
-`secrets:` block in `docker-compose.prod.yml`). All four are **required** —
+The production compose mounts five Docker secrets from `./secrets/` (see the
+`secrets:` block in `docker-compose.prod.yml`). All five are **required** —
 `docker compose up` fails if a source file is missing, and the API/worker
 **fail closed** (refuse to start) if a secret is empty or whitespace-only. Write
 real, non-empty values:
@@ -118,6 +118,11 @@ openssl rand -hex 32 > secrets/reva_api_key
 #    so use printf, not echo:
 printf '%s' 'sk-ant-api03-...' > secrets/anthropic_api_key
 
+# 5. REVA secret key — Fernet key encrypting Odoo instances' callback API keys
+#    at rest. Must be a valid Fernet key (NOT openssl rand); rotating it makes
+#    existing encrypted callback keys undecryptable:
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" > secrets/reva_secret_key
+
 chmod 600 secrets/*
 ```
 
@@ -130,7 +135,7 @@ calls (`Authorization: Bearer <that value>`).
 
 TLS is handled by Cloudflare — there are no certificates on the server. Install
 `cloudflared` and create a tunnel that forwards `reva.dev.cloudunify.org` to
-nginx (published on `127.0.0.1:8080` by the prod compose).
+nginx (published on `127.0.0.1:80` and `[::1]:80` by the prod compose).
 
 ```bash
 # Install cloudflared (Debian/Ubuntu)
@@ -149,7 +154,7 @@ tunnel: reva
 credentials-file: /root/.cloudflared/<TUNNEL_ID>.json
 ingress:
   - hostname: reva.dev.cloudunify.org
-    service: http://localhost:8080
+    service: http://localhost:80
   - service: http_status:404
 ```
 
@@ -290,7 +295,7 @@ auth layer at the edge if you want.
 Internet ──► Cloudflare edge (TLS) ──► cloudflared tunnel (outbound)
                                               │
                                               ▼
-                                   nginx (127.0.0.1:8080, plain HTTP)
+                                   nginx (127.0.0.1:80, plain HTTP)
    ├── /webhooks/*  ──► api:8080  (rate-limited, HMAC-verified, GitHub-IP allowlist via CF-Connecting-IP)
    ├── /api/*       ──► api:8080  (review data for the TUI; Bearer auth)
    └── /health      ──► api:8080
@@ -319,10 +324,10 @@ Internet ──► Cloudflare edge (TLS) ──► cloudflared tunnel (outbound)
 
 ### Tunnel up but site returns 502 / 404
 `cloudflared` reaches the host but not nginx. Check the ingress points at
-`http://localhost:8080` and nginx is healthy:
+`http://localhost:80` and nginx is healthy:
 ```bash
 sudo cloudflared tunnel info reva
-curl -s http://localhost:8080/nginx-health   # should print "ok"
+curl -s http://localhost:80/nginx-health   # should print "ok"
 docker compose -f docker-compose.prod.yml ps nginx
 ```
 

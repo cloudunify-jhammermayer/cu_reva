@@ -319,7 +319,7 @@ def test_review_returns_claude_response(runner_with_skill, tmp_path):
         )
 
     assert resp.tool_use_input == review_output
-    assert resp.model == "claude-sonnet-4-6"
+    assert resp.model == "claude-sonnet-5"
     assert resp.stop_reason == "tool_use"
 
 

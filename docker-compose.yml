@@ -22,7 +22,9 @@ services:
     cap_drop:
       - ALL
     ports:
-      - "8080:8080"
+      # Loopback-only: the internal/admin API is unauthenticated in dev, so keep
+      # it off the LAN (matches postgres/redis below).
+      - "127.0.0.1:8080:8080"
     environment:
       DATABASE_URL: postgresql://review:${POSTGRES_PASSWORD}@postgres:5432/reviews
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0

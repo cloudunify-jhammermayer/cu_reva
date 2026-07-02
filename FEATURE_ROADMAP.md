@@ -11,6 +11,14 @@ Legend — **Effort**: S / M / L · **Value**: H / M / L.
 
 ## The through-line: REVA has dormant infrastructure
 
+> **STATUS (2026-07-02): RESOLVED — this section is historical.** Every gap below has since
+> shipped: `review_feedback` is written (`api/app/routes/webhooks.py:385`, `writers.record_feedback`),
+> `prompt_versions` is written (`writers.register_prompt_version`), delta reviews feed prior
+> findings back via `already_reported` (prompt v1.6, `prompts/skills/reva-delta-review.md`),
+> `reva-risk-*` PR labels are set (`worker/worker/runner.py:69,421`), and the delta-resolution
+> verdict is persisted to the finding-outcome ledger (`db/migrations/015_finding_outcome.sql`).
+> Kept for context on why Tiers 0–3 exist.
+
 The strongest finding is that REVA already **built the machinery for a learning loop and
 never wired it up**. Several independent gaps trace back to this:
 

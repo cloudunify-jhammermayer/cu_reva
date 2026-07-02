@@ -466,7 +466,7 @@ func (a *App) statusBar() string {
 	case viewFeedback:
 		hint = "j/k scroll | dismissals & mutes per repo/category | r=refresh | q quit"
 	case viewOdoo:
-		hint = "j/k navigate | n=add · r=rotate key · t=toggle active · R=refresh | q quit"
+		hint = "j/k navigate | n=add · ^R=rotate key · t=toggle active · r=refresh | q quit"
 	default:
 		hint = "1 Dash | 2 Reviews | 3 Findings | 4 Failures | 5 Repos | 6 Pending | 7 Tickets | 8 Audits | q quit"
 	}

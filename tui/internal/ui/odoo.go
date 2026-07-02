@@ -28,6 +28,8 @@ type Odoo struct {
 	createURL  string
 	createKey  string
 
+	confirmingRotate bool // awaiting y/n confirmation for an irreversible key rotation
+
 	newKey string // plaintext key to display once after create/rotate
 }
 
@@ -80,6 +82,20 @@ func (o Odoo) update(msg tea.Msg) (Odoo, tea.Cmd) {
 			o.newKey = ""
 			return o, nil
 		}
+		if o.confirmingRotate {
+			o.confirmingRotate = false
+			if m.String() == "y" && o.cursor < len(o.items) {
+				id := o.items[o.cursor].ID
+				client := o.client
+				o.statusMsg = styleSubtitle.Render("rotating key...")
+				return o, func() tea.Msg {
+					created, err := client.RotateOdooInstanceKey(id)
+					return odooCreatedMsg{created: created, err: err}
+				}
+			}
+			o.statusMsg = styleSubtitle.Render("rotation cancelled")
+			return o, nil
+		}
 		if o.creating {
 			return o.updateCreate(m)
 		}
@@ -95,15 +111,14 @@ func (o Odoo) update(msg tea.Msg) (Odoo, tea.Cmd) {
 		case "n":
 			o.creating, o.createStep = true, 0
 			o.createName, o.createURL, o.createKey, o.statusMsg = "", "", "", ""
-		case "r":
+		case "ctrl+r":
+			// Key rotation is irreversible (the old key stops working immediately),
+			// so it's gated behind a confirmation and kept off "r" — which means
+			// refresh on every other tab.
 			if o.cursor < len(o.items) {
-				id := o.items[o.cursor].ID
-				client := o.client
-				o.statusMsg = styleSubtitle.Render("rotating key...")
-				return o, func() tea.Msg {
-					created, err := client.RotateOdooInstanceKey(id)
-					return odooCreatedMsg{created: created, err: err}
-				}
+				o.confirmingRotate = true
+				o.statusMsg = styleStatusFailed.Render(
+					"rotate API key for " + o.items[o.cursor].Name + "? invalidates the current key — press y to confirm, any other key to cancel")
 			}
 		case "t":
 			if o.cursor < len(o.items) {
@@ -114,7 +129,7 @@ func (o Odoo) update(msg tea.Msg) (Odoo, tea.Cmd) {
 					return odooActionMsg{err: client.SetOdooInstanceActive(it.ID, !it.Active)}
 				}
 			}
-		case "R":
+		case "r", "R":
 			o.loading, o.statusMsg = true, ""
 			return o, o.load()
 		}
@@ -243,7 +258,7 @@ func (o Odoo) view(w, h int) string {
 		rows = append(rows, line)
 	}
 
-	pos := styleSubtitle.Render(fmt.Sprintf("  %d/%d   n add · r rotate · t toggle · R refresh", o.cursor+1, len(o.items)))
+	pos := styleSubtitle.Render(fmt.Sprintf("  %d/%d   n add · ^R rotate key · t toggle · r refresh", o.cursor+1, len(o.items)))
 	if o.statusMsg != "" {
 		pos = "  " + o.statusMsg
 	}

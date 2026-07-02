@@ -18,8 +18,9 @@ needs is already in place (statistic + TUI). Cold-start brief:
   `resolved_by_fix`, `still_open_at_merge` (90-day window). High `dismissed/findings` is the signal.
 - **Where it plugs in:** the reviewer assembles `skill_params` in `worker/worker/reviewer.py`
   (see how `stated_intent` / `manifest_audit` are added); add a `learned_memory` param built from
-  a new `RepoLookup` method, plus guidance in `prompts/review_guidance.md` (→ prompt **v1.7**, bump
-  the CHANGELOG so the drift guard doesn't alert). Nonce-fence nothing here — it's REVA's own data.
+  a new `RepoLookup` method, plus guidance in `prompts/review_guidance.md` (→ prompt **v1.8** — v1.7
+  was already consumed by the Tier-2 hash re-baseline; bump the CHANGELOG so the drift guard doesn't
+  alert). Nonce-fence nothing here — it's REVA's own data.
 - **Plan/measure:** write the slice into `docs/tier3-plan.md` (feature B section), and watch the
   dismiss rate fall on the **TUI Feedback tab (`9`)** as it takes effect.
 
@@ -72,9 +73,10 @@ Summary of what to watch:
   (8) xpath/`inherit_id` resolution (false positives on valid xpath); (9) detection quality — esp. **not**
   false-flagging the `_inherit`-extension pattern (the most common Odoo change).
 
-**Prompt versioning:** all Tier-2 prompt/skill edits landed under CHANGELOG version **v1.6**. The
-next prompt change (feature B's `review_guidance.md` block) starts **v1.7** — add a CHANGELOG
-heading and update the `test_get_version` assertion, or the Tier-1 drift guard alerts on boot.
+**Prompt versioning:** Tier-2 prompt/skill edits landed under CHANGELOG version **v1.6**, then a
+Tier-2 hash re-baseline bumped the set to **v1.7** (commit 55c049b). The next prompt change
+(feature B's `review_guidance.md` block) starts **v1.8** — add a CHANGELOG heading and update the
+`test_get_version` assertion, or the Tier-1 drift guard alerts on boot.
 
 **Operator actions owed (not code):**
 - **Enable the `Pull request review thread` webhook event** on the GitHub App — until then Tier-1
@@ -130,7 +132,7 @@ Test counts now: **worker 339 · api 98 · scheduler 27**, ruff clean, **CI gree
 
 - **Repo audits — completed.** Findings are persisted (`audit_findings` table) and **major/critical are opened as GitHub issues** (`[REVA audit] …`, auto-created `reva-audit` label, hidden-marker dedup). Read via `GET /api/v1/audit-findings` + the new **TUI Audits tab (`8`)**; trigger from the **Repos tab (`a`)** or the API. Audits run on the **deep model**. Requires GitHub App **Issues: Read & write**.
 - **Comment auto-resolution — fixed.** Backfill used `/pulls/{pr}/reviews/{id}/comments` (returns `line:null`), so `github_comment_id` was never stored and delta re-reviews resolved nothing (Aurium #60). Now uses the PR-level `/pulls/{pr}/comments` endpoint filtered by `pull_request_review_id`. Added `finding_comment_ids_*` / `delta_resolution_*` logs.
-- **Models env-configurable.** Single source `reva/config.py`: `REVA_DEFAULT_MODEL` (`claude-sonnet-4-6`), `REVA_DEEP_MODEL` (**`claude-opus-4-8`**, bumped from 4-7). Wired through both compose files. Audits + `/deep-review` use the deep model.
+- **Models env-configurable.** Single source `reva/config.py`: `REVA_DEFAULT_MODEL` (`claude-sonnet-5`, changed from 4-6 in commit 590fb28), `REVA_DEEP_MODEL` (**`claude-opus-4-8`**, bumped from 4-7). Wired through both compose files. Audits + `/deep-review` use the deep model.
 - **CodeGraph enabled** on the live worker (`REVA_CODEGRAPH_ENABLED=true`) + a positive `codegraph_index_ready` log. **Still owed (HANDOFF's standing CodeGraph gate): confirm the model actually calls `mcp__codegraph__*` on a real full/deep PR.**
 - **nginx → Cloudflare tunnel.** Plain HTTP on `127.0.0.1:8080`; TLS at the Cloudflare edge; real client IP via `CF-Connecting-IP`. Dropped certbot / Let's Encrypt / `:443` / `setup-letsencrypt.sh`. Added a branded cloud **404**. Prod compose + `docs/setup-production.md` rewritten for the tunnel.
 
