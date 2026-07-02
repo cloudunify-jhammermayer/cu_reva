@@ -24,6 +24,21 @@ const (
 	viewOdoo     // tab 0
 )
 
+// tabKeys maps the number-row switch keys to their tab, so the key handler is a
+// single lookup instead of ten near-identical cases (M27).
+var tabKeys = map[string]view{
+	"1": viewDashboard,
+	"2": viewReviews,
+	"3": viewFindings,
+	"4": viewFailures,
+	"5": viewRepos,
+	"6": viewPending,
+	"7": viewTickets,
+	"8": viewAudits,
+	"9": viewFeedback,
+	"0": viewOdoo,
+}
+
 type App struct {
 	client    api.ClientIface
 	active    view
@@ -132,48 +147,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, cmd
 		}
-		switch m.String() {
-		case "q", "ctrl+c":
+		if m.String() == "q" || m.String() == "ctrl+c" {
 			return a, tea.Quit
-		case "1":
+		}
+		if v, ok := tabKeys[m.String()]; ok {
 			a.clearStatusMsgs()
-			a.active = viewDashboard
-			return a, nil
-		case "2":
-			a.clearStatusMsgs()
-			a.active = viewReviews
-			return a, nil
-		case "3":
-			a.clearStatusMsgs()
-			a.active = viewFindings
-			return a, nil
-		case "4":
-			a.clearStatusMsgs()
-			a.active = viewFailures
-			return a, nil
-		case "5":
-			a.clearStatusMsgs()
-			a.active = viewRepos
-			return a, nil
-		case "6":
-			a.clearStatusMsgs()
-			a.active = viewPending
-			return a, nil
-		case "7":
-			a.clearStatusMsgs()
-			a.active = viewTickets
-			return a, nil
-		case "8":
-			a.clearStatusMsgs()
-			a.active = viewAudits
-			return a, nil
-		case "9":
-			a.clearStatusMsgs()
-			a.active = viewFeedback
-			return a, nil
-		case "0":
-			a.clearStatusMsgs()
-			a.active = viewOdoo
+			a.active = v
 			return a, nil
 		}
 		if a.active == viewDashboard {

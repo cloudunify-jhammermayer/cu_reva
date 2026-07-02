@@ -118,19 +118,9 @@ func (r Repos) update(msg tea.Msg) (Repos, tea.Cmd) {
 
 		// Filter-input mode: capture keys for the `/` substring filter.
 		if r.filtering {
-			switch m.Type {
-			case tea.KeyEsc:
-				r.filtering, r.filter = false, ""
-				r.cursor, r.offset = 0, 0
-			case tea.KeyEnter:
-				r.filtering = false
-			case tea.KeyBackspace:
-				if len(r.filter) > 0 {
-					r.filter = dropLastRune(r.filter)
-					r.cursor, r.offset = 0, 0
-				}
-			case tea.KeyRunes, tea.KeySpace:
-				r.filter += string(m.Runes)
+			var changed bool
+			r.filtering, r.filter, changed = applyFilterKey(m, r.filter)
+			if changed {
 				r.cursor, r.offset = 0, 0
 			}
 			return r, nil

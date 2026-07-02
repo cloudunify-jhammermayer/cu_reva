@@ -273,19 +273,9 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 	case tea.KeyMsg:
 		// Filter-input mode (main list only): capture keys for the `/` filter.
 		if t.filtering {
-			switch m.Type {
-			case tea.KeyEsc:
-				t.filtering, t.filter = false, ""
-				t.cursor, t.offset = 0, 0
-			case tea.KeyEnter:
-				t.filtering = false
-			case tea.KeyBackspace:
-				if len(t.filter) > 0 {
-					t.filter = dropLastRune(t.filter)
-					t.cursor, t.offset = 0, 0
-				}
-			case tea.KeyRunes, tea.KeySpace:
-				t.filter += string(m.Runes)
+			var changed bool
+			t.filtering, t.filter, changed = applyFilterKey(m, t.filter)
+			if changed {
 				t.cursor, t.offset = 0, 0
 			}
 			return t, nil

@@ -80,19 +80,9 @@ func (f Findings) update(msg tea.Msg) (Findings, tea.Cmd) {
 	case tea.KeyMsg:
 		// Filter-input mode: capture keys for the `/` text filter.
 		if f.filtering {
-			switch m.Type {
-			case tea.KeyEsc:
-				f.filtering, f.filter = false, ""
-				f.cursor, f.offset = 0, 0
-			case tea.KeyEnter:
-				f.filtering = false
-			case tea.KeyBackspace:
-				if len(f.filter) > 0 {
-					f.filter = dropLastRune(f.filter)
-					f.cursor, f.offset = 0, 0
-				}
-			case tea.KeyRunes, tea.KeySpace:
-				f.filter += string(m.Runes)
+			var changed bool
+			f.filtering, f.filter, changed = applyFilterKey(m, f.filter)
+			if changed {
 				f.cursor, f.offset = 0, 0
 			}
 			return f, nil
