@@ -126,3 +126,70 @@ def test_attachment_invalid_base64_is_422(client_db_queue):
     r = client.post("/api/v1/ticket-analysis", json=payload, headers=headers)
     assert r.status_code == 422
     assert queue.enqueued == []
+
+
+def test_submit_enqueues_with_retry(client_db_queue):
+    """H7: the runner re-raises TransientError expecting a retry, so the job must
+    be enqueued with retry= (and a bounded failure_ttl)."""
+    client, _, queue, headers = client_db_queue
+    r = client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers)
+    assert r.status_code == 202
+    _, _, kwargs = queue.enqueued[0]
+    assert kwargs.get("retry") is not None
+    assert kwargs.get("failure_ttl")
+
+
+def test_duplicate_submit_dedups_to_one_job(client_db_queue):
+    """A re-click while pending returns the same id and enqueues no second (paid) job."""
+    client, _, queue, headers = client_db_queue
+    r1 = client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers)
+    r2 = client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers)
+    assert r1.json()["analysis_id"] == r2.json()["analysis_id"]
+    assert len(queue.enqueued) == 1
+
+
+def test_pending_unique_index_rejects_second_pending(client_db_queue):
+    """M10: the constraint behind the dedup — a second pending row for the same
+    (instance, ticket, model, field) is rejected, so a concurrent-POST race can't
+    create two paid jobs."""
+    from sqlalchemy.exc import IntegrityError
+
+    from reva.db.models import TicketAnalysis
+
+    client, db, _, headers = client_db_queue
+    client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers)
+    with pytest.raises(IntegrityError):
+        with db.session() as s:
+            first = s.query(TicketAnalysis).one()
+            s.add(TicketAnalysis(
+                odoo_instance_id=first.odoo_instance_id,
+                ticket_id=first.ticket_id,
+                model_name=first.model_name,
+                field_name=first.field_name,
+                input_text="dup",
+                status="pending",
+            ))
+
+
+def test_fresh_pending_cannot_be_requeued(client_db_queue):
+    """A pending analysis with a presumably-live job must not be requeued."""
+    client, _, _, headers = client_db_queue
+    aid = client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers).json()["analysis_id"]
+    assert client.post(f"/api/v1/ticket-analysis/{aid}/requeue").status_code == 409
+
+
+def test_stale_pending_can_be_requeued(client_db_queue):
+    """H6: a pending row whose job died (older than the stale window) can be
+    requeued instead of the dedup wedging every future submit."""
+    from datetime import datetime, timezone
+
+    from reva.db.models import TicketAnalysis
+
+    client, db, queue, headers = client_db_queue
+    aid = client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers).json()["analysis_id"]
+    with db.session() as s:
+        s.get(TicketAnalysis, aid).created_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+    r = client.post(f"/api/v1/ticket-analysis/{aid}/requeue")
+    assert r.status_code == 202
+    assert len(queue.enqueued) == 2  # original + requeue

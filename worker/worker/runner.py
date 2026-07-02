@@ -394,13 +394,13 @@ def _post_result_to_github(
             existing_check_id, existing_review_id = writers.get_posted_github_ids(ctx.db, run_id)
             review_id = existing_review_id
             if review_id is None:
-                # Only recover a review from THIS run's era. The "Run #N" marker
-                # isn't unique across runs (run-id sequence can repeat on a DB
-                # reset, or a re-review reuses the row), so without this a
-                # re-review recovers a STALE prior review and never posts its new
-                # findings (PR-9 regression). 5-min margin covers clock skew.
-                created = writers.get_review_run_created_at(ctx.db, run_id)
-                since = (created - timedelta(minutes=5)) if created is not None else None
+                # Only recover a review from THIS attempt. The "Run #N" marker
+                # isn't unique across attempts (run-id reuse on a DB reset, or a
+                # re-review reusing the row), so without a lower bound a re-review
+                # recovers a STALE prior review and never posts its new findings
+                # (PR-9 / H3). reset_at (re-review) or created_at (first run); see
+                # get_review_recovery_since.
+                since = writers.get_review_recovery_since(ctx.db, run_id)
                 review_id = ctx.github.find_pr_review_id(
                     token, owner, name, pr_number, marker=f"Run #{run_id}", since=since
                 )

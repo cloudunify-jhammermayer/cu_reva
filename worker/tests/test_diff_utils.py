@@ -242,6 +242,64 @@ def test_filter_diff_drops_thirdparty_odoo_and_enterprise():
     assert "custom_addons/mod/models/x.py" in out
 
 
+def test_filter_diff_drops_deleted_thirdparty_file():
+    """H4: a deletion ends with `+++ /dev/null` (no `+++ b/`); the pre-image
+    `--- a/` path must still be scope-filtered instead of kept unconditionally."""
+    diff = (
+        "diff --git a/odoo/core/secret.py b/odoo/core/secret.py\n"
+        "deleted file mode 100644\n--- a/odoo/core/secret.py\n+++ /dev/null\n"
+        "@@ -1,2 +0,0 @@\n-secret = 1\n-more = 2\n"
+        "diff --git a/custom_addons/mod/keep.py b/custom_addons/mod/keep.py\n"
+        "--- a/custom_addons/mod/keep.py\n+++ b/custom_addons/mod/keep.py\n@@ -1 +1 @@\n-a\n+b\n"
+    )
+    out = filter_diff(diff, include_prefixes=())
+    assert "odoo/core/secret.py" not in out
+    assert "custom_addons/mod/keep.py" in out
+
+
+def test_filter_diff_deleted_in_scope_file_is_kept():
+    """A deletion inside custom_addons/ (the reviewed prefix) must be kept — the
+    pre-image path satisfies include_prefixes."""
+    diff = (
+        "diff --git a/custom_addons/mod/gone.py b/custom_addons/mod/gone.py\n"
+        "deleted file mode 100644\n--- a/custom_addons/mod/gone.py\n+++ /dev/null\n"
+        "@@ -1,1 +0,0 @@\n-x = 1\n"
+    )
+    out = filter_diff(diff)  # default include_prefixes = custom_addons
+    assert "custom_addons/mod/gone.py" in out
+
+
+def test_filter_diff_drops_out_of_scope_binary_and_rename():
+    """H4: binary files and pure renames have no +++/--- hunks; the path from the
+    `diff --git` header must still be scope-filtered."""
+    diff = (
+        "diff --git a/odoo/assets/logo.png b/odoo/assets/logo.png\n"
+        "index 1111111..2222222 100644\nBinary files a/odoo/assets/logo.png and b/odoo/assets/logo.png differ\n"
+        "diff --git a/odoo/old.py b/odoo/new.py\n"
+        "similarity index 100%\nrename from odoo/old.py\nrename to odoo/new.py\n"
+        "diff --git a/custom_addons/mod/x.py b/custom_addons/mod/x.py\n"
+        "--- a/custom_addons/mod/x.py\n+++ b/custom_addons/mod/x.py\n@@ -1 +1 @@\n-a\n+b\n"
+    )
+    out = filter_diff(diff, include_prefixes=())
+    assert "logo.png" not in out
+    assert "odoo/new.py" not in out
+    assert "custom_addons/mod/x.py" in out
+
+
+def test_filter_diff_by_paths_strips_deleted_file():
+    """H4: skip_paths globs must also apply to deletions (no `+++ b/` line)."""
+    diff = (
+        "diff --git a/custom_addons/mod/tests/test_x.py b/custom_addons/mod/tests/test_x.py\n"
+        "deleted file mode 100644\n--- a/custom_addons/mod/tests/test_x.py\n+++ /dev/null\n"
+        "@@ -1,1 +0,0 @@\n-x\n"
+        "diff --git a/custom_addons/mod/keep.py b/custom_addons/mod/keep.py\n"
+        "--- a/custom_addons/mod/keep.py\n+++ b/custom_addons/mod/keep.py\n@@ -1 +1 @@\n-a\n+b\n"
+    )
+    out = filter_diff_by_paths(diff, ["*/tests/*"])
+    assert "test_x.py" not in out
+    assert "custom_addons/mod/keep.py" in out
+
+
 def test_is_excluded_path():
     assert is_excluded_path("odoo/addons/base/models/res_partner.py")
     assert is_excluded_path("enterprise/account/models/x.py")

@@ -132,7 +132,10 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD}
+    # noeviction: Redis is the RQ broker, so evicting keys would drop queued
+    # jobs. Matches prod (see docker-compose.prod.yml); no volume in dev since a
+    # lost dev queue is harmless.
+    command: redis-server --maxmemory 256mb --maxmemory-policy noeviction --requirepass ${REDIS_PASSWORD}
     ports:
       # Loopback-only: reachable from the dev host, not the LAN.
       - "127.0.0.1:6379:6379"

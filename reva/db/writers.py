@@ -173,6 +173,10 @@ def reset_review_run_post_state(db: Database, review_run_id: int) -> None:
         run.decline_reason = None
         run.error_class = None
         run.error_message = None
+        # H3: mark the re-review boundary. Recovery scopes to reviews submitted
+        # at/after this instant, so the prior attempt's review (same "Run #N"
+        # marker, submitted before now) is not mistaken for this attempt's.
+        run.reset_at = datetime.now(timezone.utc)
 
 
 def record_review_completed(db: Database, params: JobParams, result: ReviewResult) -> int:
@@ -375,13 +379,37 @@ def get_posted_github_ids(db: Database, review_run_id: int) -> tuple[int | None,
     return row[0], row[1]
 
 
-def get_review_run_created_at(db: Database, review_run_id: int) -> datetime | None:
-    """created_at of a run — used to scope review recovery to this run's era so a
-    stale prior review (run-id reuse / DB reset) isn't recovered (PR-9 fix)."""
+def get_review_recovery_since(db: Database, review_run_id: int) -> datetime | None:
+    """Lower bound for crash-recovery review lookup, scoping it to this attempt.
+
+    The "Run #N" marker isn't unique across attempts (run-id reuse on a DB reset,
+    or a re-review reusing the row), so recovery must ignore a stale prior review
+    that shares the marker (PR-9 / H3).
+
+    - Re-reviewed row (reset_at set): return reset_at with NO margin. The reset
+      happens after the prior attempt's review was submitted and before this
+      attempt posts, so it is an exact boundary; a clock-skew margin here would
+      wrongly re-admit the prior review when a re-review follows quickly.
+    - First run (reset_at NULL): created_at minus a clock-skew margin. created_at
+      precedes the review post by minutes, so the margin only cushions skew and
+      cannot reach a prior review (there is none)."""
     with db.session() as s:
-        return s.execute(
-            select(ReviewRun.created_at).where(ReviewRun.id == review_run_id)
-        ).scalar_one_or_none()
+        row = s.execute(
+            select(ReviewRun.reset_at, ReviewRun.created_at).where(
+                ReviewRun.id == review_run_id
+            )
+        ).one_or_none()
+    if row is None:
+        return None
+    reset_at, created_at = row
+    anchor = reset_at if reset_at is not None else created_at
+    if anchor is None:
+        return None
+    # SQLite returns naive datetimes; normalize to UTC-aware so the caller can
+    # compare against GitHub's tz-aware submitted_at (Postgres is already aware).
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone.utc)
+    return anchor if reset_at is not None else anchor - timedelta(minutes=5)
 
 
 def attach_github_ids(

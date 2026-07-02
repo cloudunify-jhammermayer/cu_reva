@@ -36,23 +36,32 @@ def run_ticket_analysis(job_params: dict) -> dict:
     except Exception:
         log.warning("ticket_analysis_odoo_reset_failed", exc_info=True)
 
-    try:
-        response_obj, result = ctx.ticket_analyzer.analyze_with_response(params)
-        html = format_ticket_html(result)
-    except TransientError:
-        log.warning("ticket_analysis_transient_error", exc_info=True)
-        raise
-    except PermanentError as exc:
-        log.error("ticket_analysis_permanent_error", error=str(exc))
-        writers.record_ticket_analysis_failed(ctx.db, params.analysis_id, str(exc))
-        raise
-    except Exception as exc:
-        log.exception("ticket_analysis_unexpected_error")
-        writers.record_ticket_analysis_failed(ctx.db, params.analysis_id, str(exc))
-        raise PermanentError(str(exc)) from exc
+    # Idempotent resume: an RQ retry after a transient *callback* failure finds
+    # the analysis already completed. Re-analyzing would re-pay Claude, so reuse
+    # the persisted HTML and go straight to the callback. A genuine requeue
+    # resets the row to pending first, so it still re-analyzes.
+    existing = writers.get_ticket_analysis(ctx.db, params.analysis_id)
+    if existing is not None and existing["status"] == "completed" and existing["result_html"]:
+        log.info("ticket_analysis_resume_completed")
+        html = existing["result_html"]
+    else:
+        try:
+            response_obj, result = ctx.ticket_analyzer.analyze_with_response(params)
+            html = format_ticket_html(result)
+        except TransientError:
+            log.warning("ticket_analysis_transient_error", exc_info=True)
+            raise
+        except PermanentError as exc:
+            log.error("ticket_analysis_permanent_error", error=str(exc))
+            writers.record_ticket_analysis_failed(ctx.db, params.analysis_id, str(exc))
+            raise
+        except Exception as exc:
+            log.exception("ticket_analysis_unexpected_error")
+            writers.record_ticket_analysis_failed(ctx.db, params.analysis_id, str(exc))
+            raise PermanentError(str(exc)) from exc
 
-    # Persist HTML before attempting Odoo callback so the result is never lost.
-    writers.record_ticket_analysis_completed(ctx.db, params.analysis_id, html, response_obj)
+        # Persist HTML before attempting Odoo callback so the result is never lost.
+        writers.record_ticket_analysis_completed(ctx.db, params.analysis_id, html, response_obj)
 
     try:
         odoo.write_field(
@@ -66,10 +75,5 @@ def run_ticket_analysis(job_params: dict) -> dict:
         log.warning("ticket_analysis_odoo_callback_error", exc_info=True)
         raise
 
-    log.info(
-        "ticket_analysis_done",
-        missing_info=len(result.missing_info),
-        test_cases=len(result.test_cases),
-        acceptance_criteria=len(result.acceptance_criteria),
-    )
+    log.info("ticket_analysis_done")
     return {"status": "completed", "analysis_id": params.analysis_id}

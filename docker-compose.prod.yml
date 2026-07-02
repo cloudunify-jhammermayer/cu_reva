@@ -245,7 +245,14 @@ services:
 
   redis:
     image: redis:7.4-alpine
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD}
+    # Redis is the RQ broker (DB 0 holds the queues + job hashes), so it must
+    # NOT evict: allkeys-lru would silently drop enqueued reviews/ticket jobs
+    # under memory pressure. noeviction instead fails writes loudly (enqueue
+    # errors surface to the webhook/scheduler) once maxmemory is hit — job
+    # metadata is tiny, so that headroom is ample. appendonly + a persistent
+    # volume means a restart replays the queue instead of losing it (the
+    # stale-running reaper only recovers rows that already started).
+    command: redis-server --maxmemory 256mb --maxmemory-policy noeviction --appendonly yes --requirepass ${REDIS_PASSWORD}
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep -q PONG"]
       interval: 10s
@@ -256,6 +263,13 @@ services:
         limits:
           cpus: "1.0"
           memory: 320M
+    volumes:
+      - redis_data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
     networks:
       - reva-net
     restart: unless-stopped
@@ -263,6 +277,7 @@ services:
 volumes:
   postgres_data:
   repo_cache:
+  redis_data:
 
 networks:
   reva-net:

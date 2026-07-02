@@ -105,6 +105,30 @@ def xml_only_diff(diff: str) -> bool:
     return bool(paths) and all(p.lower().endswith(".xml") for p in paths)
 
 
+def _section_path(section: str) -> str | None:
+    """Best-effort file path for a `diff --git` section, for scope filtering.
+
+    Prefers the post-image `+++ b/<path>`, but falls back so deletions, binary
+    files, and pure renames — which have no `+++ b/` line — are still filtered
+    instead of being kept unconditionally (which let odoo//enterprise/ deletions
+    and out-of-scope binaries slip through every filter):
+      - deletion (`+++ /dev/null`): use the pre-image `--- a/<path>`;
+      - binary / rename-only (no +++/--- hunks): use the new-side path from the
+        `diff --git a/<old> b/<new>` header.
+    Returns None only for a section with no recognizable header.
+    """
+    m = re.search(r"^\+\+\+ b/(.+)$", section, re.MULTILINE)
+    if m:
+        return m.group(1).rstrip("\r")
+    m = re.search(r"^--- a/(.+)$", section, re.MULTILINE)
+    if m:
+        return m.group(1).rstrip("\r")
+    m = re.search(r"^diff --git a/.+ b/(.+)$", section, re.MULTILINE)
+    if m:
+        return m.group(1).rstrip("\r")
+    return None
+
+
 def filter_diff(
     diff: str,
     exclude_extensions: frozenset[str] = DEFAULT_EXCLUDE_EXTENSIONS,
@@ -132,9 +156,8 @@ def filter_diff(
     for section in sections:
         if not section:
             continue
-        m = re.search(r"^\+\+\+ b/(.+)$", section, re.MULTILINE)
-        if m:
-            path = m.group(1)
+        path = _section_path(section)
+        if path is not None:
             if exclude_prefixes and path.startswith(exclude_prefixes):
                 continue
             if include_prefixes and not any(path.startswith(p) for p in include_prefixes):
@@ -162,8 +185,8 @@ def filter_diff_by_paths(diff: str, patterns: list[str]) -> str:
     for section in sections:
         if not section:
             continue
-        m = re.search(r"^\+\+\+ b/(.+)$", section, re.MULTILINE)
-        if m and any(fnmatch.fnmatch(m.group(1), p) for p in patterns):
+        path = _section_path(section)
+        if path is not None and any(fnmatch.fnmatch(path, p) for p in patterns):
             continue
         kept.append(section)
     return "".join(kept)

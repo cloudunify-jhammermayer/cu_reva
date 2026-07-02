@@ -2,8 +2,9 @@
 
 These Markdown files are the instructions for the **headless Claude Code CLI**
 (`reva/claude_code_runner.py`). For each review, the runner reads the skill
-file, appends the task parameters (XML-delimited so user content can't be
-confused with instructions) and an `output_path`, and runs `claude --print`
+file, appends the task parameters (each fenced by a per-run nonce marker so
+user content can't forge a closing tag and inject instructions — SECU-6) and an
+`output_path`, and runs `claude --print`
 inside the cloned repo. The skill tells Claude to explore the repo with
 `Read`/`Grep` and then **write the `submit_review` JSON to `output_path`** with
 the `Write` tool. REVA reads that file back and validates it against the

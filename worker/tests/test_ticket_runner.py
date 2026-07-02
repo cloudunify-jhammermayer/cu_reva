@@ -222,6 +222,28 @@ def test_permanent_error_from_odoo(ctx_and_fakes):
     assert row["result_html"] is not None
 
 
+def test_retry_after_callback_failure_does_not_reanalyze(ctx_and_fakes):
+    """H7: once the result is persisted, an RQ retry (the row is already
+    completed) reuses the HTML and retries only the Odoo callback — it must never
+    re-run the paid analyzer. This is what makes adding retry= safe."""
+    s = ctx_and_fakes
+    params = _make_params(s["db"])
+
+    # First attempt: analysis persists, then the Odoo callback fails transiently.
+    s["odoo"].raise_exc = TransientError("Odoo 503")
+    with pytest.raises(TransientError):
+        run_ticket_analysis(params)
+    assert s["analyzer"].call_count == 1
+    assert writers.get_ticket_analysis(s["db"], params["analysis_id"])["status"] == "completed"
+
+    # RQ retry: callback succeeds now. The analyzer must NOT be invoked again.
+    s["odoo"].raise_exc = None
+    out = run_ticket_analysis(params)
+    assert out["status"] == "completed"
+    assert s["analyzer"].call_count == 1  # not re-analyzed (no re-pay)
+    assert s["odoo"].call_count == 2      # callback was retried
+
+
 def test_dedup_pending(ctx_and_fakes):
     s = ctx_and_fakes
     params = _make_params(s["db"])

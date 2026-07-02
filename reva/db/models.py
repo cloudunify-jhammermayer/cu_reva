@@ -172,6 +172,9 @@ class ReviewRun(Base):
     error_class: Mapped[str | None] = mapped_column(Text)
     worker_id: Mapped[str | None] = mapped_column(Text)
     claimed_by_job_id: Mapped[str | None] = mapped_column(Text)  # CONC-1 atomic claim
+    # Set when an explicit re-review clears the row's posted state; scopes crash
+    # recovery to the current attempt (H3). NULL until first re-review.
+    reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -398,6 +401,18 @@ class TicketAnalysis(Base):
         ),
         Index("idx_ticket_analyses_status", "status"),
         Index("idx_ticket_analyses_ticket_id", "ticket_id"),
+        # One pending analysis per (instance, ticket, model, field) — migration
+        # 020. Backs the submit dedup against a concurrent-POST race (M10).
+        Index(
+            "idx_ticket_analyses_pending",
+            "odoo_instance_id",
+            "ticket_id",
+            "model_name",
+            "field_name",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+            sqlite_where=text("status = 'pending'"),
+        ),
     )
 
 

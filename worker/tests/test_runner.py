@@ -72,6 +72,7 @@ class FakeGitHub:
     # Simulate a review/check already on GitHub from a prior attempt that
     # crashed before persisting the id (None = nothing recoverable).
     recoverable_review_id: int | None = None
+    recoverable_review_submitted_at: datetime | None = None
     recoverable_check_run_id: int | None = None
 
     # Label state for the risk-label path. existing_labels seeds what's already
@@ -86,6 +87,17 @@ class FakeGitHub:
         return self.installation_token
 
     def find_pr_review_id(self, token, owner, repo, pr_number, marker, since=None) -> int | None:
+        # Honor `since` like the real client (compares GitHub's submitted_at), so
+        # tests actually exercise the era-scoping that prevents a re-review from
+        # recovering a stale prior review (H3). submitted_at unset = no time info.
+        if self.recoverable_review_id is None:
+            return None
+        if (
+            since is not None
+            and self.recoverable_review_submitted_at is not None
+            and self.recoverable_review_submitted_at < since
+        ):
+            return None
         return self.recoverable_review_id
 
     def find_check_run_id(self, token, owner, repo, head_sha, name) -> int | None:
@@ -641,6 +653,40 @@ def test_comment_trigger_rereviews_even_if_already_posted(ctx_and_fakes):
     assert s["reviewer"].call_count == 2          # re-reviewed, not short-circuited
     assert len(s["github"].created_pr_reviews) == 2
     assert len(s["github"].created_check_runs) == 2  # stale IDs cleared on restart
+
+
+def test_rereview_ignores_stale_pre_reset_review(ctx_and_fakes):
+    """H3: a re-review must not 'recover' the prior attempt's PR review. That
+    review shares the same 'Run #N' marker and was submitted after created_at but
+    before the re-review reset, so the old created_at-based `since` matched it and
+    the new findings were never posted. reset_at makes the boundary exact."""
+    from reva.db.models import ReviewRun
+
+    s = ctx_and_fakes
+    gh = s["github"]
+    s["reviewer"].result = _completed_result()
+
+    run_review(_params(s))  # first review posts once
+    assert len(gh.created_pr_reviews) == 1
+
+    # Pin created_at to a known past instant and place the prior review's
+    # submitted_at inside the old (buggy) created_at window but before the reset
+    # that the re-review will perform (reset_at = real now).
+    with s["db"].session() as session:
+        run = session.query(ReviewRun).one()
+        run.created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    gh.recoverable_review_id = 999
+    gh.recoverable_review_submitted_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
+
+    out = run_review(_params(s, trigger_event="comment"))  # re-review same SHA
+    assert out["status"] == "completed"
+    # The stale review is NOT recovered → a fresh review is posted, and the row
+    # points at the new review, not the stale 999.
+    assert len(gh.created_pr_reviews) == 2
+    with s["db"].session() as session:
+        run = session.query(ReviewRun).one()
+        assert run.review_id != 999
+        assert run.reset_at is not None
 
 
 def test_review_runs_when_under_budget(ctx_and_fakes):
