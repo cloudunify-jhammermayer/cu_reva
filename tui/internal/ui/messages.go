@@ -11,6 +11,7 @@ type reviewsLoadedMsg struct {
 	err  error
 }
 type reviewDetailLoadedMsg struct {
+	id   int // which review this detail is for — guards against stale responses
 	data *api.ReviewDetail
 	err  error
 }

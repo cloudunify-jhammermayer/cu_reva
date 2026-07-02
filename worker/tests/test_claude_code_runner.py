@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from reva.claude_code_runner import (
+    LOCK_WAIT_BUDGET,
     REVIEW_JOB_TIMEOUT,
     SUBPROCESS_TIMEOUT,
     ClaudeCodeRunner,
@@ -16,10 +17,25 @@ from reva.claude_code_runner import (
 from reva.errors import PermanentError, TransientError
 
 
-def test_review_job_timeout_exceeds_subprocess_timeout():
-    """The RQ job timeout must outlive the CLI subprocess so a running review
-    is never SIGKILLed by RQ before the subprocess can finish."""
-    assert REVIEW_JOB_TIMEOUT > SUBPROCESS_TIMEOUT
+def test_review_job_timeout_covers_lock_wait_and_subprocess():
+    """M8: the RQ job timeout must outlive the bounded lock wait PLUS the CLI
+    subprocess, so a job that waits the full lock budget and then runs a
+    max-length review is never SIGKILLed mid-paid-run."""
+    assert REVIEW_JOB_TIMEOUT >= LOCK_WAIT_BUDGET + SUBPROCESS_TIMEOUT
+
+
+def test_repo_lock_acquires_when_free(runner):
+    with runner.repo_lock("acme", "widgets"):
+        pass  # acquires and releases without error
+
+
+def test_repo_lock_requeues_when_busy(runner):
+    """M8: a second acquisition while the lock is held must not block forever —
+    it requeues (TransientError) so the work-horse isn't held past its timeout."""
+    with runner.repo_lock("acme", "widgets"):
+        with pytest.raises(TransientError, match="busy"):
+            with runner.repo_lock("acme", "widgets", wait_budget=0):
+                pass  # pragma: no cover — never entered
 
 
 @pytest.fixture

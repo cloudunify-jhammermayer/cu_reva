@@ -86,7 +86,18 @@ func (p Pending) view(w, h int) string {
 				styleSubtitle.Render("No pending or running reviews")))
 	}
 
-	visibleRows := h - 5
+	// Reserve the fixed chrome around the table: header + blank + table
+	// column-header + blank + 8-line detail panel + blank + position line = 14
+	// non-data lines. Was h-5, which overran by the detail panel + position line
+	// when the list filled the table, so the MaxHeight clamp cut them off (M23).
+	// If the terminal is too short for the detail panel plus a few rows, drop the
+	// detail so the list and position line still fit.
+	showDetail := true
+	visibleRows := h - 14
+	if visibleRows < 3 {
+		showDetail = false
+		visibleRows = h - 5 // compact: header + blank + table hdr + blank + pos
+	}
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
@@ -145,13 +156,12 @@ func (p Pending) view(w, h int) string {
 
 	table := strings.Join(rows, "\n")
 
-	var detail string
-	if p.cursor < len(p.items) {
-		detail = p.renderDetail(p.items[p.cursor], w)
-	}
-
 	pos := styleSubtitle.Render(fmt.Sprintf("  %d/%d", p.cursor+1, len(p.items)))
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", detail, "", pos)
+	if showDetail && p.cursor < len(p.items) {
+		detail := p.renderDetail(p.items[p.cursor], w)
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", detail, "", pos)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", pos)
 }
 
 func (p Pending) renderDetail(item api.PendingReview, w int) string {

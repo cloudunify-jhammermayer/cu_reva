@@ -41,7 +41,9 @@ def list_reviews(
             .join(PullRequest, ReviewRun.pull_request_id == PullRequest.id)
         )
         if repo:
-            base = base.where(Repository.full_name == repo)
+            # Substring match so a partial name ("odoo") finds "acme/odoo-addons"
+            # — the TUI's single filter box passes whatever is typed (M26).
+            base = base.where(Repository.full_name.ilike(f"%{repo}%"))
         if statuses:
             base = base.where(ReviewRun.status.in_(statuses))
         if author:

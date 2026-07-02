@@ -36,7 +36,7 @@ type Reviews struct {
 
 func newReviews(client api.ClientIface) Reviews {
 	ti := textinput.New()
-	ti.Placeholder = "repo or author..."
+	ti.Placeholder = "filter by repo (substring)..."
 	ti.CharLimit = 100
 	return Reviews{client: client, loadingList: true, focusLeft: true, repoInput: ti}
 }
@@ -54,7 +54,7 @@ func (r Reviews) loadList() tea.Cmd {
 func (r Reviews) loadDetail(id int) tea.Cmd {
 	return func() tea.Msg {
 		data, err := r.client.ReviewDetail(id)
-		return reviewDetailLoadedMsg{data: data, err: err}
+		return reviewDetailLoadedMsg{id: id, data: data, err: err}
 	}
 }
 
@@ -75,6 +75,12 @@ func (r Reviews) update(msg tea.Msg) (Reviews, tea.Cmd) {
 		}
 
 	case reviewDetailLoadedMsg:
+		// Holding j/k fires a loadDetail per row, each in its own goroutine;
+		// ignore a response for a row we've since scrolled off so the last one
+		// to arrive can't overwrite the pane for the wrong review (M24).
+		if r.cursor < len(r.items) && m.id != r.items[r.cursor].ID {
+			return r, nil
+		}
 		r.loadingDetail = false
 		r.errDetail = m.err
 		r.detail = m.data

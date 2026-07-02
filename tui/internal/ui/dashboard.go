@@ -39,6 +39,11 @@ func (d Dashboard) update(msg tea.Msg) (Dashboard, tea.Cmd) {
 	case tickMsg:
 		d.loading = true
 		return d, d.load()
+	case tea.KeyMsg:
+		if m.String() == "r" || m.String() == "R" { // manual refresh (M25)
+			d.loading = true
+			return d, d.load()
+		}
 	}
 	return d, nil
 }

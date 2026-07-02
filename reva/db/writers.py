@@ -1096,6 +1096,22 @@ def purge_old_ticket_text(db: Database, older_than_days: int) -> int:
         return result.rowcount
 
 
+def purge_old_github_events(db: Database, older_than_days: int) -> int:
+    """Delete github_events rows older than `older_than_days` (M14).
+
+    Every webhook delivery — even ignored actions — persists its full payload as
+    JSONB (PR titles/bodies, sender logins), so the table becomes the largest in
+    the DB and carries the most PII with no retention. Deletion is safe: the rows
+    exist only for delivery_id dedup (GitHub never redelivers deliveries this old)
+    and ad-hoc debugging. Returns the number of rows deleted."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+    with db.session() as s:
+        result = s.execute(
+            delete(GithubEvent).where(GithubEvent.received_at < cutoff)
+        )
+        return result.rowcount
+
+
 def get_pending_ticket_analysis(
     db: Database, ticket_id: int, model_name: str, field_name: str, odoo_instance_id: int
 ) -> dict | None:

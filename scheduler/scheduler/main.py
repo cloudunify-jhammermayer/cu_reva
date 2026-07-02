@@ -58,6 +58,11 @@ def maybe_purge_ticket_text(db, now, last_purge, interval_s, retention_days):
     if purged_issue_rows:
         logger.info("ticket_issue_text_purged", rows=purged_issue_rows,
                     retention_days=retention_days)
+    # M14: raw webhook payloads carry PII and grow unbounded — same cadence.
+    purged_events = writers.purge_old_github_events(db, retention_days)
+    if purged_events:
+        logger.info("github_events_purged", rows=purged_events,
+                    retention_days=retention_days)
     return now
 
 

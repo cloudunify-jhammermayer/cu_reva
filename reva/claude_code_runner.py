@@ -67,13 +67,22 @@ _CODEGRAPH_MCP_CONFIG = {
 }
 SUBPROCESS_TIMEOUT = 1500  # seconds; large PRs can take 10–15 minutes
 
+# M8: how long a job may wait on the per-repo lock before giving up and
+# requeueing. Two PRs (or a PR + audit) on the same repo serialize on the lock;
+# without a bound, job B blocks for the full length of job A's review and then
+# runs its own — blowing REVIEW_JOB_TIMEOUT and getting SIGKILLed mid-paid-run.
+# Bounded here and ADDED to REVIEW_JOB_TIMEOUT so the worst case (wait the full
+# budget, then a max-length review + git/post) still fits inside the job timeout.
+LOCK_WAIT_BUDGET = 300
+_LOCK_POLL_INTERVAL = 2  # seconds between non-blocking lock attempts
+
 # Headroom for git clone/fetch + GitHub posting that bracket the subprocess
-# inside one RQ job. The RQ job_timeout MUST exceed SUBPROCESS_TIMEOUT, or the
-# work-horse is SIGKILLed mid-review (wasting spend, losing the result). Every
-# enqueue of a review/audit job derives its timeout from REVIEW_JOB_TIMEOUT so
-# the two can never drift apart again.
+# inside one RQ job. The RQ job_timeout MUST exceed the lock wait + subprocess,
+# or the work-horse is SIGKILLed mid-review (wasting spend, losing the result).
+# Every enqueue of a review/audit job derives its timeout from REVIEW_JOB_TIMEOUT
+# so the two can never drift apart again.
 JOB_TIMEOUT_BUFFER = 300
-REVIEW_JOB_TIMEOUT = SUBPROCESS_TIMEOUT + JOB_TIMEOUT_BUFFER  # 1800s
+REVIEW_JOB_TIMEOUT = LOCK_WAIT_BUDGET + SUBPROCESS_TIMEOUT + JOB_TIMEOUT_BUFFER  # 2100s
 
 # Bound every git op (clone/fetch/checkout/reset). Held under the per-repo
 # flock, so an unbounded git that hangs on the network would stall every job
@@ -120,7 +129,7 @@ class ClaudeCodeRunner:
     # ------------------------------------------------------------------ public
 
     @contextmanager
-    def repo_lock(self, owner: str, name: str):
+    def repo_lock(self, owner: str, name: str, wait_budget: float = LOCK_WAIT_BUDGET):
         """Exclusive per-repo lock spanning ensure_repo + review.
 
         The working tree at repo_cache_dir/{owner}/{name} is shared across jobs.
@@ -128,6 +137,13 @@ class ClaudeCodeRunner:
         would `git checkout` over each other and review the wrong SHA. Held as
         a flock on a sibling lock file so it works across worker processes
         sharing the repo-cache volume. Different repos never block each other.
+
+        M8: acquisition is bounded (non-blocking polling up to `wait_budget`)
+        instead of an unbounded LOCK_EX. If the lock can't be taken in time the
+        job requeues (TransientError) rather than holding the RQ work-horse
+        blocked so long that wait + review overruns REVIEW_JOB_TIMEOUT and the
+        work-horse is SIGKILLed mid-paid-review. `wait_budget=0` = try once, for
+        best-effort callers (eviction) that should skip a busy repo.
         """
         _validate_repo_component(owner, "owner")
         _validate_repo_component(name, "name")
@@ -135,12 +151,25 @@ class ClaudeCodeRunner:
         os.makedirs(lock_dir, exist_ok=True)
         lock_path = os.path.join(lock_dir, f".{name}.lock")
         fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        acquired = False
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            start = time.monotonic()
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                    break
+                except BlockingIOError:
+                    if time.monotonic() - start >= wait_budget:
+                        raise TransientError(
+                            f"repo_lock for {owner}/{name} busy after {wait_budget}s"
+                        )
+                    time.sleep(_LOCK_POLL_INTERVAL)
             yield
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            os.close(fd)
+            if acquired:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)  # also releases the flock
 
     def ensure_repo(
         self,
@@ -557,9 +586,15 @@ class ClaudeCodeRunner:
             for repo_dir in owner_dir.iterdir():
                 if repo_dir.is_dir() and repo_dir.stat().st_mtime < cutoff:
                     # Hold the per-repo lock so we never rmtree a tree a
-                    # concurrent worker is mid-review on.
-                    with self.repo_lock(owner_dir.name, repo_dir.name):
-                        shutil.rmtree(repo_dir)
+                    # concurrent worker is mid-review on. Best-effort: skip a repo
+                    # that's busy (wait_budget=0) — a stale repo is rarely being
+                    # reviewed, and it'll be evicted on the next pass.
+                    try:
+                        with self.repo_lock(owner_dir.name, repo_dir.name, wait_budget=0):
+                            shutil.rmtree(repo_dir)
+                    except TransientError:
+                        logger.info("evict_skipped_busy_repo",
+                                    repo=f"{owner_dir.name}/{repo_dir.name}")
 
     def _run_git_transient(self, args: list[str]) -> None:
         self._run_git(args, TransientError)

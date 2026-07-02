@@ -73,3 +73,26 @@ def test_purge_also_scrubs_ticket_issue_runs(db):
         row = s.get(TicketIssueRun, run_id)
         assert "raw customer PII" not in row.description
         assert "derived PII" not in row.analysis_html
+
+
+def test_purge_deletes_old_github_events(db):
+    """M14: raw webhook payloads past retention are deleted; recent ones kept."""
+    from reva.db.models import GithubEvent
+
+    with db.session() as s:
+        s.add(GithubEvent(
+            delivery_id="old-1", event_type="pull_request", action="opened",
+            payload={"pull_request": {"title": "PII title"}},
+            received_at=datetime.now(timezone.utc) - timedelta(days=40),
+        ))
+        s.add(GithubEvent(
+            delivery_id="recent-1", event_type="pull_request", action="opened",
+            payload={"pull_request": {"title": "keep me"}},
+            received_at=datetime.now(timezone.utc) - timedelta(days=1),
+        ))
+
+    maybe_purge_ticket_text(db, _now(), None, interval_s=86_400, retention_days=30)
+
+    with db.session() as s:
+        remaining = [e.delivery_id for e in s.query(GithubEvent).all()]
+    assert remaining == ["recent-1"]

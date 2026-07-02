@@ -126,6 +126,18 @@ def test_reviews_filter_by_repo(client_and_db):
     assert resp.json()["total"] == 0
 
 
+def test_reviews_filter_by_repo_substring(client_and_db):
+    """M26: a partial repo name matches (single filter box passes what's typed)."""
+    client, db = client_and_db
+    repo_id, pr_id = _seed_repo_and_pr(db, repo_num=1002)
+    _seed_review(db, repo_id=repo_id, pr_id=pr_id)
+
+    # "widgets" and case-insensitive "ACME" both match "acme/widgets".
+    assert client.get("/api/v1/reviews?repo=widgets").json()["total"] == 1
+    assert client.get("/api/v1/reviews?repo=ACME").json()["total"] == 1
+    assert client.get("/api/v1/reviews?repo=nope").json()["total"] == 0
+
+
 def test_reviews_filter_by_status(client_and_db):
     client, db = client_and_db
     repo_id, pr_id = _seed_repo_and_pr(db)

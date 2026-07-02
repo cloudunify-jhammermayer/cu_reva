@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -124,6 +125,25 @@ func TestNoTabOverflowsTerminal(t *testing.T) {
 		a.tickets = onRow(a.tickets, 456)
 		a = apply(t, a, keyMsg("enter"))
 		check("tickets/issues")
+	}
+}
+
+// TestPositionLineVisibleInShortTerminal is the M23 regression: on the Failures
+// and Pending tabs the position line ("N/M") used to be pushed past MaxHeight by
+// the fixed 8-line detail panel and clipped from the bottom in a short terminal.
+// It must stay on screen (the view now drops the detail panel when too short).
+func TestPositionLineVisibleInShortTerminal(t *testing.T) {
+	a := loadedApp(t)
+	a = apply(t, a, tea.WindowSizeMsg{Width: 100, Height: 10})
+	for _, v := range []view{viewFailures, viewPending} {
+		a.active = v
+		out := a.View()
+		if lipgloss.Height(out) > 10 {
+			t.Errorf("%s: view height %d exceeds 10", viewName(v), lipgloss.Height(out))
+		}
+		if !strings.Contains(out, "1/") {
+			t.Errorf("%s: position line (\"1/N\") not visible in a short terminal", viewName(v))
+		}
 	}
 }
 

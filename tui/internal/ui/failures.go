@@ -104,7 +104,18 @@ func (f Failures) view(w, h int) string {
 				styleSubtitle.Render("No failures — all good")))
 	}
 
-	visibleRows := h - 5
+	// Reserve the fixed chrome around the table: header + blank + table
+	// column-header + blank + 8-line detail panel + blank + position line = 14
+	// non-data lines. Was h-5, which overran by the detail panel + position line
+	// when the list filled the table, so the MaxHeight clamp cut them off (M23).
+	// If the terminal is too short for the detail panel plus a few rows, drop the
+	// detail so the list and position line still fit.
+	showDetail := true
+	visibleRows := h - 14
+	if visibleRows < 3 {
+		showDetail = false
+		visibleRows = h - 5 // compact: header + blank + table hdr + blank + pos
+	}
 	if visibleRows < 1 {
 		visibleRows = 1
 	}
@@ -162,12 +173,6 @@ func (f Failures) view(w, h int) string {
 
 	table := strings.Join(rows, "\n")
 
-	// Detail panel for selected item
-	var detail string
-	if f.cursor < len(f.items) {
-		detail = f.renderDetail(f.items[f.cursor], w)
-	}
-
 	var posLine string
 	if f.statusMsg != "" {
 		posLine = f.statusMsg
@@ -176,7 +181,11 @@ func (f Failures) view(w, h int) string {
 			cappedNote(len(f.items), f.total)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", detail, "", posLine)
+	if showDetail && f.cursor < len(f.items) {
+		detail := f.renderDetail(f.items[f.cursor], w)
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", detail, "", posLine)
+	}
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", posLine)
 }
 
 func (f Failures) renderDetail(item api.ReviewDetail, w int) string {

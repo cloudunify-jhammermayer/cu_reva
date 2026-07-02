@@ -190,6 +190,9 @@ class ReviewRun(Base):
         Index("idx_review_runs_repo_created", "repository_id", text("created_at DESC")),
         Index("idx_review_runs_status", "status"),
         Index("idx_review_runs_pr", "pull_request_id", text("created_at DESC")),
+        # Serves the unfiltered global /reviews feed's ORDER BY created_at DESC
+        # (migration 021) — the composite indexes above don't.
+        Index("idx_review_runs_created", text("created_at DESC")),
     )
 
 

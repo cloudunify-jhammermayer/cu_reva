@@ -176,6 +176,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.active = viewOdoo
 			return a, nil
 		}
+		if a.active == viewDashboard {
+			var cmd tea.Cmd
+			a.dashboard, cmd = a.dashboard.update(msg)
+			return a, cmd
+		}
 		if a.active == viewReviews {
 			var cmd tea.Cmd
 			a.reviews, cmd = a.reviews.update(msg)
@@ -448,7 +453,7 @@ func (a *App) statusBar() string {
 	var hint string
 	switch a.active {
 	case viewDashboard:
-		hint = "1-9 switch tabs | r=refresh | q quit"
+		hint = "0-9 switch tabs | r=refresh | q quit"
 	case viewReviews:
 		hint = "j/k navigate | J/K scroll detail | / filter | s=status | c=clear | e=requeue | o=browser | r=refresh | q quit"
 	case viewFindings:

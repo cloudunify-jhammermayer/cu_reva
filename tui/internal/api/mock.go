@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -125,7 +126,9 @@ func (m *MockClient) Reviews(limit int, repo, status, author string) (*ReviewPag
 
 	var filtered []ReviewSummary
 	for _, it := range items {
-		if repo != "" && it.RepoFullName != repo {
+		// Substring match, mirroring the server's ILIKE (M26).
+		if repo != "" && !strings.Contains(
+			strings.ToLower(it.RepoFullName), strings.ToLower(repo)) {
 			continue
 		}
 		if status != "" && it.Status != status {
