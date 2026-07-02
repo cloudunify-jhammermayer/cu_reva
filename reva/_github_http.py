@@ -26,9 +26,17 @@ def map_github_status(response: httpx.Response, action: str) -> Exception:
     if sc == 401:
         return PermanentError(f"{msg} — App auth invalid")
     if sc == 403:
+        # Primary rate limit: remaining quota hit 0; reset via x-ratelimit-reset.
         if response.headers.get("x-ratelimit-remaining") == "0":
             retry_after = seconds_until(response.headers.get("x-ratelimit-reset"))
             return TransientError(f"{msg} — rate limited", retry_after=retry_after)
+        # Secondary/abuse rate limit (M6): GitHub returns 403 with a Retry-After
+        # header (quota may still be non-zero) or a "secondary rate limit" body.
+        # It's transient — a backed-off retry succeeds — so a burst of posts
+        # (review + check run + labels) that trips it isn't a permanent failure.
+        retry_after = parse_retry_after(response.headers.get("retry-after"))
+        if retry_after is not None or "secondary rate limit" in body_snippet.lower():
+            return TransientError(f"{msg} — secondary rate limit", retry_after=retry_after)
         return PermanentError(f"{msg} — forbidden")
     if sc == 404:
         return PermanentError(msg)

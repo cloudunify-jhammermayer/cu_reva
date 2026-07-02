@@ -424,6 +424,27 @@ def test_review_nonce_fences_untrusted_params(runner_with_skill, tmp_path):
     assert forged_idx < real_close_idx  # forged tag is trapped inside the fence
 
 
+def test_review_timeout_raises_permanent_not_raw(runner_with_skill, tmp_path):
+    """M5: a CLI timeout must surface as PermanentError (an explicit, terminal
+    decision), not a raw subprocess.TimeoutExpired that RQ would blindly retry as
+    3× full paid runs."""
+    import subprocess
+
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+
+    def fake_run(args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=SUBPROCESS_TIMEOUT)
+
+    with patch("subprocess.run", side_effect=fake_run):
+        with pytest.raises(PermanentError, match="timed out"):
+            runner_with_skill.review(
+                repo_path=repo_path,
+                skill="reva-diff-review",
+                params={"diff": "x"},
+            )
+
+
 def test_review_passes_correct_subprocess_args(runner_with_skill, tmp_path):
     repo_path = str(tmp_path / "repo")
     os.makedirs(repo_path)

@@ -361,6 +361,18 @@ class ClaudeCodeRunner:
                 cost_usd=resp.total_cost_usd,
             )
             return resp
+        except subprocess.TimeoutExpired as exc:
+            # M5: convert explicitly rather than letting a raw TimeoutExpired
+            # escape (the docstring promises only Permanent/Transient). Unlike a
+            # git op (transient infra blip → TransientError in _run_git), a review
+            # that can't finish within SUBPROCESS_TIMEOUT won't finish on retry
+            # either, and each attempt is a full paid CLI run — so fail terminally
+            # (the RQ boundary won't retry a PermanentError) and let the operator
+            # alert fire instead of burning 3× the spend.
+            logger.warning("claude_cli_timeout", skill=skill, timeout_s=SUBPROCESS_TIMEOUT)
+            raise PermanentError(
+                f"claude review timed out after {SUBPROCESS_TIMEOUT}s"
+            ) from exc
         finally:
             Path(output_path).unlink(missing_ok=True)
             if mcp_config_path:

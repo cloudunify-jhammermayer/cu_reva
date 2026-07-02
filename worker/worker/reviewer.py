@@ -501,8 +501,25 @@ class Reviewer:
         completed_at = datetime.now(timezone.utc)
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 
+        # Cost of the paid CLI run, computed now so it can be recorded even if the
+        # steps below fail (M1: the CLI already charged us; a parse failure must
+        # not hide that from the budget ledger). Prefer the CLI's authoritative
+        # total, fall back to a token estimate.
+        cli_cost = response.total_cost_usd or estimate_cost(
+            response.model or model,
+            response.input_tokens,
+            response.output_tokens,
+            response.cache_read_tokens,
+            response.cache_creation_tokens,
+        )
+
         # 11. Validate and parse findings.
-        summary, findings = _parse_tool_use(response.tool_use_input)
+        try:
+            summary, findings = _parse_tool_use(response.tool_use_input)
+        except PermanentError as exc:
+            # Surface the incurred cost so runner.record_review_failed ledgers it.
+            exc.incurred_cost_usd = cli_cost  # type: ignore[attr-defined]
+            raise
 
         # 12. Drop findings citing files absent from the clone (hallucinated or
         # injection-fabricated), then cap by severity * confidence and recompute risk.
@@ -535,15 +552,9 @@ class Reviewer:
         capped = _cap_findings(grounded, MAX_FINDINGS)
         risk_level = _recompute_risk_level(capped)
 
-        # 13. Cost: prefer the CLI's authoritative total_cost_usd; fall back to
-        # the token-based estimate (Messages-API path, or older CLI output).
-        cost = (response.total_cost_usd or estimate_cost(
-            response.model or model,
-            response.input_tokens,
-            response.output_tokens,
-            response.cache_read_tokens,
-            response.cache_creation_tokens,
-        )) + verify_cost
+        # 13. Cost: the paid CLI run (cli_cost, computed above) plus any
+        # second-pass verification calls.
+        cost = cli_cost + verify_cost
 
         # 14. Prompt version (best-effort).
         try:

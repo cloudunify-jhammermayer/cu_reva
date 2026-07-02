@@ -53,7 +53,7 @@ class WeeklyReporter:
 
         # Enqueue only after the dedup row is committed: a crash here means a
         # missed report (recoverable next tick), never a duplicate.
-        self._queue.enqueue("worker.runner.run_weekly_report", {})
+        self._queue.enqueue("worker.report_runner.run_weekly_report", {})
         logger.info("weekly_report_enqueued", weekday=now.weekday(), hour=now.hour)
         return True
 

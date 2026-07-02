@@ -39,7 +39,7 @@ def trigger_weekly_report(
     the next scheduled send. Useful for testing the report format.
     """
     rq_queue = request.app.state.rq_queue
-    job = rq_queue.enqueue("worker.runner.run_weekly_report", {"since_days": days})
+    job = rq_queue.enqueue("worker.report_runner.run_weekly_report", {"since_days": days})
     writers.record_admin_action(
         db, action="weekly_report", actor=actor_from_request(request),
         target=f"days={days}", detail={"job_id": job.id},

@@ -37,7 +37,7 @@ _MONDAY_8 = datetime(2026, 6, 1, 8, 30, tzinfo=timezone.utc)
 def test_enqueues_on_configured_weekday_and_hour(db):
     q = FakeQueue()
     assert _reporter(db, q).check_and_send(_MONDAY_8) is True
-    assert q.enqueued == ["worker.runner.run_weekly_report"]
+    assert q.enqueued == ["worker.report_runner.run_weekly_report"]
 
 
 def test_skips_on_wrong_weekday_when_not_overdue(db):
@@ -46,7 +46,7 @@ def test_skips_on_wrong_weekday_when_not_overdue(db):
     r.check_and_send(_MONDAY_8)               # send this week's report
     tuesday = _MONDAY_8 + timedelta(days=1)   # wrong weekday, recent report
     assert r.check_and_send(tuesday) is False  # not overdue → skip
-    assert q.enqueued == ["worker.runner.run_weekly_report"]
+    assert q.enqueued == ["worker.report_runner.run_weekly_report"]
 
 
 def test_skips_before_configured_hour(db):
@@ -61,7 +61,7 @@ def test_fires_later_same_day_if_window_missed(db):
     still fires (no exact-hour requirement)."""
     q = FakeQueue()
     assert _reporter(db, q).check_and_send(_MONDAY_8.replace(hour=20)) is True
-    assert q.enqueued == ["worker.runner.run_weekly_report"]
+    assert q.enqueued == ["worker.report_runner.run_weekly_report"]
 
 
 def test_catches_up_when_overdue_on_wrong_weekday(db):
@@ -74,7 +74,7 @@ def test_catches_up_when_overdue_on_wrong_weekday(db):
     later = _MONDAY_8 + timedelta(days=8)
     assert later.weekday() != 0
     assert r.check_and_send(later) is True
-    assert q.enqueued == ["worker.runner.run_weekly_report"] * 2
+    assert q.enqueued == ["worker.report_runner.run_weekly_report"] * 2
 
 
 def test_skips_within_min_interval(db):
@@ -83,7 +83,7 @@ def test_skips_within_min_interval(db):
     assert r.check_and_send(_MONDAY_8) is True
     # same window, a few seconds later (e.g. another tick) → no second send
     assert r.check_and_send(_MONDAY_8.replace(minute=31)) is False
-    assert q.enqueued == ["worker.runner.run_weekly_report"]
+    assert q.enqueued == ["worker.report_runner.run_weekly_report"]
 
 
 def test_enqueues_again_after_interval(db):
@@ -92,4 +92,4 @@ def test_enqueues_again_after_interval(db):
     assert r.check_and_send(_MONDAY_8) is True
     next_week = _MONDAY_8 + timedelta(days=7)
     assert r.check_and_send(next_week) is True
-    assert q.enqueued == ["worker.runner.run_weekly_report"] * 2
+    assert q.enqueued == ["worker.report_runner.run_weekly_report"] * 2

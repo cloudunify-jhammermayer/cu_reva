@@ -9,7 +9,8 @@ import pytest
 
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.db.models import ClaudeSpend, ReviewFinding, ReviewRun
-from worker.runner import WorkerContext, run_comment_reply, set_context
+from worker.reply_runner import run_comment_reply
+from worker.runner import WorkerContext, set_context
 
 _COMMENT_ID = 7777
 

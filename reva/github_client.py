@@ -33,6 +33,28 @@ MAX_FILE_PAGES = 30        # safety net; size guard handles real cap
 PAGE_SIZE = 100
 
 
+def _graphql_data(response: httpx.Response, action: str) -> dict:
+    """Extract `data` from a GraphQL response, raising on errors (M7).
+
+    GraphQL failures come back as HTTP 200 with an `errors` array and a null
+    `data` (or nulled sub-objects), which the naive `.get("data", {})` chain
+    silently swallowed — turning a missing App permission into a silent no-op and
+    crashing on `data: null`. Surface them: RATE_LIMITED is transient, everything
+    else permanent (both are caught by the best-effort callers and logged)."""
+    payload = response.json()
+    errors = payload.get("errors")
+    if errors:
+        types = {e.get("type") for e in errors if isinstance(e, dict)}
+        msg = "; ".join(e.get("message", "") for e in errors if isinstance(e, dict))[:200]
+        if "RATE_LIMITED" in types:
+            raise TransientError(f"GitHub GraphQL rate limited ({action}): {msg}")
+        raise PermanentError(f"GitHub GraphQL error ({action}): {msg}")
+    data = payload.get("data")
+    if data is None:
+        raise PermanentError(f"GitHub GraphQL returned no data ({action})")
+    return data
+
+
 def _submitted_after(review: dict, since: datetime) -> bool:
     """True if a PR review's submitted_at is at/after `since`. Conservatively
     False if missing/unparseable (so an ambiguous review isn't recovered)."""
@@ -645,12 +667,12 @@ class GitHubClient:
                     "owner": owner, "repo": repo, "prNumber": pr_number, "cursor": cursor,
                 }},
             )
+            data = _graphql_data(response, "get_review_threads")
+            # Null-safe: a nulled repository/pullRequest (e.g. permission gap)
+            # yields {} → no threads, loop ends — never an AttributeError.
             review_threads = (
-                response.json()
-                .get("data", {})
-                .get("repository", {})
-                .get("pullRequest", {})
-                .get("reviewThreads", {})
+                ((data.get("repository") or {}).get("pullRequest") or {}).get("reviewThreads")
+                or {}
             )
             for node in review_threads.get("nodes", []):
                 if not node.get("isResolved") and node.get("comments", {}).get("nodes"):
@@ -670,7 +692,12 @@ class GitHubClient:
           }
         }
         """
-        self._post(token, "/graphql", {"query": mutation, "variables": {"threadId": thread_node_id}})
+        response = self._post(
+            token, "/graphql", {"query": mutation, "variables": {"threadId": thread_node_id}}
+        )
+        # M7: surface a GraphQL error instead of reporting success unconditionally
+        # (a failed resolve must not be marked resolved_by_fix by the caller).
+        _graphql_data(response, "resolve_review_thread")
 
     # --- shared HTTP --------------------------------------------------------
 

@@ -33,6 +33,22 @@ PRICING: dict[str, dict[str, float]] = {
 _FALLBACK_KEY = "claude-sonnet-4-6"
 
 
+def _resolve_rates(model: str) -> dict[str, float]:
+    """Rates for `model`, tolerant of dated / vendor-prefixed ids (M2).
+
+    The Messages API echoes back the concrete versioned id
+    (`claude-opus-4-8-20260101`, or `us.anthropic.claude-opus-4-8` on Bedrock),
+    which an exact-key lookup misses — silently billing Opus at Sonnet rates and
+    undercounting the budget cap ~40%. Match the longest PRICING key contained in
+    the id (so a dated suffix or vendor prefix still resolves), else fall back."""
+    if model in PRICING:
+        return PRICING[model]
+    matches = [key for key in PRICING if key in model]
+    if matches:
+        return PRICING[max(matches, key=len)]
+    return PRICING[_FALLBACK_KEY]
+
+
 def estimate_cost(
     model: str,
     input_tokens: int,
@@ -42,11 +58,12 @@ def estimate_cost(
 ) -> float:
     """Return the estimated USD cost for one Claude call.
 
-    An unknown/unpriced model silently falls back to Sonnet 4.6 rates
-    (`_FALLBACK_KEY`), so the estimate stays non-zero but may be inaccurate for a
-    model not in PRICING — keep the table current when adding models.
+    Rates resolve via `_resolve_rates` (exact, then longest-substring, then
+    Sonnet 4.6 fallback), so a dated or vendor-prefixed model id is still priced
+    correctly. A genuinely unknown model falls back to Sonnet 4.6 rates so the
+    estimate stays non-zero — keep PRICING current when adding models.
     """
-    rates = PRICING.get(model, PRICING[_FALLBACK_KEY])
+    rates = _resolve_rates(model)
     total = (
         input_tokens * rates["input"]
         + output_tokens * rates["output"]

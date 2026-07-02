@@ -328,6 +328,36 @@ def test_403_without_rate_limit_maps_to_permanent(rsa_key_pair):
     assert "forbidden" in str(exc_info.value).lower()
 
 
+def test_403_secondary_rate_limit_with_retry_after_maps_to_transient(rsa_key_pair):
+    """M6: a secondary/abuse limit is 403 + Retry-After (quota may be non-zero) —
+    transient, not the permanent 'forbidden' that fails a recoverable review."""
+    private_pem, _ = rsa_key_pair
+
+    def handler(req):
+        return httpx.Response(
+            403,
+            headers={"x-ratelimit-remaining": "42", "retry-after": "30"},
+            text="You have exceeded a secondary rate limit",
+        )
+
+    client = _make_client(handler, private_pem)
+    with pytest.raises(TransientError) as exc_info:
+        client.get_pull_request("tok", "acme", "widgets", 1)
+    assert exc_info.value.retry_after == 30
+
+
+def test_403_secondary_rate_limit_body_without_header_maps_to_transient(rsa_key_pair):
+    """M6: some secondary-limit responses only signal it in the body."""
+    private_pem, _ = rsa_key_pair
+
+    def handler(req):
+        return httpx.Response(403, text="You have exceeded a secondary rate limit. Please wait.")
+
+    client = _make_client(handler, private_pem)
+    with pytest.raises(TransientError):
+        client.get_pull_request("tok", "acme", "widgets", 1)
+
+
 def test_500_maps_to_transient(rsa_key_pair):
     private_pem, _ = rsa_key_pair
     client = _make_client(lambda req: httpx.Response(500, text="oops"), private_pem)
@@ -871,6 +901,64 @@ def test_get_review_threads_returns_database_id_to_node_id_map(rsa_key_pair):
     result = client.get_review_threads("tok", "acme", "widgets", 42)
     # Only unresolved threads returned
     assert result == {12345: "THREAD_NODE_1"}
+
+
+def test_get_review_threads_raises_on_graphql_errors(rsa_key_pair):
+    """M7: a GraphQL error (HTTP 200 + errors[]) must surface, not be swallowed —
+    e.g. a missing App permission would otherwise be a silent no-op."""
+    private_pem, _ = rsa_key_pair
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "data": None,
+            "errors": [{"type": "FORBIDDEN", "message": "Resource not accessible"}],
+        })
+
+    client = _make_client(handler, private_pem)
+    with pytest.raises(PermanentError):
+        client.get_review_threads("tok", "acme", "widgets", 42)
+
+
+def test_get_review_threads_handles_null_pull_request(rsa_key_pair):
+    """M7: a nulled sub-object (data present, pullRequest null) yields no threads
+    instead of crashing with AttributeError."""
+    private_pem, _ = rsa_key_pair
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": {"repository": {"pullRequest": None}}})
+
+    client = _make_client(handler, private_pem)
+    assert client.get_review_threads("tok", "acme", "widgets", 42) == {}
+
+
+def test_get_review_threads_rate_limited_is_transient(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "data": None,
+            "errors": [{"type": "RATE_LIMITED", "message": "API rate limit exceeded"}],
+        })
+
+    client = _make_client(handler, private_pem)
+    with pytest.raises(TransientError):
+        client.get_review_threads("tok", "acme", "widgets", 42)
+
+
+def test_resolve_review_thread_raises_on_graphql_error(rsa_key_pair):
+    """M7: a failed resolve must raise, not silently report success (else the
+    caller would mark the finding resolved_by_fix)."""
+    private_pem, _ = rsa_key_pair
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "data": None,
+            "errors": [{"type": "NOT_FOUND", "message": "Could not resolve to a node"}],
+        })
+
+    client = _make_client(handler, private_pem)
+    with pytest.raises(PermanentError):
+        client.resolve_review_thread("tok", "THREAD_NODE_1")
 
 
 def test_get_review_comments_uses_pr_endpoint_and_filters_by_review(rsa_key_pair):

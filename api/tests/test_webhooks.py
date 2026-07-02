@@ -486,7 +486,7 @@ def test_review_comment_reply_by_member_enqueues(client_and_db):
     finally:
         app.state.rq_queue = None
     assert resp.status_code == 202
-    assert [e["func"] for e in q.enqueued] == ["worker.runner.run_comment_reply"]
+    assert [e["func"] for e in q.enqueued] == ["worker.tasks.run_comment_reply"]
 
 
 def test_review_comment_reply_by_outsider_is_ignored(client_and_db):

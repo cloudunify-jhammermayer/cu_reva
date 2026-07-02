@@ -836,7 +836,7 @@ def test_run_repo_cache_eviction_calls_evict_with_ttl():
 
 
 def test_run_comment_reply_raises_permanent_on_missing_key(ctx_and_fakes):
-    from worker.runner import run_comment_reply
+    from worker.reply_runner import run_comment_reply
 
     # Missing 'comment_id' key — should raise PermanentError, not KeyError
     with pytest.raises(PermanentError, match="missing required param"):
@@ -848,6 +848,46 @@ def test_run_comment_reply_raises_permanent_on_missing_key(ctx_and_fakes):
             "question": "Is this safe?",
             # 'comment_id' intentionally absent
         })
+
+
+def test_comment_reply_costs_at_default_model():
+    """M3: reply spend must be estimated at the model chat() actually uses
+    (default_model), not a hardcoded sonnet-4-6 that drifts from it."""
+    from worker.reply_runner import run_comment_reply
+
+    ctx = MagicMock()
+    ctx.claude.default_model = "claude-sonnet-5"
+    ctx.claude.chat.return_value = "Here's the answer."
+    with patch("worker.reply_runner.get_context", return_value=ctx), \
+         patch("worker.reply_runner.budget_exceeded", return_value=None), \
+         patch("worker.reply_runner.writers") as mock_writers, \
+         patch("worker.reply_runner.estimate_cost", return_value=0.01) as mock_est:
+        mock_writers.lookup_finding_by_comment_id.return_value = {
+            "file_path": "a.py", "line_start": 3, "severity": "major",
+            "title": "t", "body": "b", "suggestion": None,
+        }
+        run_comment_reply({
+            "comment_id": 1, "installation_id": 2, "question": "why?",
+            "owner": "o", "repo": "r", "pr_number": 5,
+        })
+    assert mock_est.call_args.args[0] == "claude-sonnet-5"
+    mock_writers.record_claude_spend.assert_called_once()
+
+
+def test_permanent_error_after_paid_cli_records_spend(ctx_and_fakes):
+    """M1: a parse failure after the paid CLI run must still ledger the incurred
+    cost (carried on the exception) so the budget cap counts it."""
+    from reva.db.models import ClaudeSpend
+
+    s = ctx_and_fakes
+    exc = PermanentError("Claude wrote invalid JSON")
+    exc.incurred_cost_usd = 0.42  # type: ignore[attr-defined]
+    s["reviewer"].raise_exc = exc
+    with pytest.raises(PermanentError):
+        run_review(_params(s))
+    with s["db"].session() as session:
+        rows = session.query(ClaudeSpend).filter_by(kind="review").all()
+    assert any(abs(float(r.cost_usd) - 0.42) < 1e-9 for r in rows)
 
 
 # --- _verify_and_resolve_findings --------------------------------------------
@@ -909,6 +949,21 @@ def _resolve_ctx_and_finding(is_resolved: bool):
         "github_comment_id": 12345,
     }
     return ctx, params, result, finding
+
+
+def test_verify_and_resolve_records_spend():
+    """M1: each is_resolved() is a paid call; the delta pass must ledger it so the
+    rolling budget cap counts it (previously the whole pass was free)."""
+    from worker.runner import _verify_and_resolve_findings
+    ctx, params, result, finding = _resolve_ctx_and_finding(is_resolved=True)
+    ctx.claude.default_model = "claude-sonnet-5"
+    with patch("worker.runner.writers") as mock_writers:
+        mock_writers.get_open_findings_for_pr.return_value = [finding]
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)
+    spend_calls = [c for c in mock_writers.record_claude_spend.call_args_list
+                   if c.args[1] == "delta_verify"]
+    assert len(spend_calls) == 1
+    assert spend_calls[0].args[2] > 0
 
 
 def test_verify_and_resolve_no_outcome_when_not_resolved():

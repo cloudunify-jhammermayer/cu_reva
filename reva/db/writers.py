@@ -275,13 +275,23 @@ def reap_stale_running_reviews(db: Database, older_than_seconds: int) -> int:
 
 
 def record_review_failed(
-    db: Database, params: JobParams, error_class: str, message: str
+    db: Database,
+    params: JobParams,
+    error_class: str,
+    message: str,
+    cost_usd: float | None = None,
 ) -> int:
+    """Record a failed run. `cost_usd` (M1) captures spend already incurred before
+    the failure — e.g. a paid CLI run whose output failed to parse — so the
+    rolling budget ledger counts it instead of the failure hiding the charge."""
     with db.session() as s:
         run = _upsert_review_run(s, params, status="failed")
         run.error_class = error_class
         run.error_message = message
         run.completed_at = datetime.now(timezone.utc)
+        if cost_usd:
+            run.estimated_cost_usd = cost_usd
+            _insert_spend(s, "review", cost_usd)
         s.flush()
         logger.warning(
             "review_run_failed",

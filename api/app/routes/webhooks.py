@@ -327,7 +327,7 @@ def _handle_review_comment(db: Database, payload: dict, settings: Settings, rq_q
         return
 
     rq_queue.enqueue(
-        "worker.runner.run_comment_reply",
+        "worker.tasks.run_comment_reply",
         {
             "installation_id": installation_id,
             "owner": owner,
@@ -336,6 +336,11 @@ def _handle_review_comment(db: Database, payload: dict, settings: Settings, rq_q
             "comment_id": in_reply_to_id,
             "question": question,
         },
+        # M9: a transient chat()/GitHub blip shouldn't silently drop the
+        # developer's question. The reply is idempotent enough to retry (worst
+        # case a duplicate reply comment on repeated transient failures), and the
+        # task contract keeps a PermanentError from being retried.
+        retry=Retry(max=3, interval=[30, 120, 300]),
     )
     logger.info(
         "comment_reply_queued",
