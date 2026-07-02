@@ -85,9 +85,11 @@ findings unverified.
   - `runner._verify_and_resolve_findings`: same — delete the
     `verify_model = ctx.claude.default_model` estimate; ledger actual cost
     (spend category `"delta_verify"` unchanged).
-- Wiring: `worker/worker/settings.py` gains `verify_model: str` (env
-  `REVA_VERIFY_MODEL`, default `claude-haiku-4-5`); `runner.py` constructs
-  `FindingVerifier(claude=claude, model=settings.verify_model)`.
+- Wiring: model selection stays in `reva/config.py` (CLAUDE.md invariant:
+  model selection lives in one place) — `FindingVerifier`'s constructor
+  default is `VERIFY_MODEL`, mirroring how `ClaudeCodeRunner` defaults to
+  `DEFAULT_MODEL`/`DEEP_MODEL`. `build_worker_context` keeps constructing
+  `FindingVerifier(claude=claude)` unchanged.
 
 ### 2. Content windowing for verifier input
 
@@ -182,8 +184,9 @@ in the existing logs and spend ledger; mutes are already visible in the TUI.
   identical param set as today (prompt-prefix stability).
 - **runner**: resolution pass ledgers actual verify cost under
   `"delta_verify"`.
-- **settings**: `REVA_VERIFY_FINDINGS` parsing; legacy `REVA_VERIFY_HIGH_COST`
-  honored + deprecation logged; `REVA_VERIFY_MODEL` default.
+- **settings/config**: `REVA_VERIFY_FINDINGS` parsing; legacy
+  `REVA_VERIFY_HIGH_COST` honored + deprecation logged; `VERIFY_MODEL`
+  default in `reva/config.py`.
 - **prompt files**: update `test_prompt_files` anchors if the new skill
   sections introduce anchored phrases.
 - Definition of done per CLAUDE.md: worker + api + scheduler suites green
