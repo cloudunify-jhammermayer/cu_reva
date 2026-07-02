@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -68,7 +67,9 @@ func (r Repos) update(msg tea.Msg) (Repos, tea.Cmd) {
 			r.items = m.data.Items
 			r.total = m.data.Total
 		}
-		if r.cursor >= len(r.items) {
+		// Clamp against the filtered view (what nav/render use), or an active
+		// filter could leave the cursor past the end with a vanished highlight.
+		if r.cursor >= len(r.filtered()) {
 			r.cursor = 0
 			r.offset = 0
 		}
@@ -108,9 +109,7 @@ func (r Repos) update(msg tea.Msg) (Repos, tea.Cmd) {
 					return repoAddedMsg{owner: owner, name: name, err: client.AddRepo(owner, name)}
 				}
 			case tea.KeyBackspace:
-				if len(r.input) > 0 {
-					r.input = r.input[:len(r.input)-1]
-				}
+				r.input = dropLastRune(r.input)
 			case tea.KeyRunes:
 				r.input += string(m.Runes)
 			}
@@ -127,7 +126,7 @@ func (r Repos) update(msg tea.Msg) (Repos, tea.Cmd) {
 				r.filtering = false
 			case tea.KeyBackspace:
 				if len(r.filter) > 0 {
-					r.filter = r.filter[:len(r.filter)-1]
+					r.filter = dropLastRune(r.filter)
 					r.cursor, r.offset = 0, 0
 				}
 			case tea.KeyRunes, tea.KeySpace:
@@ -154,7 +153,7 @@ func (r Repos) update(msg tea.Msg) (Repos, tea.Cmd) {
 		case "o":
 			if r.cursor < len(items) {
 				url := "https://github.com/" + items[r.cursor].FullName
-				_ = exec.Command("xdg-open", url).Start()
+				openInBrowser(url)
 			}
 		case "a":
 			if r.cursor < len(items) {
@@ -220,7 +219,7 @@ func (r Repos) view(w, h int) string {
 	}
 
 	hdr := lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
-		fmt.Sprintf("   %-*s  %-*s  %-*s  %-*s",
+		fmt.Sprintf("     %-*s  %-*s  %-*s  %-*s",
 			colName, "Repository",
 			colBranch, "Branch",
 			colCount, "Reviews",

@@ -360,7 +360,11 @@ class MutedCategory(Base):
 
     __table_args__ = (
         UniqueConstraint("repository_id", "category", name="uq_muted_category"),
-        Index("idx_muted_categories_repo", "repository_id"),
+        # Partial, matching migration 016 — the lookup only wants active mutes.
+        Index(
+            "idx_muted_categories_repo", "repository_id",
+            postgresql_where=text("active"), sqlite_where=text("active"),
+        ),
     )
 
 
@@ -433,6 +437,11 @@ class TicketIssueRun(Base):
         BigInteger, ForeignKey("odoo_instances.id")
     )
     github_url: Mapped[str] = mapped_column(Text, nullable=False)
+    # Lowercased "owner/repo" derived from github_url at creation (migration 022).
+    # Lets update_ticket_issue_state equality-match on an index instead of a
+    # leading-wildcard ILIKE full scan (M15). NULL only for pre-022 rows the
+    # backfill couldn't parse.
+    repo_full_name: Mapped[str | None] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     analysis_html: Mapped[str] = mapped_column(Text, nullable=False)
@@ -485,6 +494,8 @@ class TicketIssueRun(Base):
         Index("idx_ticket_issue_runs_status", "status"),
         Index("idx_ticket_issue_runs_ticket_id", "ticket_id"),
         Index("idx_ticket_issue_runs_created_at", "created_at"),
+        # Equality lookup by repo for issue state-sync webhooks (M15).
+        Index("idx_ticket_issue_runs_repo_full_name", "repo_full_name"),
     )
 
 
@@ -610,7 +621,7 @@ class WeeklyReport(Base):
     )
     period_days: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
 
-    __table_args__ = (Index("idx_weekly_reports_enqueued", "enqueued_at"),)
+    __table_args__ = (Index("idx_weekly_reports_enqueued", text("enqueued_at DESC")),)
 
 
 # ----------------------------------------------------------- prompt_versions

@@ -91,3 +91,17 @@ func TestShortSHA(t *testing.T) {
 		}
 	}
 }
+
+func TestDropLastRune(t *testing.T) {
+	// Byte-slicing an umlaut would leave a dangling continuation byte; dropping
+	// a whole rune keeps the string valid UTF-8 (backspace in filter inputs).
+	if got := dropLastRune("café"); got != "caf" || !utf8.ValidString(got) {
+		t.Fatalf("got %q (valid=%v)", got, utf8.ValidString(got))
+	}
+	if got := dropLastRune("abc"); got != "ab" {
+		t.Fatalf("got %q", got)
+	}
+	if got := dropLastRune(""); got != "" {
+		t.Fatalf("empty should stay empty, got %q", got)
+	}
+}

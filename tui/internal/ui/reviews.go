@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -151,7 +150,7 @@ func (r Reviews) update(msg tea.Msg) (Reviews, tea.Cmd) {
 			if r.detail != nil {
 				url := fmt.Sprintf("https://github.com/%s/pull/%d",
 					r.detail.RepoFullName, r.detail.PRNumber)
-				_ = exec.Command("xdg-open", url).Start()
+				openInBrowser(url)
 			}
 		case "j", "down", "k", "up", "g", "G", "home", "end", "ctrl+d", "ctrl+u":
 			// List nav moves the cursor and (re)loads that review's detail.

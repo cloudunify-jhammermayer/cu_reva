@@ -117,8 +117,10 @@ def main() -> None:
 
     while not stop:
         now = datetime.now(timezone.utc)
+        poll_ok = False
         try:
             count = poller.poll()
+            poll_ok = True
             if count:
                 logger.info("scheduler_cycle", enqueued=count)
         except Exception:
@@ -155,10 +157,15 @@ def main() -> None:
             logger.exception("scheduler_retention_purge_error")
 
         # Liveness heartbeat — the container healthcheck checks its freshness.
-        try:
-            Path(settings.heartbeat_path).touch()
-        except OSError:
-            logger.warning("scheduler_heartbeat_write_failed", path=settings.heartbeat_path)
+        # Only refresh it when the poll (the DB-dependent core loop) succeeded, so
+        # a scheduler whose DB connection is permanently broken goes stale and
+        # fails its healthcheck instead of looking alive forever. A transient
+        # blip just skips one beat, within the healthcheck's staleness tolerance.
+        if poll_ok:
+            try:
+                Path(settings.heartbeat_path).touch()
+            except OSError:
+                logger.warning("scheduler_heartbeat_write_failed", path=settings.heartbeat_path)
 
         for _ in range(settings.poll_interval_seconds):
             if stop:

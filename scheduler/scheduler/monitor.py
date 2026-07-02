@@ -62,10 +62,14 @@ class Monitor:
         if value is None:
             return
         if value >= threshold and key not in self._firing:
-            self._firing.add(key)
-            notify_operational_alert(
+            # Mark firing only if the alert was actually delivered — otherwise a
+            # Chat outage at the transition swallows it forever (the next message
+            # would be a spurious "Recovered"). A failed send leaves key unset so
+            # the next tick re-attempts while the breach persists.
+            if notify_operational_alert(
                 self.webhook_url, title, f"{value} {unit} (threshold {threshold})."
-            )
+            ):
+                self._firing.add(key)
             logger.warning("operational_alert", metric=key, value=value, threshold=threshold)
         elif value < threshold and key in self._firing:
             self._firing.discard(key)

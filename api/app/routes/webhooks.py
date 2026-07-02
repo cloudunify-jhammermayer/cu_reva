@@ -323,7 +323,7 @@ def _handle_review_comment(db: Database, payload: dict, settings: Settings, rq_q
     repo_data = payload.get("repository", {})
     owner = (repo_data.get("owner") or {}).get("login")
     repo = repo_data.get("name")
-    if not owner or not repo:
+    if not owner or not repo or rq_queue is None:
         return
 
     rq_queue.enqueue(

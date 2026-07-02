@@ -758,14 +758,17 @@ def test_migration_runner_rejects_unnamed_files(tmp_path):
 # --- ticket_issue_runs writers -------------------------------------------------
 
 
-def _issue_params(ticket_id: int = 7, run_id: int = 0) -> "TicketIssueJobParams":
+def _issue_params(
+    ticket_id: int = 7, run_id: int = 0,
+    github_url: str = "https://github.com/acme/widgets",
+) -> "TicketIssueJobParams":
     from reva.types import TicketIssueJobParams
     return TicketIssueJobParams(
         run_id=run_id,
         odoo_instance_id=1,
         ticket_id=ticket_id,
         model_name="helpdesk.ticket",
-        github_url="https://github.com/acme/widgets",
+        github_url=github_url,
         name="Login page broken",
         description="We need a login page.",
         analysis_html="<h2>Summary</h2>",
@@ -974,10 +977,9 @@ def test_update_ticket_issue_state_matches_repo_and_number(db):
     new_run = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=7))
     writers.update_ticket_issue_progress(db, new_run, issues)
     # same issue number in a DIFFERENT repo must not match
-    from reva.db.models import TicketIssueRun
-    other = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=8))
-    with db.session() as s:
-        s.get(TicketIssueRun, other).github_url = "https://github.com/acme/other"
+    other = writers.record_ticket_issue_run_created(
+        db, _issue_params(ticket_id=8, github_url="https://github.com/acme/other")
+    )
     writers.update_ticket_issue_progress(db, other, [dict(issues[0])])
 
     affected = writers.update_ticket_issue_state(db, "Acme", "Widgets", 42, "closed")
@@ -1000,6 +1002,18 @@ def test_update_ticket_issue_state_no_match_returns_empty(db):
     ])
     assert writers.update_ticket_issue_state(db, "acme", "widgets", 999, "closed") == []
     assert writers.update_ticket_issue_state(db, "acme", "elsewhere", 42, "closed") == []
+
+
+def test_repo_full_name_normalized_at_creation(db):
+    """M15: repo_full_name is the lowercased owner/repo derived from github_url,
+    tolerating .git and case, so the state-sync webhook can equality-match it."""
+    from reva.db.models import TicketIssueRun
+
+    run = writers.record_ticket_issue_run_created(
+        db, _issue_params(ticket_id=7, github_url="https://github.com/Acme/Widgets.git")
+    )
+    with db.session() as s:
+        assert s.get(TicketIssueRun, run).repo_full_name == "acme/widgets"
 
 
 def test_planning_basis_stored_not_the_doc(db):

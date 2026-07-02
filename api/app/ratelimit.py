@@ -8,6 +8,7 @@ guardrail, not a distributed quota. Disabled when the configured limit is 0.
 from __future__ import annotations
 
 import hashlib
+import threading
 import time
 from collections import defaultdict, deque
 
@@ -20,13 +21,17 @@ _WINDOW_SECONDS = 60.0
 _SWEEP_INTERVAL = 300.0
 _hits: dict[str, deque[float]] = defaultdict(deque)
 _last_sweep = 0.0
+# Sync FastAPI deps run on multiple threadpool threads; guard the shared counters
+# so a concurrent _sweep del can't drop a bucket another request just fetched.
+_lock = threading.Lock()
 
 
 def reset() -> None:
     """Clear all counters (used by tests)."""
     global _last_sweep
-    _hits.clear()
-    _last_sweep = 0.0
+    with _lock:
+        _hits.clear()
+        _last_sweep = 0.0
 
 
 def _client_key(request: Request) -> str:
@@ -56,14 +61,16 @@ def rate_limit(request: Request, settings: Settings = Depends(get_settings)) -> 
     if not limit:
         return
     now = time.monotonic()
+    key = _client_key(request)
     global _last_sweep
-    if now - _last_sweep > _SWEEP_INTERVAL:
-        _sweep(now)
-        _last_sweep = now
-    window = _hits[_client_key(request)]
-    cutoff = now - _WINDOW_SECONDS
-    while window and window[0] < cutoff:
-        window.popleft()
-    if len(window) >= limit:
-        raise HTTPException(status_code=429, detail="Rate limit exceeded")
-    window.append(now)
+    with _lock:
+        if now - _last_sweep > _SWEEP_INTERVAL:
+            _sweep(now)
+            _last_sweep = now
+        window = _hits[key]
+        cutoff = now - _WINDOW_SECONDS
+        while window and window[0] < cutoff:
+            window.popleft()
+        if len(window) >= limit:
+            raise HTTPException(status_code=429, detail="Rate limit exceeded")
+        window.append(now)

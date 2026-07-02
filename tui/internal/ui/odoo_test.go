@@ -32,8 +32,8 @@ func TestOdooCreateFlowPostsAndShowsKey(t *testing.T) {
 	for _, ch := range "ACME" { // field 0: name
 		o, _ = o.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
 	}
-	o, _ = o.update(keyMsg("enter")) // advance to callback_url
-	o, _ = o.update(keyMsg("enter")) // advance to outbound key (leave url blank)
+	o, _ = o.update(keyMsg("enter"))    // advance to callback_url
+	o, _ = o.update(keyMsg("enter"))    // advance to outbound key (leave url blank)
 	o, cmd := o.update(keyMsg("enter")) // submit
 	if cmd == nil {
 		t.Fatal("submit produced no command")

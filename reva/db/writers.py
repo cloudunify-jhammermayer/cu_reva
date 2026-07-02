@@ -1183,6 +1183,16 @@ def compute_planning_basis(params: TicketIssueJobParams) -> str:
     return prefix + digest
 
 
+def _normalize_repo_full_name(github_url: str) -> str | None:
+    """Lowercased "owner/repo" for `github_url`, or None if unparseable (M15)."""
+    from reva.github_urls import parse_github_repo_url
+
+    parsed = parse_github_repo_url(github_url)
+    if parsed is None:
+        return None
+    return f"{parsed[0]}/{parsed[1]}".lower()
+
+
 def record_ticket_issue_run_created(db: Database, params: TicketIssueJobParams) -> int:
     """Insert a pending ticket_issue_runs row and return its id.
 
@@ -1194,6 +1204,7 @@ def record_ticket_issue_run_created(db: Database, params: TicketIssueJobParams) 
             model_name=params.model_name,
             odoo_instance_id=params.odoo_instance_id,
             github_url=params.github_url,
+            repo_full_name=_normalize_repo_full_name(params.github_url),
             name=params.name,
             description=params.description,
             analysis_html=params.analysis_html,
@@ -1410,27 +1421,31 @@ def update_ticket_issue_state(
     Odoo records with the NEWEST run's full issue snapshot:
     [{"ticket_id", "model_name", "issues"}].
 
-    Matching is done in Python after a coarse SQL filter: github_url is free
-    text from Odoo (casing/.git/trailing-slash variants), so the LIKE only
-    narrows the scan and parse_github_repo_url decides.
+    Matched on the normalized repo_full_name column (indexed) instead of a
+    leading-wildcard github_url ILIKE that full-scanned the table; the big text
+    columns are deferred (load_only) since only issues/ids are needed (M15).
     """
-    from reva.github_urls import parse_github_repo_url
+    from sqlalchemy.orm import load_only
 
-    target = (owner.lower(), repo.lower())
+    target = f"{owner.lower()}/{repo.lower()}"
     affected: dict[tuple[int, str], dict] = {}
     with db.session() as s:
         rows = s.execute(
             select(TicketIssueRun)
             .where(
                 TicketIssueRun.issues.is_not(None),
-                TicketIssueRun.github_url.ilike(f"%github.com/{owner}/{repo}%"),
+                TicketIssueRun.repo_full_name == target,
             )
+            .options(load_only(
+                TicketIssueRun.ticket_id,
+                TicketIssueRun.model_name,
+                TicketIssueRun.odoo_instance_id,
+                TicketIssueRun.issues,
+                TicketIssueRun.created_at,
+            ))
             .order_by(TicketIssueRun.created_at.desc(), TicketIssueRun.id.desc())
         ).scalars().all()
         for row in rows:
-            parsed = parse_github_repo_url(row.github_url)
-            if parsed is None or (parsed[0].lower(), parsed[1].lower()) != target:
-                continue
             items = [dict(i) for i in (row.issues or [])]
             if not any(i.get("number") == number for i in items):
                 continue
@@ -1461,20 +1476,13 @@ def purge_old_ticket_issue_text(db: Database, older_than_days: int) -> int:
     scrubbed."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
     with db.session() as s:
-        result = s.execute(
-            update(TicketIssueRun)
-            .where(
-                TicketIssueRun.created_at < cutoff,
-                TicketIssueRun.description != PURGED_TICKET_TEXT,
-            )
-            .values(
-                description=PURGED_TICKET_TEXT,
-                analysis_html=PURGED_TICKET_TEXT,
-            )
-        )
+        # Strip issue bodies FIRST, while description still marks the row
+        # un-purged, so a later run (description already the sentinel) skips it
+        # instead of re-loading every historical row each day.
         rows = s.execute(
             select(TicketIssueRun).where(
                 TicketIssueRun.created_at < cutoff,
+                TicketIssueRun.description != PURGED_TICKET_TEXT,
                 TicketIssueRun.issues.is_not(None),
             )
         ).scalars().all()
@@ -1485,6 +1493,21 @@ def purge_old_ticket_issue_text(db: Database, older_than_days: int) -> int:
             ]
             if stripped != row.issues:
                 row.issues = stripped
+        # synchronize_session=False: the issue rows are already loaded in this
+        # session, and the default evaluator would choke comparing their (naive,
+        # on SQLite) created_at to the aware cutoff. We only need the rowcount.
+        result = s.execute(
+            update(TicketIssueRun)
+            .where(
+                TicketIssueRun.created_at < cutoff,
+                TicketIssueRun.description != PURGED_TICKET_TEXT,
+            )
+            .values(
+                description=PURGED_TICKET_TEXT,
+                analysis_html=PURGED_TICKET_TEXT,
+            )
+            .execution_options(synchronize_session=False),
+        )
         return result.rowcount
 
 

@@ -36,6 +36,17 @@ def test_alerts_once_on_breach_not_every_tick():
     assert "queue" in notify.call_args[0][1].lower()
 
 
+def test_retries_alert_when_send_fails():
+    """If the alert send fails, the breach isn't marked firing, so the next tick
+    re-attempts instead of swallowing it forever."""
+    m = _monitor(FakeQueue(depth=100))
+    with patch("scheduler.monitor.notify_operational_alert", return_value=False) as notify, \
+         patch.object(Monitor, "_failed_count", return_value=0):
+        m.check()  # send fails → not marked firing
+        m.check()  # still breached → retry
+    assert notify.call_count == 2
+
+
 def test_recovery_alert_when_clearing():
     q = FakeQueue(depth=100)
     m = _monitor(q)

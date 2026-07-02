@@ -160,19 +160,13 @@ func (o Odoo) updateCreate(m tea.KeyMsg) (Odoo, tea.Cmd) {
 			return odooCreatedMsg{created: created, err: err}
 		}
 	case tea.KeyBackspace:
-		f := func(s string) string {
-			if len(s) > 0 {
-				return s[:len(s)-1]
-			}
-			return s
-		}
 		switch o.createStep {
 		case 0:
-			o.createName = f(o.createName)
+			o.createName = dropLastRune(o.createName)
 		case 1:
-			o.createURL = f(o.createURL)
+			o.createURL = dropLastRune(o.createURL)
 		case 2:
-			o.createKey = f(o.createKey)
+			o.createKey = dropLastRune(o.createKey)
 		}
 	case tea.KeyRunes, tea.KeySpace:
 		appended := string(m.Runes)

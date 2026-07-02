@@ -19,6 +19,7 @@ from app.settings import Settings
 from reva._github_http import NotFound
 from reva.db import writers
 from reva.db.engine import Database
+from reva.errors import PermanentError
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_api_key)])
 logger = structlog.get_logger()
@@ -72,6 +73,12 @@ def trigger_review(
         pr_data = github.get_pull_request(token, body.owner, body.repo, body.pr_number)
     except NotFound:
         raise HTTPException(status_code=404, detail="PR not found on GitHub")
+    except PermanentError as exc:
+        # e.g. a wrong/stale installation_id — a client error, not a 500.
+        raise HTTPException(
+            status_code=404,
+            detail=f"Could not access the PR (check installation_id): {exc}",
+        ) from exc
 
     repo_info = pr_data["base"]["repo"]
     repo_id = writers.upsert_repository(

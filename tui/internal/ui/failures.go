@@ -126,8 +126,10 @@ func (f Failures) view(w, h int) string {
 	colErr := w - colStatus - colRepo - colPR - 8
 
 	hdr := lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
-		fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s",
-			colStatus, " ",
+		// Status is a single visible char in rows (%s), so pad the header's
+		// status cell to 1 too — not colStatus — or every column drifts right.
+		fmt.Sprintf("  %s  %-*s  %-*s  %-*s",
+			" ",
 			colRepo, "Repository",
 			colPR, "PR#",
 			colErr, "Error"),

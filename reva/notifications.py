@@ -27,7 +27,8 @@ def post_to_chat(webhook_url: str, text: str, *, timeout: float = 5) -> bool:
     applied uniformly."""
     try:
         assert_safe_url(webhook_url, allowed_hosts=_CHAT_ALLOWED_HOSTS)
-        httpx.post(webhook_url, json={"text": text}, timeout=timeout)
+        resp = httpx.post(webhook_url, json={"text": text}, timeout=timeout)
+        resp.raise_for_status()  # a 4xx/5xx (revoked/deleted space) is a failure
         return True
     except Exception as exc:
         logger.warning("google_chat_notify_failed", error=str(exc))
@@ -275,11 +276,13 @@ def notify_worker_error(
     _post_to_chat(webhook_url, text)
 
 
-def notify_operational_alert(webhook_url: str, title: str, detail: str) -> None:
+def notify_operational_alert(webhook_url: str, title: str, detail: str) -> bool:
     """POST an operational/infra alert (queue depth, disk, failed jobs) to Google Chat.
 
     Best-effort: swallows all exceptions so monitoring can never crash the caller.
+    Returns True iff the alert was actually delivered, so the caller can avoid
+    marking a breach "notified" when the send failed.
     """
     if not webhook_url:
-        return
-    _post_to_chat(webhook_url, f"⚠️ *{title}*\n{detail}")
+        return False
+    return post_to_chat(webhook_url, f"⚠️ *{title}*\n{detail}")

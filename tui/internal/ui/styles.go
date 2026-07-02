@@ -311,6 +311,17 @@ func cappedNote(shown, total int) string {
 
 // truncate shortens s to at most n characters, counting by runes so multibyte
 // UTF-8 (e.g. accented or CJK text) isn't sliced mid-codepoint (CORR-16).
+// dropLastRune removes the last rune (not byte) from s, so backspacing a
+// multibyte character (e.g. an umlaut) in a filter/form input doesn't leave a
+// dangling continuation byte behind (CORR-16, matching truncate's rune slicing).
+func dropLastRune(s string) string {
+	r := []rune(s)
+	if len(r) == 0 {
+		return s
+	}
+	return string(r[:len(r)-1])
+}
+
 func truncate(s string, n int) string {
 	if n <= 0 {
 		// A caller passed a column width that underflowed (e.g. a fixed-column

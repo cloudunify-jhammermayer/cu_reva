@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -282,7 +281,7 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 				t.filtering = false
 			case tea.KeyBackspace:
 				if len(t.filter) > 0 {
-					t.filter = t.filter[:len(t.filter)-1]
+					t.filter = dropLastRune(t.filter)
 					t.cursor, t.offset = 0, 0
 				}
 			case tea.KeyRunes, tea.KeySpace:
@@ -314,8 +313,8 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 			case "o", "enter":
 				if t.detailCursor < len(t.detailIssues) {
 					ref := t.detailIssues[t.detailCursor]
-					if ref.URL != nil && *ref.URL != "" {
-						_ = exec.Command("xdg-open", *ref.URL).Start()
+					if ref.URL != nil {
+						openInBrowser(*ref.URL)
 					}
 				}
 			}
@@ -394,12 +393,14 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 		case "o":
 			if cur.header {
 				if cur.key != "" {
-					_ = exec.Command("xdg-open", "https://github.com/"+cur.key).Start()
+					openInBrowser("https://github.com/" + cur.key)
 				}
-			} else {
+			} else if cur.row.ticketID != 0 {
+				// Guard against a zero-value cur (empty/collapsed list), which
+				// would otherwise open "<odoo>/web#model=&id=0&view_type=form".
 				url := fmt.Sprintf("%s/web#model=%s&id=%d&view_type=form",
 					t.odooURL, cur.row.modelName, cur.row.ticketID)
-				_ = exec.Command("xdg-open", url).Start()
+				openInBrowser(url)
 			}
 		}
 	}

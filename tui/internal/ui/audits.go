@@ -226,7 +226,7 @@ func (a Audits) findingsView(w, h int) string {
 		colTitle = remaining
 	}
 	hdr := lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
-		fmt.Sprintf("   %-*s  %-*s  %-*s", colTitle, "Title", colFile, "File:Line", colIssue, "Issue"))
+		fmt.Sprintf("     %-*s  %-*s  %-*s", colTitle, "Title", colFile, "File:Line", colIssue, "Issue"))
 
 	// Window the finding rows; the column header (hdr) stays pinned.
 	vis := h - 5

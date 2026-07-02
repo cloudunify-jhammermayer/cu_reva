@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -89,7 +88,7 @@ func (f Findings) update(msg tea.Msg) (Findings, tea.Cmd) {
 				f.filtering = false
 			case tea.KeyBackspace:
 				if len(f.filter) > 0 {
-					f.filter = f.filter[:len(f.filter)-1]
+					f.filter = dropLastRune(f.filter)
 					f.cursor, f.offset = 0, 0
 				}
 			case tea.KeyRunes, tea.KeySpace:
@@ -115,7 +114,7 @@ func (f Findings) update(msg tea.Msg) (Findings, tea.Cmd) {
 			if f.cursor < len(items) && items[f.cursor].RepoFullName != "" {
 				url := fmt.Sprintf("https://github.com/%s/pull/%d",
 					items[f.cursor].RepoFullName, items[f.cursor].PRNumber)
-				_ = exec.Command("xdg-open", url).Start()
+				openInBrowser(url)
 			}
 		case "r":
 			f.loading = true
@@ -195,7 +194,7 @@ func (f Findings) view(w, h int) string {
 	}
 
 	hdr := lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
-		fmt.Sprintf("   %-*s  %-*s  %-*s  %-*s  %-*s",
+		fmt.Sprintf("     %-*s  %-*s  %-*s  %-*s  %-*s",
 			colTitle, "Title",
 			colRepo, "Repository",
 			colCategory, "Category",
