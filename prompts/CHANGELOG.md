@@ -7,6 +7,11 @@
   those files carried a stale `submit_review` contract and a self-set
   `risk_level` instruction contradicting `review_guidance.md`. `PromptBuilder`
   now owns only versioning + drift hashes.
+- Single-sourced the "Team configuration" block (`custom_instructions` /
+  `muted_categories` / `team_review_preferences` handling) into
+  `review_guidance.md` — it was copy-pasted verbatim into five skills.
+  `review_guidance.md` is prepended to every skill, so behaviour is unchanged;
+  skills now carry only mode-specific deltas.
 
 ## v2.0 — Learned team preferences on the review path
 

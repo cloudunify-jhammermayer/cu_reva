@@ -30,6 +30,14 @@ Optional structured params some skills receive (added only when relevant, so the
 stable): `test_coverage`, `already_reported`, `stated_intent` (closed GitHub issues), `manifest_audit`
 (deterministic `__manifest__.py` checks).
 
+**Shared behaviour lives in `review_guidance.md`, not in the skills.** That file
+is prepended to every skill by the runner, so cross-cutting rules — severity /
+category / confidence definitions, security & conduct rules, and the handling of
+the `custom_instructions` / `muted_categories` / `team_review_preferences`
+parameters — are stated there once. A skill carries only its mode-specific delta
+(what to review, its process steps, and any mode-scoped checks). Don't copy a
+shared block into a skill; edit the guidance.
+
 ## Why skills instead of a giant prompt
 
 The skill format lets Claude Code do agentic exploration (open files, grep,
@@ -41,7 +49,7 @@ delta/audit behaviours evolve independently.
 
 - The output **must** be valid JSON at `output_path` matching the tool schema
   (`reva/types.py`). A missing/invalid file is a `PermanentError`.
-- `Finding.title` ≤ 80 chars; `confidence` guidance is in each skill.
-- Severity / category vocab must match `system.md` and the schema.
+- `Finding.title` ≤ 80 chars; confidence guidance is in `review_guidance.md`.
+- Severity / category vocab must match `review_guidance.md` and the schema.
 - Skills are installed into the worker image (see the headless-Claude design
   spec) and version-bumped alongside `prompts/CHANGELOG.md`.

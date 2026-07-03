@@ -115,6 +115,19 @@ def test_stated_intent_guidance_present():
     assert "stated_intent" in (PROMPTS_DIR / "review_guidance.md").read_text()
 
 
+def test_team_configuration_block_single_sourced():
+    # The team-configuration handling lives once in review_guidance.md (prepended
+    # to every skill), not copy-pasted into each skill where it would drift.
+    guidance = (PROMPTS_DIR / "review_guidance.md").read_text()
+    assert "team_review_preferences" in guidance
+    assert "If a `custom_instructions` parameter is present" in guidance
+    for skill in SKILLS_DIR.glob("*.md"):
+        assert "If a `custom_instructions` parameter is present" not in skill.read_text(), (
+            f"{skill.name} still carries the team-configuration block — it belongs "
+            "only in review_guidance.md"
+        )
+
+
 def test_migration_skill_present_and_well_formed():
     text = (SKILLS_DIR / "reva-migration-review.md").read_text()
     assert text.strip(), "reva-migration-review.md is empty"
