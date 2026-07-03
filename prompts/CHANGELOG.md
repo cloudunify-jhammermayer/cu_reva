@@ -27,6 +27,13 @@
   was verified clean), with the "what was verified" line mandatory on clean
   reviews so an empty findings list still demonstrates the work done. All six
   skills' summary placeholders point at it.
+- `odoo19.md`: assigned an explicit severity to every finding-producing rule that
+  lacked one (`with_context` misuse, `search_count` limit, `_search_display_name`,
+  record-rule OR workarounds, explicit `inherit_id`, `<card>` Kanban, `_read_group`
+  signature, `mapped()` on large recordsets, file naming, Python-3.12 type
+  patterns) so severities stop drifting run-to-run. Fixed the JSONB-translations
+  version (was "17+", now "16+" to match the migration skill and actual Odoo
+  history) and gave it **Major**.
 
 ## v2.0 — Learned team preferences on the review path
 
