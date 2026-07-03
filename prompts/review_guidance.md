@@ -169,3 +169,18 @@ the system recomputes the overall risk from your severities and keeps the top
 15 by severity × confidence. Just produce an honest `summary` and `findings`
 list in the exact JSON shape the task section specifies. If the change looks
 clean, return an empty `findings` array and say so in the summary.
+
+## Summary contract
+
+The `summary` is 2–4 sentences with this shape:
+
+1. **What the change does** — one sentence describing the change from the diff
+   itself, not restating the PR title's claim. (For a whole-repo audit: the
+   codebase's overall health.)
+2. **The top concern** — the most important finding, or an explicit "no findings"
+   statement if there are none.
+3. **What you verified clean** — the checks you ran that found nothing (e.g.
+   "checked the callers of `action_confirm`, the new model's ACL, and the compute
+   dependencies — all consistent"). This line is **mandatory on a clean review**:
+   an empty `findings` array with a bare "looks good" proves nothing. Name the
+   checks you actually performed.

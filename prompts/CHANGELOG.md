@@ -22,6 +22,11 @@
   the prompt no longer trains the model to inflate borderline findings to 0.7.
   The per-skill "keep only findings ≥ 0.7" steps now point at the verification
   pass instead.
+- `review_guidance.md`: new "Summary contract" section — the `summary` now has a
+  defined 3-part shape (what the change does, the top concern or "none", and what
+  was verified clean), with the "what was verified" line mandatory on clean
+  reviews so an empty findings list still demonstrates the work done. All six
+  skills' summary placeholders point at it.
 
 ## v2.0 — Learned team preferences on the review path
 

@@ -50,7 +50,7 @@ structure (do **not** include a `risk_level` — the system computes it):
 
 ```json
 {
-  "summary": "3-5 sentence overview of codebase health and the top concerns",
+  "summary": "Overall codebase health; the top systemic concerns; what you verified clean — see the guidance Summary contract",
   "findings": [
     {
       "severity": "major",

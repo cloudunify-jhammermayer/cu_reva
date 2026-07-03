@@ -44,7 +44,7 @@ structure (do **not** include a `risk_level` — the system computes it):
 
 ```json
 {
-  "summary": "2-3 sentence overview of the view changes and key concerns",
+  "summary": "What the view changes do; the top concern (or none); what you verified clean — see the guidance Summary contract",
   "findings": [
     {
       "severity": "major",

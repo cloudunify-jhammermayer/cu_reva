@@ -115,6 +115,14 @@ def test_stated_intent_guidance_present():
     assert "stated_intent" in (PROMPTS_DIR / "review_guidance.md").read_text()
 
 
+def test_summary_contract_present():
+    guidance = (PROMPTS_DIR / "review_guidance.md").read_text()
+    assert "Summary contract" in guidance
+    # every skill's summary placeholder points reviewers at the contract
+    for skill in SKILLS_DIR.glob("reva-*.md"):
+        assert "Summary contract" in skill.read_text(), skill.name
+
+
 def test_verify_before_write_guidance_present():
     # The pre-output verification pass lives in the guidance; the confidence
     # threshold is stated once there (honestly), not repeated as a hard "≥ 0.7"
