@@ -54,6 +54,8 @@ logger = structlog.get_logger()
 DEFAULT_MAX_DIFF_LINES = 2500
 DEFAULT_MAX_DIFF_TOKENS = 60_000
 MAX_FINDINGS = 15
+# Cap for the team-authored custom_instructions skill param (prompt-bloat guard).
+_CUSTOM_INSTRUCTIONS_MAX_CHARS = 4000
 # Second-pass self-critique bounds (mirror runner's delta-verify caps).
 _MAX_VERIFICATIONS = 20
 _MAX_VERIFY_ERRORS = 3
@@ -223,7 +225,7 @@ class Reviewer:
         max_diff_lines: int = DEFAULT_MAX_DIFF_LINES,
         max_diff_tokens: int = DEFAULT_MAX_DIFF_TOKENS,
         verifier: FindingVerifier | None = None,
-        verify_high_cost: bool = False,
+        verify_findings_default: bool = True,
     ) -> None:
         self.runner = runner
         self.github = github
@@ -232,7 +234,7 @@ class Reviewer:
         self.max_diff_lines = max_diff_lines
         self.max_diff_tokens = max_diff_tokens
         self.verifier = verifier
-        self.verify_high_cost = verify_high_cost
+        self.verify_findings_default = verify_findings_default
 
     # ------------------------------------------------------------------ public
 
@@ -440,6 +442,10 @@ class Reviewer:
         # 9. Select model.
         model = self.runner.deep_model if params.review_mode == "deep" else self.runner.default_model
 
+        # Muted categories, fetched once: steer the prompt away from them
+        # (below) and keep the post-hoc drop as the enforcement backstop.
+        muted = self.repos.get_muted_categories(params.repository_id)
+
         skill_params = {
             "pr_title": pr_basic.get("title", ""),
             "pr_body": pr_basic.get("body") or pr_detail.get("body") or "",
@@ -450,8 +456,31 @@ class Reviewer:
         }
         # Optional structured hints, added only when present so a clean PR's
         # cached prompt prefix stays byte-identical (runner XML-fences each value).
+        # Team-authored review guidance from .claude-review.yml. Previously
+        # consumed only by the Messages-API prompt_builder (tickets/replies) —
+        # dead on this path. Semi-trusted (repo write access), so it rides as a
+        # nonce-fenced skill param, never in the preamble; optional so repos
+        # without it keep a byte-identical cached prompt prefix.
+        if repo_config.custom_instructions and repo_config.custom_instructions.strip():
+            instructions = repo_config.custom_instructions.strip()
+            if len(instructions) > _CUSTOM_INSTRUCTIONS_MAX_CHARS:
+                log.info(
+                    "custom_instructions_truncated",
+                    chars=len(instructions), cap=_CUSTOM_INSTRUCTIONS_MAX_CHARS,
+                )
+                instructions = instructions[:_CUSTOM_INSTRUCTIONS_MAX_CHARS]
+            skill_params["custom_instructions"] = instructions
+        # Tell the model up front not to spend effort on muted categories —
+        # previously they were only dropped after the fact, and test_coverage
+        # even prompted for findings a mute then deleted.
+        if muted:
+            skill_params["muted_categories"] = (
+                "The team muted these finding categories for this repo — do not "
+                "report findings in them: " + ", ".join(sorted(muted))
+            )
         # Test-coverage: modules that add new logic with no accompanying tests/.
-        coverage = analyze_test_coverage(diff)
+        # Skipped when `test` is muted (don't prompt for findings we'd delete).
+        coverage = [] if "test" in muted else analyze_test_coverage(diff)
         if coverage:
             skill_params["test_coverage"] = _format_test_coverage(coverage)
         # Delta re-reviews: the still-open prior findings, so the skill suppresses
@@ -530,9 +559,7 @@ class Reviewer:
         grounded = _drop_thirdparty_findings(grounded)
         # Drop categories a trusted user muted for this repo (/mute) — before
         # calibration/verification so we never pay to process a muted finding.
-        grounded = _drop_muted_findings(
-            grounded, self.repos.get_muted_categories(params.repository_id)
-        )
+        grounded = _drop_muted_findings(grounded, muted)
         # Floor Odoo anti-pattern severities to odoo19.md's documented minimums
         # before capping/risk so the Check Run conclusion reflects them.
         grounded = _calibrate_odoo_severity(grounded)
@@ -542,13 +569,13 @@ class Reviewer:
         verify_enabled = (
             repo_config.verify_findings
             if repo_config.verify_findings is not None
-            else self.verify_high_cost
+            else self.verify_findings_default
         )
         verify_cost = 0.0
         if verify_enabled:
             grounded, verify_cost = self._verify_findings(
                 grounded, repo_path, params.review_mode,
-                repo_config.block_on_severity, model, verify_budget_ok,
+                repo_config.block_on_severity, verify_budget_ok,
             )
         capped = _cap_findings(grounded, MAX_FINDINGS)
         risk_level = _recompute_risk_level(capped)
@@ -592,7 +619,6 @@ class Reviewer:
         repo_path: str,
         mode: str,
         block_on_severity: str,
-        model: str,
         verify_budget_ok: bool,
     ) -> tuple[list[Finding], float]:
         """Re-verify high-stakes findings against the cited file and drop confident
@@ -600,7 +626,8 @@ class Reviewer:
         modes verify only findings at/above the repo's blocking threshold. Bounded
         by _MAX_VERIFICATIONS and abort-after-_MAX_VERIFY_ERRORS. Never drops on an
         infrastructure failure (unreadable file / verifier error) — only on a
-        confident "not substantiated" verdict. Returns (kept_findings, est_cost)."""
+        confident "not substantiated" verdict. Returns (kept_findings, actual_cost_usd
+        summed from the verifier's verdicts)."""
         if self.verifier is None or not verify_budget_ok:
             if self.verifier is not None and not verify_budget_ok:
                 logger.info("findings_verification_skipped", reason="over_budget")
@@ -655,15 +682,15 @@ class Reviewer:
                 body=f.body, severity=f.severity, category=f.category,
             )
             try:
-                substantiated = self.verifier.is_substantiated(stored, content)
+                verdict = self.verifier.is_substantiated(stored, content)
             except Exception:
                 errors += 1
                 logger.warning("finding_verify_error", exc_info=True)
                 kept.append(f)  # keep on a verifier error
                 continue
             verified += 1
-            cost += estimate_cost(model, max(1, len(content)) // 4, 64)
-            if substantiated:
+            cost += verdict.cost_usd
+            if verdict.verdict:
                 kept.append(f)
             else:
                 dropped.append(f.title)

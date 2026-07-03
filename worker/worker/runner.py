@@ -27,7 +27,6 @@ from rq import get_current_job
 from reva import secrets_crypto
 from reva.claude_client import ClaudeClient
 from reva.claude_code_runner import ClaudeCodeRunner
-from reva.cost import estimate_cost
 from reva.notifications import notify_operational_alert, notify_worker_error
 from reva.odoo_client import OdooCallbackClient
 from reva.ticket_analyzer import TicketAnalyzer
@@ -153,7 +152,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         repos=repo_lookup,
         prompts=prompts,
         verifier=verifier,
-        verify_high_cost=settings.verify_high_cost,
+        verify_findings_default=settings.verify_findings_default,
     )
     auditor = Auditor(
         runner=runner,
@@ -793,12 +792,10 @@ def _verify_and_resolve_findings(
     file_cache: dict[str, str | None] = {}
     errors = 0
     resolved = 0
-    # M1: each is_resolved() is a paid Messages-API call. It doesn't return
-    # usage, so estimate from the file size at the verifier's model (same shape as
-    # the reviewer's self-critique accounting) and record it in the unified ledger
-    # so the rolling budget cap counts it — previously this whole pass was free.
+    # M1: each is_resolved() is a paid Messages-API call. The verdict carries
+    # the call's actual usage-derived cost; sum it into the unified ledger so
+    # the rolling budget cap counts this pass.
     verify_cost = 0.0
-    verify_model = ctx.claude.default_model
     for f in candidates:
         path = f["file_path"]
         try:
@@ -815,9 +812,9 @@ def _verify_and_resolve_findings(
                 severity=f["severity"],
                 category=f["category"],
             )
-            resolved_now = ctx.verifier.is_resolved(stored, content)
-            verify_cost += estimate_cost(verify_model, max(1, len(content)) // 4, 64)
-            if resolved_now:
+            verdict = ctx.verifier.is_resolved(stored, content)
+            verify_cost += verdict.cost_usd
+            if verdict.verdict:
                 ctx.github.resolve_review_thread(token, threads[f["github_comment_id"]])
                 # Persist the verdict the loop already computed (Tier 1 outcome
                 # ledger). After resolve, so a failed resolve never mislabels it.

@@ -1,3 +1,16 @@
+## v1.9 — Team configuration on the review path + verifier re-pricing
+
+- All five review skills gain a "Team configuration" section. Reviews now
+  receive two optional nonce-fenced params: `custom_instructions`
+  (team-authored guidance from `.claude-review.yml`, previously dead on the
+  review path — it reached only the Messages-API ticket/reply prompts) and
+  `muted_categories` (categories a trusted user muted — the model is told not
+  to report them up front; the post-hoc drop stays as enforcement backstop).
+  Neither overrides severity definitions, security rules, or the output format.
+- `finding_verifier` (code-side, not in this prompt set): both verifier system
+  prompts now note the file content may be a ±150-line excerpt around the
+  cited line, with its absolute range labelled above the fence.
+
 ## v1.8 — Issue types + tldr titles for ticket-issue planning
 
 - `ticket_issues.md`: each planned issue now carries a `type` code

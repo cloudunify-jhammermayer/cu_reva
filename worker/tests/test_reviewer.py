@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from reva.errors import PermanentError, TransientError
+from reva.finding_verifier import VerifierVerdict
 from worker.reviewer import (
     Reviewer,
     _INTENT_BODY_CAP,
@@ -185,11 +186,13 @@ class FakeVerifier:
     raise_exc: Exception | None = None
     calls: list[str] = field(default_factory=list)
 
-    def is_substantiated(self, finding, file_content) -> bool:
+    def is_substantiated(self, finding, file_content) -> VerifierVerdict:
         self.calls.append(finding.title)
         if self.raise_exc:
             raise self.raise_exc
-        return self.verdicts.get(finding.title, True)
+        return VerifierVerdict(
+            verdict=self.verdicts.get(finding.title, True), cost_usd=0.001
+        )
 
 
 def _make_reviewer(**overrides):
@@ -1292,7 +1295,7 @@ def test_manifest_audit_skips_deleted_manifest():
 # --- second-pass self-critique (feature 6) -----------------------------------
 
 
-def _verify_reviewer(tmp_path, finding_dicts, *, verifier, verify_high_cost=True):
+def _verify_reviewer(tmp_path, finding_dicts, *, verifier, verify_findings_default=True):
     """Reviewer wired with a FakeVerifier and a clone holding the cited files
     (so grounding keeps them and _verify_findings can read them)."""
     for fd in finding_dicts:
@@ -1305,7 +1308,7 @@ def _verify_reviewer(tmp_path, finding_dicts, *, verifier, verify_high_cost=True
         repo_path_returned=str(tmp_path),
     )
     reviewer, *_ = _make_reviewer(
-        runner=runner, verifier=verifier, verify_high_cost=verify_high_cost
+        runner=runner, verifier=verifier, verify_findings_default=verify_findings_default
     )
     return reviewer, runner
 
@@ -1340,7 +1343,7 @@ def test_verify_respects_block_on_severity_critical(tmp_path):
         repo_path_returned=str(tmp_path),
     )
     reviewer, *_ = _make_reviewer(
-        runner=runner, github=github, verifier=verifier, verify_high_cost=True
+        runner=runner, github=github, verifier=verifier, verify_findings_default=True
     )
     reviewer.execute(_params(review_mode="diff"))
     assert verifier.calls == []  # major is below the critical gate
@@ -1349,10 +1352,34 @@ def test_verify_respects_block_on_severity_critical(tmp_path):
 def test_verify_disabled_by_flag_leaves_findings_untouched(tmp_path):
     findings = [_finding("x", "custom_addons/x.py")]
     verifier = FakeVerifier(verdicts={"x": False})
-    reviewer, _ = _verify_reviewer(tmp_path, findings, verifier=verifier, verify_high_cost=False)
+    reviewer, _ = _verify_reviewer(tmp_path, findings, verifier=verifier, verify_findings_default=False)
     titles = {f.title for f in reviewer.execute(_params(review_mode="full")).findings}
     assert titles == {"x"}  # not dropped
     assert verifier.calls == []
+
+
+def test_repo_verify_findings_overrides_global_default(tmp_path):
+    """Gating matrix: explicit .claude-review.yml verify_findings wins over
+    the process-wide default, in both directions."""
+    (tmp_path / "custom_addons").mkdir()
+    (tmp_path / "custom_addons" / "a.py").write_text("x\n")
+    findings = [_finding("x", "custom_addons/a.py")]
+
+    def run(yml, default):
+        verifier = FakeVerifier(verdicts={"x": False})
+        runner = FakeRunner(
+            response=_claude_response_with_findings(findings),
+            repo_path_returned=str(tmp_path),
+        )
+        github = FakeGitHub(file_contents={".claude-review.yml": yml})
+        reviewer, *_ = _make_reviewer(
+            runner=runner, github=github, verifier=verifier,
+            verify_findings_default=default,
+        )
+        return {f.title for f in reviewer.execute(_params(review_mode="full")).findings}
+
+    assert run("verify_findings: false\n", True) == {"x"}  # repo off wins: kept
+    assert run("verify_findings: true\n", False) == set()  # repo on wins: dropped
 
 
 def test_verify_skipped_when_over_budget(tmp_path):
@@ -1405,13 +1432,13 @@ def test_verify_adds_cost(tmp_path):
     (tmp_path / "custom_addons" / "x.py").write_text("x\n")
     findings = [_finding("x", "custom_addons/x.py")]
 
-    def run(verify_high_cost):
+    def run(verify_findings_default):
         runner = FakeRunner(
             response=_claude_response_with_findings(findings),
             repo_path_returned=str(tmp_path),
         )
         reviewer, *_ = _make_reviewer(
-            runner=runner, verifier=FakeVerifier(), verify_high_cost=verify_high_cost
+            runner=runner, verifier=FakeVerifier(), verify_findings_default=verify_findings_default
         )
         return reviewer.execute(_params(review_mode="full")).estimated_cost_usd
 
@@ -1442,6 +1469,73 @@ def test_no_mute_leaves_findings_untouched():
     reviewer, *_ = _make_reviewer(runner=runner, repos=FakeRepos(muted_categories=set()))
     titles = {f.title for f in reviewer.execute(_params()).findings}
     assert titles == {"style nit"}
+
+
+def test_muted_categories_param_attached():
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    repos = FakeRepos(muted_categories={"style", "docs"})
+    reviewer, *_ = _make_reviewer(runner=runner, repos=repos)
+    reviewer.execute(_params())
+    assert runner.last_params["muted_categories"] == (
+        "The team muted these finding categories for this repo — do not "
+        "report findings in them: docs, style"
+    )
+
+
+def test_muted_categories_param_absent_when_nothing_muted():
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(
+        runner=runner, repos=FakeRepos(muted_categories=set())
+    )
+    reviewer.execute(_params())
+    assert "muted_categories" not in runner.last_params
+
+
+def test_test_coverage_suppressed_when_test_muted():
+    """A muted `test` category must not prompt for test findings we'd delete.
+    Same _LOGIC_DIFF fixture as test_test_coverage_param_present_for_untested_logic;
+    only the muted set differs."""
+    github = FakeGitHub(
+        diff=_LOGIC_DIFF, files=[{"filename": "custom_addons/m/models/x.py"}]
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(
+        runner=runner, github=github, repos=FakeRepos(muted_categories={"test"})
+    )
+    reviewer.execute(_params())
+    assert "test_coverage" not in runner.last_params
+
+
+# --- custom_instructions on the review path -----------------------------------
+
+
+def test_custom_instructions_param_attached():
+    github = FakeGitHub(file_contents={
+        ".claude-review.yml": "custom_instructions: |\n  Focus on performance regressions.\n",
+    })
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(runner=runner, github=github)
+    reviewer.execute(_params())
+    assert runner.last_params["custom_instructions"] == "Focus on performance regressions."
+
+
+def test_custom_instructions_absent_keeps_params_identical():
+    """Prompt-prefix stability: repos without the field get no extra param."""
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(runner=runner)
+    reviewer.execute(_params())
+    assert "custom_instructions" not in runner.last_params
+
+
+def test_custom_instructions_truncated_at_cap():
+    long_text = "x" * 5000
+    github = FakeGitHub(file_contents={
+        ".claude-review.yml": f"custom_instructions: {long_text}\n",
+    })
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(runner=runner, github=github)
+    reviewer.execute(_params())
+    assert len(runner.last_params["custom_instructions"]) == 4000
 
 
 # --- migration-safety routing (feature 7) ------------------------------------

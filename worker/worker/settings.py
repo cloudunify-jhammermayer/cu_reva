@@ -10,7 +10,11 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+import structlog
+
 from reva.config import required_env_or_file
+
+logger = structlog.get_logger()
 
 
 @dataclass(frozen=True)
@@ -36,9 +40,10 @@ class Settings:
     codegraph_enabled: bool = False
     codegraph_version: str = "0.9.8"
     codegraph_index_timeout: int = 180
-    # Second-pass self-critique: re-verify high-stakes findings before posting.
-    # Default off; per-repo `.claude-review.yml verify_findings` overrides it.
-    verify_high_cost: bool = False
+    # Second-pass self-critique: re-verify blocking-threshold findings before
+    # posting. Default ON (Haiku-priced, windowed, bounded); per-repo
+    # `.claude-review.yml verify_findings` overrides it.
+    verify_findings_default: bool = True
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -76,6 +81,23 @@ class Settings:
             in ("1", "true", "yes"),
             codegraph_version=os.environ.get("REVA_CODEGRAPH_VERSION", "0.9.8"),
             codegraph_index_timeout=int(os.environ.get("REVA_CODEGRAPH_INDEX_TIMEOUT", "180")),
-            verify_high_cost=os.environ.get("REVA_VERIFY_HIGH_COST", "false").lower()
-            in ("1", "true", "yes"),
+            verify_findings_default=_verify_findings_default_from_env(),
         )
+
+
+def _verify_findings_default_from_env() -> bool:
+    """REVA_VERIFY_FINDINGS (default on). Legacy REVA_VERIFY_HIGH_COST is
+    honored when the new var is unset — flips the default without an ops
+    change at deploy; remove after the fleet migrates."""
+    value = os.environ.get("REVA_VERIFY_FINDINGS")
+    if value is None:
+        legacy = os.environ.get("REVA_VERIFY_HIGH_COST")
+        if legacy is not None:
+            logger.warning(
+                "deprecated_env_var",
+                var="REVA_VERIFY_HIGH_COST",
+                replacement="REVA_VERIFY_FINDINGS",
+            )
+            return legacy.lower() in ("1", "true", "yes")
+        return True
+    return value.lower() in ("1", "true", "yes")

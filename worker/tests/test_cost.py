@@ -28,3 +28,19 @@ def test_sonnet_dated_id_stays_sonnet():
 def test_unknown_model_falls_back_to_sonnet_46():
     fallback = estimate_cost("gpt-4", 0, 1_000_000)
     assert fallback == PRICING["claude-sonnet-4-6"]["output"] * 1_000_000
+
+
+def test_haiku_45_prices_at_haiku_rates():
+    # $1/M input, $5/M output.
+    assert estimate_cost("claude-haiku-4-5", 1_000_000, 0) == 1.0
+    assert estimate_cost("claude-haiku-4-5", 0, 1_000_000) == 5.0
+
+
+def test_haiku_dated_id_resolves_to_haiku_rates():
+    # The Messages API echoes the dated id (claude-haiku-4-5-20251001).
+    assert estimate_cost("claude-haiku-4-5-20251001", 0, 1_000_000) == 5.0
+
+
+def test_haiku_cache_rates():
+    assert estimate_cost("claude-haiku-4-5", 0, 0, 1_000_000, 0) == 0.1
+    assert estimate_cost("claude-haiku-4-5", 0, 0, 0, 1_000_000) == 1.25

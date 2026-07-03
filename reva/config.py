@@ -16,6 +16,9 @@ import os
 # the pinned production models.
 DEFAULT_MODEL = os.environ.get("REVA_DEFAULT_MODEL", "claude-sonnet-5")
 DEEP_MODEL = os.environ.get("REVA_DEEP_MODEL", "claude-opus-4-8")
+# Binary finding-verdict calls (second-pass self-critique + delta-resolution
+# pass): short outputs, windowed inputs — Haiku-priced by default.
+VERIFY_MODEL = os.environ.get("REVA_VERIFY_MODEL", "claude-haiku-4-5")
 
 
 def env_or_file(name: str, default: str | None = None) -> str | None:

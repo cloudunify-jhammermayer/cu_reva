@@ -1,6 +1,6 @@
 """Cost estimation for Claude API calls.
 
-Rates reflect Anthropic public pricing for Sonnet 5, Sonnet 4.6, and Opus 4.8.
+Rates reflect Anthropic public pricing for Sonnet 5, Sonnet 4.6, Opus 4.8, and Haiku 4.5.
 Verify against https://www.anthropic.com/pricing if billing accuracy matters.
 Sonnet 5 uses its standard $3/$15 rate; the $2/$10 introductory rate (through
 Aug 31, 2026) is intentionally not used so the budget cap estimates conservatively.
@@ -27,6 +27,12 @@ PRICING: dict[str, dict[str, float]] = {
         "output": 25.00 / 1_000_000,
         "cache_read": 0.50 / 1_000_000,
         "cache_write_5m": 6.25 / 1_000_000,
+    },
+    "claude-haiku-4-5": {
+        "input": 1.00 / 1_000_000,
+        "output": 5.00 / 1_000_000,
+        "cache_read": 0.10 / 1_000_000,
+        "cache_write_5m": 1.25 / 1_000_000,
     },
 }
 

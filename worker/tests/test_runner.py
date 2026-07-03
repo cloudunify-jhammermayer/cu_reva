@@ -20,6 +20,7 @@ from reva.errors import PermanentError, TransientError
 from reva.prompt_builder import PromptBuilder
 from worker.runner import WorkerContext, _register_prompt_version, run_review, set_context
 from reva.types import Finding, JobParams, ReviewResult
+from reva.finding_verifier import VerifierVerdict
 
 _PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
 
@@ -900,7 +901,7 @@ def test_verify_and_resolve_calls_resolve_for_fixed_finding():
     ctx = MagicMock()
     ctx.github.get_review_threads.return_value = {12345: "THREAD_NODE_1"}
     ctx.github.get_file_content.return_value = "def foo(): pass"
-    ctx.verifier.is_resolved.return_value = True
+    ctx.verifier.is_resolved.return_value = VerifierVerdict(verdict=True, cost_usd=0.002)
 
     params = MagicMock()
     params.pull_request_id = 1
@@ -934,7 +935,7 @@ def _resolve_ctx_and_finding(is_resolved: bool):
     ctx = MagicMock()
     ctx.github.get_review_threads.return_value = {12345: "THREAD_NODE_1"}
     ctx.github.get_file_content.return_value = "def foo(): pass"
-    ctx.verifier.is_resolved.return_value = is_resolved
+    ctx.verifier.is_resolved.return_value = VerifierVerdict(verdict=is_resolved, cost_usd=0.002)
     params = MagicMock()
     params.pull_request_id = 1
     params.head_sha = "newsha"
@@ -964,6 +965,19 @@ def test_verify_and_resolve_records_spend():
                    if c.args[1] == "delta_verify"]
     assert len(spend_calls) == 1
     assert spend_calls[0].args[2] > 0
+
+
+def test_delta_verify_ledgers_actual_verdict_cost():
+    """The pass sums the verifier's real per-call cost — not a size estimate."""
+    from worker.runner import _verify_and_resolve_findings
+    ctx, params, result, finding = _resolve_ctx_and_finding(is_resolved=True)
+    with patch("worker.runner.writers") as mock_writers:
+        mock_writers.get_open_findings_for_pr.return_value = [finding]
+        _verify_and_resolve_findings(ctx, params, result, "tok", "acme", "widgets", 42, 99)
+    spend = [c for c in mock_writers.record_claude_spend.call_args_list
+             if c.args[1] == "delta_verify"]
+    assert len(spend) == 1
+    assert spend[0].args[2] == 0.002  # exactly the verdict's cost_usd
 
 
 def test_verify_and_resolve_no_outcome_when_not_resolved():
@@ -1023,7 +1037,7 @@ def test_verify_and_resolve_logs_summary():
     ctx = MagicMock()
     ctx.github.get_review_threads.return_value = {12345: "THREAD_NODE_1"}
     ctx.github.get_file_content.return_value = "def foo(): pass"
-    ctx.verifier.is_resolved.return_value = True
+    ctx.verifier.is_resolved.return_value = VerifierVerdict(verdict=True, cost_usd=0.002)
 
     params = MagicMock()
     params.pull_request_id = 1
@@ -1073,7 +1087,7 @@ def test_verify_and_resolve_skips_unfixed_finding():
     ctx = MagicMock()
     ctx.github.get_review_threads.return_value = {12345: "THREAD_NODE_1"}
     ctx.github.get_file_content.return_value = "def foo(): x = user.name"
-    ctx.verifier.is_resolved.return_value = False
+    ctx.verifier.is_resolved.return_value = VerifierVerdict(verdict=False, cost_usd=0.002)
 
     params = MagicMock()
     params.pull_request_id = 1
@@ -1148,7 +1162,7 @@ def test_verify_and_resolve_fetches_each_file_once_and_caps():
 
     ctx = MagicMock()
     ctx.github.get_file_content.return_value = "content"
-    ctx.verifier.is_resolved.return_value = False
+    ctx.verifier.is_resolved.return_value = VerifierVerdict(verdict=False, cost_usd=0.002)
 
     params = MagicMock(); params.pull_request_id = 1; params.head_sha = "newsha"
     result = MagicMock()
