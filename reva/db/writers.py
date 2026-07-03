@@ -1180,7 +1180,13 @@ def compute_planning_basis(params: TicketIssueJobParams) -> str:
     digest = hashlib.sha1(  # nosemgrep: python.lang.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
         key.encode(), usedforsecurity=False
     ).hexdigest()[:16]
-    return prefix + digest
+    basis = prefix + digest
+    if params.issue_type:
+        # A typed request plans separately from an untyped one over the same
+        # text (own marker, no cross-adoption); untyped runs keep the pre-type
+        # basis format so existing markers stay valid.
+        return params.issue_type.lower() + ":" + basis
+    return basis
 
 
 def _normalize_repo_full_name(github_url: str) -> str | None:
@@ -1209,6 +1215,7 @@ def record_ticket_issue_run_created(db: Database, params: TicketIssueJobParams) 
             description=params.description,
             analysis_html=params.analysis_html,
             planning_basis=compute_planning_basis(params),
+            issue_type=params.issue_type,
             priority=params.priority,
             ticket_url=params.ticket_url,
             status="pending",
@@ -1269,6 +1276,7 @@ def get_ticket_issue_run(db: Database, run_id: int) -> dict | None:
             "description": row.description,
             "analysis_html": row.analysis_html,
             "planning_basis": row.planning_basis,
+            "issue_type": row.issue_type,
             "priority": row.priority,
             "ticket_url": row.ticket_url,
             "status": row.status,

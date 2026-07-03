@@ -294,12 +294,20 @@ class TicketJobParams(BaseModel):
 # --- Ticket issue creation types -----------------------------------------------
 
 
+# Work-item type codes: title prefix + GitHub label on every REVA-created issue.
+ISSUE_TYPE_CODES = ("BUG", "FEAT", "CR", "CONF", "DEV", "MIG", "SUP", "DOC")
+IssueTypeCode = Literal["BUG", "FEAT", "CR", "CONF", "DEV", "MIG", "SUP", "DOC"]
+
+
 class TicketIssueItem(BaseModel):
     """One GitHub issue planned from an Odoo ticket."""
 
     title: str
     body: str
     acceptance_criteria: list[str] = Field(default_factory=list)
+    # Defaults to DEV so plans persisted before the type rollout still
+    # validate; the runner overrides it when the request fixes a type.
+    type: IssueTypeCode = "DEV"
 
     @field_validator("title", mode="before")
     @classmethod
@@ -342,6 +350,9 @@ class TicketIssueJobParams(BaseModel):
     description_docx: Attachment | None = None  # tasks only; .docx/.pdf/.txt
     priority: str  # Odoo priority key "0".."3"
     ticket_url: str
+    # Fixed work-item type for every issue of this request (Odoo wizard), or
+    # None to let the planner pick per issue (analysis flow).
+    issue_type: str | None = None
 
 
 class AuditJobParams(BaseModel):

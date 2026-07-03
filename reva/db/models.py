@@ -449,6 +449,9 @@ class TicketIssueRun(Base):
     # A 25-byte digest, not the document — the consultant DOCX itself is never
     # stored server-side; it rides the RQ job params at first-plan time only.
     planning_basis: Mapped[str | None] = mapped_column(Text)
+    # Fixed work-item type for this request ("CR", "BUG", …; migration 023),
+    # or NULL when the planner picks per issue.
+    issue_type: Mapped[str | None] = mapped_column(Text)
     priority: Mapped[str] = mapped_column(Text, nullable=False)
     ticket_url: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
