@@ -67,3 +67,12 @@ class MuteEntry(BaseModel):
     category: str
     muted_by: str
     created_at: datetime
+
+
+class LearnedMemoryEntry(BaseModel):
+    repo: str
+    version: int
+    content: str
+    item_count: int
+    estimated_cost_usd: float | None = None
+    created_at: datetime

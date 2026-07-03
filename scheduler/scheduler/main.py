@@ -43,6 +43,21 @@ def maybe_enqueue_eviction(queue, now, last_eviction, interval_s):
     return now
 
 
+def maybe_distill_memories(queue, db, now, last_distill, interval_s, min_dismissals):
+    """Enqueue per-repo learned-memory distills for repos with fresh dismissal
+    signal, if `interval_s` has elapsed (Tier 3 feature B). Distillation runs on
+    the worker (paid Claude call), so the scheduler triggers it via the queue.
+    Returns the new last-distill timestamp (unchanged if not yet due)."""
+    if last_distill is not None and (now - last_distill).total_seconds() < interval_s:
+        return last_distill
+    due = writers.repos_due_for_memory_distill(db, min_dismissals=min_dismissals)
+    for repo_id in due:
+        queue.enqueue("worker.memory_distill_runner.run_memory_distill", repo_id)
+    if due:
+        logger.info("memory_distill_enqueued", repos=len(due))
+    return now
+
+
 def maybe_purge_ticket_text(db, now, last_purge, interval_s, retention_days):
     """Scrub raw ticket text past the retention window if a purge is due (F1/SECU-8).
 
@@ -114,6 +129,8 @@ def main() -> None:
     last_eviction = datetime.now(timezone.utc)
     # No other trigger drives retention purges, so run one shortly after startup.
     last_purge = None
+    # Memory distillation: run one shortly after startup, then on its interval.
+    last_distill = None
 
     while not stop:
         now = datetime.now(timezone.utc)
@@ -155,6 +172,15 @@ def main() -> None:
             )
         except Exception:
             logger.exception("scheduler_retention_purge_error")
+
+        try:
+            last_distill = maybe_distill_memories(
+                queue, db, now, last_distill,
+                settings.memory_distill_interval_seconds,
+                settings.memory_distill_min_dismissals,
+            )
+        except Exception:
+            logger.exception("scheduler_memory_distill_error")
 
         # Liveness heartbeat — the container healthcheck checks its freshness.
         # Only refresh it when the poll (the DB-dependent core loop) succeeded, so

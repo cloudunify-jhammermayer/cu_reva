@@ -116,3 +116,11 @@ class DatabaseRepoLookup:
     def get_muted_categories(self, repository_id: int) -> set[str]:
         from reva.db import writers
         return writers.get_muted_categories(self._db, repository_id)
+
+    def get_active_memory(self, repository_id: int) -> str | None:
+        from reva.db import writers
+        return writers.get_active_memory(self._db, repository_id)
+
+    def get_active_memory_row(self, repository_id: int) -> dict | None:
+        from reva.db import writers
+        return writers.get_active_memory_row(self._db, repository_id)

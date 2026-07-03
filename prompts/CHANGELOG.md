@@ -1,3 +1,12 @@
+## v2.0 — Learned team preferences on the review path
+
+- All five review skills' "Team configuration" section gains a third optional
+  param, `team_review_preferences`: a distilled per-repo summary of what the
+  team has accepted/dismissed in past reviews (Tier 3 feature B). It adjusts
+  prioritization within the repo and can never suppress a security/bug finding
+  or override severity/output rules. Injected only when an active learned-memory
+  version exists and the repo hasn't set `learned_memory: false`.
+
 ## v1.9 — Team configuration on the review path + verifier re-pricing
 
 - All five review skills gain a "Team configuration" section. Reviews now

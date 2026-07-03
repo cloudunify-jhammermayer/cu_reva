@@ -73,6 +73,9 @@ class RepoConfig(BaseModel):
     # Per-repo override for the second-pass self-critique. None = defer to the
     # global REVA_VERIFY_HIGH_COST setting; True/False force it on/off.
     verify_findings: bool | None = None
+    # Kill switch for per-repo learned memory (Tier 3 B): false disables both
+    # injecting the learned block and distilling new versions for this repo.
+    learned_memory: bool = True
 
 
 # --- Finding ------------------------------------------------------------------
@@ -173,6 +176,9 @@ class ReviewResult(BaseModel):
     error_message: str | None = None
     error_class: Literal["transient", "permanent"] | None = None
     delta_base_sha: str | None = None   # set when this was a delta review
+    # Learned-memory version injected into this review's prompt (Tier 3 B), or
+    # None when none was active/allowed. Runner stamps it onto the run row.
+    learned_memory_version: int | None = None
 
 
 # --- Job parameters -----------------------------------------------------------
@@ -329,6 +335,35 @@ class TicketIssuePlan(BaseModel):
     issues: list[TicketIssueItem] = Field(min_length=1, max_length=10)
 
     @field_validator("issues", mode="before")
+    @classmethod
+    def _parse_json_string_list(cls, v: object) -> object:
+        return _unwrap_json_list(v)
+
+
+MemoryAction = Literal["dont_flag", "raise_bar", "keep_flagging"]
+
+
+class ReviewMemoryItem(BaseModel):
+    """One distilled learned-guidance item (Tier 3 feature B)."""
+
+    guidance: str
+    categories: list[Category] = Field(default_factory=list)
+    action: MemoryAction
+    evidence_count: int = 0
+
+    @field_validator("categories", mode="before")
+    @classmethod
+    def _parse_json_string_list(cls, v: object) -> object:
+        return _unwrap_json_list(v)
+
+
+class ReviewMemoryPlan(BaseModel):
+    """Structured output from the submit_review_memory tool_use call. No hard
+    length cap here — code-side guardrails drop and cap items after validation."""
+
+    items: list[ReviewMemoryItem] = Field(default_factory=list)
+
+    @field_validator("items", mode="before")
     @classmethod
     def _parse_json_string_list(cls, v: object) -> object:
         return _unwrap_json_list(v)

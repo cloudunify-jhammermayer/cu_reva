@@ -20,7 +20,7 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import case, delete, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from reva.cost import estimate_cost
@@ -35,6 +35,7 @@ from reva.db.models import (
     PendingReview,
     PromptVersion,
     PullRequest,
+    RepoReviewMemory,
     Repository,
     ReviewFeedback,
     ReviewFinding,
@@ -999,6 +1000,201 @@ def get_muted_categories(db: Database, repository_id: int) -> set[str]:
             )
         ).all()
     return {r[0] for r in rows}
+
+
+# --- repo review memory (Tier 3 feature B) -----------------------------------
+
+
+def record_repo_memory(
+    db: Database,
+    repository_id: int,
+    *,
+    items: list[dict],
+    content: str,
+    source_stats: dict,
+    response: ClaudeResponse,
+) -> int:
+    """Write the next memory version for a repo and deactivate the prior one in
+    the same transaction (exactly one active row per repo). Returns the new
+    version. content "" is valid — it means "nothing to inject", and writing it
+    supersedes an older non-empty version so guidance can't outlive its evidence."""
+    with db.session() as s:
+        prior = s.execute(
+            select(RepoReviewMemory)
+            .where(RepoReviewMemory.repository_id == repository_id)
+            .order_by(RepoReviewMemory.version.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        next_version = (prior.version + 1) if prior is not None else 1
+        # Deactivate every currently-active row for this repo (normally just one).
+        s.execute(
+            update(RepoReviewMemory)
+            .where(RepoReviewMemory.repository_id == repository_id)
+            .where(RepoReviewMemory.active.is_(True))
+            .values(active=False)
+        )
+        s.add(RepoReviewMemory(
+            repository_id=repository_id,
+            version=next_version,
+            content=content,
+            items=items,
+            source_stats=source_stats,
+            model=response.model,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            estimated_cost_usd=estimate_cost(
+                response.model, response.input_tokens, response.output_tokens,
+                response.cache_read_tokens, response.cache_creation_tokens,
+            ),
+            active=True,
+        ))
+        return next_version
+
+
+def get_active_memory(db: Database, repository_id: int) -> str | None:
+    """Active memory content for a repo, or None when absent or empty ("" means
+    the last distillation produced nothing — inject nothing)."""
+    with db.session() as s:
+        content = s.execute(
+            select(RepoReviewMemory.content)
+            .where(RepoReviewMemory.repository_id == repository_id)
+            .where(RepoReviewMemory.active.is_(True))
+            .limit(1)
+        ).scalar_one_or_none()
+    return content or None
+
+
+def get_active_memory_row(db: Database, repository_id: int) -> dict | None:
+    """Active memory metadata for a repo (API/scheduler): version, content,
+    item count, created_at, cost. None when no version exists."""
+    with db.session() as s:
+        row = s.execute(
+            select(RepoReviewMemory)
+            .where(RepoReviewMemory.repository_id == repository_id)
+            .where(RepoReviewMemory.active.is_(True))
+            .limit(1)
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        return {
+            "version": row.version,
+            "content": row.content,
+            "item_count": len(row.items or []),
+            "created_at": row.created_at,
+            "estimated_cost_usd": float(row.estimated_cost_usd) if row.estimated_cost_usd else None,
+        }
+
+
+def repos_due_for_memory_distill(
+    db: Database, *, min_dismissals: int = 3, window_days: int = 90
+) -> list[int]:
+    """Repository ids due for a memory re-distill: at least `min_dismissals`
+    dismissals in the trailing window AND newer negative feedback than the
+    active memory version's created_at (or no version yet)."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+    with db.session() as s:
+        candidates = s.execute(
+            select(
+                ReviewRun.repository_id,
+                func.count(func.distinct(ReviewFeedback.id)).label("dismissed"),
+                func.max(ReviewFeedback.created_at).label("newest"),
+            )
+            .select_from(ReviewFeedback)
+            .join(ReviewFinding, ReviewFeedback.review_finding_id == ReviewFinding.id)
+            .join(ReviewRun, ReviewFinding.review_run_id == ReviewRun.id)
+            .where(ReviewFeedback.reaction == "dismissed")
+            .where(ReviewFeedback.created_at >= cutoff)
+            .group_by(ReviewRun.repository_id)
+            .having(func.count(func.distinct(ReviewFeedback.id)) >= min_dismissals)
+        ).all()
+        if not candidates:
+            return []
+        repo_ids = [c.repository_id for c in candidates]
+        active = dict(s.execute(
+            select(RepoReviewMemory.repository_id, RepoReviewMemory.created_at)
+            .where(RepoReviewMemory.repository_id.in_(repo_ids))
+            .where(RepoReviewMemory.active.is_(True))
+        ).all())
+    due = []
+    for c in candidates:
+        created = active.get(c.repository_id)
+        if created is None or (c.newest is not None and c.newest > created):
+            due.append(c.repository_id)
+    return due
+
+
+def set_review_run_learned_memory_version(db: Database, run_id: int, version: int) -> None:
+    """Stamp the learned-memory version a review injected (attribution)."""
+    with db.session() as s:
+        row = s.get(ReviewRun, run_id)
+        if row is not None:
+            row.learned_memory_version = version
+
+
+def get_memory_distill_input(
+    db: Database, repository_id: int, *, since_days: int = 90, max_dismissed: int = 30
+) -> dict:
+    """Assemble the distiller's input for one repo over the trailing window:
+    per-category finding/dismiss/fix counts, the most recent dismissed findings
+    (title/category/severity/file — /dismiss carries no free-text reason), and
+    the newest negative-feedback timestamp. Repo-scoped (by repository_id)."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=since_days)
+    with db.session() as s:
+        stat_rows = s.execute(
+            select(
+                ReviewFinding.category,
+                func.count(func.distinct(ReviewFinding.id)).label("findings"),
+                func.count(func.distinct(
+                    case((ReviewFeedback.is_positive.is_(False), ReviewFeedback.review_finding_id))
+                )).label("dismissed"),
+                func.count(func.distinct(
+                    case((ReviewFinding.outcome == "resolved_by_fix", ReviewFinding.id))
+                )).label("resolved_by_fix"),
+                func.count(func.distinct(
+                    case((ReviewFinding.outcome == "still_open_at_merge", ReviewFinding.id))
+                )).label("still_open_at_merge"),
+            )
+            .select_from(ReviewFinding)
+            .join(ReviewRun, ReviewFinding.review_run_id == ReviewRun.id)
+            .outerjoin(ReviewFeedback, ReviewFeedback.review_finding_id == ReviewFinding.id)
+            .where(ReviewRun.repository_id == repository_id)
+            .where(ReviewFinding.created_at >= cutoff)
+            .group_by(ReviewFinding.category)
+            .order_by(ReviewFinding.category)
+        ).all()
+        dismissed_rows = s.execute(
+            select(
+                ReviewFinding.title, ReviewFinding.category,
+                ReviewFinding.severity, ReviewFinding.file_path,
+                ReviewFeedback.created_at,
+            )
+            .select_from(ReviewFeedback)
+            .join(ReviewFinding, ReviewFeedback.review_finding_id == ReviewFinding.id)
+            .join(ReviewRun, ReviewFinding.review_run_id == ReviewRun.id)
+            .where(ReviewRun.repository_id == repository_id)
+            .where(ReviewFeedback.reaction == "dismissed")
+            .where(ReviewFeedback.created_at >= cutoff)
+            .order_by(ReviewFeedback.created_at.desc())
+            .limit(max_dismissed)
+        ).all()
+    category_stats = [
+        {"category": r.category, "findings": r.findings, "dismissed": r.dismissed,
+         "resolved_by_fix": r.resolved_by_fix, "still_open_at_merge": r.still_open_at_merge}
+        for r in stat_rows
+    ]
+    dismissed = [
+        {"title": r.title, "category": r.category, "severity": r.severity,
+         "file_path": r.file_path}
+        for r in dismissed_rows
+    ]
+    newest_feedback_at = dismissed_rows[0].created_at if dismissed_rows else None
+    return {
+        "window_days": since_days,
+        "category_stats": category_stats,
+        "dismissed_findings": dismissed,
+        "dismissed_count": sum(c["dismissed"] for c in category_stats),
+        "newest_feedback_at": newest_feedback_at,
+    }
 
 
 # --- ticket_analyses writers -------------------------------------------------

@@ -65,9 +65,10 @@ type ticketRequeuedMsg struct {
 	err error
 }
 type feedbackLoadedMsg struct {
-	stats []api.LearningStat
-	mutes []api.MuteEntry
-	err   error
+	stats  []api.LearningStat
+	mutes  []api.MuteEntry
+	memory []api.LearnedMemoryEntry
+	err    error
 }
 type odooLoadedMsg struct {
 	data *api.OdooInstancePage

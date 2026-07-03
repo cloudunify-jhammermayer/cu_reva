@@ -1268,3 +1268,120 @@ def test_unmute_excludes_from_active_set(db, seeded):
     writers.set_category_mute(db, repo_id, "style", muted_by="alice", active=True)
     writers.set_category_mute(db, repo_id, "style", muted_by="alice", active=False)
     assert writers.get_muted_categories(db, repo_id) == set()  # active-only
+
+
+# --- repo review memory (Tier 3 feature B) -----------------------------------
+
+
+def test_record_repo_memory_versions_and_active_pointer(db_session):
+    repo_id, _ = _seed_repo_and_pr(db_session)
+    v1 = writers.record_repo_memory(
+        db_session, repo_id, items=[{"guidance": "g1"}], content="block v1",
+        source_stats={"window_days": 90}, response=_claude_response(),
+    )
+    assert v1 == 1
+    assert writers.get_active_memory(db_session, repo_id) == "block v1"
+
+    v2 = writers.record_repo_memory(
+        db_session, repo_id, items=[{"guidance": "g2"}], content="block v2",
+        source_stats={"window_days": 90}, response=_claude_response(),
+    )
+    assert v2 == 2
+    # newest version active; prior deactivated (exactly one active row)
+    assert writers.get_active_memory(db_session, repo_id) == "block v2"
+    row = writers.get_active_memory_row(db_session, repo_id)
+    assert row["version"] == 2 and row["item_count"] == 1
+    assert row["estimated_cost_usd"] > 0
+
+
+def test_empty_memory_content_returns_none(db_session):
+    repo_id, _ = _seed_repo_and_pr(db_session)
+    writers.record_repo_memory(
+        db_session, repo_id, items=[], content="",
+        source_stats={}, response=_claude_response(),
+    )
+    assert writers.get_active_memory(db_session, repo_id) is None
+    assert writers.get_active_memory_row(db_session, repo_id)["version"] == 1  # still recorded
+
+
+def test_get_active_memory_absent_is_none(db_session):
+    repo_id, _ = _seed_repo_and_pr(db_session)
+    assert writers.get_active_memory(db_session, repo_id) is None
+    assert writers.get_active_memory_row(db_session, repo_id) is None
+
+
+def test_set_review_run_learned_memory_version_stamps(db_session):
+    repo_id, pr_id = _seed_repo_and_pr(db_session)
+    run_id = _seed_review_run(db_session, pr_id, repo_id, head_sha="abc", status="completed")
+    writers.set_review_run_learned_memory_version(db_session, run_id, 3)
+    with db_session.session() as s:
+        assert s.get(ReviewRun, run_id).learned_memory_version == 3
+
+
+def test_get_memory_distill_input_aggregates_and_lists_dismissed(db_session):
+    repo_id, pr_id = _seed_repo_and_pr(db_session)
+    run_id = _seed_review_run(db_session, pr_id, repo_id, head_sha="abc", status="completed")
+    keep = _seed_finding(db_session, run_id, file_path="custom_addons/a.py", github_comment_id=11)
+    drop = _seed_finding(db_session, run_id, file_path="custom_addons/b.py", github_comment_id=22)
+    with db_session.session() as s:
+        s.add(ReviewFeedback(
+            review_finding_id=drop, review_run_id=run_id, github_comment_id=22,
+            reactor_login="dev", reaction="dismissed", is_positive=False,
+        ))
+
+    inp = writers.get_memory_distill_input(db_session, repo_id)
+    assert inp["window_days"] == 90
+    assert inp["dismissed_count"] == 1
+    # both findings are category "bug" (seed default) -> one row, 2 findings, 1 dismissed
+    bug = next(c for c in inp["category_stats"] if c["category"] == "bug")
+    assert bug["findings"] == 2 and bug["dismissed"] == 1
+    assert [d["file_path"] for d in inp["dismissed_findings"]] == ["custom_addons/b.py"]
+    assert inp["newest_feedback_at"] is not None
+    assert keep  # referenced
+
+
+def _add_dismissed(db_session, run_id, finding_id, comment_id, created_at=None):
+    with db_session.session() as s:
+        fb = ReviewFeedback(
+            review_finding_id=finding_id, review_run_id=run_id, github_comment_id=comment_id,
+            reactor_login="dev", reaction="dismissed", is_positive=False,
+        )
+        s.add(fb)
+        s.flush()
+        if created_at is not None:
+            fb.created_at = created_at
+
+
+def test_repos_due_for_memory_distill_threshold_and_freshness(db_session):
+    repo_id, pr_id = _seed_repo_and_pr(db_session)
+    run_id = _seed_review_run(db_session, pr_id, repo_id, head_sha="s", status="completed")
+    # 3 dismissals, no memory yet -> due
+    for i in range(3):
+        fid = _seed_finding(db_session, run_id, github_comment_id=100 + i)
+        _add_dismissed(db_session, run_id, fid, 100 + i)
+    assert writers.repos_due_for_memory_distill(db_session, min_dismissals=3) == [repo_id]
+
+    # An active memory NEWER than the newest feedback -> not due
+    from datetime import timedelta
+
+    from sqlalchemy import select as _select
+
+    from reva.db.models import RepoReviewMemory
+    writers.record_repo_memory(
+        db_session, repo_id, items=[], content="", source_stats={}, response=_claude_response(),
+    )
+    with db_session.session() as s:
+        row = s.execute(
+            _select(RepoReviewMemory).where(RepoReviewMemory.repository_id == repo_id)
+        ).scalar_one()
+        row.created_at = datetime.now(timezone.utc) + timedelta(days=1)  # newer than all feedback
+    assert writers.repos_due_for_memory_distill(db_session, min_dismissals=3) == []
+
+
+def test_repos_due_below_threshold_excluded(db_session):
+    repo_id, pr_id = _seed_repo_and_pr(db_session)
+    run_id = _seed_review_run(db_session, pr_id, repo_id, head_sha="s", status="completed")
+    for i in range(2):  # only 2 dismissals
+        fid = _seed_finding(db_session, run_id, github_comment_id=200 + i)
+        _add_dismissed(db_session, run_id, fid, 200 + i)
+    assert writers.repos_due_for_memory_distill(db_session, min_dismissals=3) == []

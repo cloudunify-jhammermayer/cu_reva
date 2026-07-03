@@ -27,6 +27,21 @@ func TestFeedbackLoadAndView(t *testing.T) {
 	}
 }
 
+func TestFeedbackShowsLearnedMemory(t *testing.T) {
+	f := newFeedback(&api.MockClient{})
+	f, _ = f.update(f.load()())
+	if len(f.memory) == 0 {
+		t.Fatal("expected mock learned memory")
+	}
+	// tall viewport so the memory section (rendered after stats + mutes) is visible
+	out := f.view(120, 60)
+	for _, want := range []string{"Learned memory", "v3", "Learned team preferences"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("view missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestFeedbackRefreshKey(t *testing.T) {
 	f := newFeedback(&api.MockClient{})
 	if _, cmd := f.update(keyMsg("r")); cmd == nil {

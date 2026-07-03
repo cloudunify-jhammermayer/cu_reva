@@ -9,6 +9,7 @@ from app.schemas.metrics import (
     DashboardMetrics,
     DeveloperStat,
     FeedbackEntry,
+    LearnedMemoryEntry,
     LearningStat,
     MuteEntry,
 )
@@ -58,3 +59,8 @@ def learning(db: Database = Depends(get_db)) -> list[dict]:
 @router.get("/metrics/mutes", response_model=list[MuteEntry])
 def mutes(db: Database = Depends(get_db)) -> list[dict]:
     return [MuteEntry.model_validate(r) for r in q.active_mutes(db)]
+
+
+@router.get("/metrics/learned-memory", response_model=list[LearnedMemoryEntry])
+def learned_memory(db: Database = Depends(get_db)) -> list[dict]:
+    return [LearnedMemoryEntry.model_validate(r) for r in q.learned_memory(db)]

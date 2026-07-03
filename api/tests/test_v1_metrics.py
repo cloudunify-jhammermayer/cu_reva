@@ -261,3 +261,31 @@ def test_mutes_endpoint_returns_active_only(client_and_db):
     assert [(m["repo"], m["category"], m["muted_by"]) for m in data] == [
         ("acme/widgets", "docs", "bob")
     ]
+
+
+def test_learned_memory_empty(client_and_db):
+    client, _ = client_and_db
+    resp = client.get("/api/v1/metrics/learned-memory")
+    assert resp.status_code == 200 and resp.json() == []
+
+
+def test_learned_memory_returns_active_nonempty_only(client_and_db):
+    from reva.types import ClaudeResponse
+
+    client, db = client_and_db
+    resp_obj = ClaudeResponse(model="claude-sonnet-5", stop_reason="tool_use",
+                              tool_use_input={}, input_tokens=500, output_tokens=80)
+    repo1 = writers.upsert_repository(db, github_repository_id=4004, owner="acme",
+                                      name="widgets", default_branch="main", installation_id=99)
+    writers.record_repo_memory(db, repo1, items=[{"guidance": "g"}],
+                               content="## Learned\n- g", source_stats={}, response=resp_obj)
+    # empty-content version on another repo must be omitted
+    repo2 = writers.upsert_repository(db, github_repository_id=5005, owner="acme",
+                                      name="other", default_branch="main", installation_id=99)
+    writers.record_repo_memory(db, repo2, items=[], content="", source_stats={}, response=resp_obj)
+
+    data = client.get("/api/v1/metrics/learned-memory").json()
+    assert [d["repo"] for d in data] == ["acme/widgets"]
+    assert data[0]["version"] == 1 and data[0]["item_count"] == 1
+    assert data[0]["content"].startswith("## Learned")
+    assert data[0]["estimated_cost_usd"] > 0

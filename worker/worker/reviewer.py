@@ -214,6 +214,10 @@ class RepoLookup(Protocol):
         """Finding categories a trusted user muted for this repo (/mute)."""
         ...
 
+    def get_active_memory_row(self, repository_id: int) -> dict | None:
+        """Active learned-memory row {version, content, ...} or None (Tier 3 B)."""
+        ...
+
 
 class Reviewer:
     def __init__(
@@ -478,6 +482,16 @@ class Reviewer:
                 "The team muted these finding categories for this repo — do not "
                 "report findings in them: " + ", ".join(sorted(muted))
             )
+        # Learned team preferences (Tier 3 B): a distilled "what this team tends to
+        # accept/reject" block, injected only when a version is active and the repo
+        # hasn't opted out. Optional param (prompt-prefix stability); the version
+        # is stamped onto the run row for attribution.
+        learned_memory_version: int | None = None
+        if repo_config.learned_memory:
+            memory_row = self.repos.get_active_memory_row(params.repository_id)
+            if memory_row and memory_row.get("content"):
+                skill_params["team_review_preferences"] = memory_row["content"]
+                learned_memory_version = memory_row["version"]
         # Test-coverage: modules that add new logic with no accompanying tests/.
         # Skipped when `test` is muted (don't prompt for findings we'd delete).
         coverage = [] if "test" in muted else analyze_test_coverage(diff)
@@ -608,6 +622,7 @@ class Reviewer:
             cache_creation_tokens=response.cache_creation_tokens,
             estimated_cost_usd=cost,
             delta_base_sha=delta_base_sha,
+            learned_memory_version=learned_memory_version,
             block_on_severity=repo_config.block_on_severity,
         )
 

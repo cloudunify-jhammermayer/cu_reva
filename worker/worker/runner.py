@@ -30,6 +30,7 @@ from reva.claude_code_runner import ClaudeCodeRunner
 from reva.notifications import notify_operational_alert, notify_worker_error
 from reva.odoo_client import OdooCallbackClient
 from reva.ticket_analyzer import TicketAnalyzer
+from reva.memory_distiller import MemoryDistiller
 from reva.ticket_issue_planner import TicketIssuePlanner
 from reva.db import (
     Database,
@@ -86,8 +87,9 @@ class WorkerContext:
     ticket_analyzer: TicketAnalyzer
     verifier: FindingVerifier
     # Default None keeps existing WorkerContext call sites/fixtures valid;
-    # build_worker_context always wires it.
+    # build_worker_context always wires them.
     ticket_issue_planner: TicketIssuePlanner | None = None
+    memory_distiller: MemoryDistiller | None = None
     google_chat_webhook_url: str = ""
     daily_budget_usd: float | None = None
     repo_cache_ttl_days: int = 30
@@ -161,6 +163,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
     )
     ticket_analyzer = TicketAnalyzer(claude=claude, prompts_dir=settings.prompts_dir)
     ticket_issue_planner = TicketIssuePlanner(claude=claude, prompts_dir=settings.prompts_dir)
+    memory_distiller = MemoryDistiller(claude=claude, prompts_dir=settings.prompts_dir)
     context = WorkerContext(
         db=db,
         claude=claude,
@@ -170,6 +173,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         auditor=auditor,
         ticket_analyzer=ticket_analyzer,
         ticket_issue_planner=ticket_issue_planner,
+        memory_distiller=memory_distiller,
         verifier=verifier,
         google_chat_webhook_url=settings.google_chat_webhook_url,
         daily_budget_usd=settings.daily_budget_usd,
@@ -363,6 +367,10 @@ def _execute_and_persist(
 
     if result.status == "completed":
         writers.record_review_completed(ctx.db, params, result)
+        if result.learned_memory_version is not None:
+            writers.set_review_run_learned_memory_version(
+                ctx.db, run_id, result.learned_memory_version
+            )
     elif result.status == "declined":
         writers.record_review_declined(ctx.db, params, result.decline_reason or "Declined.")
     elif result.status == "stale":

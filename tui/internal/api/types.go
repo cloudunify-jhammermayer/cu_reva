@@ -235,6 +235,17 @@ type MuteEntry struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// LearnedMemoryEntry is one repo's active learned-review-memory block (Tier-3
+// feature B). Served by GET /api/v1/metrics/learned-memory.
+type LearnedMemoryEntry struct {
+	Repo             string    `json:"repo"`
+	Version          int       `json:"version"`
+	Content          string    `json:"content"`
+	ItemCount        int       `json:"item_count"`
+	EstimatedCostUSD *float64  `json:"estimated_cost_usd"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
 type TaskCost struct {
 	CostUSD      float64 `json:"cost_usd"`
 	InputTokens  int     `json:"input_tokens"`

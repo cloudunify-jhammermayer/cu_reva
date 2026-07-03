@@ -104,6 +104,7 @@ class FakeRepos:
     prior_open_findings: list[dict] = field(default_factory=list)
     prior_open_findings_calls: int = 0
     muted_categories: set[str] = field(default_factory=set)
+    active_memory_row: dict | None = None
 
     def get_owner_name(self, repository_id: int) -> tuple[str, str]:
         return self.owner, self.name
@@ -120,6 +121,9 @@ class FakeRepos:
 
     def get_muted_categories(self, repository_id: int) -> set[str]:
         return self.muted_categories
+
+    def get_active_memory_row(self, repository_id: int) -> dict | None:
+        return self.active_memory_row
 
 
 @dataclass
@@ -1536,6 +1540,45 @@ def test_custom_instructions_truncated_at_cap():
     reviewer, *_ = _make_reviewer(runner=runner, github=github)
     reviewer.execute(_params())
     assert len(runner.last_params["custom_instructions"]) == 4000
+
+
+# --- learned memory injection (Tier 3 feature B) ------------------------------
+
+
+def test_team_review_preferences_injected_and_stamped():
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    repos = FakeRepos(active_memory_row={"version": 4, "content": "## Learned\n- x"})
+    reviewer, *_ = _make_reviewer(runner=runner, repos=repos)
+    result = reviewer.execute(_params())
+    assert runner.last_params["team_review_preferences"] == "## Learned\n- x"
+    assert result.learned_memory_version == 4
+
+
+def test_team_review_preferences_absent_without_memory():
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(runner=runner, repos=FakeRepos(active_memory_row=None))
+    result = reviewer.execute(_params())
+    assert "team_review_preferences" not in runner.last_params
+    assert result.learned_memory_version is None
+
+
+def test_empty_memory_content_not_injected():
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    repos = FakeRepos(active_memory_row={"version": 2, "content": ""})
+    reviewer, *_ = _make_reviewer(runner=runner, repos=repos)
+    result = reviewer.execute(_params())
+    assert "team_review_preferences" not in runner.last_params
+    assert result.learned_memory_version is None
+
+
+def test_learned_memory_kill_switch_disables_injection():
+    github = FakeGitHub(file_contents={".claude-review.yml": "learned_memory: false\n"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    repos = FakeRepos(active_memory_row={"version": 5, "content": "## Learned\n- x"})
+    reviewer, *_ = _make_reviewer(runner=runner, github=github, repos=repos)
+    result = reviewer.execute(_params())
+    assert "team_review_preferences" not in runner.last_params
+    assert result.learned_memory_version is None
 
 
 # --- migration-safety routing (feature 7) ------------------------------------

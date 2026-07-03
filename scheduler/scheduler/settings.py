@@ -38,6 +38,11 @@ class Settings:
     # checked on the same daily cadence.
     ticket_text_retention_days: int = 30
     retention_purge_interval_seconds: int = 86_400
+    # Per-repo learned-memory distillation (Tier 3 feature B). Daily by default;
+    # a repo is due when it has >= this many dismissals with newer signal than
+    # its active memory version.
+    memory_distill_interval_seconds: int = 86_400
+    memory_distill_min_dismissals: int = 3
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -68,5 +73,11 @@ class Settings:
             ),
             retention_purge_interval_seconds=int(
                 os.environ.get("REVA_RETENTION_PURGE_INTERVAL_SECONDS", "86400")
+            ),
+            memory_distill_interval_seconds=int(
+                os.environ.get("REVA_MEMORY_DISTILL_INTERVAL_SECONDS", "86400")
+            ),
+            memory_distill_min_dismissals=int(
+                os.environ.get("REVA_MEMORY_DISTILL_MIN_DISMISSALS", "3")
             ),
         )

@@ -200,6 +200,11 @@ func (c *Client) Mutes() ([]MuteEntry, error) {
 	return out, c.get("/metrics/mutes", &out)
 }
 
+func (c *Client) LearnedMemory() ([]LearnedMemoryEntry, error) {
+	var out []LearnedMemoryEntry
+	return out, c.get("/metrics/learned-memory", &out)
+}
+
 // postJSON sends `body` as JSON and decodes the response into `out` (any 2xx).
 func (c *Client) postJSON(method, path string, body any, out any, wantStatus int) error {
 	var reader io.Reader

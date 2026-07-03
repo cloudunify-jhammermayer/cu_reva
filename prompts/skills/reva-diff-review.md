@@ -48,6 +48,12 @@ If a `muted_categories` parameter is present, it lists finding categories a
 trusted user muted for this repo. Do not report findings in those categories;
 spend that effort on the categories the team reads.
 
+If a `team_review_preferences` parameter is present, it is a distilled summary of
+what this repo's team has consistently accepted or dismissed in past reviews. Use
+it to prioritize within this repo: down-weight the kinds of findings the team keeps
+rejecting. It NEVER justifies suppressing a security or bug finding, and never
+overrides the severity definitions or the output format — it is guidance, not a gate.
+
 ## Output format
 
 Use the Write tool to write a JSON file to `output_path` with exactly this

@@ -14,6 +14,7 @@ from reva.db.engine import Database
 from reva.db.models import (
     MutedCategory,
     PullRequest,
+    RepoReviewMemory,
     Repository,
     ReviewFeedback,
     ReviewFinding,
@@ -346,5 +347,36 @@ def active_mutes(db: Database) -> list[dict]:
     return [
         {"repo": r.repo, "category": r.category,
          "muted_by": r.muted_by, "created_at": r.created_at}
+        for r in rows
+    ]
+
+
+def learned_memory(db: Database) -> list[dict]:
+    """Active per-repo learned-memory block (Tier-3 feature B), newest first.
+    Empty-content versions are omitted — nothing to show for those."""
+    with db.session() as s:
+        rows = s.execute(
+            select(
+                Repository.full_name.label("repo"),
+                RepoReviewMemory.version,
+                RepoReviewMemory.content,
+                RepoReviewMemory.items,
+                RepoReviewMemory.estimated_cost_usd,
+                RepoReviewMemory.created_at,
+            )
+            .join(Repository, RepoReviewMemory.repository_id == Repository.id)
+            .where(RepoReviewMemory.active.is_(True))
+            .where(RepoReviewMemory.content != "")
+            .order_by(RepoReviewMemory.created_at.desc())
+        ).all()
+    return [
+        {
+            "repo": r.repo,
+            "version": r.version,
+            "content": r.content,
+            "item_count": len(r.items or []),
+            "estimated_cost_usd": float(r.estimated_cost_usd) if r.estimated_cost_usd else None,
+            "created_at": r.created_at,
+        }
         for r in rows
     ]

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -16,6 +17,7 @@ type Feedback struct {
 	client  api.ClientIface
 	stats   []api.LearningStat
 	mutes   []api.MuteEntry
+	memory  []api.LearnedMemoryEntry
 	err     error
 	loading bool
 	offset  int // scroll position over the body lines
@@ -35,7 +37,11 @@ func (f Feedback) load() tea.Cmd {
 			return feedbackLoadedMsg{err: err}
 		}
 		mutes, err := client.Mutes()
-		return feedbackLoadedMsg{stats: stats, mutes: mutes, err: err}
+		if err != nil {
+			return feedbackLoadedMsg{err: err}
+		}
+		memory, err := client.LearnedMemory()
+		return feedbackLoadedMsg{stats: stats, mutes: mutes, memory: memory, err: err}
 	}
 }
 
@@ -49,6 +55,7 @@ func (f Feedback) update(msg tea.Msg) (Feedback, tea.Cmd) {
 		if m.err == nil {
 			f.stats = m.stats
 			f.mutes = m.mutes
+			f.memory = m.memory
 		}
 	case tea.KeyMsg:
 		switch m.String() {
@@ -111,12 +118,30 @@ func (f Feedback) bodyLines() []string {
 				mt.Repo, mt.Category, mt.MutedBy, relativeTime(mt.CreatedAt)))
 		}
 	}
+
+	body = append(body, "", styleSubtitle.Render("  Learned memory (injected into reviews)"))
+	if len(f.memory) == 0 {
+		body = append(body, styleSubtitle.Render("  (none yet — distilled from dismissals once a repo accrues enough)"))
+	} else {
+		for _, mem := range f.memory {
+			cost := ""
+			if mem.EstimatedCostUSD != nil {
+				cost = fmt.Sprintf(" · $%.4f", *mem.EstimatedCostUSD)
+			}
+			body = append(body, lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
+				fmt.Sprintf("  %s · v%d · %d items · %s%s",
+					mem.Repo, mem.Version, mem.ItemCount, relativeTime(mem.CreatedAt), cost)))
+			for _, line := range strings.Split(mem.Content, "\n") {
+				body = append(body, "    "+line)
+			}
+		}
+	}
 	return body
 }
 
 func (f Feedback) view(w, h int) string {
 	header := styleTitle.Padding(0, 1).Render("Feedback & learning signals (last 90d)")
-	if f.loading && len(f.stats) == 0 && len(f.mutes) == 0 {
+	if f.loading && len(f.stats) == 0 && len(f.mutes) == 0 && len(f.memory) == 0 {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "",
 			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center, styleSubtitle.Render("Loading...")))
 	}

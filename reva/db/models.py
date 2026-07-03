@@ -172,6 +172,9 @@ class ReviewRun(Base):
     error_class: Mapped[str | None] = mapped_column(Text)
     worker_id: Mapped[str | None] = mapped_column(Text)
     claimed_by_job_id: Mapped[str | None] = mapped_column(Text)  # CONC-1 atomic claim
+    # Learned-memory version injected into this review's prompt (migration 024),
+    # or NULL when no memory was active. Attribution for dismiss-rate trends.
+    learned_memory_version: Mapped[int | None] = mapped_column(Integer)
     # Set when an explicit re-review clears the row's posted state; scopes crash
     # recovery to the current attempt (H3). NULL until first re-review.
     reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -363,6 +366,44 @@ class MutedCategory(Base):
         # Partial, matching migration 016 — the lookup only wants active mutes.
         Index(
             "idx_muted_categories_repo", "repository_id",
+            postgresql_where=text("active"), sqlite_where=text("active"),
+        ),
+    )
+
+
+# ------------------------------------------------------ repo_review_memory
+
+
+class RepoReviewMemory(Base):
+    """Per-repo learned review guidance (Tier 3 / feature B; migration 024).
+
+    Append-only versions distilled from dismissed-finding history; exactly one
+    active row per repo (record_repo_memory deactivates the prior version in the
+    same transaction). content "" = distillation produced nothing to inject."""
+
+    __tablename__ = "repo_review_memory"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    repository_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    items: Mapped[Any | None] = mapped_column(JSON)
+    source_stats: Mapped[Any | None] = mapped_column(JSON)
+    model: Mapped[str | None] = mapped_column(Text)
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    estimated_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("repository_id", "version", name="uq_repo_memory_version"),
+        Index(
+            "idx_repo_review_memory_active", "repository_id",
             postgresql_where=text("active"), sqlite_where=text("active"),
         ),
     )

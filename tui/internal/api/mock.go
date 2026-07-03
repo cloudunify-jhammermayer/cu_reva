@@ -602,6 +602,22 @@ func (m *MockClient) Mutes() ([]MuteEntry, error) {
 	}, nil
 }
 
+func (m *MockClient) LearnedMemory() ([]LearnedMemoryEntry, error) {
+	cost := 0.012
+	return []LearnedMemoryEntry{
+		{
+			Repo:    "acme/odoo-modules",
+			Version: 3,
+			Content: "## Learned team preferences (from review feedback)\n\n" +
+				"- This team dismisses style comments on generated XML views — do not raise them. (11 signals)\n" +
+				"- Raise the bar on docs findings; only flag missing docstrings on public APIs. (4 signals)",
+			ItemCount:        2,
+			EstimatedCostUSD: &cost,
+			CreatedAt:        time.Now().Add(-24 * time.Hour),
+		},
+	}, nil
+}
+
 func (m *MockClient) OdooInstances() (*OdooInstancePage, error) {
 	now := time.Now()
 	mk := func(c float64, in, out, n int) TaskCost {
