@@ -6,10 +6,13 @@ also called directly by runner.run_review without going through the adapter.
 
 from __future__ import annotations
 
+import structlog
 from sqlalchemy import select
 
 from reva.db.engine import Database
 from reva.db.models import PullRequest, Repository, ReviewRun
+
+logger = structlog.get_logger()
 
 
 def get_owner_name(db: Database, repository_id: int) -> tuple[str, str]:
@@ -98,10 +101,17 @@ class DatabaseRepoLookup:
         return get_last_completed_review(self._db, pull_request_id)
 
     def get_prior_open_findings(self, pull_request_id: int) -> list[dict]:
-        # Most-recent completed run's posted findings (= the delta base's open
-        # threads). Local import avoids a package-init cycle with writers.
+        # PR-wide open threads (the "already flagged, don't re-post" prompt
+        # context). Local import avoids a package-init cycle with writers.
         from reva.db import writers
-        return writers.get_open_findings_for_pr(self._db, pull_request_id)
+        findings = writers.get_open_findings_for_pr(self._db, pull_request_id)
+        # Cap the prompt context so a long-lived PR can't bloat it. The list is
+        # oldest-first, so keep the 30 NEWEST. The resolution pass reads the full
+        # set directly (its own cap of 20, oldest first) — this cap is prompt-only.
+        if len(findings) > 30:
+            logger.info("prior_open_findings_truncated", total=len(findings), cap=30)
+            findings = findings[-30:]
+        return findings
 
     def get_muted_categories(self, repository_id: int) -> set[str]:
         from reva.db import writers

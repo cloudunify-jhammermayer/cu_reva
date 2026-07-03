@@ -1279,3 +1279,46 @@ def test_register_prompt_version_swallows_get_version_error(monkeypatch):
 
     # Boot must never be blocked by a registry failure.
     _register_prompt_version(db, BadPrompts(), _prompt_settings())
+
+
+# --- resolution pass fires on every completed review + budget gate ------------
+
+
+def _post_ctx_result():
+    ctx = MagicMock()
+    params = MagicMock()
+    params.installation_id = 1
+    result = _completed_result()          # delta_base_sha defaults to None (full review)
+    assert result.delta_base_sha is None
+    return ctx, params, result
+
+
+def test_resolution_pass_fires_on_full_non_delta_review():
+    """The gate no longer keys off delta_base_sha: a completed full review (e.g.
+    after a rebase) still runs the thread-resolution pass."""
+    from worker.runner import _post_result_to_github
+    ctx, params, result = _post_ctx_result()
+    with patch("worker.runner.writers") as mw, \
+         patch("worker.runner._backfill_comment_ids"), \
+         patch("worker.runner._set_risk_label"), \
+         patch("worker.runner.budget_exceeded", return_value=None), \
+         patch("worker.runner._verify_and_resolve_findings") as resolve:
+        mw.get_posted_github_ids.return_value = (1, 1)   # skip check/review recovery
+        _post_result_to_github(ctx, params, result, 99, "o", "r", 42, MagicMock())
+    resolve.assert_called_once()
+
+
+def test_resolution_pass_skipped_when_budget_exceeded():
+    from worker.runner import _post_result_to_github
+    ctx, params, result = _post_ctx_result()
+    log = MagicMock()
+    with patch("worker.runner.writers") as mw, \
+         patch("worker.runner._backfill_comment_ids"), \
+         patch("worker.runner._set_risk_label"), \
+         patch("worker.runner.budget_exceeded", return_value=12.34), \
+         patch("worker.runner._verify_and_resolve_findings") as resolve:
+        mw.get_posted_github_ids.return_value = (1, 1)
+        _post_result_to_github(ctx, params, result, 99, "o", "r", 42, log)
+    resolve.assert_not_called()
+    assert any(c.args and c.args[0] == "delta_resolution_budget_skip"
+               for c in log.info.call_args_list)

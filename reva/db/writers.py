@@ -795,20 +795,24 @@ def set_audit_finding_issue_number(db: Database, finding_id: int, issue_number: 
 
 
 def get_open_findings_for_pr(db: Database, pull_request_id: int, before_run_id: int | None = None) -> list[dict]:
-    """Return findings with a github_comment_id from the most recent completed review.
+    """Posted, still-open findings across ALL completed runs of the PR, oldest first.
 
-    Pass before_run_id to exclude the current run and target the prior review.
+    A finding qualifies when it has a github_comment_id (actually posted inline),
+    outcome 'open' (not resolved / closed at merge), and carries no 'dismissed'
+    feedback. Pass before_run_id to exclude the current run's own findings.
+
+    PR-wide on purpose: the previous version looked only at the single most-recent
+    completed run, so any still-open thread from an earlier run became invisible
+    the moment a later run completed — including a delta run that found nothing.
+    A fix on the second push after a review then never resolved its thread.
     """
     with db.session() as s:
-        subq = (
-            select(ReviewRun.id)
-            .where(ReviewRun.pull_request_id == pull_request_id)
-            .where(ReviewRun.status == "completed")
+        dismissed = (
+            select(ReviewFeedback.id)
+            .where(ReviewFeedback.review_finding_id == ReviewFinding.id)
+            .where(ReviewFeedback.reaction == "dismissed")
         )
-        if before_run_id is not None:
-            subq = subq.where(ReviewRun.id < before_run_id)
-        subq = subq.order_by(ReviewRun.completed_at.desc()).limit(1).scalar_subquery()
-        rows = s.execute(
+        q = (
             select(
                 ReviewFinding.id,
                 ReviewFinding.file_path,
@@ -819,9 +823,17 @@ def get_open_findings_for_pr(db: Database, pull_request_id: int, before_run_id: 
                 ReviewFinding.category,
                 ReviewFinding.github_comment_id,
             )
-            .where(ReviewFinding.review_run_id == subq)
+            .join(ReviewRun, ReviewFinding.review_run_id == ReviewRun.id)
+            .where(ReviewRun.pull_request_id == pull_request_id)
+            .where(ReviewRun.status == "completed")
             .where(ReviewFinding.github_comment_id.is_not(None))
-        ).all()
+            .where(ReviewFinding.outcome == "open")
+            .where(~dismissed.exists())
+            .order_by(ReviewFinding.id.asc())  # oldest first: longest-open threads win the cap
+        )
+        if before_run_id is not None:
+            q = q.where(ReviewRun.id < before_run_id)
+        rows = s.execute(q).all()
     return [
         {
             "id": r[0],

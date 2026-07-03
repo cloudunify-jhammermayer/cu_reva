@@ -24,6 +24,7 @@ from reva.db.models import (
     GithubEvent,
     PendingReview,
     Repository,
+    ReviewFeedback,
     ReviewFinding,
     ReviewRun,
     TicketAnalysis,
@@ -563,7 +564,7 @@ def _seed_review_run(db: Database, pr_id: int, repo_id: int, *, head_sha: str = 
         return run.id
 
 
-def _seed_finding(db: Database, run_id: int, *, file_path: str = "custom_addons/foo.py", github_comment_id=None) -> int:
+def _seed_finding(db: Database, run_id: int, *, file_path: str = "custom_addons/foo.py", github_comment_id=None, outcome="open") -> int:
     with db.session() as s:
         f = ReviewFinding(
             review_run_id=run_id,
@@ -575,6 +576,7 @@ def _seed_finding(db: Database, run_id: int, *, file_path: str = "custom_addons/
             body="Test body",
             confidence=0.8,
             github_comment_id=github_comment_id,
+            outcome=outcome,
         )
         s.add(f)
         s.flush()
@@ -623,20 +625,55 @@ def test_get_open_findings_for_pr_returns_findings_with_comment_ids(db_session):
     assert findings[0]["github_comment_id"] == 999
 
 
-def test_get_open_findings_for_pr_uses_most_recent_run(db_session):
-    from datetime import timedelta
+def test_get_open_findings_for_pr_unions_across_runs_oldest_first(db_session):
+    # PR-wide: open threads from every completed run are returned, oldest first.
     repo_id, pr_id = _seed_repo_and_pr(db_session)
-    now = datetime.now(timezone.utc)
-    old_run = _seed_review_run(db_session, pr_id, repo_id, head_sha="old", status="completed",
-                                completed_at=now - timedelta(seconds=10))
-    new_run = _seed_review_run(db_session, pr_id, repo_id, head_sha="new", status="completed",
-                                completed_at=now)
+    old_run = _seed_review_run(db_session, pr_id, repo_id, head_sha="old", status="completed")
+    new_run = _seed_review_run(db_session, pr_id, repo_id, head_sha="new", status="completed")
     _seed_finding(db_session, old_run, file_path="custom_addons/old.py", github_comment_id=111)
     _seed_finding(db_session, new_run, file_path="custom_addons/new.py", github_comment_id=222)
 
     findings = get_open_findings_for_pr(db_session, pr_id)
-    assert len(findings) == 1
-    assert findings[0]["file_path"] == "custom_addons/new.py"
+    assert [f["file_path"] for f in findings] == ["custom_addons/old.py", "custom_addons/new.py"]
+
+
+def test_get_open_findings_for_pr_reproduction_survives_intermediate_empty_run(db_session):
+    # The bug: run 1 posts F, run 2 completes with nothing, and the lookback before
+    # run 3 must STILL see F (it used to hide behind the empty run 2).
+    repo_id, pr_id = _seed_repo_and_pr(db_session)
+    run1 = _seed_review_run(db_session, pr_id, repo_id, head_sha="s1", status="completed")
+    _seed_finding(db_session, run1, file_path="custom_addons/f.py", github_comment_id=111)
+    _seed_review_run(db_session, pr_id, repo_id, head_sha="s2", status="completed")  # empty
+    run3 = _seed_review_run(db_session, pr_id, repo_id, head_sha="s3", status="completed")
+
+    findings = get_open_findings_for_pr(db_session, pr_id, before_run_id=run3)
+    assert [f["github_comment_id"] for f in findings] == [111]
+
+
+def test_get_open_findings_for_pr_excludes_non_open_outcome(db_session):
+    repo_id, pr_id = _seed_repo_and_pr(db_session)
+    run_id = _seed_review_run(db_session, pr_id, repo_id, head_sha="abc", status="completed")
+    _seed_finding(db_session, run_id, file_path="custom_addons/open.py", github_comment_id=111)
+    _seed_finding(db_session, run_id, file_path="custom_addons/done.py", github_comment_id=222,
+                  outcome="resolved_by_fix")
+
+    findings = get_open_findings_for_pr(db_session, pr_id)
+    assert [f["github_comment_id"] for f in findings] == [111]
+
+
+def test_get_open_findings_for_pr_excludes_dismissed(db_session):
+    repo_id, pr_id = _seed_repo_and_pr(db_session)
+    run_id = _seed_review_run(db_session, pr_id, repo_id, head_sha="abc", status="completed")
+    keep = _seed_finding(db_session, run_id, file_path="custom_addons/keep.py", github_comment_id=111)
+    drop = _seed_finding(db_session, run_id, file_path="custom_addons/drop.py", github_comment_id=222)
+    with db_session.session() as s:
+        s.add(ReviewFeedback(
+            review_finding_id=drop, review_run_id=run_id, github_comment_id=222,
+            reactor_login="dev", reaction="dismissed", is_positive=False,
+        ))
+
+    findings = get_open_findings_for_pr(db_session, pr_id)
+    assert [f["id"] for f in findings] == [keep]
 
 
 def test_get_open_findings_for_pr_excludes_current_run_with_before_run_id(db_session):
@@ -1193,6 +1230,18 @@ def test_get_prior_open_findings_returns_only_posted(db, seeded):
 
 def test_get_prior_open_findings_empty_when_no_completed_run(db, seeded):
     assert DatabaseRepoLookup(db).get_prior_open_findings(seeded["pull_request_id"]) == []
+
+
+def test_get_prior_open_findings_caps_at_30_newest(db, seeded):
+    # Prompt-context cap: a long-lived PR can accumulate many open threads, but the
+    # "already flagged" list is capped at the 30 newest (list is oldest-first).
+    ids = _seed_findings(db, seeded, 31)
+    writers.attach_finding_comment_ids(db, {fid: 900 + i for i, fid in enumerate(ids)})
+    found = DatabaseRepoLookup(db).get_prior_open_findings(seeded["pull_request_id"])
+    assert len(found) == 30
+    got = {f["id"] for f in found}
+    assert ids[0] not in got      # oldest dropped
+    assert ids[-1] in got         # newest kept
 
 
 # --- muted categories (Tier 3 feature A) -------------------------------------

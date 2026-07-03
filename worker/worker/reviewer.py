@@ -298,8 +298,9 @@ class Reviewer:
         # Delta detection: if a prior completed review exists AND its head is an
         # ancestor of the current head, review only the compare diff. A rebase /
         # squash / force-push makes the prior head a non-ancestor, so the two-dot
-        # compare diff would be garbage — fall back to a full review for that push
-        # (and skip the resolution pass, which keys off delta_base_sha).
+        # compare diff would be garbage — fall back to a full review for that push.
+        # (The thread-resolution pass runs on every completed review either way, so
+        # divergence now only affects diff scope, not resolution.)
         last_review = self.repos.get_last_completed_review(params.pull_request_id)
         prior_findings: list[dict] = []
         use_delta = False

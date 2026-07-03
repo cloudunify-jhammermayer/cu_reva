@@ -422,8 +422,14 @@ def _post_result_to_github(
                 writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id)
             _backfill_comment_ids(ctx, run_id, token, owner, name, pr_number, review_id)
             _set_risk_label(ctx, token, owner, name, pr_number, result.risk_level, log)
-            if result.delta_base_sha:
+            # Runs on every completed review, not just deltas: a full review after a
+            # rebase/force-push must still resolve threads fixed since the last run.
+            # Pre-flight budget gate (same shape as the self-critique gating): each
+            # candidate is a paid verifier call, so skip when the rolling cap is blown.
+            if budget_exceeded(ctx) is None:
                 _verify_and_resolve_findings(ctx, params, result, token, owner, name, pr_number, run_id)
+            else:
+                log.info("delta_resolution_budget_skip", run_id=run_id)
         elif result.status == "declined":
             check_run_id = _check_run_id_or_recover(
                 ctx, token, owner, name, params.head_sha,
@@ -752,6 +758,11 @@ def _verify_and_resolve_findings(
     Bounded: fetches each touched file's content once (not per finding), caps the
     number of findings verified, and bails out after repeated verification errors
     (e.g. Claude rate limiting) so the post path can't stall or burn cost.
+
+    Runs after every completed review (delta or full) — divergence only changes the
+    diff scope, not resolution; the candidate set is open threads in the touched
+    files, which a full review's whole-PR diff covers too. The caller applies the
+    pre-flight budget gate (each candidate is a paid verifier call).
     """
     try:
         threads = ctx.github.get_review_threads(token, owner, name, pr_number)
