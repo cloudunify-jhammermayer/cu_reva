@@ -40,9 +40,9 @@ At the same time, **all** REVA-created issues move to a new title convention.
    *optional* field `issue_type`. The wizard flow is a normal create-issues run whose
    `description` is the wizard text and whose `analysis_html` is `""`.
 5. **One epic per ticket**: new issues attach as sub-issues to the ticket's existing
-   parent issue when one exists (even a single new issue). A new parent is created only
-   when none exists yet **and** the request yields ≥ 2 issues; it then becomes the
-   ticket's epic for future requests.
+   parent issue when one exists (even a single new issue). When none exists yet, a new
+   parent is created regardless of how many issues the request yields (updated
+   2026-07-03; originally ≥ 2); it then becomes the ticket's epic for future requests.
 6. **Type as GitHub label**: each issue gets its type code as a label alongside
    `reva-ticket`.
 7. **Claude formats the request**: the planner produces the ≤30-char tldr and a clean,

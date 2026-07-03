@@ -363,8 +363,8 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             log.info("ticket_issue_parent_adopted", issue=parent.get("number"))
 
     if issues is not None:
-        need_parent = parent is not None or (
-            len(issues) >= 2 and any(i.get("number") is None for i in issues)
+        need_parent = parent is not None or any(
+            i.get("number") is None for i in issues
         )
         done = all(i.get("number") is not None for i in issues)
         if need_parent:
@@ -421,13 +421,13 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             cost = writers.record_ticket_issue_plan(ctx.db, params.run_id, issues, response)
             writers.record_claude_spend(ctx.db, "ticket_issues", cost)
 
-    # An adopted/existing parent attaches everything (even a single new issue);
-    # a new parent is only created for >= 2 issues when none exists anywhere.
-    # Pre-feature runs reconciled with all issues already created and no parent
-    # stay flat — we don't backfill epics (spec scope), and attaching them is
-    # impossible anyway (no GitHub id on legacy items).
-    need_parent = parent is not None or (
-        len(issues) >= 2 and any(i.get("number") is None for i in issues)
+    # Every ticket gets an epic: whenever anything is still to create, adopt the
+    # ticket's existing parent or create one — including single-issue (typed
+    # wizard) requests. Pre-feature runs reconciled with all issues already
+    # created and no parent stay flat — we don't backfill epics (spec scope),
+    # and attaching them is impossible anyway (no GitHub id on legacy items).
+    need_parent = parent is not None or any(
+        i.get("number") is None for i in issues
     )
 
     ctx.github.ensure_label(

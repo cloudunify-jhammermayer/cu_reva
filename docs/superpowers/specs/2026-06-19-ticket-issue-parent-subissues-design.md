@@ -59,6 +59,12 @@ each child, then attach each child to the parent. When the plan has **1** issue:
 behave exactly as today (no parent). The Odoo callbacks are unaffected in both
 cases.
 
+> **Update 2026-07-03:** the single-issue exception was removed — every plan
+> that still has issues to create gets the epic (created or adopted), so
+> single-issue requests attach too. Only pre-existing fully-created flat sets
+> stay flat (no backfill). Decision 3 and the "1 issue → no parent" test below
+> describe the original rollout.
+
 ### `reva/github_client.py`
 
 - `create_issue()` → additionally return `id` (capture `data["id"]`).
