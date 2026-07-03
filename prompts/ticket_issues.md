@@ -26,7 +26,8 @@ The ticket may be written in German or English. **Write the issues always in Eng
 
 ## What each issue must contain
 
-- `title` — short, imperative, specific (e.g. "Add login form validation", not "Login page").
+- `title` — a TLDR of the work: **at most 30 characters**, imperative, specific (e.g. "Add login form validation"). The system renders the full GitHub title itself (`[TYPE] <ticket_id> - <tldr> (n/total)`).
+- `type` — the work-item code, exactly one of: `BUG` (defect fix), `FEAT` (new functionality), `CR` (change request to existing behaviour), `CONF` (configuration/setup), `DEV` (internal development/refactoring), `MIG` (migration), `SUP` (support task), `DOC` (documentation). When the request specifies a fixed type, set that type on every issue.
 - `body` — the requirement, in Markdown, self-contained: what to build, for whom, the expected behaviour, and any relevant constraints from the ticket.
 - `acceptance_criteria` — verifiable pass/fail conditions for **this** issue, one sentence each. Derive them from the analysis when present, otherwise from the ticket text.
 

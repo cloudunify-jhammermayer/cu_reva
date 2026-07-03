@@ -1,3 +1,11 @@
+## v1.8 — Issue types + tldr titles for ticket-issue planning
+
+- `ticket_issues.md`: each planned issue now carries a `type` code
+  (`BUG`/`FEAT`/`CR`/`CONF`/`DEV`/`MIG`/`SUP`/`DOC`) and `title` is a
+  ≤30-character tldr — the worker renders the full GitHub title
+  (`[TYPE] <ticket_id> - <tldr> (n/total)`) and applies the type as a
+  label. Typed requests (Odoo wizard) fix the type for every issue.
+
 ## v1.7 — Re-baseline Tier 2 prompt set
 
 - No new prompt behaviour. The Tier 2 additions promised under v1.6

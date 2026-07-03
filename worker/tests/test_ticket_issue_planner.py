@@ -278,3 +278,28 @@ def test_corrupt_docx_is_permanent():
     })
     with pytest.raises(PermanentError, match="invalid attachment"):
         planner.plan_with_response(params)
+
+
+def _typed_params(**overrides) -> TicketIssueJobParams:
+    base = dict(
+        run_id=1, odoo_instance_id=1, ticket_id=123, model_name="helpdesk.ticket",
+        github_url="https://github.com/org/repo", name="Login page broken",
+        description="We need a login page.", analysis_html="",
+        priority="1", ticket_url="https://odoo.example.com/web#id=123",
+    )
+    base.update(overrides)
+    return TicketIssueJobParams(**base)
+
+
+def test_user_prompt_carries_fixed_type():
+    typed = TicketIssuePlanner._build_user_prompt(_typed_params(issue_type="CR"))
+    untyped = TicketIssuePlanner._build_user_prompt(_typed_params())
+    assert 'set `type` to "CR" on every issue' in typed
+    assert "set `type`" not in untyped
+
+
+def test_tool_schema_exposes_type_enum():
+    from reva.ticket_issue_tool import build_ticket_issue_tool_schema
+    schema = build_ticket_issue_tool_schema()
+    props = schema["input_schema"]["$defs"]["TicketIssueItem"]["properties"]
+    assert props["type"]["enum"] == ["BUG", "FEAT", "CR", "CONF", "DEV", "MIG", "SUP", "DOC"]
