@@ -26,6 +26,7 @@ Differences from the ticket-analysis runner worth knowing:
 from __future__ import annotations
 
 import hashlib
+from collections import Counter
 
 import structlog
 from rq import get_current_job
@@ -41,6 +42,21 @@ logger = structlog.get_logger()
 # Label applied to every ticket issue. REVA creates it per-repo if missing, so
 # you can filter `label:reva-ticket` without setting anything up by hand.
 _TICKET_ISSUE_LABEL = "reva-ticket"
+
+# GitHub label per work-item type: name = the code itself (filter `label:CR`),
+# ensured per-repo on demand. (color, description).
+_TYPE_LABELS = {
+    "BUG": ("d73a4a", "Bug fix"),
+    "FEAT": ("a2eeef", "New feature"),
+    "CR": ("0075ca", "Change request"),
+    "CONF": ("bfd4f2", "Configuration change"),
+    "DEV": ("7057ff", "Development task"),
+    "MIG": ("fbca04", "Migration"),
+    "SUP": ("008672", "Support"),
+    "DOC": ("0e8a16", "Documentation"),
+}
+_FALLBACK_TYPE = "DEV"  # plans persisted before the type rollout carry no type
+_TLDR_MAX = 30
 
 
 def _retries_remaining() -> bool:
@@ -93,15 +109,28 @@ def _same_repo(github_url: str, owner: str, repo: str) -> bool:
     return (parsed[0].lower(), parsed[1].lower()) == (owner.lower(), repo.lower())
 
 
-def _issue_title(params: TicketIssueJobParams, position: int, total: int, title: str) -> str:
-    """GitHub issue title: '[Task 2010] 3/10 — <planned title>'.
+def _item_type(params: TicketIssueJobParams, item: dict) -> str:
+    """A typed request fixes every issue's type; else the planner's pick,
+    falling back to DEV for pre-rollout persisted plans."""
+    return params.issue_type or item.get("type") or _FALLBACK_TYPE
 
-    The Odoo record id makes every issue traceable to its ticket from the
-    GitHub list alone, and position/total mark the intended implementation
-    order (the planner returns issues in that order) independent of how
-    GitHub sorts them."""
-    label = params.model_name.rsplit(".", 1)[-1].capitalize()  # project.task -> Task
-    return f"[{label} {params.ticket_id}] {position}/{total} — {title}"
+
+def _issue_title(params: TicketIssueJobParams, position: int, total: int,
+                 title: str, issue_type: str) -> str:
+    """GitHub issue title: '[CR] 2010 - <tldr>' plus ' (3/10)' when the request
+    yields several issues. The ticket id makes every issue traceable to its
+    ticket from the GitHub list alone; the planner is prompted for a ≤30-char
+    tldr and the slice is the hard backstop."""
+    seq = f" ({position}/{total})" if total >= 2 else ""
+    return f"[{issue_type}] {params.ticket_id} - {title[:_TLDR_MAX].rstrip()}{seq}"
+
+
+def _dominant_type(params: TicketIssueJobParams, issues: list[dict]) -> str:
+    """Most common child type; tie → the first child's."""
+    types = [_item_type(params, i) for i in issues]
+    counts = Counter(types)
+    best = max(counts.values())
+    return next(t for t in types if counts[t] == best)
 
 
 def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str) -> str:
@@ -124,11 +153,10 @@ def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str) ->
     return "\n".join(lines)
 
 
-def _parent_title(params: TicketIssueJobParams) -> str:
-    """Parent ("epic") title: '[Task 2010] <ticket name>' — same id prefix as the
-    children, without the n/total order marker."""
-    label = params.model_name.rsplit(".", 1)[-1].capitalize()
-    return f"[{label} {params.ticket_id}] {params.name}"
+def _parent_title(params: TicketIssueJobParams, dominant: str) -> str:
+    """Parent ("epic") title: '[FEAT] 2010 - <ticket-name tldr>' — dominant
+    child type, no (n/total) order marker."""
+    return f"[{dominant}] {params.ticket_id} - {params.name[:_TLDR_MAX].rstrip()}"
 
 
 def _format_parent_body(params: TicketIssueJobParams, marker: str, parent_marker: str) -> str:
@@ -372,6 +400,7 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
                     "title": item.title,
                     "body": item.body,
                     "acceptance_criteria": item.acceptance_criteria,
+                    "type": params.issue_type or item.type,
                     "number": None,
                     "url": None,
                     "state": None,
@@ -399,16 +428,25 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
         description="Issues created from Odoo tickets by REVA",
     )
 
+    pending_types = {_item_type(params, i) for i in issues if i.get("number") is None}
+    if need_parent and parent is None:
+        pending_types.add(_dominant_type(params, issues))
+    for type_code in sorted(pending_types):
+        color, desc = _TYPE_LABELS.get(type_code, ("ededed", ""))
+        ctx.github.ensure_label(token, owner, repo, type_code, color=color, description=desc)
+
     # 1) parent first, so children can be attached to it
     if need_parent and parent is None:
+        dominant = _dominant_type(params, issues)
+        parent_t = _parent_title(params, dominant)
         created = ctx.github.create_issue(
             token, owner, repo,
-            title=_parent_title(params),
+            title=parent_t,
             body=_format_parent_body(params, marker, parent_marker),
-            labels=[_TICKET_ISSUE_LABEL],
+            labels=[_TICKET_ISSUE_LABEL, dominant],
         )
         parent = {"number": created["number"], "id": created["id"],
-                  "url": created["url"], "title": _parent_title(params), "state": "open"}
+                  "url": created["url"], "title": parent_t, "state": "open"}
         writers.set_ticket_issue_parent(ctx.db, params.run_id, parent)
         log.info("ticket_issue_parent_created", issue=created["number"])
 
@@ -418,18 +456,20 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             continue
         # The full GitHub title (ticket id + order) is what gets stored and
         # sent to Odoo, so all surfaces show the same name as GitHub.
-        title = _issue_title(params, idx + 1, len(issues), item["title"])
+        issue_type = _item_type(params, item)
+        title = _issue_title(params, idx + 1, len(issues), item["title"], issue_type)
         created = ctx.github.create_issue(
             token, owner, repo,
             title=title,
             body=_format_issue_body(item, params, marker),
-            labels=[_TICKET_ISSUE_LABEL],
+            labels=[_TICKET_ISSUE_LABEL, issue_type],
         )
         # Keep only what resume, Contract 2, and state tracking need; the body
         # lives on GitHub now, and dropping it keeps Claude-rendered customer
         # text out of the retained JSON (the retention purge keeps `issues`).
         issues[idx] = {
             "title": title,
+            "type": issue_type,
             "number": created["number"],
             "id": created["id"],
             "url": created["url"],

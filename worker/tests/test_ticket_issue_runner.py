@@ -163,19 +163,14 @@ def ctx_and_fakes(monkeypatch):
     return {"ctx": ctx, "db": db, "planner": planner, "github": github, "odoo": odoo}
 
 
-def _make_params(db: Database) -> dict:
-    stub = TicketIssueJobParams(
-        run_id=0,
-        odoo_instance_id=1,
-        ticket_id=123,
-        model_name="helpdesk.ticket",
-        github_url="https://github.com/acme/widgets",
-        name="Login page broken",
-        description="We need a login page.",
-        analysis_html="<h2>Summary</h2>",
+def _make_params(db: Database, **overrides) -> dict:
+    stub = TicketIssueJobParams(**{**dict(
+        run_id=0, odoo_instance_id=1, ticket_id=123, model_name="helpdesk.ticket",
+        github_url="https://github.com/acme/widgets", name="Login page broken",
+        description="We need a login page.", analysis_html="<h2>Summary</h2>",
         priority="1",
         ticket_url="https://odoo.example.com/web#id=123&model=helpdesk.ticket&view_type=form",
-    )
+    ), **overrides})
     run_id = writers.record_ticket_issue_run_created(db, stub)
     writers.attach_ticket_issue_job_id(db, run_id, f"rq:job:ti-{run_id}")
     return stub.model_copy(update={"run_id": run_id}).model_dump()
@@ -192,7 +187,7 @@ def test_happy_path_creates_issues_and_calls_back(ctx_and_fakes):
 
     assert out["status"] == "completed"
     assert s["planner"].call_count == 1
-    assert s["github"].labels_ensured == ["reva-ticket"]
+    assert s["github"].labels_ensured == ["reva-ticket", "DEV"]
     # 1 parent (index 0) + 2 children
     assert len(s["github"].created) == 3
     body = s["github"].created[1]["body"]  # index 0 is now the parent
@@ -201,7 +196,7 @@ def test_happy_path_creates_issues_and_calls_back(ctx_and_fakes):
     # mandatory Odoo back-link + hidden ticket-level dedup marker
     assert params["ticket_url"] in body
     assert "<!-- revaticket" in body
-    assert s["github"].created[1]["labels"] == ["reva-ticket"]
+    assert s["github"].created[1]["labels"] == ["reva-ticket", "DEV"]
 
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
     assert row["status"] == "completed"
@@ -215,9 +210,9 @@ def test_happy_path_creates_issues_and_calls_back(ctx_and_fakes):
     assert cb["request_id"] == params["run_id"]
     # Titles carry the Odoo record id and the implementation order (n/total)
     assert cb["issues"] == [
-        {"number": 102, "title": "[Ticket 123] 1/2 — Issue 1",
+        {"number": 102, "title": "[DEV] 123 - Issue 1 (1/2)",
          "url": "https://github.com/acme/widgets/issues/102"},
-        {"number": 103, "title": "[Ticket 123] 2/2 — Issue 2",
+        {"number": 103, "title": "[DEV] 123 - Issue 2 (2/2)",
          "url": "https://github.com/acme/widgets/issues/103"},
     ]
 
@@ -232,7 +227,7 @@ def test_two_issues_creates_parent_and_attaches_children(ctx_and_fakes):
     # 1 parent + 2 children created
     assert len(s["github"].created) == 3
     parent_create = s["github"].created[0]
-    assert parent_create["title"] == "[Ticket 123] Login page broken"   # _parent_title
+    assert parent_create["title"] == "[DEV] 123 - Login page broken"   # _parent_title
     assert "<!-- revaticketparent" in parent_create["body"]              # parent-only tag
     assert "<!-- revaticket" in parent_create["body"]                    # shared marker too
 
@@ -287,6 +282,44 @@ def test_resume_reattaches_only_unattached_children(ctx_and_fakes):
     assert len(s["github"].sub_issues) == 2          # both children end up attached
 
 
+def test_typed_single_issue_title_and_labels(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["planner"].plan = TicketIssuePlan(issues=[TicketIssueItem(
+        title="Adjust delivery slip layout that is way too long for a title",
+        body="B", type="FEAT")])
+    params = _make_params(s["db"], issue_type="CR", description="Change the layout")
+
+    run_ticket_issues(params)
+
+    created = s["github"].created
+    assert len(created) == 1                      # single issue → no parent
+    # request type CR overrides the planner's FEAT; tldr truncated to 30; no (n/total)
+    assert created[0]["title"] == "[CR] 123 - Adjust delivery slip layout th"
+    assert created[0]["labels"] == ["reva-ticket", "CR"]
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["issues"][0]["type"] == "CR"
+
+
+def test_mixed_types_title_sequence_and_dominant_parent(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["planner"].plan = TicketIssuePlan(issues=[
+        TicketIssueItem(title="Add report", body="B", type="FEAT"),
+        TicketIssueItem(title="Refactor flow", body="B", type="DEV"),
+        TicketIssueItem(title="Add second report", body="B", type="FEAT"),
+    ])
+    params = _make_params(s["db"])
+
+    run_ticket_issues(params)
+
+    titles = [c["title"] for c in s["github"].created]
+    assert titles[0] == "[FEAT] 123 - Login page broken"       # parent, dominant type
+    assert titles[1] == "[FEAT] 123 - Add report (1/3)"
+    assert titles[2] == "[DEV] 123 - Refactor flow (2/3)"
+    assert titles[3] == "[FEAT] 123 - Add second report (3/3)"
+    assert s["github"].created[0]["labels"] == ["reva-ticket", "FEAT"]
+    assert sorted(s["github"].labels_ensured) == ["DEV", "FEAT", "reva-ticket"]
+
+
 def test_issue_title_format():
     from worker.ticket_issue_runner import _issue_title
 
@@ -295,8 +328,8 @@ def test_issue_title_format():
         github_url="https://github.com/acme/widgets", name="n", description="d",
         analysis_html="", priority="1", ticket_url="https://odoo.example.com/web#id=2010",
     )
-    assert _issue_title(params, 3, 10, "Implement login form") == \
-        "[Task 2010] 3/10 — Implement login form"
+    assert _issue_title(params, 3, 10, "Implement login form", "CR") == \
+        "[CR] 2010 - Implement login form (3/10)"
 
 
 def test_spend_recorded_in_ledger(ctx_and_fakes):
@@ -647,9 +680,9 @@ def test_issue_closed_updates_db_and_notifies_odoo(ctx_and_fakes):
     assert cb["ticket_id"] == 123 and cb["model_name"] == "helpdesk.ticket"
     assert cb["number"] == 102 and cb["state"] == "closed"
     assert cb["issues"] == [
-        {"number": 102, "title": "[Ticket 123] 1/2 — Issue 1",
+        {"number": 102, "title": "[DEV] 123 - Issue 1 (1/2)",
          "url": "https://github.com/acme/widgets/issues/102", "state": "closed"},
-        {"number": 103, "title": "[Ticket 123] 2/2 — Issue 2",
+        {"number": 103, "title": "[DEV] 123 - Issue 2 (2/2)",
          "url": "https://github.com/acme/widgets/issues/103", "state": "open"},
     ]
 
