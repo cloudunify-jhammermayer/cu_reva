@@ -115,10 +115,13 @@ class OdooCallbackClient:
         """POST the created GitHub issues (or a failure) to the Odoo callback.
 
         Contract 2 of the github-issues handoff: status is exactly "created"
-        or "failed"; issues items are {"number", "title", "url"}; request_id
-        must echo the id REVA returned from POST /api/v1/create-issues. Odoo
-        responds 409 (permanent) when the record is no longer pending or the
-        request_id is stale — the expected outcome of its 10s-timeout race.
+        or "failed"; issues items are {"number", "title", "url", "state"} and
+        are the UNION of issues across ALL of the record's runs (deduped by
+        number), so Odoo's replace-handler keeps issues earlier requests
+        created. request_id must echo the id REVA returned from POST
+        /api/v1/create-issues. Odoo responds 409 (permanent) when the record is
+        no longer pending or the request_id is stale — the expected outcome of
+        its 10s-timeout race.
         """
         self._post("/issues-created", {
             "ticket_id": ticket_id,
@@ -143,9 +146,10 @@ class OdooCallbackClient:
         """POST a per-issue state change (GitHub issue closed/reopened) to Odoo.
 
         `number`/`state` identify the change; `issues` is the FULL current
-        snapshot [{"number", "title", "url", "state"}] so Odoo re-renders the
-        links idempotently (done issues get marked). 409 = the record's links
-        are not in the 'created' state — permanent, do not retry.
+        snapshot — the UNION of issues across all of the record's runs
+        [{"number", "title", "url", "state"}] — so Odoo re-renders the links
+        idempotently (done issues get marked). 409 = the record's links are not
+        in the 'created' state — permanent, do not retry.
         """
         self._post("/issue-state", {
             "ticket_id": ticket_id,

@@ -211,9 +211,9 @@ def test_happy_path_creates_issues_and_calls_back(ctx_and_fakes):
     # Titles carry the Odoo record id and the implementation order (n/total)
     assert cb["issues"] == [
         {"number": 102, "title": "[DEV] 123 - Issue 1 (1/2)",
-         "url": "https://github.com/acme/widgets/issues/102"},
+         "url": "https://github.com/acme/widgets/issues/102", "state": "open"},
         {"number": 103, "title": "[DEV] 123 - Issue 2 (2/2)",
-         "url": "https://github.com/acme/widgets/issues/103"},
+         "url": "https://github.com/acme/widgets/issues/103", "state": "open"},
     ]
 
 
@@ -256,6 +256,57 @@ def test_single_issue_creates_no_parent(ctx_and_fakes):
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
     assert row["parent_issue"] is None
     assert len(s["odoo"].calls[0]["issues"]) == 1
+
+
+def test_second_run_attaches_to_existing_epic_and_sends_union(ctx_and_fakes):
+    s = ctx_and_fakes
+    params1 = _make_params(s["db"])
+    run_ticket_issues(params1)                       # parent 101 + children 102, 103
+    parent_number = s["github"].created[0]["number"]
+    assert parent_number == 101
+
+    s["planner"].plan = TicketIssuePlan(issues=[
+        TicketIssueItem(title="Adjust layout", body="B", type="CR")])
+    params2 = _make_params(s["db"], issue_type="CR", description="Change the layout")
+    run_ticket_issues(params2)
+
+    # no second parent: exactly one new GitHub issue, attached to run 1's epic
+    assert len(s["github"].created) == 4
+    assert s["github"].created[3]["title"] == "[CR] 123 - Adjust layout"
+    assert s["github"].sub_issues[-1] == (101, 900104)
+
+    # the second callback carries the UNION of both runs' issues, with state
+    cb = s["odoo"].calls[-1]
+    assert [i["number"] for i in cb["issues"]] == [102, 103, 104]
+    assert all(i["state"] == "open" for i in cb["issues"])
+
+
+def test_single_issue_without_epic_stays_flat(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["planner"].plan = TicketIssuePlan(issues=[
+        TicketIssueItem(title="One thing", body="B")])
+    params = _make_params(s["db"])
+    run_ticket_issues(params)
+    assert len(s["github"].created) == 1
+    assert s["github"].sub_issues == []
+
+
+def test_state_sync_sends_union_snapshot(ctx_and_fakes):
+    s = ctx_and_fakes
+    params1 = _make_params(s["db"])
+    run_ticket_issues(params1)                       # issues 102, 103
+    s["planner"].plan = TicketIssuePlan(issues=[
+        TicketIssueItem(title="Adjust layout", body="B", type="CR")])
+    params2 = _make_params(s["db"], issue_type="CR", description="Change the layout")
+    run_ticket_issues(params2)                       # issue 104
+    s["odoo"].calls.clear()
+
+    from worker.ticket_issue_runner import sync_ticket_issue_state
+    sync_ticket_issue_state({"owner": "acme", "repo": "widgets", "number": 102, "state": "closed"})
+
+    cb = s["odoo"].calls[0]
+    numbers = {i["number"]: i["state"] for i in cb["issues"]}
+    assert numbers == {102: "closed", 103: "open", 104: "open"}
 
 
 def test_resume_reattaches_only_unattached_children(ctx_and_fakes):
@@ -357,7 +408,8 @@ def test_reconcile_existing_issues_skips_planning_and_creation(ctx_and_fakes):
     assert s["github"].created == []
     cb = s["odoo"].calls[0]
     assert cb["status"] == "created"
-    assert cb["issues"] == s["github"].existing_issues
+    # union normalizes every item with a state (defaults "open")
+    assert cb["issues"] == [{**s["github"].existing_issues[0], "state": "open"}]
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
     assert row["status"] == "completed"
 

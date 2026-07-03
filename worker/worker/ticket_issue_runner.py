@@ -175,15 +175,6 @@ def _format_parent_body(params: TicketIssueJobParams, marker: str, parent_marker
     ])
 
 
-def _issues_payload(issues: list[dict]) -> list[dict]:
-    """Contract 2 issue items for everything that exists on GitHub."""
-    return [
-        {"number": i["number"], "title": i["title"], "url": i["url"]}
-        for i in issues
-        if i.get("number") is not None
-    ]
-
-
 def _send_failed_callback(ctx, params: TicketIssueJobParams, error: str, log) -> None:
     """Best-effort failure callback so Odoo leaves 'pending' and re-enables the
     Create Issues button. Must never mask the original error."""
@@ -239,14 +230,19 @@ def run_ticket_issues(job_params: dict) -> dict:
     # Persist completion before the callback so the result is never lost.
     writers.record_ticket_issue_run_completed(ctx.db, params.run_id, issues)
 
-    payload = _issues_payload(issues)
+    # Odoo's issues-created handler REPLACES the record's issue list with this
+    # payload — send the union across all of this record's runs so earlier
+    # requests' issues survive (wizard + planner requests accumulate).
+    union = writers.get_ticket_issue_union(
+        ctx.db, params.odoo_instance_id, params.ticket_id, params.model_name
+    )
     try:
         odoo.issues_created(
             ticket_id=params.ticket_id,
             model_name=params.model_name,
             request_id=params.run_id,
             status="created",
-            issues=payload,
+            issues=union,
         )
     except TransientError:
         # Contract 2: 5xx/network on the callback must be retried. Re-raise so
@@ -261,8 +257,8 @@ def run_ticket_issues(job_params: dict) -> dict:
         # the re-click path re-links them.
         log.warning("ticket_issues_odoo_callback_permanent", exc_info=True)
 
-    log.info("ticket_issues_done", issues=len(payload))
-    return {"status": "completed", "run_id": params.run_id, "issues": len(payload)}
+    log.info("ticket_issues_done", issues=len(union))
+    return {"status": "completed", "run_id": params.run_id, "issues": len(union)}
 
 
 def sync_ticket_issue_state(job_params: dict) -> dict:
@@ -291,12 +287,9 @@ def sync_ticket_issue_state(job_params: dict) -> dict:
 
     notified = 0
     for record in affected:
-        snapshot = [
-            {"number": i["number"], "title": i["title"], "url": i["url"],
-             "state": i.get("state") or "open"}
-            for i in record["issues"]
-            if i.get("number") is not None
-        ]
+        snapshot = writers.get_ticket_issue_union(
+            ctx.db, record["odoo_instance_id"], record["ticket_id"], record["model_name"]
+        )
         try:
             odoo = build_odoo_client(ctx, record["odoo_instance_id"])
             odoo.issue_state(
@@ -356,9 +349,22 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             writers.update_ticket_issue_progress(ctx.db, params.run_id, issues)
             log.info("ticket_issues_plan_adopted", from_run=prior["id"])
 
+    if parent is None:
+        # One epic per ticket: adopt the parent an earlier run created in this
+        # repo so new issues (wizard requests, re-plans over changed text)
+        # attach to the existing epic instead of spawning a second one.
+        prior_parent = writers.get_latest_ticket_issue_parent(
+            ctx.db, params.odoo_instance_id, params.ticket_id, params.model_name,
+            f"{owner.lower()}/{repo.lower()}", exclude_run_id=params.run_id,
+        )
+        if prior_parent is not None:
+            parent = prior_parent
+            writers.set_ticket_issue_parent(ctx.db, params.run_id, parent)
+            log.info("ticket_issue_parent_adopted", issue=parent.get("number"))
+
     if issues is not None:
-        need_parent = len(issues) >= 2 and (
-            parent is not None or any(i.get("number") is None for i in issues)
+        need_parent = parent is not None or (
+            len(issues) >= 2 and any(i.get("number") is None for i in issues)
         )
         done = all(i.get("number") is not None for i in issues)
         if need_parent:
@@ -415,12 +421,13 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             cost = writers.record_ticket_issue_plan(ctx.db, params.run_id, issues, response)
             writers.record_claude_spend(ctx.db, "ticket_issues", cost)
 
-    # Only group under a parent when this run creates issues itself, or a parent
-    # already exists (resume). Pre-feature runs reconciled/adopted with all
-    # issues already created stay flat — we don't backfill epics (spec scope),
-    # and attaching them is impossible anyway (no GitHub id on legacy items).
-    need_parent = len(issues) >= 2 and (
-        parent is not None or any(i.get("number") is None for i in issues)
+    # An adopted/existing parent attaches everything (even a single new issue);
+    # a new parent is only created for >= 2 issues when none exists anywhere.
+    # Pre-feature runs reconciled with all issues already created and no parent
+    # stay flat — we don't backfill epics (spec scope), and attaching them is
+    # impossible anyway (no GitHub id on legacy items).
+    need_parent = parent is not None or (
+        len(issues) >= 2 and any(i.get("number") is None for i in issues)
     )
 
     ctx.github.ensure_label(
