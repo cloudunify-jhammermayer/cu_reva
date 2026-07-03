@@ -1471,6 +1471,82 @@ def update_ticket_issue_state(
     return list(affected.values())
 
 
+def _instance_filter(odoo_instance_id: int | None):
+    if odoo_instance_id is None:
+        return TicketIssueRun.odoo_instance_id.is_(None)
+    return TicketIssueRun.odoo_instance_id == odoo_instance_id
+
+
+def get_ticket_issue_union(
+    db: Database, odoo_instance_id: int | None, ticket_id: int, model_name: str
+) -> list[dict]:
+    """Union of created issues across ALL runs for this record, deduped by
+    issue number (newest run wins title/url/state), sorted by number.
+
+    The Odoo issues-created handler replaces the record's whole issue list
+    with the payload — sending only the completing run's issues would wipe
+    what earlier requests created (wizard + planner requests accumulate).
+    Parents are excluded (parent_issue column, never in `issues`)."""
+    from sqlalchemy.orm import load_only
+
+    with db.session() as s:
+        rows = s.execute(
+            select(TicketIssueRun)
+            .where(
+                TicketIssueRun.ticket_id == ticket_id,
+                TicketIssueRun.model_name == model_name,
+                _instance_filter(odoo_instance_id),
+                TicketIssueRun.issues.is_not(None),
+            )
+            .options(load_only(TicketIssueRun.issues, TicketIssueRun.created_at))
+            .order_by(TicketIssueRun.created_at.desc(), TicketIssueRun.id.desc())
+        ).scalars().all()
+        seen: dict[int, dict] = {}
+        for row in rows:  # newest first — first occurrence of a number wins
+            for item in row.issues or []:
+                n = item.get("number")
+                if n is None or n in seen:
+                    continue
+                seen[n] = {
+                    "number": n,
+                    "title": item.get("title", ""),
+                    "url": item.get("url"),
+                    "state": item.get("state") or "open",
+                }
+        return sorted(seen.values(), key=lambda i: i["number"])
+
+
+def get_latest_ticket_issue_parent(
+    db: Database,
+    odoo_instance_id: int | None,
+    ticket_id: int,
+    model_name: str,
+    repo_full_name: str,
+    exclude_run_id: int,
+) -> dict | None:
+    """The record's existing parent ("epic") issue in this repo, from the most
+    recent other run that has one — or None. One epic per ticket: a new run
+    attaches its issues to this parent instead of creating a second one."""
+    from sqlalchemy.orm import load_only
+
+    with db.session() as s:
+        row = s.execute(
+            select(TicketIssueRun)
+            .where(
+                TicketIssueRun.ticket_id == ticket_id,
+                TicketIssueRun.model_name == model_name,
+                TicketIssueRun.repo_full_name == repo_full_name,
+                _instance_filter(odoo_instance_id),
+                TicketIssueRun.parent_issue.is_not(None),
+                TicketIssueRun.id != exclude_run_id,
+            )
+            .options(load_only(TicketIssueRun.parent_issue, TicketIssueRun.created_at))
+            .order_by(TicketIssueRun.created_at.desc(), TicketIssueRun.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        return dict(row.parent_issue) if row is not None else None
+
+
 def purge_old_ticket_issue_text(db: Database, older_than_days: int) -> int:
     """Scrub raw ticket inputs on ticket_issue_runs past retention (F1/SECU-8).
 

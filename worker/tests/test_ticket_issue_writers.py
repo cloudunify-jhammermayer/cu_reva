@@ -85,3 +85,46 @@ def test_issue_type_persisted_roundtrip(db):
     # untyped stays NULL (different ticket: one pending run per record)
     run_id2 = writers.record_ticket_issue_run_created(db, _typed_params(ticket_id=78))
     assert writers.get_ticket_issue_run(db, run_id2)["issue_type"] is None
+
+
+def _complete_run(db, params, issues):
+    run_id = writers.record_ticket_issue_run_created(db, params)
+    writers.update_ticket_issue_progress(db, run_id, issues)
+    writers.record_ticket_issue_run_completed(db, run_id, issues)
+    return run_id
+
+
+def test_union_dedups_newest_wins_and_scopes_by_instance(db):
+    p = _typed_params(ticket_id=90)
+    _complete_run(db, p, [
+        {"number": 1, "title": "old title", "url": "https://gh/1", "state": "closed"},
+        {"number": 2, "title": "two", "url": "https://gh/2", "state": "open"},
+        {"number": None, "title": "never created", "url": None, "state": None},
+    ])
+    _complete_run(db, p, [
+        {"number": 1, "title": "new title", "url": "https://gh/1", "state": "open"},
+        {"number": 3, "title": "three", "url": "https://gh/3", "state": "open"},
+    ])
+    # same ticket id on ANOTHER instance must not leak in
+    _complete_run(db, _typed_params(ticket_id=90, odoo_instance_id=2),
+                  [{"number": 99, "title": "other", "url": "https://gh/99", "state": "open"}])
+
+    union = writers.get_ticket_issue_union(db, 1, 90, "helpdesk.ticket")
+    assert [i["number"] for i in union] == [1, 2, 3]
+    assert union[0]["title"] == "new title"      # newest run wins
+    assert union[1]["state"] == "open"
+
+
+def test_latest_parent_scoped_and_excludes_self(db):
+    p = _typed_params(ticket_id=91)
+    r1 = _complete_run(db, p, [{"number": 5, "title": "t", "url": "https://gh/5", "state": "open"}])
+    parent = {"number": 4, "id": 900004, "url": "https://gh/4", "title": "[DEV] 91 - Epic", "state": "open"}
+    writers.set_ticket_issue_parent(db, r1, parent)
+
+    got = writers.get_latest_ticket_issue_parent(
+        db, 1, 91, "helpdesk.ticket", "org/repo", exclude_run_id=999)
+    assert got == parent
+    # own run excluded; other repo/instance → None
+    assert writers.get_latest_ticket_issue_parent(db, 1, 91, "helpdesk.ticket", "org/repo", exclude_run_id=r1) is None
+    assert writers.get_latest_ticket_issue_parent(db, 1, 91, "helpdesk.ticket", "org/other", exclude_run_id=999) is None
+    assert writers.get_latest_ticket_issue_parent(db, 2, 91, "helpdesk.ticket", "org/repo", exclude_run_id=999) is None
