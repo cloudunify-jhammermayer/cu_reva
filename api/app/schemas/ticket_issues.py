@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from reva.types import Attachment
 
 
 class CreateIssuesRequest(BaseModel):
-    """Contract 1 payload. The field set is fixed by the shipped Odoo addon —
-    do not add required fields (every real request would 422)."""
+    """Contract 1 payload. The field set is fixed for *required* fields by the
+    shipped Odoo addon — do not add required fields (every real request would
+    422). Optional additive fields are fine."""
 
     ticket_id: int
     model_name: str = Field(
@@ -29,6 +31,17 @@ class CreateIssuesRequest(BaseModel):
     )
     priority: str = Field(description='Odoo priority key, "0" (low) … "3" (urgent)')
     ticket_url: str = Field(description="Deep link back to the Odoo record")
+    issue_type: Literal["BUG", "FEAT", "CR", "CONF", "DEV", "MIG", "SUP", "DOC"] | None = Field(
+        default=None,
+        description="Fixed work-item type for every issue of this request "
+        "(Odoo wizard flow). Omitted/empty: the planner picks per issue.",
+    )
+
+    @field_validator("issue_type", mode="before")
+    @classmethod
+    def _empty_type_is_none(cls, v: object) -> object:
+        # The Odoo wizard's empty Selection may serialize as "" — treat as unset.
+        return None if v == "" else v
 
 
 class TicketIssuesAccepted(BaseModel):

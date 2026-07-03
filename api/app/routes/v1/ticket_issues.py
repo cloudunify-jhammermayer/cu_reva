@@ -276,6 +276,7 @@ def requeue_ticket_issue_run(
         description_docx=None,
         priority=row["priority"],
         ticket_url=row["ticket_url"],
+        issue_type=row["issue_type"],
     )
     writers.reset_ticket_issue_run(db, request_id)
     job_id = _enqueue(request, db, request_id, params)

@@ -600,3 +600,41 @@ def test_requeue_collision_check_is_instance_scoped(client_db_queue):
     r = client.post(f"/api/v1/create-issues/{run_id_a}/requeue")
     assert r.status_code == 202, r.json()
     assert r.json()["request_id"] == run_id_a
+
+
+def test_create_issues_accepts_issue_type(client_db_queue):
+    tc, db, queue, headers = client_db_queue
+    resp = tc.post("/api/v1/create-issues",
+                   json={**CONTRACT_PAYLOAD, "issue_type": "CR"}, headers=headers)
+    assert resp.status_code == 202
+    _, params, _ = queue.enqueued[0]
+    assert params["issue_type"] == "CR"
+    assert writers.get_ticket_issue_run(db, resp.json()["request_id"])["issue_type"] == "CR"
+
+
+def test_create_issues_rejects_unknown_issue_type(client_db_queue):
+    tc, _, _, headers = client_db_queue
+    resp = tc.post("/api/v1/create-issues",
+                   json={**CONTRACT_PAYLOAD, "issue_type": "FB"}, headers=headers)
+    assert resp.status_code == 422
+
+
+def test_create_issues_empty_issue_type_is_untyped(client_db_queue):
+    tc, _, queue, headers = client_db_queue
+    resp = tc.post("/api/v1/create-issues",
+                   json={**CONTRACT_PAYLOAD, "issue_type": ""}, headers=headers)
+    assert resp.status_code == 202
+    _, params, _ = queue.enqueued[0]
+    assert params["issue_type"] is None
+
+
+def test_requeue_preserves_issue_type(client_db_queue):
+    tc, db, queue, headers = client_db_queue
+    resp = tc.post("/api/v1/create-issues",
+                   json={**CONTRACT_PAYLOAD, "issue_type": "BUG"}, headers=headers)
+    request_id = resp.json()["request_id"]
+    writers.record_ticket_issue_run_failed(db, request_id, "boom")
+    resp = tc.post(f"/api/v1/create-issues/{request_id}/requeue")
+    assert resp.status_code == 202
+    _, params, _ = queue.enqueued[-1]
+    assert params["issue_type"] == "BUG"
