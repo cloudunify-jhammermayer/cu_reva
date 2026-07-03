@@ -54,6 +54,11 @@ logger = structlog.get_logger()
 DEFAULT_MAX_DIFF_LINES = 2500
 DEFAULT_MAX_DIFF_TOKENS = 60_000
 MAX_FINDINGS = 15
+# Minimum confidence a finding must carry to be reported. Enforced in code (not
+# just the prompt) so the prompt can ask for honest scores: sub-threshold
+# findings are expected output, dropped here instead of being inflation-laundered
+# to 0.7 by the model.
+MIN_CONFIDENCE = 0.7
 # Cap for the team-authored custom_instructions skill param (prompt-bloat guard).
 _CUSTOM_INSTRUCTIONS_MAX_CHARS = 4000
 # Second-pass self-critique bounds (mirror runner's delta-verify caps).
@@ -574,6 +579,18 @@ class Reviewer:
         # Drop categories a trusted user muted for this repo (/mute) — before
         # calibration/verification so we never pay to process a muted finding.
         grounded = _drop_muted_findings(grounded, muted)
+        # Enforce the confidence floor in code, not just the prompt: the prompt
+        # asks for honest scores (v2.1), so sub-0.7 findings are expected output.
+        # Drop them here (before calibration/verification, so we never pay to
+        # process one) instead of relying on the model to self-censor.
+        confident = [f for f in grounded if f.confidence >= MIN_CONFIDENCE]
+        if len(confident) < len(grounded):
+            logger.info(
+                "findings_dropped_low_confidence",
+                count=len(grounded) - len(confident),
+                titles=[f.title for f in grounded if f.confidence < MIN_CONFIDENCE],
+            )
+        grounded = confident
         # Floor Odoo anti-pattern severities to odoo19.md's documented minimums
         # before capping/risk so the Check Run conclusion reflects them.
         grounded = _calibrate_odoo_severity(grounded)

@@ -34,7 +34,7 @@ match against a parent view you could only partially read should be ≤ 0.8.
 2. Read each changed XML file in full, and Read/Grep the inheritance and ref targets
    in the clone to confirm they exist.
 3. Apply the criteria above.
-4. Keep only findings you are confident about (confidence ≥ 0.7).
+4. Verify each candidate finding per the guidance ("Verify before you write"), then keep only what survives, scored honestly.
 5. Write your findings as JSON to `output_path`.
 
 ## Output format

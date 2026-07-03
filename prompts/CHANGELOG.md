@@ -12,6 +12,16 @@
   `review_guidance.md` — it was copy-pasted verbatim into five skills.
   `review_guidance.md` is prepended to every skill, so behaviour is unchanged;
   skills now carry only mode-specific deltas.
+- `review_guidance.md`: new "Verify before you write" section — before emitting a
+  finding the model must re-Read the cited lines (not count diff hunk lines),
+  Grep to substantiate any claim of absence, and check the parent/framework
+  method for "missing handling" findings.
+- `review_guidance.md`: confidence scoring rewritten to ask for **honest** scores
+  — the worker now enforces the 0.7 reporting floor in code
+  (`Reviewer.MIN_CONFIDENCE`, `findings_dropped_low_confidence` telemetry), so
+  the prompt no longer trains the model to inflate borderline findings to 0.7.
+  The per-skill "keep only findings ≥ 0.7" steps now point at the verification
+  pass instead.
 
 ## v2.0 — Learned team preferences on the review path
 

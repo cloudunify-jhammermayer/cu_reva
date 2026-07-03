@@ -70,4 +70,4 @@ structure (do **not** include a `risk_level` — the system computes it):
 
 - Focus on systemic patterns, not one-off style issues.
 - `file`/`line_start` may be `null` for repo-wide findings.
-- Report only findings with confidence ≥ 0.7.
+- Verify each finding per the guidance ("Verify before you write") and score confidence honestly — the system enforces the reporting threshold.

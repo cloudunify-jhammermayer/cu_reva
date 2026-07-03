@@ -49,7 +49,7 @@ severity — trust them, don't re-derive.
    migrations in the same version directory, then apply the criteria above.
 3. Use Read to examine any other changed file (models/views) and review it normally.
 4. Use Grep to trace callers/usages when a change is non-trivial.
-5. Keep only findings you are confident about (confidence ≥ 0.7).
+5. Verify each candidate finding per the guidance ("Verify before you write"), then keep only what survives, scored honestly.
 6. Write your findings as JSON to `output_path`.
 
 ## Output format

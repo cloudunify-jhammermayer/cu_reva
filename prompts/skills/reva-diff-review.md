@@ -14,7 +14,7 @@ category, confidence, and conduct rules in the guidance above apply.
 5. If a `test_coverage` parameter is present, verify the listed modules genuinely
    lack tests for the new logic and, if so, emit a `category: test` finding per the
    guidance severity rules.
-6. Keep only findings you are confident about (confidence ≥ 0.7).
+6. Verify each candidate finding per the guidance ("Verify before you write"), then keep only what survives, scored honestly.
 7. Write your findings as JSON to `output_path`.
 
 ## Manifest checks

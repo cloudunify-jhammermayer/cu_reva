@@ -345,6 +345,35 @@ def test_findings_not_dropped_when_clone_absent():
     assert any(f.title == "keep-me" for f in reviewer.execute(_params()).findings)
 
 
+# --- confidence floor (v2.1) --------------------------------------------------
+
+
+def test_low_confidence_findings_dropped():
+    """Findings below MIN_CONFIDENCE are dropped in code; the boundary (0.7) is
+    kept. The prompt asks for honest scores, so sub-threshold findings are
+    expected output rather than model error."""
+    findings = [
+        _finding("keep-070", "custom_addons/a.py", confidence=0.70),
+        _finding("drop-069", "custom_addons/b.py", confidence=0.69),
+    ]
+    runner = FakeRunner(response=_claude_response_with_findings(findings))
+    reviewer, *_ = _make_reviewer(runner=runner)
+    titles = {f.title for f in reviewer.execute(_params()).findings}
+    assert titles == {"keep-070"}
+
+
+def test_low_confidence_findings_dropped_before_verification(tmp_path):
+    """A sub-threshold finding is dropped before the paid verifier sees it — we
+    never pay to verify a finding we're going to drop anyway."""
+    keep = _finding("keep", "custom_addons/keep.py", confidence=0.9)
+    weak = _finding("weak", "custom_addons/weak.py", confidence=0.5)
+    verifier = FakeVerifier()
+    reviewer, _ = _verify_reviewer(tmp_path, [keep, weak], verifier=verifier)
+    titles = {f.title for f in reviewer.execute(_params(review_mode="full")).findings}
+    assert titles == {"keep"}
+    assert verifier.calls == ["keep"]  # "weak" dropped before verification
+
+
 # --- stale --------------------------------------------------------------------
 
 
@@ -515,7 +544,10 @@ def test_findings_capped_to_15_by_severity_and_confidence():
             "category": "security",
             "title": "SQL injection",
             "body": "x",
-            "confidence": 0.5,
+            # >= MIN_CONFIDENCE so it survives the floor; the point of this test
+            # is that the severity*confidence CAP keeps the buried critical.
+            # (Low-confidence cap ranking is unit-tested against _cap_findings.)
+            "confidence": 0.7,
             "is_odoo_specific": False,
         }
     )
@@ -535,7 +567,7 @@ def test_risk_level_recomputed_when_no_critical_or_major():
             "category": "style",
             "title": f"m {i}",
             "body": "x",
-            "confidence": 0.6,
+            "confidence": 0.7,
             "is_odoo_specific": False,
         }
         for i in range(4)

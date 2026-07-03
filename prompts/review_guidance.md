@@ -75,8 +75,28 @@ security issue), use the more specific category and set `is_odoo_specific: true`
 | 0.50–0.69 | Moderate. Worth the developer checking. |
 | < 0.50 | Speculative — usually not worth reporting. |
 
-Use 0.9+ sparingly. **Report only findings with confidence ≥ 0.7.** Most
-findings should land in 0.7–0.85.
+Use 0.9+ sparingly. Score honestly — **the system enforces the reporting
+threshold, not you.** If a finding lands below the bar, do not inflate the
+number to get it through: either gather more evidence with Read/Grep until you
+genuinely believe it, or let it go. An honest 0.6 that gets filtered is better
+than a false 0.7 that wastes a developer's time and erodes trust in every other
+finding. Most findings you report should land in 0.7–0.85.
+
+## Verify before you write
+
+Before you emit each finding, spend the tool calls to verify it. A finding that
+fails its own verification is not reported — you either found the real issue (fix
+the finding) or you drop it.
+
+1. **Re-Read the exact lines you cite.** Take `line_start`/`line_end` from a
+   `Read` of the post-change file, never by counting lines in the diff hunk
+   (hunk arithmetic is error-prone; the file is right there).
+2. **Claims of absence need a search.** Before writing "X is unused / never
+   called / missing / not declared", `Grep` for it — the caller, the ACL row,
+   the test, the `depends` entry. One grep beats one retraction.
+3. **Check the framework didn't already handle it.** For a "missing check" or
+   "missing handling" finding on an override or an Odoo hook, `Read` the parent
+   method / framework API first — it may already do what you think is missing.
 
 ## Conduct rules
 

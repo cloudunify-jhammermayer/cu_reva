@@ -115,6 +115,16 @@ def test_stated_intent_guidance_present():
     assert "stated_intent" in (PROMPTS_DIR / "review_guidance.md").read_text()
 
 
+def test_verify_before_write_guidance_present():
+    # The pre-output verification pass lives in the guidance; the confidence
+    # threshold is stated once there (honestly), not repeated as a hard "≥ 0.7"
+    # instruction in each skill that trains the model to inflate to the boundary.
+    guidance = (PROMPTS_DIR / "review_guidance.md").read_text()
+    assert "Verify before you write" in guidance
+    for skill in SKILLS_DIR.glob("*.md"):
+        assert "confidence ≥ 0.7" not in skill.read_text(), skill.name
+
+
 def test_team_configuration_block_single_sourced():
     # The team-configuration handling lives once in review_guidance.md (prepended
     # to every skill), not copy-pasted into each skill where it would drift.
