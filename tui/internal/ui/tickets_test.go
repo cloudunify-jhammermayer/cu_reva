@@ -203,6 +203,14 @@ func TestDetailViewOmitsEpicLineWithoutParent(t *testing.T) {
 	}
 }
 
+func TestDetailViewShowsIssueType(t *testing.T) {
+	tt := Tickets{detail: true, detailIssueType: "CR",
+		detailIssues: []api.TicketIssueRef{{Title: "x"}}}
+	if out := tt.detailView(80, 20); !strings.Contains(out, "type CR") {
+		t.Errorf("detail header missing type tag:\n%s", out)
+	}
+}
+
 func TestEnterWithoutIssuesShowsStatus(t *testing.T) {
 	tab := newTickets(&api.MockClient{}, "")
 	tab.width, tab.height = 120, 30

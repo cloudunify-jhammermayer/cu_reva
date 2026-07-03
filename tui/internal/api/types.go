@@ -191,6 +191,7 @@ type TicketIssueRunSummary struct {
 	ModelName        string           `json:"model_name"`
 	GithubURL        string           `json:"github_url"`
 	Status           string           `json:"status"`
+	IssueType        *string          `json:"issue_type"`
 	Issues           []TicketIssueRef `json:"issues"`
 	ParentIssue      *TicketIssueRef  `json:"parent_issue"`
 	ErrorMessage     *string          `json:"error_message"`

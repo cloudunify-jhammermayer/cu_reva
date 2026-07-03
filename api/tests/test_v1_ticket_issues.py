@@ -638,3 +638,10 @@ def test_requeue_preserves_issue_type(client_db_queue):
     assert resp.status_code == 202
     _, params, _ = queue.enqueued[-1]
     assert params["issue_type"] == "BUG"
+
+
+def test_run_list_exposes_issue_type(client_db_queue):
+    tc, db, queue, headers = client_db_queue
+    tc.post("/api/v1/create-issues", json={**CONTRACT_PAYLOAD, "issue_type": "CR"}, headers=headers)
+    items = tc.get("/api/v1/ticket-issue-runs").json()["items"]
+    assert items[0]["issue_type"] == "CR"

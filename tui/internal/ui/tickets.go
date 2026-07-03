@@ -41,11 +41,12 @@ type Tickets struct {
 	expanded  map[string]bool // repo keys whose group is unfolded (default: collapsed)
 	// Issue drill-down: the full issue list for the selected ticket's run,
 	// plus its parent ("epic") issue if the run synthesized one (else nil).
-	detail       bool
-	detailIssues []api.TicketIssueRef
-	detailParent *api.TicketIssueRef
-	detailCursor int
-	detailOffset int
+	detail          bool
+	detailIssues    []api.TicketIssueRef
+	detailParent    *api.TicketIssueRef
+	detailIssueType string
+	detailCursor    int
+	detailOffset    int
 }
 
 func newTickets(client api.ClientIface, odooURL string) Tickets {
@@ -341,6 +342,10 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 				t.detail = true
 				t.detailIssues = cur.row.issueRun.Issues
 				t.detailParent = cur.row.issueRun.ParentIssue
+				t.detailIssueType = ""
+				if cur.row.issueRun.IssueType != nil {
+					t.detailIssueType = *cur.row.issueRun.IssueType
+				}
 				t.detailCursor, t.detailOffset = 0, 0
 			} else {
 				t.statusMsg = "no GitHub issues for this ticket"
@@ -601,8 +606,11 @@ func (t Tickets) detailView(w, h int) string {
 			created++
 		}
 	}
-	header := styleTitle.Padding(0, 1).Render(
-		fmt.Sprintf("GitHub Issues  (%d created / %d planned)", created, len(t.detailIssues)))
+	label := fmt.Sprintf("GitHub Issues  (%d created / %d planned)", created, len(t.detailIssues))
+	if t.detailIssueType != "" {
+		label += "  · type " + t.detailIssueType
+	}
+	header := styleTitle.Padding(0, 1).Render(label)
 
 	// Window the issue list around the cursor so a long list scrolls.
 	vis := h - 4 // header + blank + blank + pos
