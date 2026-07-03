@@ -92,10 +92,16 @@ def migrate(engine: Engine, migrations_dir: str | Path) -> list[int]:
             logger.info("migration_applying", version=version, file=path.name)
             try:
                 with engine.begin() as conn:
-                    # exec_driver_sql sends the file verbatim to the driver: it
-                    # runs multi-statement DDL and does not treat ':' as a bind
-                    # parameter (which text() would).
-                    conn.exec_driver_sql(sql)
+                    # Run the file verbatim through the raw DBAPI cursor with no
+                    # params arg: it executes multi-statement DDL, doesn't treat
+                    # ':' as a bind (which text() would), and — unlike
+                    # exec_driver_sql, which always hands psycopg2 an (empty)
+                    # params mapping — leaves a literal '%' in the SQL alone
+                    # (an ILIKE pattern or a comment) instead of tripping
+                    # psycopg2's %-interpolation.
+                    cur = conn.connection.cursor()
+                    cur.execute(sql)
+                    cur.close()
                     conn.execute(
                         text("INSERT INTO schema_migrations (version) VALUES (:v)"),
                         {"v": version},
