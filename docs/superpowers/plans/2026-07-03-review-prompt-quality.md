@@ -1,5 +1,16 @@
 # Review-Prompt Quality Improvements Implementation Plan
 
+> **STATUS (2026-07-03):** Prompt-side tasks **shipped** on `main` under prompt
+> version **v2.1** — Task 1 (version), Task 2 (delete dead Messages-API path),
+> Task 3 (dedupe team-config block), Task 4+6 (code confidence floor +
+> honest-confidence/verify-before-write prompt), Task 8 (summary contract),
+> Task 9 (odoo19 severities + JSONB 16+). All three suites green
+> (worker 751 / api 207 / scheduler 33), ruff clean.
+> **Remaining (code-heavy):** Task 5 (`code_excerpt` evidence anchor — schema +
+> migration 024 + verifier + persistence), Task 7 (worked examples — depends on
+> Task 5's field), Task 10 (`odoo_version` repo config). Task 11 (finalize/
+> handoff) after those.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Raise review quality across all six CLI skills: calibrated worked examples, a mandatory pre-output self-verification step, honest confidence scoring with code-side enforcement, a verbatim `code_excerpt` evidence anchor threaded through ground-check → verifier → DB, an `odoo_version` repo config so non-19 repos stop getting wrong-version deprecation noise, deduplicated shared prompt blocks, a defined summary shape, severities for every `odoo19.md` rule, and removal of the dead Messages-API review prompt path.
