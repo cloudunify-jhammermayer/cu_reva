@@ -201,8 +201,8 @@ class JobParams(BaseModel):
 class ContentBlock(TypedDict, total=False):
     """A single content block sent to the Claude Messages API.
 
-    `cache_control` is attached to blocks we want to cache (system prompt,
-    odoo19.md, CLAUDE.md). See `prompt_builder.build_system_blocks`.
+    `cache_control` is attached to blocks we want to cache. Used by the
+    Messages-API paths (ticket analysis, comment replies, the finding verifier).
     """
 
     type: str

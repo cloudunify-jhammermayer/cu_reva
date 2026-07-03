@@ -4,27 +4,24 @@
 changes, not implementation details. There are two delivery paths, matching
 REVA's two Claude clients:
 
-- **`skills/`** → the headless **Claude Code CLI** (`ClaudeCodeRunner`). Used
-  for all PR reviews and repo audits. See [`skills/README.md`](skills/README.md).
-- **The Markdown templates here** → the **Messages API** (`PromptBuilder` +
-  `ClaudeClient`). Used for ticket analysis and inline-comment replies.
+- **`skills/` + `review_guidance.md` + `odoo19.md`** → the headless **Claude
+  Code CLI** (`ClaudeCodeRunner`). Used for all PR reviews and repo audits. The
+  CLI assembles the prompt itself (`review_guidance.md` preamble → `odoo19.md`
+  for Odoo repos → the selected `skills/*.md`). See
+  [`skills/README.md`](skills/README.md).
+- **The remaining Markdown templates** → the **Messages API** (`ClaudeClient`).
+  Used for ticket analysis, ticket-issue planning, inline-comment replies, and
+  the learned-memory distiller — each reads its own template directly.
 
-## Files (Messages-API path)
+## Files
 
-| File | Role | Cached on Claude side? |
+| File | Role | Path |
 |---|---|---|
-| `system.md` | REVA identity, anti-injection guard, tool_use contract, severity/category definitions, global rules | Yes (block 1) |
-| `odoo19.md` | Odoo-specific review rules | Yes (block 2, conditional) |
-| `ticket_analysis.md` | Ticket-analysis instructions | n/a |
-| `diff_review.md`, `deep_review.md` | Legacy user-message templates from the original Messages-API review path; retained for reference (reviews now run via `skills/`). | No |
+| `review_guidance.md` | Always-on review governance: identity, severity/category/confidence definitions, security & conduct rules, shared skill-parameter handling | CLI |
+| `odoo19.md` | Odoo-specific review rules (prepended for Odoo repos) | CLI |
+| `skills/*.md` | Per-mode task sections (diff/delta/full/xml/migration/audit) | CLI |
+| `ticket_analysis.md`, `ticket_issues.md`, `review_memory.md` | Messages-API task prompts | Messages API |
 | `CHANGELOG.md` | Version history; the first heading is parsed as `prompt_version` and stored on every `review_runs` row. | n/a |
-
-## Cache strategy (Messages-API path)
-
-`PromptBuilder.build_system_blocks` tags each cacheable block with
-`cache_control: ephemeral`, in order: `system.md` → `odoo19.md` (conditional) →
-the repo's `CLAUDE.md` (if present) → `custom_instructions` from
-`.claude-review.yml`. Repeated calls hit the cache and cut input cost ~90%.
 
 > On the CLI path, a reviewed repo's own `CLAUDE.md` (and `.claude/`, `.mcp.json`,
 > `AGENTS.md`) is **deleted from the clone before the CLI runs** (SECU-1): the
@@ -37,14 +34,15 @@ the repo's `CLAUDE.md` (if present) → `custom_instructions` from
 Bump the version on every prompt change (add a heading at the top of
 `CHANGELOG.md`). `PromptBuilder.get_version()` parses it and persists it on
 `review_runs.prompt_version`, so finding rates stay A/B-comparable across
-versions. Don't edit prompts without bumping — you lose comparability. Watch the
+versions. Don't edit prompts without bumping — you lose comparability, and the
+boot-time drift guard (`compute_prompt_hashes`) alerts. Watch the
 `review_feedback` table to spot over-eager finding categories, then adjust the
 relevant section.
 
 ## Output contract
 
-REVA uses **tool_use** structured output (`submit_review`). The schema is
-generated from `reva/types.py` (`Finding` / `ReviewResult`) via
-`reva/review_tool.py` — never hand-write a second schema. If you change those
-models, update the prose in `system.md` (and the skills) to describe the new
-fields.
+On the CLI path each skill instructs Claude to Write a JSON file matching the
+shape in that skill's "Output format" section; the worker parses it into
+`Finding` / `ReviewResult` (`reva/types.py`) and recomputes `risk_level` and the
+finding cap itself. If you change those models, update every skill's output
+example to match.

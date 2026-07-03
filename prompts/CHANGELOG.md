@@ -1,3 +1,13 @@
+## v2.1 — Review-quality pass: examples, self-verification, evidence anchors
+
+- Removed the dead Messages-API review prompts (`system.md`, `diff_review.md`,
+  `deep_review.md`) and the `PromptBuilder.build_system_blocks` /
+  `build_user_prompt` methods they fed. The CLI is the only review path and
+  assembles its prompt directly (`review_guidance.md` + `odoo19.md` + skills);
+  those files carried a stale `submit_review` contract and a self-set
+  `risk_level` instruction contradicting `review_guidance.md`. `PromptBuilder`
+  now owns only versioning + drift hashes.
+
 ## v2.0 — Learned team preferences on the review path
 
 - All five review skills' "Team configuration" section gains a third optional
