@@ -732,7 +732,7 @@ Note: the partial unique index and raw SQL are exercised only on real Postgres �
 - Test: `worker/tests/test_odoo_client.py` (append)
 
 **Interfaces:**
-- Produces: `OdooCallbackClient.timesheet_results(request_id: str, results: list[dict], stats: dict) -> None` — POSTs `{base}/timesheet-results`; raises `PermanentError` (4xx) / `TransientError` (5xx, network).
+- Produces: `OdooCallbackClient.timesheet_results(request_id: str, results: list[dict], stats: dict) -> None` — POSTs `{base}/hr/timesheet-results`; raises `PermanentError` (4xx) / `TransientError` (5xx, network).
 
 - [ ] **Step 1: Write the failing test** (append to `worker/tests/test_odoo_client.py`)
 
@@ -759,7 +759,7 @@ def test_timesheet_results_posts_contract(monkeypatch):
 
     monkeypatch.setattr("reva.odoo_client.httpx.post", post)
     _client().timesheet_results(**_ts_kwargs())
-    assert captured["url"].endswith("/timesheet-results")
+    assert captured["url"].endswith("/hr/timesheet-results")
     assert captured["json"] == _ts_kwargs()
     assert captured["headers"]["Authorization"] == f"Bearer {_KEY}"
 
@@ -803,7 +803,7 @@ Expected: FAIL — `AttributeError: 'OdooCallbackClient' object has no attribute
         line of the batch checked except the needs_human ones. `request_id`
         echoes the id Odoo sent to POST /api/v1/timesheet-review.
         """
-        self._post("/timesheet-results", {
+        self._post("/hr/timesheet-results", {
             "request_id": request_id,
             "results": results,
             "stats": stats,
@@ -811,7 +811,7 @@ Expected: FAIL — `AttributeError: 'OdooCallbackClient' object has no attribute
         logger.bind(request_id=request_id).info("odoo_timesheet_results_ok")
 ```
 
-Also add to the module docstring's endpoint list (after the write-field block): `POST {base}/timesheet-results — timesheet wording review results`.
+Also add to the module docstring's endpoint list (after the `/tickets/` block): `POST {base}/hr/timesheet-results — timesheet wording review results` (the timesheet app's namespace is `/hr/`, per the 2026-07-05 Odoo-side API namespacing).
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -2314,7 +2314,7 @@ func (m *MockClient) TimesheetReviews(limit int) (*TimesheetReviewPage, error) {
 			ID: 1, OdooInstanceID: intPtr(1), RequestID: "req-2026-07-02",
 			Status: "failed", TotalLines: 40,
 			CreatedAt: now.Add(-26 * time.Hour),
-			ErrorMessage: strPtr("Odoo /timesheet-results 409 (permanent)"),
+			ErrorMessage: strPtr("Odoo /hr/timesheet-results 409 (permanent)"),
 		},
 	}
 	n := limit

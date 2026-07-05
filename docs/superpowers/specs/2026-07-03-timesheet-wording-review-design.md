@@ -105,7 +105,10 @@ RQ enqueue parameters: `job_timeout = max(600, 120 * n_chunks)` seconds,
 Redis carry the description texts, same situation as ticket text today — the
 TTL caps that retention).
 
-### Callback: `POST {odoo_base}/timesheet-results`
+### Callback: `POST {odoo_base}/hr/timesheet-results`
+
+(Odoo-side API namespacing, 2026-07-05: each Odoo app namespaces its REVA
+endpoints — tickets under `/tickets/`, the timesheet app under `/hr/`.)
 
 Sent via a new `OdooCallbackClient.timesheet_results()` (same bearer auth,
 `_post()` error mapping: 4xx permanent, 5xx/network transient).

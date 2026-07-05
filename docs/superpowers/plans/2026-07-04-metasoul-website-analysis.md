@@ -20,7 +20,7 @@
 - Migration number: **verify `025` is still the next free number** (`ls db/migrations/`) — other approved designs may claim numbers; renumber file + references if taken.
 - Security comment codes: the new fetch guard is **SECU-21**; untrusted-content fencing follows **SECU-5**.
 - The element key enum is fixed (order matters, it is the Odoo mapping contract): `contact_email, cookies, cmp, analytics, newsletter_signup, contact_form, booking_tool, error_tracking, review_platforms, live_chat, captcha, maps, feedback_form, remote_fonts, survey_forms, other`.
-- Callback contract: `POST {instance callback base}/website-analysis-result` with `{"record_id", "model_name", "status": "completed"|"failed", "result": {...}|null, "error": str|null}`.
+- Callback contract: `POST {instance callback base}/metasoul/website-analysis-result` with `{"record_id", "model_name", "status": "completed"|"failed", "result": {...}|null, "error": str|null}`.
 - Model selection: the analyzer passes no `model=` → `REVA_DEFAULT_MODEL`. Spend ledger kind: `"website"`. Budget gate: `worker.runner.budget_exceeded` **is** applied (unlike tickets).
 
 ---
@@ -550,7 +550,7 @@ Expected: FAIL — `ImportError: cannot import name 'WebsiteAnalysis'`
 ```sql
 -- Website analyses (metasoul GDPR questionnaire): one row per Odoo-triggered
 -- website check. REVA fetches the site, answers the fixed checklist, and
--- posts the JSONB result back to the instance's /website-analysis-result
+-- posts the JSONB result back to the instance's /metasoul/website-analysis-result
 -- callback. Mirrors reva/db/models.py::WebsiteAnalysis.
 CREATE TABLE IF NOT EXISTS website_analyses (
     id BIGSERIAL PRIMARY KEY,
@@ -2403,7 +2403,7 @@ git commit -m "feat(reva): website analyzer (fenced evidence, forced tool) + mer
 
 **Interfaces:**
 - Consumes: existing `OdooCallbackClient._post` (4xx→PermanentError, 5xx/network→TransientError, disabled→PermanentError).
-- Produces: `OdooCallbackClient.website_analysis_result(record_id: int, model_name: str, status: str, result: dict | None, error: str | None = None) -> None` posting to sibling path `/website-analysis-result`.
+- Produces: `OdooCallbackClient.website_analysis_result(record_id: int, model_name: str, status: str, result: dict | None, error: str | None = None) -> None` posting to sibling path `/metasoul/website-analysis-result`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2426,7 +2426,7 @@ def test_website_analysis_result_success(monkeypatch):
         record_id=42, model_name="metasoul.website.check",
         status="completed", result={"schema_version": 1},
     )
-    assert captured["url"].endswith("/website-analysis-result")
+    assert captured["url"].endswith("/metasoul/website-analysis-result")
     assert captured["json"] == {
         "record_id": 42,
         "model_name": "metasoul.website.check",
@@ -2495,7 +2495,7 @@ Insert after `write_field`:
         dict) or "failed" (result None, error set) — a failed run still calls
         back so the Odoo form shows WHY instead of hanging in pending.
         """
-        self._post("/website-analysis-result", {
+        self._post("/metasoul/website-analysis-result", {
             "record_id": record_id,
             "model_name": model_name,
             "status": status,
@@ -2517,7 +2517,7 @@ Expected: PASS
 ```bash
 ruff check reva worker/worker api/app scheduler/scheduler
 git add reva/odoo_client.py worker/tests/test_odoo_client.py
-git commit -m "feat(reva): /website-analysis-result Odoo callback method"
+git commit -m "feat(reva): /metasoul/website-analysis-result Odoo callback method"
 ```
 
 ---
@@ -3893,5 +3893,5 @@ git commit -m "docs: website-analysis job, endpoints, and TUI tab"
 ## Post-implementation notes (not tasks)
 
 - **No new env vars / compose changes**: the job uses `REVA_DEFAULT_MODEL`, the existing budget cap, and the per-instance callback config. The Odoo instance for metasoul is registered at runtime via `POST /api/v1/odoo-instances` (existing flow).
-- **Odoo-side contract** (separate codebase): implement `POST {callback base}/website-analysis-result` accepting `{record_id, model_name, status, result, error}`, Bearer-authed with the instance's outbound key.
+- **Odoo-side contract** (separate codebase): implement `POST {callback base}/metasoul/website-analysis-result` accepting `{record_id, model_name, status, result, error}`, Bearer-authed with the instance's outbound key.
 - **Honest status line for the ship report**: the Claude call and the live fetch are unit-tested against mocks only; the RDAP heuristic and CDN/hosting confidence need a few real-site smoke checks on staging before metasoul relies on them.

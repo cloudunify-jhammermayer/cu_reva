@@ -174,7 +174,7 @@ Callback: on completion the worker POSTs
  "status": "completed", "result": { …WebsiteAnalysisResult… }}
 ```
 
-to a new sibling path `/website-analysis-result` derived off the instance's
+to a new sibling path `/metasoul/website-analysis-result` derived off the instance's
 `callback_url` (the `OdooCallbackClient` sibling-path convention), Bearer-authed
 with the instance's outbound key. On **permanent failure** (unreachable site,
 SSRF-blocked URL) the worker still calls back with `status: "failed"` and a
@@ -355,7 +355,7 @@ mocks only — state that honestly at ship time.
 
 ## Open questions
 
-- Exact Odoo endpoint shape for `/website-analysis-result` (Odoo app is a
+- Exact Odoo endpoint shape for `/metasoul/website-analysis-result` (Odoo app is a
   separate codebase; the payload above is the proposed contract).
 - Whether metasoul's checklist gains/loses questions later — handled by
   bumping `schema_version` and evolving the Pydantic model + prompt together.
