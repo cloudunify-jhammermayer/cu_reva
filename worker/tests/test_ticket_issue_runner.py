@@ -56,6 +56,7 @@ class FakeGitHub:
     labels_ensured: list[str] = field(default_factory=list)
     installation_exc: Exception | None = None
     create_exc_on_call: int | None = None  # 1-based index of create_issue call that raises
+    reject_assignees: bool = False
     installation_calls: int = 0
     search_calls: int = 0
     _create_calls: int = 0
@@ -81,14 +82,18 @@ class FakeGitHub:
     def ensure_label(self, token, owner, repo, name, color="5319e7", description="") -> None:
         self.labels_ensured.append(name)
 
-    def create_issue(self, token, owner, repo, title, body, labels=None) -> dict:
+    def create_issue(
+        self, token, owner, repo, title, body, labels=None, assignees=None
+    ) -> dict:
         self._create_calls += 1
         if self.create_exc_on_call == self._create_calls:
             raise PermanentError("GitHub 403 secondary rate limit")
+        if assignees and self.reject_assignees:
+            raise PermanentError("GitHub 422 assignee is not assignable")
         self.next_number += 1
         self.created.append(
             {"owner": owner, "repo": repo, "title": title, "body": body, "labels": labels,
-             "number": self.next_number}
+             "assignees": assignees, "number": self.next_number}
         )
         return {
             "number": self.next_number,
@@ -103,6 +108,7 @@ class FakeGitHub:
 @dataclass
 class FakeOdoo:
     raise_exc: Exception | None = None
+    ready_raise_exc: Exception | None = None
     calls: list[dict] = field(default_factory=list)
 
     def issues_created(self, ticket_id, model_name, request_id, status, issues, error=None):
@@ -120,6 +126,14 @@ class FakeOdoo:
         )
         if self.raise_exc:
             raise self.raise_exc
+
+    def tickets_ready(self, ticket_id, model_name, issues):
+        self.calls.append(
+            {"ticket_id": ticket_id, "model_name": model_name, "ready": True,
+             "issues": issues}
+        )
+        if self.ready_raise_exc:
+            raise self.ready_raise_exc
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -215,6 +229,33 @@ def test_happy_path_creates_issues_and_calls_back(ctx_and_fakes):
         {"number": 103, "title": "[DEV] 123 - Issue 2 (2/2)",
          "url": "https://github.com/acme/widgets/issues/103", "state": "open"},
     ]
+
+
+def test_github_username_assigns_created_issues(ctx_and_fakes):
+    s = ctx_and_fakes
+    params = _make_params(s["db"], github_username="jane-doe")
+
+    run_ticket_issues(params)
+
+    assert [issue["assignees"] for issue in s["github"].created] == [
+        ["jane-doe"],
+        ["jane-doe"],
+        ["jane-doe"],
+    ]
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["github_username"] == "jane-doe"
+
+
+def test_github_assignee_422_retries_without_assignee(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["github"].reject_assignees = True
+    params = _make_params(s["db"], github_username="jane-doe")
+
+    out = run_ticket_issues(params)
+
+    assert out["status"] == "completed"
+    assert len(s["github"].created) == 3
+    assert [issue["assignees"] for issue in s["github"].created] == [None, None, None]
 
 
 def test_two_issues_creates_parent_and_attaches_children(ctx_and_fakes):
@@ -745,6 +786,28 @@ def test_issue_closed_updates_db_and_notifies_odoo(ctx_and_fakes):
          "url": "https://github.com/acme/widgets/issues/102", "state": "closed"},
         {"number": 103, "title": "[DEV] 123 - Issue 2 (2/2)",
          "url": "https://github.com/acme/widgets/issues/103", "state": "open"},
+    ]
+
+
+def test_all_issues_closed_notifies_odoo_ticket_ready(ctx_and_fakes):
+    from worker.ticket_issue_runner import sync_ticket_issue_state
+
+    s = ctx_and_fakes
+    _seed_completed_run(s)
+    s["odoo"].calls.clear()
+
+    sync_ticket_issue_state(
+        {"owner": "acme", "repo": "widgets", "number": 102, "state": "closed"}
+    )
+    out = sync_ticket_issue_state(
+        {"owner": "acme", "repo": "widgets", "number": 103, "state": "closed"}
+    )
+
+    assert out == {"status": "completed", "records": 1, "notified": 1}
+    assert s["odoo"].calls[-1]["ready"] is True
+    assert [issue["state"] for issue in s["odoo"].calls[-1]["issues"]] == [
+        "closed",
+        "closed",
     ]
 
 

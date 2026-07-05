@@ -144,6 +144,10 @@ func (d Dashboard) renderCostCard(m *api.DashboardMetrics, pendingCount, w int) 
 		b.WriteString(fmt.Sprintf("  Degrade %s\n",
 			styleStatusFailed.Render(fmt.Sprintf("%d events (24h)", m.Degradations24h))))
 	}
+	if m.TicketsReady > 0 {
+		b.WriteString(fmt.Sprintf("  Ready   %s\n",
+			styleStatusCompleted.Render(fmt.Sprintf("%d tickets", m.TicketsReady))))
+	}
 	if len(m.CoreKnowledge) > 0 {
 		versions := make([]string, 0, len(m.CoreKnowledge))
 		for _, status := range m.CoreKnowledge {

@@ -1,0 +1,57 @@
+{
+  "$defs": {
+    "PrRefPayload": {
+      "properties": {
+        "number": {
+          "title": "Number",
+          "type": "integer"
+        },
+        "repo": {
+          "title": "Repo",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "title",
+        "url",
+        "repo"
+      ],
+      "title": "PrRefPayload",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "model_name": {
+      "title": "Model Name",
+      "type": "string"
+    },
+    "note_html": {
+      "title": "Note Html",
+      "type": "string"
+    },
+    "pr": {
+      "$ref": "#/$defs/PrRefPayload"
+    },
+    "ticket_id": {
+      "title": "Ticket Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "ticket_id",
+    "model_name",
+    "pr",
+    "note_html"
+  ],
+  "title": "ChangeNotePayload",
+  "type": "object"
+}

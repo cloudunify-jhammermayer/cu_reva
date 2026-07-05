@@ -58,6 +58,30 @@ def maybe_distill_memories(queue, db, now, last_distill, interval_s, min_dismiss
     return now
 
 
+def _previous_month_bounds(now: datetime) -> tuple[datetime, datetime]:
+    first_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if first_this_month.month == 1:
+        start = first_this_month.replace(year=first_this_month.year - 1, month=12)
+    else:
+        start = first_this_month.replace(month=first_this_month.month - 1)
+    return start, first_this_month
+
+
+def maybe_enqueue_value_report(queue, now, last_sent, day: int, hour: int):
+    """Enqueue previous-month value report once per month after day/hour."""
+    if now.day < day or (now.day == day and now.hour < hour):
+        return last_sent
+    if last_sent is not None and last_sent.year == now.year and last_sent.month == now.month:
+        return last_sent
+    start, end = _previous_month_bounds(now)
+    queue.enqueue(
+        "worker.value_report_tasks.run_value_report",
+        {"period_start_iso": start.isoformat(), "period_end_iso": end.isoformat()},
+    )
+    logger.info("value_report_enqueued", period_start=start.date(), period_end=end.date())
+    return now
+
+
 def maybe_purge_ticket_text(
     db,
     now,
@@ -153,6 +177,7 @@ def main() -> None:
     last_purge = None
     # Memory distillation: run one shortly after startup, then on its interval.
     last_distill = None
+    last_value_report = None
 
     while not stop:
         now = datetime.now(timezone.utc)
@@ -205,6 +230,15 @@ def main() -> None:
             )
         except Exception:
             logger.exception("scheduler_memory_distill_error")
+
+        try:
+            last_value_report = maybe_enqueue_value_report(
+                queue, now, last_value_report,
+                settings.value_report_day,
+                settings.value_report_hour_utc,
+            )
+        except Exception:
+            logger.exception("scheduler_value_report_error")
 
         # Liveness heartbeat — the container healthcheck checks its freshness.
         # Only refresh it when the poll (the DB-dependent core loop) succeeded, so

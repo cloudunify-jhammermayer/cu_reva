@@ -200,7 +200,11 @@ def test_requeue_409_when_text_purged_and_no_plan(client_db_queue):
     """Without a persisted plan, a requeue would re-plan from the purge
     sentinel and create garbage issues on GitHub — refuse it."""
     client, db, _, headers = client_db_queue
-    created = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers).json()
+    created = client.post(
+        "/api/v1/create-issues",
+        json={**CONTRACT_PAYLOAD, "github_username": "alice"},
+        headers=headers,
+    ).json()
     run_id = created["request_id"]
     writers.record_ticket_issue_run_failed(db, run_id, "boom")
 
@@ -290,7 +294,11 @@ def test_list_ticket_issue_runs_strips_plan_bodies(client_db_queue):
     """The runs feed (TUI) gets {number, title, url} refs only — plan bodies
     carry customer-derived text and must not leave via the list endpoint."""
     client, db, _, headers = client_db_queue
-    created = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers).json()
+    created = client.post(
+        "/api/v1/create-issues",
+        json={**CONTRACT_PAYLOAD, "github_username": "alice"},
+        headers=headers,
+    ).json()
     run_id = created["request_id"]
 
     from reva.db.models import TicketIssueRun
@@ -314,6 +322,7 @@ def test_list_ticket_issue_runs_strips_plan_bodies(client_db_queue):
     assert item["id"] == run_id
     assert item["ticket_id"] == CONTRACT_PAYLOAD["ticket_id"]
     assert item["status"] == "completed"
+    assert item["github_username"] == "alice"
     assert item["issues"] == [
         {"number": 42, "title": "Implement login form",
          "url": "https://github.com/org/repo/issues/42", "state": "closed"},

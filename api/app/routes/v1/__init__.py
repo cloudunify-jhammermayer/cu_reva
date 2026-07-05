@@ -27,6 +27,7 @@ from app.routes.v1 import (
     ticket_analyses,
     ticket_issues,
     timesheet_reviews,
+    value_reports,
 )
 
 router = APIRouter()
@@ -42,6 +43,7 @@ _master.include_router(admin.router)
 _master.include_router(ticket_analyses.router)
 _master.include_router(ticket_issues.router)
 _master.include_router(timesheet_reviews.router)
+_master.include_router(value_reports.router)
 _master.include_router(audits.router)
 _master.include_router(odoo_instances.router)
 _master.include_router(ops_events.router)

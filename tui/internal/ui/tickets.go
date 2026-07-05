@@ -45,6 +45,7 @@ type Tickets struct {
 	detailIssues    []api.TicketIssueRef
 	detailParent    *api.TicketIssueRef
 	detailIssueType string
+	detailAssignee  string
 	detailCursor    int
 	detailOffset    int
 }
@@ -346,6 +347,10 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 				if cur.row.issueRun.IssueType != nil {
 					t.detailIssueType = *cur.row.issueRun.IssueType
 				}
+				t.detailAssignee = ""
+				if cur.row.issueRun.GithubUsername != nil {
+					t.detailAssignee = *cur.row.issueRun.GithubUsername
+				}
 				t.detailCursor, t.detailOffset = 0, 0
 			} else {
 				t.statusMsg = "no GitHub issues for this ticket"
@@ -610,6 +615,9 @@ func (t Tickets) detailView(w, h int) string {
 	if t.detailIssueType != "" {
 		label += "  · type " + t.detailIssueType
 	}
+	if t.detailAssignee != "" {
+		label += "  · assignee @" + t.detailAssignee
+	}
 	header := styleTitle.Padding(0, 1).Render(label)
 
 	// Window the issue list around the cursor so a long list scrolls.
@@ -702,15 +710,22 @@ func plainStatusSymbol(status string, createdAt time.Time) string {
 // created, "1/4" when a failed run created only part of its plan.
 func issueRunCounts(run api.TicketIssueRunSummary) string {
 	created := 0
+	closed := 0
 	for _, ref := range run.Issues {
 		if ref.Number != nil {
 			created++
+		}
+		if ref.Number != nil && ref.State != nil && *ref.State == "closed" {
+			closed++
 		}
 	}
 	if len(run.Issues) == 0 {
 		return ""
 	}
 	if created == len(run.Issues) {
+		if created > 0 && closed == created {
+			return fmt.Sprintf("✓ %d", created)
+		}
 		return fmt.Sprintf("%d", created)
 	}
 	return fmt.Sprintf("%d/%d", created, len(run.Issues))

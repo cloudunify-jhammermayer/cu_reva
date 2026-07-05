@@ -115,6 +115,22 @@ def test_union_dedups_newest_wins_and_scopes_by_instance(db):
     assert union[1]["state"] == "open"
 
 
+def test_ready_tickets_require_nonempty_all_closed_union(db):
+    _complete_run(db, _typed_params(ticket_id=92), [
+        {"number": 10, "title": "A", "url": "https://gh/10", "state": "closed"},
+        {"number": 11, "title": "B", "url": "https://gh/11", "state": "closed"},
+    ])
+    _complete_run(db, _typed_params(ticket_id=93), [
+        {"number": 12, "title": "C", "url": "https://gh/12", "state": "closed"},
+        {"number": 13, "title": "D", "url": "https://gh/13", "state": "open"},
+    ])
+
+    ready = writers.list_ready_tickets(db)
+
+    assert writers.count_ready_tickets(db) == 1
+    assert [(row["ticket_id"], row["issue_count"]) for row in ready] == [(92, 2)]
+
+
 def test_latest_parent_scoped_and_excludes_self(db):
     p = _typed_params(ticket_id=91)
     r1 = _complete_run(db, p, [{"number": 5, "title": "t", "url": "https://gh/5", "state": "open"}])

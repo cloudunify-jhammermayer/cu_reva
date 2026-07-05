@@ -1,6 +1,6 @@
 # Monthly Value Report Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** A persisted monthly per-repo/per-instance rollup of REVA's delivered value (findings, confirmed-fixed rate, spend, throughput) — generated always, sent to Chat only when explicitly enabled (default OFF).
 
@@ -34,7 +34,7 @@
   - `writers.get_value_reports(db, limit=12) -> list[dict]` (newest first, full content)
   - `reva.value_report.build_report(db, period_start, period_end) -> tuple[str, dict]` — `(markdown, stats)`; always returns a report, even for an empty month
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `worker/tests/test_value_report.py`:
 
@@ -131,7 +131,7 @@ def test_list_newest_first(db):
     assert rows[0]["content_md"] == "june"
 ```
 
-- [ ] **Step 2: Run to verify failure, then implement**
+- [x] **Step 2: Run to verify failure, then implement**
 
 Migration `0NN_value_reports.sql`:
 
@@ -212,7 +212,7 @@ straightforward `select`/`func.count` — mirror `api/app/queries/metrics.py`
 aggregation style; the outcome column name comes from
 `grep -n "outcome" reva/db/models.py`.)
 
-- [ ] **Step 3: Run to verify pass, commit**
+- [x] **Step 3: Run to verify pass, commit**
 
 ```bash
 cd worker && .venv/bin/python -m pytest tests/test_value_report.py -q
@@ -232,7 +232,7 @@ git commit -m "feat(report): monthly value-report builder + persistence"
 **Interfaces:**
 - Produces: scheduler settings `value_report_day: int = 1` (`REVA_VALUE_REPORT_DAY`), `value_report_hour_utc: int = 7` (`REVA_VALUE_REPORT_HOUR_UTC`); worker setting `value_report_chat_enabled: bool = False` (`REVA_VALUE_REPORT_CHAT_ENABLED`); RQ entry `"worker.value_report_tasks.run_value_report"` (params `{period_start_iso, period_end_iso}`).
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 `scheduler/tests/test_value_report_due.py` — a `maybe_enqueue_value_report(queue, now, last_sent, day, hour)` helper (the `maybe_enqueue_eviction` shape): fires once when `now` is on/after (day, hour) of the month AND `last_sent` is in a previous month; params carry the PREVIOUS calendar month's ISO bounds; not due → unchanged; month rollover covered (Jan→Dec of previous year).
 
@@ -242,7 +242,7 @@ Write both concretely (the scheduler helper is new and pure — full code
 tests; the runner test uses `Base.metadata.create_all` + a monkeypatched
 `worker.value_report_runner.notify_value_report`).
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 `worker/worker/value_report_runner.py`:
 
@@ -313,7 +313,7 @@ restart double-fire is harmless). `.env.example`:
 # REVA_VALUE_REPORT_HOUR_UTC=7
 ```
 
-- [ ] **Step 3: Run to verify pass, commit**
+- [x] **Step 3: Run to verify pass, commit**
 
 ```bash
 cd worker && .venv/bin/python -m pytest tests/test_value_report_runner.py -q && cd ../scheduler && .venv/bin/python -m pytest tests/ -q
@@ -330,16 +330,16 @@ git commit -m "feat(report): monthly trigger + chat gating (default off)"
 - Modify: `api/app/routes/v1/__init__.py` (import + `_master.include_router`)
 - Test: `api/tests/test_v1_value_reports.py`
 
-- [ ] **Step 1: Failing tests** — list returns newest-first with full
+- [x] **Step 1: Failing tests** — list returns newest-first with full
 `content_md`; `latest` 200/404; master-key gated (the standard fixture).
 Write them in the established `test_v1_*` style (fixture: db override +
 `Base.metadata.create_all`, seed via `writers.upsert_value_report`).
-- [ ] **Step 2: Implement** — schemas `ValueReportEntry`
+- [x] **Step 2: Implement** — schemas `ValueReportEntry`
 (`id, period_start, period_end, content_md, stats, chat_sent, created_at`) +
 `ValueReportPage`; routes `GET /value-reports?limit=` (clamped 24) and
 `GET /value-reports/latest` (404 when none) reading via
 `writers.get_value_reports`; wire into `_master`.
-- [ ] **Step 3: Run + commit**
+- [x] **Step 3: Run + commit**
 
 ```bash
 cd api && .venv/bin/python -m pytest tests/test_v1_value_reports.py -q
@@ -351,7 +351,7 @@ git commit -m "feat(api): value-report read endpoints"
 
 ### Task 4: Final verification
 
-- [ ] **Step 1:** Full DoD:
+- [x] **Step 1:** Full DoD:
 
 ```bash
 make test
@@ -359,7 +359,7 @@ worker/.venv/bin/ruff check reva worker/worker api/app scheduler/scheduler
 docker compose -f docker-compose.prod.yml config -q
 ```
 
-- [ ] **Step 2:** Commit anything outstanding + report. State honestly:
+- [x] **Step 2:** Commit anything outstanding + report. State honestly:
 Chat delivery ships OFF and stays off until Joseph flips
 `REVA_VALUE_REPORT_CHAT_ENABLED` after manually reviewing persisted reports
 (`GET /api/v1/value-reports/latest`); TUI surface deliberately deferred with

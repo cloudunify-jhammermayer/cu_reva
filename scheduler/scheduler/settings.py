@@ -49,6 +49,8 @@ class Settings:
     # its active memory version.
     memory_distill_interval_seconds: int = 86_400
     memory_distill_min_dismissals: int = 3
+    value_report_day: int = 1
+    value_report_hour_utc: int = 7
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -90,4 +92,6 @@ class Settings:
             memory_distill_min_dismissals=int(
                 os.environ.get("REVA_MEMORY_DISTILL_MIN_DISMISSALS", "3")
             ),
+            value_report_day=int(os.environ.get("REVA_VALUE_REPORT_DAY", "1")),
+            value_report_hour_utc=int(os.environ.get("REVA_VALUE_REPORT_HOUR_UTC", "7")),
         )

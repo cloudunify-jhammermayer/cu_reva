@@ -124,3 +124,15 @@ class DatabaseRepoLookup:
     def get_active_memory_row(self, repository_id: int) -> dict | None:
         from reva.db import writers
         return writers.get_active_memory_row(self._db, repository_id)
+
+    def resolve_pr_tickets(self, repo_full_name: str, issue_numbers: list[int]):
+        from reva.ticket_links import resolve_pr_tickets
+        return resolve_pr_tickets(self._db, repo_full_name, issue_numbers)
+
+    def get_latest_structured_analysis(
+        self, odoo_instance_id: int | None, ticket_id: int, model_name: str
+    ) -> dict | None:
+        from reva.db import writers
+        return writers.get_latest_structured_analysis(
+            self._db, odoo_instance_id, ticket_id, model_name
+        )

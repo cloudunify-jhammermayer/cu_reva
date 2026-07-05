@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import case, func, select
 
+from reva.db import writers
 from reva.db.engine import Database
 from reva.db.models import PullRequest, Repository, ReviewFinding, ReviewRun
 
@@ -175,6 +176,7 @@ def weekly_report_stats(db: Database, since: datetime) -> dict:
         "top_findings": top_findings,
         "repos": repos,
         "models": models,
+        "ready_tickets": writers.list_ready_tickets(db, limit=10),
     }
 
 
@@ -288,6 +290,17 @@ def build_weekly_report(db: Database, since: datetime | None = None) -> str:
     if stats["models"]:
         model_parts = [f"{m['model']}: {m['count']}" for m in stats["models"]]
         lines.append(f"*Models*  {' · '.join(model_parts)}")
+        lines.append("")
+
+    # --- Ready tickets ---
+    if stats["ready_tickets"]:
+        lines.append("*Ready for deployment*")
+        for ticket in stats["ready_tickets"]:
+            repo = ticket.get("repo_full_name") or "(no repo)"
+            lines.append(
+                f"  `{repo}` ticket {ticket['ticket_id']} "
+                f"({ticket['issue_count']} issues closed)"
+            )
         lines.append("")
 
     lines.append("_REVA_")

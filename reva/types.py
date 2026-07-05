@@ -82,6 +82,8 @@ class RepoConfig(BaseModel):
     triage: bool = True
     # Kill switch for GitHub security-alert context (scanner-feed spec).
     scanner_feed: bool = True
+    ticket_grounding: bool = True
+    change_notes: bool = True
     # Which /core version reviews consult, e.g. "19.0". None disables it.
     odoo_version: str | None = None
 
@@ -423,6 +425,8 @@ class TicketIssueJobParams(BaseModel):
     # Fixed work-item type for every issue of this request (Odoo wizard), or
     # None to let the planner pick per issue (analysis flow).
     issue_type: str | None = None
+    # Optional GitHub login assigned to every created issue and parent epic.
+    github_username: str | None = None
 
 
 # --- Timesheet wording review types -----------------------------------------

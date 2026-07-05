@@ -16,7 +16,7 @@ from app.dependencies import get_db, get_redis, get_settings
 from app.main import app
 from app.settings import Settings
 from reva.db import Base, Database, create_engine_from_url, writers
-from reva.types import JobParams, ReviewResult
+from reva.types import JobParams, ReviewResult, TicketIssueJobParams
 
 
 @pytest.fixture()
@@ -100,6 +100,33 @@ def test_dashboard_findings_keys(client_and_db):
     client, _ = client_and_db
     fc = client.get("/api/v1/metrics/dashboard").json()["findings_24h"]
     assert set(fc.keys()) == {"critical", "major", "minor", "info"}
+
+
+def test_dashboard_counts_ready_tickets(client_and_db):
+    client, db = client_and_db
+    params = TicketIssueJobParams(
+        run_id=0,
+        odoo_instance_id=1,
+        ticket_id=123,
+        model_name="helpdesk.ticket",
+        github_url="https://github.com/acme/widgets",
+        name="Login work",
+        description="d",
+        analysis_html="a",
+        priority="1",
+        ticket_url="https://odoo.example/web#id=123",
+    )
+    issues = [
+        {"number": 10, "title": "A", "url": "https://gh/10", "state": "closed"},
+        {"number": 11, "title": "B", "url": "https://gh/11", "state": "closed"},
+    ]
+    run_id = writers.record_ticket_issue_run_created(db, params)
+    writers.update_ticket_issue_progress(db, run_id, issues)
+    writers.record_ticket_issue_run_completed(db, run_id, issues)
+
+    data = client.get("/api/v1/metrics/dashboard").json()
+
+    assert data["tickets_ready"] == 1
 
 
 # --- developers ---------------------------------------------------------------

@@ -3,6 +3,7 @@
   "description": "Please add a login page.",
   "description_docx": null,
   "github_url": "https://github.com/acme/widgets",
+  "github_username": null,
   "issue_type": null,
   "model_name": "project.task",
   "name": "Login rework",

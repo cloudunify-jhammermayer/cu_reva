@@ -13,6 +13,7 @@ import pytest
 
 from reva.errors import PermanentError, TransientError
 from reva.finding_verifier import VerifierVerdict
+from reva.ticket_links import TicketRef
 from worker.reviewer import (
     Reviewer,
     _INTENT_BODY_CAP,
@@ -136,6 +137,12 @@ class FakeRepos:
 
     def get_active_memory_row(self, repository_id: int) -> dict | None:
         return self.active_memory_row
+
+    def resolve_pr_tickets(self, repo_full_name: str, issue_numbers: list[int]):
+        return []
+
+    def get_latest_structured_analysis(self, odoo_instance_id, ticket_id, model_name):
+        return None
 
 
 @dataclass
@@ -1273,6 +1280,84 @@ def test_stated_intent_passed_on_delta_review():
     reviewer.execute(params)
     assert runner.last_skill == "reva-delta-review"
     assert "stated_intent" in runner.last_params
+
+
+class TicketGroundingRepos(FakeRepos):
+    def __init__(self, *, raise_on_resolve: bool = False, **kwargs):
+        super().__init__(**kwargs)
+        self.raise_on_resolve = raise_on_resolve
+        self.resolve_calls: list[tuple[str, list[int]]] = []
+
+    def resolve_pr_tickets(self, repo_full_name: str, issue_numbers: list[int]):
+        self.resolve_calls.append((repo_full_name, issue_numbers))
+        if self.raise_on_resolve:
+            raise RuntimeError("db down")
+        return [TicketRef(
+            odoo_instance_id=1,
+            ticket_id=123,
+            model_name="helpdesk.ticket",
+            run_id=7,
+        )]
+
+    def get_latest_structured_analysis(self, odoo_instance_id, ticket_id, model_name):
+        return {
+            "summary": "Customer needs CSV export.",
+            "acceptance_criteria": [
+                {"given": "I am a user", "when": "I export", "then": "I get CSV"}
+            ],
+        }
+
+
+def test_ticket_grounding_adds_acceptance_criteria_param():
+    github = FakeGitHub(pr_detail_body="Closes #102")
+    repos = TicketGroundingRepos()
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+
+    reviewer.execute(_params())
+
+    assert repos.resolve_calls == [("acme/widgets", [102])]
+    val = runner.last_params["ticket_acceptance_criteria"]
+    assert "Customer needs CSV export." in val
+    assert "I am a user / I export / I get CSV" in val
+
+
+def test_ticket_grounding_repo_config_false_skips_resolver():
+    github = FakeGitHub(
+        pr_detail_body="Closes #102",
+        file_contents={".claude-review.yml": "ticket_grounding: false\n"},
+    )
+    repos = TicketGroundingRepos()
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+
+    reviewer.execute(_params())
+
+    assert repos.resolve_calls == []
+    assert "ticket_acceptance_criteria" not in runner.last_params
+
+
+def test_ticket_grounding_resolve_failure_is_degraded():
+    ops_events = []
+    github = FakeGitHub(pr_detail_body="Closes #102")
+    repos = TicketGroundingRepos(raise_on_resolve=True)
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(
+        github=github,
+        repos=repos,
+        runner=runner,
+        ops_recorder=lambda c, s, e, d: ops_events.append((c, s, e, d)),
+    )
+
+    reviewer.execute(_params())
+
+    assert "ticket_acceptance_criteria" not in runner.last_params
+    assert ops_events == [
+        ("ticket_grounding", "warning", "resolve_failed", {
+            "repo": "acme/widgets",
+            "error": "db down",
+        })
+    ]
 
 
 # --- manifest validator (feature 5) ------------------------------------------

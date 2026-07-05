@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import get_args
 
 import structlog
+import yaml
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from rq import Retry
 from starlette.concurrency import run_in_threadpool
@@ -17,7 +18,8 @@ from app.settings import Settings
 from reva.claude_code_runner import REVIEW_JOB_TIMEOUT
 from reva.db import writers
 from reva.db.engine import Database
-from reva.types import Category
+from reva.ticket_links import parse_closing_refs
+from reva.types import Category, RepoConfig
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -98,7 +100,7 @@ def _process_delivery(
 
     try:
         if event == "pull_request":
-            _handle_pull_request(db, payload, settings, github)
+            _handle_pull_request(db, payload, settings, github, rq_queue)
         elif event == "issue_comment":
             _handle_issue_comment(db, payload, settings, github)
         elif event == "pull_request_review_comment":
@@ -153,7 +155,33 @@ def _upsert_repo_and_pr(db: Database, payload: dict) -> tuple[int, int]:
     return repo_id, pr_id
 
 
-def _handle_pull_request(db: Database, payload: dict, settings: Settings, github=None) -> None:
+def _change_notes_enabled(github, payload: dict) -> bool:
+    """Best-effort .claude-review.yml kill switch for merge change notes."""
+    if github is None:
+        return True
+    try:
+        repo = payload["repository"]
+        pr = payload["pull_request"]
+        token = github.get_installation_token(payload["installation"]["id"])
+        raw = github.get_file_content(
+            token,
+            repo["owner"]["login"],
+            repo["name"],
+            ".claude-review.yml",
+            pr["head"]["sha"],
+        )
+        if not raw:
+            return True
+        parsed = yaml.safe_load(raw)
+        if not isinstance(parsed, dict):
+            return True
+        return RepoConfig.model_validate(parsed).change_notes
+    except Exception:
+        logger.warning("change_notes_config_failed", exc_info=True)
+        return True
+
+
+def _handle_pull_request(db: Database, payload: dict, settings: Settings, github=None, rq_queue=None) -> None:
     action = payload.get("action", "")
     pr_data = payload["pull_request"]
 
@@ -165,6 +193,24 @@ def _handle_pull_request(db: Database, payload: dict, settings: Settings, github
         _, pr_id = _upsert_repo_and_pr(db, payload)
         marked = writers.mark_open_findings_at_merge(db, pr_id)
         logger.info("findings_marked_at_merge", pr=pr_data.get("number"), count=marked)
+        if (
+            rq_queue is not None
+            and parse_closing_refs(pr_data.get("body"))
+            and _change_notes_enabled(github, payload)
+        ):
+            repo_data = payload["repository"]
+            rq_queue.enqueue(
+                "worker.change_note_tasks.run_change_note",
+                {
+                    "repo_full_name": repo_data["full_name"].lower(),
+                    "pr_number": pr_data["number"],
+                    "pr_title": pr_data.get("title") or "",
+                    "pr_body": pr_data.get("body") or "",
+                    "pr_url": pr_data.get("html_url") or "",
+                    "installation_id": payload["installation"]["id"],
+                },
+                retry=Retry(max=3, interval=[30, 120, 300]),
+            )
         return
 
     if action not in _REVIEWABLE_ACTIONS:

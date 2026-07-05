@@ -49,6 +49,19 @@
       "title": "Github Url",
       "type": "string"
     },
+    "github_username": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional GitHub login assigned to created issues.",
+      "title": "Github Username"
+    },
     "issue_type": {
       "anyOf": [
         {

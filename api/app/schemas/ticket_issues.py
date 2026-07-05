@@ -36,11 +36,20 @@ class CreateIssuesRequest(BaseModel):
         description="Fixed work-item type for every issue of this request "
         "(Odoo wizard flow). Omitted/empty: the planner picks per issue.",
     )
+    github_username: str | None = Field(
+        default=None,
+        description="Optional GitHub login assigned to created issues.",
+    )
 
     @field_validator("issue_type", mode="before")
     @classmethod
     def _empty_type_is_none(cls, v: object) -> object:
         # The Odoo wizard's empty Selection may serialize as "" — treat as unset.
+        return None if v == "" else v
+
+    @field_validator("github_username", mode="before")
+    @classmethod
+    def _empty_username_is_none(cls, v: object) -> object:
         return None if v == "" else v
 
 
@@ -73,6 +82,7 @@ class TicketIssueRunSummary(BaseModel):
     github_url: str
     status: str
     issue_type: str | None = None
+    github_username: str | None = None
     issues: list[TicketIssueRef]
     parent_issue: TicketIssueRef | None = None
     error_message: str | None

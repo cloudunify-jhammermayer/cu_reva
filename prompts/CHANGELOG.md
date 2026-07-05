@@ -1,3 +1,9 @@
+## v2.6 — Ticket loop closure
+
+- change_note.md: new Messages-API prompt for merged-PR internal Odoo notes.
+- review_guidance.md: ticket_acceptance_criteria guidance for linked Odoo
+  ticket acceptance checks.
+
 ## v2.5 — Scanner feed
 
 - review_guidance.md: scanner_alerts task-parameter guidance for GitHub

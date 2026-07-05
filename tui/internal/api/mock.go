@@ -34,6 +34,7 @@ func (m *MockClient) Dashboard() (*DashboardMetrics, error) {
 		TotalCost7d:        0.2814,
 		AvgCostPerReview7d: &avgCost,
 		ActiveWorkers:      2,
+		TicketsReady:       1,
 		CoreKnowledge: []CoreVersionStatus{{
 			OdooVersion: "19.0",
 			LoadedAt:    time.Now().Add(-24 * time.Hour),
@@ -567,6 +568,7 @@ func (m *MockClient) TicketIssueRuns(limit int) (*TicketIssueRunPage, error) {
 		{
 			ID: 3, TicketID: 456, ModelName: "helpdesk.ticket",
 			GithubURL: "https://github.com/acme/widgets", Status: "completed",
+			GithubUsername: strPtr("alice"),
 			Issues: []TicketIssueRef{
 				{Number: intPtr(42), Title: "Implement login form",
 					URL:   strPtr("https://github.com/acme/widgets/issues/42"),

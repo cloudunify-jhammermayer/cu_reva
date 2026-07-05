@@ -307,6 +307,31 @@ def sync_ticket_issue_state(job_params: dict) -> dict:
                 issues=snapshot,
             )
             notified += 1
+            if state == "closed" and snapshot and all(
+                item.get("state") == "closed" for item in snapshot
+            ):
+                try:
+                    odoo.tickets_ready(
+                        ticket_id=record["ticket_id"],
+                        model_name=record["model_name"],
+                        issues=snapshot,
+                    )
+                    log.info("ticket_ready_sent", ticket_id=record["ticket_id"])
+                except TransientError:
+                    raise
+                except PermanentError:
+                    log.warning(
+                        "tickets_ready_permanent",
+                        ticket_id=record["ticket_id"],
+                        exc_info=True,
+                    )
+                    writers.record_ops_event(
+                        ctx.db,
+                        "odoo_callback",
+                        "warning",
+                        "tickets_ready_rejected",
+                        {"ticket_id": record["ticket_id"]},
+                    )
         except TransientError:
             # Odoo down: re-raise so the RQ retry re-syncs (the DB update is
             # idempotent and re-running re-sends the remaining records).
@@ -463,11 +488,13 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
     if need_parent and parent is None:
         dominant = _dominant_type(params, issues)
         parent_t = _parent_title(params, dominant)
-        created = ctx.github.create_issue(
+        created = _create_issue_with_assignee(
+            ctx,
             token, owner, repo,
             title=parent_t,
             body=_format_parent_body(params, marker, parent_marker),
             labels=[_TICKET_ISSUE_LABEL, dominant],
+            assignees=[params.github_username] if params.github_username else None,
         )
         parent = {"number": created["number"], "id": created["id"],
                   "url": created["url"], "title": parent_t, "state": "open"}
@@ -482,11 +509,13 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
         # sent to Odoo, so all surfaces show the same name as GitHub.
         issue_type = _item_type(params, item)
         title = _issue_title(params, idx + 1, len(issues), item["title"], issue_type)
-        created = ctx.github.create_issue(
+        created = _create_issue_with_assignee(
+            ctx,
             token, owner, repo,
             title=title,
             body=_format_issue_body(item, params, marker),
             labels=[_TICKET_ISSUE_LABEL, issue_type],
+            assignees=[params.github_username] if params.github_username else None,
         )
         # Keep only what resume, Contract 2, and state tracking need; the body
         # lives on GitHub now, and dropping it keeps Claude-rendered customer
@@ -514,3 +543,33 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             log.info("ticket_issue_attached", issue=item["number"], parent=parent["number"])
 
     return issues
+
+
+def _create_issue_with_assignee(
+    ctx,
+    token: str,
+    owner: str,
+    repo: str,
+    title: str,
+    body: str,
+    labels: list[str],
+    assignees: list[str] | None,
+) -> dict:
+    try:
+        return ctx.github.create_issue(
+            token, owner, repo, title=title, body=body,
+            labels=labels, assignees=assignees,
+        )
+    except PermanentError as exc:
+        if assignees and "422" in str(exc):
+            writers.record_ops_event(
+                ctx.db,
+                "github",
+                "warning",
+                "assignee_rejected",
+                {"username": assignees[0], "repo": f"{owner}/{repo}"},
+            )
+            return ctx.github.create_issue(
+                token, owner, repo, title=title, body=body, labels=labels
+            )
+        raise

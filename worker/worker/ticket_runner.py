@@ -116,7 +116,13 @@ def run_ticket_analysis(job_params: dict) -> dict:
             raise PermanentError(str(exc)) from exc
 
         # Persist HTML before attempting Odoo callback so the result is never lost.
-        writers.record_ticket_analysis_completed(ctx.db, params.analysis_id, html, response_obj)
+        writers.record_ticket_analysis_completed(
+            ctx.db,
+            params.analysis_id,
+            html,
+            response_obj,
+            result_structured=result.model_dump(mode="json"),
+        )
 
     try:
         odoo.write_field(

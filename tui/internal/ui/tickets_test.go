@@ -99,6 +99,13 @@ func TestIssueRunCounts(t *testing.T) {
 	if got := issueRunCounts(full); got != "2" {
 		t.Errorf("full run counts = %q, want 2", got)
 	}
+	closed := api.TicketIssueRunSummary{Status: "completed", Issues: []api.TicketIssueRef{
+		{Number: intPtr(42), Title: "a", State: strPtr("closed")},
+		{Number: intPtr(43), Title: "b", State: strPtr("closed")},
+	}}
+	if got := issueRunCounts(closed); got != "✓ 2" {
+		t.Errorf("closed run counts = %q, want ✓ 2", got)
+	}
 	partial := api.TicketIssueRunSummary{Status: "failed", Issues: []api.TicketIssueRef{
 		{Number: intPtr(40), Title: "a"}, {Number: nil, Title: "b"},
 	}}
@@ -208,6 +215,14 @@ func TestDetailViewShowsIssueType(t *testing.T) {
 		detailIssues: []api.TicketIssueRef{{Title: "x"}}}
 	if out := tt.detailView(80, 20); !strings.Contains(out, "type CR") {
 		t.Errorf("detail header missing type tag:\n%s", out)
+	}
+}
+
+func TestDetailViewShowsAssignee(t *testing.T) {
+	tt := Tickets{detail: true, detailAssignee: "alice",
+		detailIssues: []api.TicketIssueRef{{Title: "x"}}}
+	if out := tt.detailView(80, 20); !strings.Contains(out, "assignee @alice") {
+		t.Errorf("detail header missing assignee:\n%s", out)
 	}
 }
 

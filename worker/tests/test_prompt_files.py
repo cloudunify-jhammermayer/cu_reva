@@ -44,7 +44,7 @@ def test_prompts_dir_exists():
 
 
 def test_get_version_returns_current_version(builder):
-    assert builder.get_version() == "v2.5"
+    assert builder.get_version() == "v2.6"
 
 
 def test_odoo_severity_rules_in_sync_with_odoo19_md():
@@ -191,3 +191,9 @@ def test_scanner_alert_guidance_present():
     guidance = (PROMPTS_DIR / "review_guidance.md").read_text()
     assert "Security-alert hints" in guidance
     assert "scanner_alerts" in guidance
+
+
+def test_ticket_loop_prompt_guidance_present():
+    guidance = (PROMPTS_DIR / "review_guidance.md").read_text()
+    assert "ticket_acceptance_criteria" in guidance
+    assert (PROMPTS_DIR / "change_note.md").is_file()

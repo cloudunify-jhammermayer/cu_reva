@@ -492,6 +492,7 @@ class GitHubClient:
         title: str,
         body: str,
         labels: list[str] | None = None,
+        assignees: list[str] | None = None,
     ) -> dict:
         """Open a new issue. Returns {"number", "url", "id"} — url is GitHub's
         canonical html_url, not reconstructed from the (possibly mis-cased)
@@ -499,6 +500,8 @@ class GitHubClient:
         payload: dict = {"title": title, "body": body}
         if labels:
             payload["labels"] = labels
+        if assignees:
+            payload["assignees"] = assignees
         response = self._post(token, f"/repos/{owner}/{repo}/issues", payload)
         data = response.json()
         return {"number": data["number"], "url": data["html_url"], "id": data["id"]}

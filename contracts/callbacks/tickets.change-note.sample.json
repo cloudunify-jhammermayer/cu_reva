@@ -1,0 +1,11 @@
+{
+  "model_name": "helpdesk.ticket",
+  "note_html": "<p>Die \u00c4nderung wurde gemerged.</p>",
+  "pr": {
+    "number": 7,
+    "repo": "acme/widgets",
+    "title": "Login rework",
+    "url": "https://github.com/acme/widgets/pull/7"
+  },
+  "ticket_id": 123
+}

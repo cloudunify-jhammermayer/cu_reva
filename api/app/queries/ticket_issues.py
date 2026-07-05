@@ -42,6 +42,7 @@ def list_ticket_issue_runs(
                 "github_url": r.github_url,
                 "status": r.status,
                 "issue_type": r.issue_type,
+                "github_username": r.github_username,
                 "issues": [
                     {
                         "number": i.get("number"),

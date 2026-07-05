@@ -28,6 +28,7 @@ from reva.db.engine import Database
 from reva.db.models import (
     AdminAudit,
     AuditFinding,
+    ChangeNote,
     ClaudeSpend,
     GithubEvent,
     MutedCategory,
@@ -45,6 +46,7 @@ from reva.db.models import (
     TicketIssueRun,
     TimesheetReviewLine,
     TimesheetReviewRun,
+    ValueReport,
 )
 from reva.types import (
     ClaudeResponse,
@@ -1235,6 +1237,7 @@ def record_ticket_analysis_completed(
     analysis_id: int,
     result_html: str,
     response: ClaudeResponse,
+    result_structured: dict | None = None,
 ) -> None:
     """Mark a ticket analysis as completed and store the result."""
     with db.session() as s:
@@ -1243,6 +1246,7 @@ def record_ticket_analysis_completed(
             return
         row.status = "completed"
         row.result_html = result_html
+        row.result_structured = result_structured
         row.model = response.model
         row.input_tokens = response.input_tokens
         row.output_tokens = response.output_tokens
@@ -1658,6 +1662,7 @@ def record_ticket_issue_run_created(db: Database, params: TicketIssueJobParams) 
             analysis_html=params.analysis_html,
             planning_basis=compute_planning_basis(params),
             issue_type=params.issue_type,
+            github_username=params.github_username,
             priority=params.priority,
             ticket_url=params.ticket_url,
             status="pending",
@@ -1719,6 +1724,7 @@ def get_ticket_issue_run(db: Database, run_id: int) -> dict | None:
             "analysis_html": row.analysis_html,
             "planning_basis": row.planning_basis,
             "issue_type": row.issue_type,
+            "github_username": row.github_username,
             "priority": row.priority,
             "ticket_url": row.ticket_url,
             "status": row.status,
@@ -1732,6 +1738,168 @@ def get_ticket_issue_run(db: Database, run_id: int) -> dict | None:
             "created_at": row.created_at,
             "completed_at": row.completed_at,
         }
+
+
+def get_latest_structured_analysis(
+    db: Database, odoo_instance_id: int | None, ticket_id: int, model_name: str
+) -> dict | None:
+    """Latest completed structured ticket analysis for a record, if present."""
+    with db.session() as s:
+        filters = [
+            TicketAnalysis.ticket_id == ticket_id,
+            TicketAnalysis.model_name == model_name,
+            TicketAnalysis.status == "completed",
+            TicketAnalysis.result_structured.is_not(None),
+        ]
+        if odoo_instance_id is None:
+            filters.append(TicketAnalysis.odoo_instance_id.is_(None))
+        else:
+            filters.append(TicketAnalysis.odoo_instance_id == odoo_instance_id)
+        row = s.execute(
+            select(TicketAnalysis)
+            .where(*filters)
+            .order_by(TicketAnalysis.completed_at.desc(), TicketAnalysis.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        return row.result_structured if row is not None else None
+
+
+@_retry_on_conflict
+def get_or_create_change_note(
+    db: Database,
+    repo_full_name: str,
+    pr_number: int,
+    ticket_id: int,
+    odoo_instance_id: int,
+    model_name: str,
+) -> tuple[int, dict]:
+    """Return the deduped change-note row for a PR/ticket, creating it if absent."""
+    repo_full_name = repo_full_name.lower()
+    with db.session() as s:
+        row = s.execute(
+            select(ChangeNote).where(
+                ChangeNote.repo_full_name == repo_full_name,
+                ChangeNote.pr_number == pr_number,
+                ChangeNote.ticket_id == ticket_id,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            row = ChangeNote(
+                repo_full_name=repo_full_name,
+                pr_number=pr_number,
+                ticket_id=ticket_id,
+                odoo_instance_id=odoo_instance_id,
+                model_name=model_name,
+                status="pending",
+            )
+            s.add(row)
+            s.flush()
+        return row.id, _change_note_dict(row)
+
+
+def _change_note_dict(row: ChangeNote) -> dict:
+    return {
+        "id": row.id,
+        "repo_full_name": row.repo_full_name,
+        "pr_number": row.pr_number,
+        "ticket_id": row.ticket_id,
+        "odoo_instance_id": row.odoo_instance_id,
+        "model_name": row.model_name,
+        "status": row.status,
+        "note_html": row.note_html,
+        "error_message": row.error_message,
+        "estimated_cost_usd": (
+            float(row.estimated_cost_usd) if row.estimated_cost_usd is not None else None
+        ),
+        "created_at": row.created_at,
+        "completed_at": row.completed_at,
+    }
+
+
+def record_change_note_completed(
+    db: Database, note_id: int, note_html: str, cost: float
+) -> None:
+    with db.session() as s:
+        row = s.get(ChangeNote, note_id)
+        if row is None:
+            return
+        row.status = "completed"
+        row.note_html = note_html
+        row.error_message = None
+        row.estimated_cost_usd = cost
+        row.completed_at = datetime.now(timezone.utc)
+
+
+def record_change_note_failed(
+    db: Database, note_id: int, status: str, error: str
+) -> None:
+    if status not in ("failed", "skipped_budget"):
+        raise ValueError("change note status must be failed or skipped_budget")
+    with db.session() as s:
+        row = s.get(ChangeNote, note_id)
+        if row is None:
+            return
+        row.status = status
+        row.error_message = error
+        row.completed_at = datetime.now(timezone.utc)
+
+
+def upsert_value_report(
+    db: Database,
+    period_start,
+    period_end,
+    content_md: str,
+    stats: dict,
+) -> int:
+    """One row per period; a re-run replaces content and resets chat_sent."""
+    with db.session() as s:
+        row = s.execute(
+            select(ValueReport).where(
+                ValueReport.period_start == period_start,
+                ValueReport.period_end == period_end,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            row = ValueReport(
+                period_start=period_start,
+                period_end=period_end,
+                content_md=content_md,
+                stats=stats,
+                chat_sent=False,
+            )
+            s.add(row)
+            s.flush()
+        else:
+            row.content_md = content_md
+            row.stats = stats
+            row.chat_sent = False
+            row.created_at = datetime.now(timezone.utc)
+        return row.id
+
+
+def set_value_report_chat_sent(db: Database, report_id: int) -> None:
+    with db.session() as s:
+        row = s.get(ValueReport, report_id)
+        if row is not None:
+            row.chat_sent = True
+
+
+def get_value_reports(db: Database, limit: int = 12) -> list[dict]:
+    with db.session() as s:
+        rows = s.execute(
+            select(ValueReport)
+            .order_by(ValueReport.period_start.desc(), ValueReport.id.desc())
+            .limit(limit)
+        ).scalars().all()
+        return [{
+            "id": row.id,
+            "period_start": row.period_start,
+            "period_end": row.period_end,
+            "content_md": row.content_md,
+            "stats": row.stats or {},
+            "chat_sent": row.chat_sent,
+            "created_at": row.created_at,
+        } for row in rows]
 
 
 def record_ticket_issue_plan(
@@ -1956,6 +2124,55 @@ def get_ticket_issue_union(
                     "state": item.get("state") or "open",
                 }
         return sorted(seen.values(), key=lambda i: i["number"])
+
+
+def _issues_all_closed(issues: list[dict]) -> bool:
+    return bool(issues) and all(item.get("state") == "closed" for item in issues)
+
+
+def list_ready_tickets(db: Database, limit: int = 10) -> list[dict]:
+    """Tickets whose union of REVA-created issues is non-empty and all closed."""
+    from sqlalchemy.orm import load_only
+
+    candidates: dict[tuple[int | None, int, str], dict] = {}
+    with db.session() as s:
+        rows = s.execute(
+            select(TicketIssueRun)
+            .where(TicketIssueRun.issues.is_not(None))
+            .options(load_only(
+                TicketIssueRun.odoo_instance_id,
+                TicketIssueRun.ticket_id,
+                TicketIssueRun.model_name,
+                TicketIssueRun.repo_full_name,
+                TicketIssueRun.name,
+                TicketIssueRun.issues,
+                TicketIssueRun.created_at,
+            ))
+            .order_by(TicketIssueRun.created_at.desc(), TicketIssueRun.id.desc())
+        ).scalars().all()
+        for row in rows:
+            key = (row.odoo_instance_id, row.ticket_id, row.model_name)
+            candidates.setdefault(key, {
+                "odoo_instance_id": row.odoo_instance_id,
+                "ticket_id": row.ticket_id,
+                "model_name": row.model_name,
+                "repo_full_name": row.repo_full_name,
+                "name": row.name,
+            })
+
+    ready: list[dict] = []
+    for (odoo_instance_id, ticket_id, model_name), meta in candidates.items():
+        issues = get_ticket_issue_union(db, odoo_instance_id, ticket_id, model_name)
+        if not _issues_all_closed(issues):
+            continue
+        ready.append({**meta, "issue_count": len(issues), "issues": issues})
+        if len(ready) >= limit:
+            break
+    return ready
+
+
+def count_ready_tickets(db: Database) -> int:
+    return len(list_ready_tickets(db, limit=10_000))
 
 
 def get_latest_ticket_issue_parent(

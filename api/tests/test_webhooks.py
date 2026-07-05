@@ -183,6 +183,56 @@ def test_pr_closed_merged_marks_open_findings(client_and_db):
         assert s.get(ReviewFinding, fid).outcome == "still_open_at_merge"
 
 
+def test_pr_closed_merged_with_closing_ref_enqueues_change_note(client_and_db):
+    client, db = client_and_db
+    _seed_posted_finding(db)
+    payload = _pr_payload("closed")
+    payload["pull_request"]["merged"] = True
+    payload["pull_request"]["body"] = "Closes #102"
+    payload["pull_request"]["html_url"] = "https://github.com/acme/widgets/pull/42"
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    try:
+        resp = _post(client, payload, delivery="merge-note-1")
+    finally:
+        app.state.rq_queue = None
+
+    assert resp.status_code == 202
+    assert len(q.enqueued) == 1
+    assert q.enqueued[0]["func"] == "worker.change_note_tasks.run_change_note"
+    assert q.enqueued[0]["args"][0] == {
+        "repo_full_name": "acme/widgets",
+        "pr_number": 42,
+        "pr_title": "Add feature",
+        "pr_body": "Closes #102",
+        "pr_url": "https://github.com/acme/widgets/pull/42",
+        "installation_id": 99,
+    }
+
+
+def test_pr_closed_merged_change_notes_disabled_skips_note_job(client_and_db):
+    client, db = client_and_db
+    _seed_posted_finding(db)
+    payload = _pr_payload("closed")
+    payload["pull_request"]["merged"] = True
+    payload["pull_request"]["body"] = "Closes #102"
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    app.state.github = _FakeGitHub(
+        file_contents={".claude-review.yml": "change_notes: false\n"}
+    )
+    try:
+        resp = _post(client, payload, delivery="merge-note-disabled-1")
+    finally:
+        app.state.rq_queue = None
+        app.state.github = None
+
+    assert resp.status_code == 202
+    assert q.enqueued == []
+    with db.session() as s:
+        assert s.query(ReviewFinding).one().outcome == "still_open_at_merge"
+
+
 def test_pr_closed_unmerged_marks_nothing(client_and_db):
     client, db = client_and_db
     fid = _seed_posted_finding(db)
@@ -582,9 +632,10 @@ def test_unmute_deactivates_existing_mute(client_and_db):
 
 
 class _FakeGitHub:
-    def __init__(self, pr=None):
+    def __init__(self, pr=None, file_contents=None):
         self.comments = []
         self._pr = pr
+        self.file_contents = file_contents or {}
         self.fetched = []
         self.fetched_repos = []
 
@@ -600,6 +651,9 @@ class _FakeGitHub:
         if self._pr is None:
             raise AssertionError("get_pull_request called without a configured PR")
         return self._pr
+
+    def get_file_content(self, token, owner, repo, path, ref):
+        return self.file_contents.get(path)
 
     def get_repo(self, token, owner, repo):
         self.fetched_repos.append({"owner": owner, "repo": repo})

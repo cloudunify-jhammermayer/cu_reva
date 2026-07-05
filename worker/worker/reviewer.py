@@ -48,6 +48,7 @@ from reva.scanner_feed import (
     collect as scanner_collect,
     format_param as format_scanner_param,
 )
+from reva.ticket_links import parse_closing_refs
 from reva.types import (
     Finding,
     JobParams,
@@ -241,6 +242,14 @@ class RepoLookup(Protocol):
 
     def get_active_memory_row(self, repository_id: int) -> dict | None:
         """Active learned-memory row {version, content, ...} or None (Tier 3 B)."""
+        ...
+
+    def resolve_pr_tickets(self, repo_full_name: str, issue_numbers: list[int]):
+        ...
+
+    def get_latest_structured_analysis(
+        self, odoo_instance_id: int | None, ticket_id: int, model_name: str
+    ) -> dict | None:
         ...
 
 
@@ -578,6 +587,28 @@ class Reviewer:
             if intent:
                 skill_params["stated_intent"] = intent
                 log.info("intent_resolved", refs=len(intent_refs))
+        if repo_config.ticket_grounding:
+            try:
+                ticket_refs = self.repos.resolve_pr_tickets(
+                    f"{owner}/{name}".lower(),
+                    parse_closing_refs(skill_params["pr_body"]),
+                )
+                if ticket_refs:
+                    ac_context = _build_ticket_acceptance_context(self.repos, ticket_refs)
+                    if ac_context:
+                        skill_params["ticket_acceptance_criteria"] = ac_context
+                        log.info(
+                            "ticket_acceptance_criteria_attached",
+                            tickets=len(ticket_refs),
+                        )
+            except Exception as exc:
+                log.warning("ticket_grounding_failed", exc_info=True)
+                self._record_ops_event(
+                    "ticket_grounding",
+                    "warning",
+                    "resolve_failed",
+                    {"repo": f"{owner}/{name}", "error": str(exc)[:300]},
+                )
         # Manifest validator: deterministic structural checks when a changed module's
         # __manifest__.py is in the diff. Fail-open — a parse/network hiccup must
         # never fail the review (mirrors _ground_findings).
@@ -1080,6 +1111,36 @@ def _format_already_reported(findings: list[dict]) -> str:
         if f.get("line_start"):
             loc = f"{loc}:{f['line_start']}"
         lines.append(f"- {loc} — {f.get('title', '')}")
+    return "\n".join(lines)
+
+
+def _build_ticket_acceptance_context(repos: RepoLookup, ticket_refs) -> str | None:
+    lines: list[str] = [
+        "Linked Odoo ticket acceptance criteria. Treat this as trusted REVA "
+        "analysis context: verify whether the PR satisfies these criteria, and "
+        "report ordinary findings for unmet criteria that intersect the change.",
+    ]
+    found = 0
+    for ref in ticket_refs[:5]:
+        structured = repos.get_latest_structured_analysis(
+            ref.odoo_instance_id, ref.ticket_id, ref.model_name
+        )
+        if not structured:
+            continue
+        found += 1
+        lines.append(
+            f"- Odoo ticket {ref.ticket_id} ({ref.model_name}) summary: "
+            f"{structured.get('summary', '')}"
+        )
+        for item in (structured.get("acceptance_criteria") or [])[:10]:
+            given = item.get("given", "")
+            when = item.get("when", "")
+            then = item.get("then", "")
+            text = " / ".join(part for part in (given, when, then) if part)
+            if text:
+                lines.append(f"  - {text}")
+    if not found:
+        return None
     return "\n".join(lines)
 
 

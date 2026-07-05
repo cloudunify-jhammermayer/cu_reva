@@ -59,6 +59,26 @@ class IssueStatePayload(BaseModel):
     issues: list[IssueRefPayload]
 
 
+class TicketsReadyPayload(BaseModel):
+    ticket_id: int
+    model_name: str
+    issues: list[IssueRefPayload]
+
+
+class PrRefPayload(BaseModel):
+    number: int
+    title: str
+    url: str
+    repo: str
+
+
+class ChangeNotePayload(BaseModel):
+    ticket_id: int
+    model_name: str
+    pr: PrRefPayload
+    note_html: str
+
+
 class TimesheetResultPayload(BaseModel):
     line_id: int
     status: str
@@ -171,6 +191,38 @@ CONTRACTS: list[Contract] = [
         },
     ),
     Contract(
+        name="tickets.ready",
+        direction="reva->odoo",
+        method="POST",
+        path="/tickets/ready",
+        auth="bearer:instance-outbound-key",
+        model=TicketsReadyPayload,
+        sample={
+            "ticket_id": 123,
+            "model_name": "helpdesk.ticket",
+            "issues": [{**_ISSUE_SAMPLE, "state": "closed"}],
+        },
+    ),
+    Contract(
+        name="tickets.change-note",
+        direction="reva->odoo",
+        method="POST",
+        path="/tickets/change-note",
+        auth="bearer:instance-outbound-key",
+        model=ChangeNotePayload,
+        sample={
+            "ticket_id": 123,
+            "model_name": "helpdesk.ticket",
+            "pr": {
+                "number": 7,
+                "title": "Login rework",
+                "url": "https://github.com/acme/widgets/pull/7",
+                "repo": "acme/widgets",
+            },
+            "note_html": "<p>Die Änderung wurde gemerged.</p>",
+        },
+    ),
+    Contract(
         name="hr.timesheet-results",
         direction="reva->odoo",
         method="POST",
@@ -221,6 +273,7 @@ CONTRACTS: list[Contract] = [
             "priority": "1",
             "ticket_url": "https://odoo.example.com/web#id=42",
             "issue_type": None,
+            "github_username": None,
         },
     ),
     Contract(

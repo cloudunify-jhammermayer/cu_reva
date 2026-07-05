@@ -192,6 +192,7 @@ type TicketIssueRunSummary struct {
 	GithubURL        string           `json:"github_url"`
 	Status           string           `json:"status"`
 	IssueType        *string          `json:"issue_type"`
+	GithubUsername   *string          `json:"github_username"`
 	Issues           []TicketIssueRef `json:"issues"`
 	ParentIssue      *TicketIssueRef  `json:"parent_issue"`
 	ErrorMessage     *string          `json:"error_message"`
@@ -234,6 +235,7 @@ type DashboardMetrics struct {
 	AvgCostPerReview7d *float64            `json:"avg_cost_per_review_7d"`
 	ActiveWorkers      int                 `json:"active_workers"`
 	Degradations24h    int                 `json:"degradations_24h"`
+	TicketsReady       int                 `json:"tickets_ready"`
 	CoreKnowledge      []CoreVersionStatus `json:"core_knowledge"`
 }
 

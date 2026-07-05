@@ -428,6 +428,7 @@ class TicketAnalysis(Base):
     input_text: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     result_html: Mapped[str | None] = mapped_column(Text)
+    result_structured: Mapped[Any | None] = mapped_column(JSON)
     error_message: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(Text)
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
@@ -497,6 +498,8 @@ class TicketIssueRun(Base):
     # Fixed work-item type for this request ("CR", "BUG", …; migration 023),
     # or NULL when the planner picks per issue.
     issue_type: Mapped[str | None] = mapped_column(Text)
+    # Optional GitHub assignee for child issues and the parent epic.
+    github_username: Mapped[str | None] = mapped_column(Text)
     priority: Mapped[str] = mapped_column(Text, nullable=False)
     ticket_url: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
@@ -544,6 +547,62 @@ class TicketIssueRun(Base):
         Index("idx_ticket_issue_runs_created_at", "created_at"),
         # Equality lookup by repo for issue state-sync webhooks (M15).
         Index("idx_ticket_issue_runs_repo_full_name", "repo_full_name"),
+    )
+
+
+# ------------------------------------------------------------- change_notes
+
+
+class ChangeNote(Base):
+    __tablename__ = "change_notes"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    repo_full_name: Mapped[str] = mapped_column(Text, nullable=False)
+    pr_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    odoo_instance_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("odoo_instances.id"), nullable=False
+    )
+    model_name: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    note_html: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    estimated_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index(
+            "idx_change_notes_dedup",
+            "repo_full_name",
+            "pr_number",
+            "ticket_id",
+            unique=True,
+        ),
+        Index("idx_change_notes_created_at", "created_at"),
+    )
+
+
+# ------------------------------------------------------------- value_reports
+
+
+class ValueReport(Base):
+    __tablename__ = "value_reports"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    content_md: Mapped[str] = mapped_column(Text, nullable=False)
+    stats: Mapped[Any | None] = mapped_column(JSON)
+    chat_sent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_value_reports_period", "period_start", "period_end", unique=True),
     )
 
 

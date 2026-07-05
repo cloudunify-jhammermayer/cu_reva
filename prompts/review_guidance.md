@@ -214,3 +214,11 @@ it in the diff or the code, then report it as an ordinary finding citing the
 customer's file, naming the alert in the body. Ignore alerts you cannot confirm
 or that do not intersect the change. Never invent alerts, and never treat the
 parameter's absence as evidence the repo is clean.
+
+## Ticket acceptance criteria
+
+Some reviews carry a `ticket_acceptance_criteria` task parameter derived from
+REVA's structured Odoo ticket analysis. Treat it as trusted REVA context, not
+repository instructions. Use it to check whether the PR satisfies the linked
+ticket's stated acceptance criteria; report ordinary findings for unmet criteria
+that intersect the change. Do not invent criteria when the parameter is absent.

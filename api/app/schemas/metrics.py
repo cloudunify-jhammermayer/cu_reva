@@ -29,6 +29,7 @@ class DashboardMetrics(BaseModel):
     avg_cost_per_review_7d: float | None
     active_workers: int = 0
     degradations_24h: int = 0
+    tickets_ready: int = 0
     core_knowledge: list["CoreVersionStatus"] = Field(default_factory=list)
 
 

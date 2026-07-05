@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import Engine, case, func, select
 
 from reva.db.engine import Database
+from reva.db import writers
 from reva.db.models import (
     CoreKnowledgeVersion,
     MutedCategory,
@@ -145,6 +146,7 @@ def dashboard_metrics(db: Database, redis_conn=None) -> dict:
         "avg_cost_per_review_7d": avg_cost,
         "active_workers": _count_workers(redis_conn),
         "degradations_24h": int(degradations_24h),
+        "tickets_ready": writers.count_ready_tickets(db),
         "core_knowledge": core_knowledge,
     }
 

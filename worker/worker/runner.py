@@ -98,6 +98,7 @@ class WorkerContext:
     daily_budget_usd: float | None = None
     repo_cache_ttl_days: int = 30
     prompts_dir: str = "/app/prompts"
+    value_report_chat_enabled: bool = False
 
 
 # Module-level singleton so RQ task functions (which can't take extra args)
@@ -198,6 +199,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         daily_budget_usd=settings.daily_budget_usd,
         repo_cache_ttl_days=settings.repo_cache_ttl_days,
         prompts_dir=settings.prompts_dir,
+        value_report_chat_enabled=settings.value_report_chat_enabled,
     )
     set_context(context)
     return context

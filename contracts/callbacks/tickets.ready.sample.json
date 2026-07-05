@@ -1,0 +1,12 @@
+{
+  "issues": [
+    {
+      "number": 42,
+      "state": "closed",
+      "title": "Implement login form",
+      "url": "https://github.com/acme/widgets/issues/42"
+    }
+  ],
+  "model_name": "helpdesk.ticket",
+  "ticket_id": 123
+}

@@ -51,6 +51,8 @@ class Settings:
     core_versions: list[str] = field(default_factory=list)
     # Escalate-only Haiku pre-pass for push-triggered diff reviews. Default off.
     triage_enabled: bool = False
+    # Monthly value report is always persisted; Chat delivery is opt-in.
+    value_report_chat_enabled: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -100,6 +102,9 @@ class Settings:
             ],
             triage_enabled=os.environ.get("REVA_TRIAGE_ENABLED", "false").lower()
             in ("1", "true", "yes"),
+            value_report_chat_enabled=os.environ.get(
+                "REVA_VALUE_REPORT_CHAT_ENABLED", "false"
+            ).lower() in ("1", "true", "yes"),
         )
 
 

@@ -13,6 +13,8 @@ change, 2026-07-05; the un-namespaced /write-field etc. were removed):
     POST {base}/tickets/reset-status     — set reva_status = pending
     POST {base}/tickets/issues-created   — created GitHub issues (or failure)
     POST {base}/tickets/issue-state      — per-issue state change
+    POST {base}/tickets/ready            — all linked issues closed
+    POST {base}/tickets/change-note      — merged-PR internal note
     POST {base}/hr/timesheet-results     — timesheet wording review results
 
     Authorization: Bearer {api_key}
@@ -41,9 +43,11 @@ import structlog
 import httpx
 
 from reva.odoo_contracts import (
+    ChangeNotePayload,
     IssuesCreatedPayload,
     IssueStatePayload,
     ResetStatusPayload,
+    TicketsReadyPayload,
     TimesheetResultsPayload,
     WriteFieldPayload,
 )
@@ -227,4 +231,42 @@ class OdooCallbackClient:
         )
         logger.bind(ticket_id=ticket_id, model_name=model_name, number=number).info(
             "odoo_issue_state_ok"
+        )
+
+    def tickets_ready(
+        self,
+        ticket_id: int,
+        model_name: str,
+        issues: list[dict],
+    ) -> None:
+        """Inform Odoo that all linked issues are closed; never auto-completes."""
+        payload = TicketsReadyPayload(
+            ticket_id=ticket_id,
+            model_name=model_name,
+            issues=issues,
+        )
+        body = payload.model_dump(exclude={"issues"})
+        body["issues"] = _project_items(issues, _ISSUE_KEYS)
+        self._post("/tickets/ready", body)
+        logger.bind(ticket_id=ticket_id, model_name=model_name).info(
+            "odoo_tickets_ready_ok"
+        )
+
+    def change_note(
+        self,
+        ticket_id: int,
+        model_name: str,
+        pr: dict,
+        note_html: str,
+    ) -> None:
+        """Post a merged-PR internal note to the Odoo record."""
+        payload = ChangeNotePayload(
+            ticket_id=ticket_id,
+            model_name=model_name,
+            pr=pr,
+            note_html=note_html,
+        )
+        self._post("/tickets/change-note", payload.model_dump())
+        logger.bind(ticket_id=ticket_id, model_name=model_name).info(
+            "odoo_change_note_ok"
         )
