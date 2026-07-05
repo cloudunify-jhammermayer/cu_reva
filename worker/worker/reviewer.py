@@ -659,7 +659,16 @@ class Reviewer:
         if self.core_knowledge is not None and repo_config.odoo_version:
             core_version = self.core_knowledge.resolve(repo_config.odoo_version)
             if core_version is None:
+                # Config drift (repo requests a version /core doesn't carry):
+                # degrade + record it, per the degradations-are-visible invariant.
                 log.warning("core_knowledge_unavailable", version=repo_config.odoo_version)
+                self._record_ops_event(
+                    "core_knowledge",
+                    "warning",
+                    "version_unavailable",
+                    {"repo": f"{owner}/{name}",
+                     "requested": repo_config.odoo_version},
+                )
             else:
                 if skill in ("reva-full-review", "reva-repo-audit"):
                     extra_dirs = self.core_knowledge.core_paths(core_version)

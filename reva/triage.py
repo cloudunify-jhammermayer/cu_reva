@@ -89,7 +89,13 @@ def decide(
         data = response.tool_use_input or {}
         escalate = data.get("escalate")
         if escalate not in _VALID:
-            return TriageDecision("none", f"invalid tool output: {escalate!r}"), cost
+            # "error:" prefix so the reviewer's ops-event gate fires — an
+            # invalid/missing tool_use must not fail open silently (spec
+            # error table: invalid tool output → triage/decide_failed).
+            logger.warning("triage_invalid_tool_output", escalate=repr(escalate))
+            return TriageDecision(
+                "none", f"error: invalid tool output: {escalate!r}"
+            ), cost
         return TriageDecision(escalate, str(data.get("reason", ""))[:300]), cost
     except Exception as exc:
         logger.warning("triage_decide_failed", error=str(exc), exc_info=True)
