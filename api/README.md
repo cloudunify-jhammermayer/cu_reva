@@ -6,7 +6,7 @@ Two responsibilities in one process:
    signature, stores every delivery, and turns reviewable events into
    `pending_reviews` rows (for the scheduler) or directly enqueued jobs.
 2. **`/api/v1/*`** — the internal read/admin API consumed by the Go TUI
-   (metrics, reviews, findings, failures, repos, pending, tickets, plus admin
+  (metrics, reviews, findings, failures, repos, pending, tickets, timesheets, plus admin
    actions like requeue and on-demand audit).
 
 The API does **no LLM work** — it records events and enqueues jobs, keeping the
@@ -27,7 +27,7 @@ comment so the developer gets instant feedback while the review is queued.
 | `app/routes/webhooks.py` | Signature check → record event → dispatch. Blocking DB work runs in the threadpool so it never stalls the event loop. Idempotency is keyed on a `processed` flag set only after all downstream writes commit, so a mid-handling failure leaves the delivery reprocessable on GitHub's retry instead of silently dropped. PR pushes upsert a debounced `pending_review`; `/review` & `/deep-review` comments trigger immediately (gated to OWNER/MEMBER/COLLABORATOR, bots skipped); inline-comment replies enqueue `run_comment_reply`. |
 | `app/routes/health.py` | `GET /health` — checks Postgres **and** the Redis broker; returns `503` (`{"status":"degraded"}`) if either is down so orchestration/the TUI see it. |
 | `app/routes/v1/health.py` | `GET /api/v1/health` — credentialed connection test: accepts the master key **or** a per-instance Odoo key and reports which matched (`authenticated_as`, `instance`). For "Test connection" buttons; the root `/health` stays the unauthenticated probe. |
-| `app/routes/v1/*` | One router per resource: metrics, reviews, findings, failures, repos, pending, ticket_analyses, audits, admin. Gated by `require_api_key` + the rate limiter; list endpoints clamp `limit`/`offset`. |
+| `app/routes/v1/*` | One router per resource: metrics, reviews, findings, failures, repos, pending, ticket_analyses, ticket_issues, timesheet_reviews, audits, admin. Gated by `require_api_key` + the rate limiter; list endpoints clamp `limit`/`offset`. |
 | `app/queries/*` | Read-side SQL (kept out of the route handlers). |
 | `app/schemas/*` | Pydantic response models. |
 
@@ -57,6 +57,16 @@ GitHub HMAC signature.
 
 Both live under the `/api/v1` router, so they share its Bearer auth
 (`REVA_API_KEY`) and rate limiting.
+
+## Odoo endpoints
+
+- **`POST /api/v1/timesheet-review`** — instance-key-gated batch intake for
+  timesheet wording review. Creates a pending `timesheet_review_runs` row and
+  enqueues `worker.timesheet_tasks.run_timesheet_review`; the worker callbacks
+  Odoo at `/hr/timesheet-results`.
+- **`GET /api/v1/timesheet-reviews`** — master-key list endpoint consumed by the
+  TUI Timesheets tab. Returns run metadata and counts only; original line
+  descriptions are not stored.
 
 ## Tests
 

@@ -65,7 +65,7 @@ The Go/Bubble Tea **tui** (`tui/`, read-only client of `/api/v1`) is the operati
 
 ## What this is
 
-REVA — automated GitHub PR review platform built on Claude. Webhook-driven: it debounces PR pushes, reviews the change with a headless Claude Code CLI against a local repo clone, and posts a Check Run + PR Review with inline comments. Also: whole-repo audits, Odoo ticket analysis, and replies to developer questions on its own inline comments.
+REVA — automated GitHub PR review platform built on Claude. Webhook-driven: it debounces PR pushes, reviews the change with a headless Claude Code CLI against a local repo clone, and posts a Check Run + PR Review with inline comments. Also: whole-repo audits, Odoo ticket analysis, Odoo timesheet wording review, and replies to developer questions on its own inline comments.
 
 Authoritative docs: root `README.md`, per-directory `README.md` files, `docs/` guides and `docs/superpowers/specs/`. `HANDOFF.md` is the current work handoff / resume point — read it when resuming work.
 
@@ -106,12 +106,12 @@ Pipeline: GitHub webhook → **api** (FastAPI, verifies HMAC signature, upserts 
 Two Claude integration paths — don't mix them up:
 
 - **Headless Claude Code CLI** (`reva/claude_code_runner.py`) — all PR review modes and repo audits. Runs against a local clone under `REVA_REPO_CACHE_DIR` so Claude can read connected files. Output contract: the `submit_review` tool schema written to a temp JSON file inside the clone.
-- **Messages API** (`reva/claude_client.py`) — structured/fast paths: Odoo ticket analysis and inline-comment reply answers. Prompts assembled by `reva/prompt_builder.py` from `prompts/*.md` with prompt-cache–controlled blocks.
+- **Messages API** (`reva/claude_client.py`) — structured/fast paths: Odoo ticket analysis, Odoo timesheet wording review, and inline-comment reply answers. Prompts assembled by task-specific analyzers from `prompts/*.md` with prompt-cache–controlled blocks.
 
 Components:
 
 - `reva/` — shared library installed editable into every Python service: Pydantic types (`types.py`: `Finding`, `ReviewResult`, `ReviewMode`, `RepoConfig`), GitHub client (App JWT → installation tokens), diff filtering (`diff_utils.py`), Check Run / review formatting, finding ground-checking (`finding_verifier.py`), core-knowledge layer (`odoo_registry.py`, `core_knowledge.py`, `ticket_knowledge.py` — operator-provisioned `/core` worktrees + registry), Google Chat notifications, cost estimation, DB layer (`reva/db/`: engine + migrations, ORM models, transactional writers).
-- `worker/` — RQ jobs: review, audit, ticket_analysis, ticket_issues, comment_reply, weekly_report, repo_cache_eviction. `Reviewer.execute()` is the pure pipeline (token → diff → config → CLI → parse → cap at 15 findings); `runner.run_review()` wraps it with claim/persist/post/notify. Retries: `TransientError` retried by RQ (max 3, backoff); `PermanentError` fails and notifies.
+- `worker/` — RQ jobs: review, audit, ticket_analysis, ticket_issues, timesheet_review, comment_reply, weekly_report, repo_cache_eviction. `Reviewer.execute()` is the pure pipeline (token → diff → config → CLI → parse → cap at 15 findings); `runner.run_review()` wraps it with claim/persist/post/notify. Retries: `TransientError` retried by RQ (max 3, backoff); `PermanentError` fails and notifies.
 - `scheduler/` — single-replica loops: debounce poller, weekly reporter, stale-`running` reaper, operational alerts, repo-cache eviction.
 - `prompts/skills/` — the headless-CLI skills. Selection is centralized in `Reviewer._select_skill` on the final (post-filter) diff, precedence **migration > delta > xml-only > diff/full**: `reva-diff-review` (diff/diff-all), `reva-full-review` (full/deep), `reva-delta-review` (incremental), `reva-migration-review` (Odoo upgrade scripts — overrides mode/delta, keeps `delta_base_sha`), `reva-xml-review` (XML-only diff), `reva-repo-audit` (audits). CodeGraph MCP (`REVA_CODEGRAPH_ENABLED`, fail-silent) is wired into the repo-aware skills only (full/deep/audit), never the diff-depth paths.
 - `db/migrations/` — plain SQL, applied idempotently at service startup by `Database.migrate()` under a Postgres advisory lock. Conventions for a new table: numbered file, idempotent (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`), `id BIGSERIAL PRIMARY KEY` (match the existing files — not `GENERATED … IDENTITY`), and add the matching ORM model in `reva/db/models.py` (tests build from the models, so a missing model means the table is invisible to tests).

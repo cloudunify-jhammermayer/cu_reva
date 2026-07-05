@@ -2,7 +2,7 @@
 
 RQ-backed worker that consumes jobs from Redis and produces the side effects:
 GitHub Check Runs + PR Reviews, Postgres `review_runs` / `review_findings`
-rows, Odoo ticket write-backs, and Google Chat alerts.
+rows, Odoo ticket/timesheet callbacks, and Google Chat alerts.
 
 The reusable building blocks — types, errors, the two Claude clients, the
 GitHub client, formatters, and the DB layer — live in the installable
@@ -17,8 +17,9 @@ directory holds only worker-specific orchestration glue.
 | `worker/auditor.py` | **Pure** full-repo audit orchestration. Clones the default branch and runs the `reva-repo-audit` skill, always on the deep model (Opus 4.8), with CodeGraph when enabled. Returns an `AuditResult`. |
 | `worker/runner.py` | All the **side effects**: `WorkerContext`, `build_worker_context(settings)`, and the RQ entry points `run_review`, `run_comment_reply`. Idempotent on retry: persists each GitHub ID immediately after posting, and if a prior attempt crashed *between* the GitHub create and that DB write, recovers the existing PR review (by `Run #<id>` marker) / Check Run (by name on the head SHA) from GitHub instead of duplicating; skips a job whose Check Run already posted (excluding `failed` runs). Enforces the rolling daily spend cap (serialized via a Postgres advisory lock). Also runs the delta-review finding-resolution pass. |
 | `worker/ticket_runner.py` | `run_ticket_analysis` — Odoo ticket analysis via the Messages API (`TicketAnalyzer`), then write-back to Odoo. |
+| `worker/timesheet_runner.py` | `run_timesheet_review` — Odoo timesheet wording review via the Messages API (`TimesheetAnalyzer`), persisted in chunks and callbacked to `/hr/timesheet-results`. |
 | `worker/audit_tasks.py` | `run_audit` — persists audit lifecycle rows and invokes `Auditor`. Persists **every** finding to `audit_findings`, and opens a GitHub issue for each **MAJOR/CRITICAL** finding (title `[REVA audit] <title>`, label `reva-audit` auto-created per repo, deduped across re-runs via a hidden marker — skipped if a matching open issue exists). Lower-severity findings are stored but not issued. Issue creation is best-effort (logs `audit_issue_created` / `audit_issue_failed`, never fails the audit); requires GitHub App `Issues: Read & write`. |
-| `worker/tasks.py`, `worker/ticket_tasks.py` | **Stable enqueue paths** — thin re-exports so `worker.tasks.run_review` / `worker.ticket_tasks.run_ticket_analysis` stay valid even if internal layout changes. |
+| `worker/tasks.py`, `worker/ticket_tasks.py`, `worker/timesheet_tasks.py` | **Stable enqueue paths** — thin re-exports so `worker.tasks.run_review` / `worker.ticket_tasks.run_ticket_analysis` / `worker.timesheet_tasks.run_timesheet_review` stay valid even if internal layout changes. |
 | `worker/settings.py` | Frozen `Settings` dataclass; `Settings.from_env()`. |
 | `worker/main.py` | Process entry: load settings → `build_worker_context` (runs DB migrations + prunes stale repo clones) → start the RQ `Worker` on the configured queue. |
 
@@ -29,6 +30,7 @@ directory holds only worker-specific orchestration glue.
 | `worker.tasks.run_review` | scheduler poller (after debounce) | headless Claude Code CLI |
 | `worker.runner.run_comment_reply` | api `pull_request_review_comment` webhook | Messages API |
 | `worker.ticket_tasks.run_ticket_analysis` | Odoo / ticket trigger | Messages API |
+| `worker.timesheet_tasks.run_timesheet_review` | Odoo `/api/v1/timesheet-review` | Messages API |
 | `worker.audit_tasks.run_audit` | api `POST /repos/{id}/audit`, TUI | headless Claude Code CLI |
 
 ## Models

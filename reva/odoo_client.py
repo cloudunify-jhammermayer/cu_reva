@@ -13,6 +13,7 @@ change, 2026-07-05; the un-namespaced /write-field etc. were removed):
     POST {base}/tickets/reset-status     — set reva_status = pending
     POST {base}/tickets/issues-created   — created GitHub issues (or failure)
     POST {base}/tickets/issue-state      — per-issue state change
+    POST {base}/hr/timesheet-results     — timesheet wording review results
 
     Authorization: Bearer {api_key}
     Content-Type: application/json
@@ -116,6 +117,20 @@ class OdooCallbackClient:
             "html": html,
         })
         logger.bind(ticket_id=ticket_id, model_name=model_name).info("odoo_callback_ok")
+
+    def timesheet_results(
+        self,
+        request_id: str,
+        results: list[dict],
+        stats: dict,
+    ) -> None:
+        """POST timesheet wording-review results to the Odoo callback."""
+        self._post("/hr/timesheet-results", {
+            "request_id": request_id,
+            "results": results,
+            "stats": stats,
+        })
+        logger.bind(request_id=request_id).info("odoo_timesheet_results_ok")
 
     def issues_created(
         self,

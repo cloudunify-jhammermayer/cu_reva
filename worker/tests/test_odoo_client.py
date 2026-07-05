@@ -162,6 +162,52 @@ def test_reset_status_uses_tickets_namespace(monkeypatch):
     assert captured["url"] == "https://odoo.example.com/api/reva/tickets/reset-status"
 
 
+# --- timesheet_results -------------------------------------------------------
+
+
+def _ts_kwargs() -> dict:
+    return {
+        "request_id": "req-1",
+        "results": [
+            {"line_id": 2, "status": "rewritten", "updated_desc": "Implemented reports"}
+        ],
+        "stats": {"total": 3, "ok": 2, "rewritten": 1, "needs_human": 0},
+    }
+
+
+def test_timesheet_results_posts_contract(monkeypatch):
+    captured = {}
+
+    def post(url, **kwargs):
+        captured["url"] = url
+        captured["json"] = kwargs["json"]
+        captured["headers"] = kwargs["headers"]
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    _client().timesheet_results(**_ts_kwargs())
+    assert captured["url"] == "https://odoo.example.com/api/reva/hr/timesheet-results"
+    assert captured["json"] == _ts_kwargs()
+    assert captured["headers"]["Authorization"] == f"Bearer {_KEY}"
+
+
+def test_timesheet_results_4xx_permanent(monkeypatch):
+    monkeypatch.setattr("reva.odoo_client.httpx.post", _mock_post(status=409))
+    with pytest.raises(PermanentError):
+        _client().timesheet_results(**_ts_kwargs())
+
+
+def test_timesheet_results_5xx_transient(monkeypatch):
+    monkeypatch.setattr("reva.odoo_client.httpx.post", _mock_post(status=502))
+    with pytest.raises(TransientError):
+        _client().timesheet_results(**_ts_kwargs())
+
+
+def test_timesheet_results_disabled_client_permanent():
+    with pytest.raises(PermanentError):
+        OdooCallbackClient(callback_url="", api_key="").timesheet_results(**_ts_kwargs())
+
+
 # --- issues_created (github-issues handoff, Contract 2) ------------------------
 
 

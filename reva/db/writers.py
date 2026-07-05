@@ -43,6 +43,8 @@ from reva.db.models import (
     ReviewRun,
     TicketAnalysis,
     TicketIssueRun,
+    TimesheetReviewLine,
+    TimesheetReviewRun,
 )
 from reva.types import (
     ClaudeResponse,
@@ -51,6 +53,8 @@ from reva.types import (
     ReviewResult,
     TicketIssueJobParams,
     TicketJobParams,
+    TimesheetJobParams,
+    TimesheetLineResult,
 )
 
 logger = structlog.get_logger()
@@ -1417,6 +1421,184 @@ def get_ticket_analysis(db: Database, analysis_id: int) -> dict | None:
         }
 
 
+# ------------------------------------------------------- timesheet reviews
+
+
+def record_timesheet_run_created(db: Database, params: TimesheetJobParams) -> int:
+    """Insert a pending timesheet_review_runs row and return its id."""
+    with db.session() as s:
+        row = TimesheetReviewRun(
+            odoo_instance_id=params.odoo_instance_id,
+            request_id=params.request_id,
+            status="pending",
+            total_lines=len(params.lines),
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def attach_timesheet_job_id(db: Database, run_id: int, job_id: str) -> None:
+    """Store the RQ job ID on the run row after enqueuing."""
+    with db.session() as s:
+        row = s.get(TimesheetReviewRun, run_id)
+        if row is not None:
+            row.job_id = job_id
+
+
+def get_pending_timesheet_run(
+    db: Database, odoo_instance_id: int, request_id: str
+) -> dict | None:
+    """Return the pending run for (instance, request_id), or None."""
+    with db.session() as s:
+        row = s.execute(
+            select(TimesheetReviewRun).where(
+                TimesheetReviewRun.odoo_instance_id == odoo_instance_id,
+                TimesheetReviewRun.request_id == request_id,
+                TimesheetReviewRun.status == "pending",
+            )
+        ).scalars().first()
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "job_id": row.job_id,
+            "status": row.status,
+            "created_at": row.created_at,
+        }
+
+
+def get_timesheet_run(db: Database, run_id: int) -> dict | None:
+    """Return a timesheet_review_runs row as a dict, or None."""
+    with db.session() as s:
+        row = s.get(TimesheetReviewRun, run_id)
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "job_id": row.job_id,
+            "odoo_instance_id": row.odoo_instance_id,
+            "request_id": row.request_id,
+            "status": row.status,
+            "total_lines": row.total_lines,
+            "ok_count": row.ok_count,
+            "rewritten_count": row.rewritten_count,
+            "needs_human_count": row.needs_human_count,
+            "model": row.model,
+            "input_tokens": row.input_tokens,
+            "output_tokens": row.output_tokens,
+            "cache_read_tokens": row.cache_read_tokens,
+            "cache_creation_tokens": row.cache_creation_tokens,
+            "estimated_cost_usd": (
+                float(row.estimated_cost_usd) if row.estimated_cost_usd else None
+            ),
+            "callback_payload": row.callback_payload,
+            "callback_sent_at": row.callback_sent_at,
+            "error_message": row.error_message,
+            "created_at": row.created_at,
+            "completed_at": row.completed_at,
+        }
+
+
+def record_timesheet_run_failed(db: Database, run_id: int, error_message: str) -> None:
+    """Mark a timesheet run as failed."""
+    with db.session() as s:
+        row = s.get(TimesheetReviewRun, run_id)
+        if row is None:
+            return
+        row.status = "failed"
+        row.error_message = error_message
+        row.completed_at = datetime.now(timezone.utc)
+
+
+def get_timesheet_line_ids(db: Database, run_id: int) -> set[int]:
+    """Line ids already recorded for this run."""
+    with db.session() as s:
+        rows = s.execute(
+            select(TimesheetReviewLine.line_id).where(TimesheetReviewLine.run_id == run_id)
+        ).scalars().all()
+        return set(rows)
+
+
+def record_timesheet_chunk(
+    db: Database,
+    run_id: int,
+    results: list[TimesheetLineResult],
+    responses: list[ClaudeResponse],
+) -> None:
+    """Persist one processed chunk atomically."""
+    with db.session() as s:
+        run = s.get(TimesheetReviewRun, run_id)
+        if run is None:
+            return
+        for result in results:
+            s.add(TimesheetReviewLine(
+                run_id=run_id,
+                line_id=result.line_id,
+                status=result.status,
+                reason=result.reason,
+            ))
+        payload = dict(run.callback_payload or {"results": []})
+        entries = list(payload.get("results", []))
+        for result in results:
+            if result.status == "rewritten":
+                entries.append({
+                    "line_id": result.line_id,
+                    "status": result.status,
+                    "updated_desc": result.updated_desc,
+                })
+            elif result.status == "needs_human":
+                entries.append({
+                    "line_id": result.line_id,
+                    "status": result.status,
+                    "reason": result.reason,
+                })
+        payload["results"] = entries
+        run.callback_payload = payload
+
+        for response in responses:
+            run.model = response.model
+            run.input_tokens += response.input_tokens
+            run.output_tokens += response.output_tokens
+            run.cache_read_tokens += response.cache_read_tokens
+            run.cache_creation_tokens += response.cache_creation_tokens
+            cost = estimate_cost(
+                response.model,
+                response.input_tokens,
+                response.output_tokens,
+                response.cache_read_tokens,
+                response.cache_creation_tokens,
+            )
+            run.estimated_cost_usd = float(run.estimated_cost_usd or 0.0) + cost
+            _insert_spend(s, "timesheet_review", cost)
+
+
+def record_timesheet_run_completed(db: Database, run_id: int) -> None:
+    """Mark the run completed; counts are derived from line rows."""
+    with db.session() as s:
+        run = s.get(TimesheetReviewRun, run_id)
+        if run is None:
+            return
+        rows = s.execute(
+            select(TimesheetReviewLine.status).where(TimesheetReviewLine.run_id == run_id)
+        ).scalars().all()
+        run.ok_count = sum(1 for status in rows if status == "ok")
+        run.rewritten_count = sum(1 for status in rows if status == "rewritten")
+        run.needs_human_count = sum(1 for status in rows if status == "needs_human")
+        run.status = "completed"
+        run.completed_at = datetime.now(timezone.utc)
+
+
+def record_timesheet_callback_sent(db: Database, run_id: int) -> None:
+    """Record callback success and clear the payload."""
+    with db.session() as s:
+        row = s.get(TimesheetReviewRun, run_id)
+        if row is None:
+            return
+        row.callback_sent_at = datetime.now(timezone.utc)
+        row.callback_payload = None
+
+
 # --- ticket_issue_runs writers -------------------------------------------------
 
 
@@ -2000,7 +2182,7 @@ def sum_instance_cost_since(db: Database, odoo_instance_id: int, since: datetime
     """
     total = 0.0
     with db.session() as s:
-        for model in (TicketAnalysis, TicketIssueRun):
+        for model in (TicketAnalysis, TicketIssueRun, TimesheetReviewRun):
             value = s.execute(
                 select(func.coalesce(func.sum(model.estimated_cost_usd), 0)).where(
                     model.odoo_instance_id == odoo_instance_id,

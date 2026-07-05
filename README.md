@@ -7,7 +7,7 @@ REVA listens for `pull_request`, `issue_comment`, and `pull_request_review_comme
 REVA uses **two Claude clients** (see `docs/superpowers/specs/2026-05-25-headless-claude-design.md`):
 
 - **Headless Claude Code CLI** (`reva/claude_code_runner.py`) — runs against a *locally cloned copy of the repo* at the head SHA, so Claude can read connected files, not just the diff. Used for all PR review modes (diff / full / deep) and repo audits. Output is the `submit_review` tool schema written to a temp JSON file.
-- **Direct Messages API** (`reva/claude_client.py`) — used for the structured/fast paths: Odoo ticket analysis and inline-comment reply answers.
+- **Direct Messages API** (`reva/claude_client.py`) — used for the structured/fast paths: Odoo ticket analysis, Odoo timesheet wording review, and inline-comment reply answers.
 
 > **Doc status:** this README, the per-directory `README.md` files, the guides under `docs/`, and the code are authoritative. `HANDOFF.md` is the current work handoff / resume point.
 
@@ -19,7 +19,7 @@ Each directory has its own `README.md` explaining how it works and why.
 .
 ├── reva/                 Shared library — types, clients (API + CLI), formatters, db, notifications
 ├── api/                  FastAPI webhook receiver + internal REST API
-├── worker/               RQ worker — review / audit / ticket / comment-reply jobs
+├── worker/               RQ worker — review / audit / Odoo / comment-reply jobs
 ├── scheduler/            Debounce poller + weekly-report scheduler
 ├── tui/                  Go / Bubble Tea ops dashboard
 ├── frontend/             Vue 3 web dashboard — RETIRED (decommissioned from the stack; TUI is the dashboard)
@@ -40,7 +40,7 @@ Each directory has its own `README.md` explaining how it works and why.
 | Webhook + Internal API | Python / FastAPI |
 | Job queue | Redis + RQ |
 | PR review / audit engine | Headless **Claude Code CLI** against a local repo clone (Sonnet 5 default, **Opus 4.8** for deep + audits; env-configurable) |
-| Ticket analysis / comment replies | Claude **Messages API** (`reva/claude_client.py`) |
+| Ticket analysis / timesheet review / comment replies | Claude **Messages API** (`reva/claude_client.py`) |
 | Database | PostgreSQL 16 |
 | Dashboard | Go / Bubble Tea TUI (the Vue web frontend is retired) |
 | Notifications | Google Chat incoming webhook |
@@ -197,6 +197,8 @@ REVA_API_URL=http://localhost:8080/api/v1 REVA_API_KEY=<key> go run .
 | Tickets | `7` | Odoo ticket analyses, grouped by GitHub repo into foldable sections, **collapsed by default** (analysis-only tickets under "no repo yet") — `enter`/`space` open a group · `z` toggles all · `/` filter · `e` requeue · `o` open in Odoo (or the repo on a header) · `enter` on a row drills into issues |
 | Audits | `8` | Repo-audit findings — `enter` views a run's findings, severity filter `a/c/m/n/i`, shows the GitHub issue # |
 | Feedback | `9` | Per-(repo, category) learning signals (findings / dismissals / fixes) + active `/mute`s |
+| Odoo | `0` | Registered Odoo instances, callback config, per-instance spend, budget, activation, and key rotation |
+| Timesheets | `-` | Odoo timesheet wording review runs from `GET /api/v1/timesheet-reviews`, with line counts, rewrite/human counts, callback state, and errors |
 
 Global keys: `1–9` switch tabs · `j`/`k` (or arrows) move · `g`/`G` top/bottom · `Ctrl+D`/`Ctrl+U` half-page · PgUp/PgDn page · `r` refresh · `q` quit. Lists that hit their fetch limit show "showing N of M"; narrow with `/`. The free-flowing panels scroll too — the **Reviews** detail pane with `J`/`K` (or PgUp/PgDn), the **Audits** findings and **Feedback** lists with `j`/`k`/PgUp/PgDn.
 
@@ -258,7 +260,7 @@ Notifications fire on `PermanentError` and unexpected exceptions. Transient erro
 | `GOOGLE_CHAT_WEBHOOK_URL` | — | _(off)_ | Incoming webhook URL for error notifications and weekly report |
 | `REVA_DEBOUNCE_SECONDS` | — | `600` | Debounce window in seconds |
 | `REVA_DEFAULT_REVIEW_MODE` | — | `diff` | Auto-review mode: `diff`, `diff-all`, `full`, or `deep` |
-| `REVA_DEFAULT_MODEL` | — | `claude-sonnet-5` | Model for diff/full reviews, ticket analysis, comment replies |
+| `REVA_DEFAULT_MODEL` | — | `claude-sonnet-5` | Model for diff/full reviews, ticket analysis, timesheet review, comment replies |
 | `REVA_DEEP_MODEL` | — | `claude-opus-4-8` | Model for `/deep-review` and all repo audits |
 | `REVA_CODEGRAPH_ENABLED` | — | `false` | Expose a pre-indexed CodeGraph (MCP) to repo-aware reviews + audits |
 | `REVA_CODEGRAPH_INDEX_TIMEOUT` | — | `180` | Seconds bounding the CodeGraph index step |

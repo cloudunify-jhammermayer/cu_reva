@@ -157,6 +157,11 @@ func (c *Client) TicketIssueRuns(limit int) (*TicketIssueRunPage, error) {
 	return &p, c.get(fmt.Sprintf("/ticket-issue-runs?limit=%d", limit), &p)
 }
 
+func (c *Client) TimesheetReviews(limit int) (*TimesheetReviewPage, error) {
+	var p TimesheetReviewPage
+	return &p, c.get(fmt.Sprintf("/timesheet-reviews?limit=%d", limit), &p)
+}
+
 func (c *Client) TriggerAudit(repoID int) error {
 	return c.post(fmt.Sprintf("/repos/%d/audit", repoID))
 }

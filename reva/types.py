@@ -418,6 +418,59 @@ class TicketIssueJobParams(BaseModel):
     issue_type: str | None = None
 
 
+# --- Timesheet wording review types -----------------------------------------
+
+
+TIMESHEET_CHUNK_SIZE = 100
+
+TimesheetUserRole = Literal["developer", "consultant", "sales"]
+TimesheetLineStatus = Literal["ok", "rewritten", "needs_human"]
+
+
+class TimesheetLine(BaseModel):
+    """One Odoo time-booking line submitted for wording review."""
+
+    line_id: int
+    task_name: str
+    project_name: str
+    user_name: str
+    user_role: TimesheetUserRole
+    description: str = Field(max_length=4000)
+
+
+class TimesheetLineResult(BaseModel):
+    """Claude's verdict for one line."""
+
+    line_id: int
+    status: TimesheetLineStatus
+    updated_desc: str | None = None
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def _conditional_fields(self) -> "TimesheetLineResult":
+        if self.status == "rewritten" and not (self.updated_desc or "").strip():
+            raise ValueError("updated_desc is required when status is 'rewritten'")
+        if self.status == "needs_human" and not (self.reason or "").strip():
+            raise ValueError("reason is required when status is 'needs_human'")
+        return self
+
+
+class TimesheetChunkResult(BaseModel):
+    """Validated input of the submit_timesheet_review tool call."""
+
+    results: list[TimesheetLineResult]
+
+
+class TimesheetJobParams(BaseModel):
+    """Inputs handed to the timesheet review RQ job."""
+
+    run_id: int
+    odoo_instance_id: int
+    request_id: str
+    flagged_words: list[str] = Field(default_factory=list)
+    lines: list[TimesheetLine]
+
+
 class AuditJobParams(BaseModel):
     """Inputs handed to the repo audit RQ job."""
 

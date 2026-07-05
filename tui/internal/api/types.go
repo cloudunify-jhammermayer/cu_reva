@@ -206,6 +206,26 @@ type TicketIssueRunPage struct {
 	Total int                     `json:"total"`
 }
 
+type TimesheetReviewSummary struct {
+	ID               int        `json:"id"`
+	RequestID        string     `json:"request_id"`
+	Status           string     `json:"status"`
+	TotalLines       int        `json:"total_lines"`
+	OkCount          int        `json:"ok_count"`
+	RewrittenCount   int        `json:"rewritten_count"`
+	NeedsHumanCount  int        `json:"needs_human_count"`
+	EstimatedCostUSD *float64   `json:"estimated_cost_usd"`
+	CallbackSentAt   *time.Time `json:"callback_sent_at"`
+	ErrorMessage     *string    `json:"error_message"`
+	CreatedAt        time.Time  `json:"created_at"`
+	CompletedAt      *time.Time `json:"completed_at"`
+}
+
+type TimesheetReviewPage struct {
+	Items []TimesheetReviewSummary `json:"items"`
+	Total int                      `json:"total"`
+}
+
 type DashboardMetrics struct {
 	Last24h            PeriodStats         `json:"last_24h"`
 	Last7d             PeriodStats         `json:"last_7d"`

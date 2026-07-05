@@ -10,8 +10,9 @@ REVA's two Claude clients:
   for Odoo repos → the selected `skills/*.md`). See
   [`skills/README.md`](skills/README.md).
 - **The remaining Markdown templates** → the **Messages API** (`ClaudeClient`).
-  Used for ticket analysis, ticket-issue planning, inline-comment replies, and
-  the learned-memory distiller — each reads its own template directly.
+  Used for ticket analysis, ticket-issue planning, timesheet wording review,
+  inline-comment replies, and the learned-memory distiller — each reads its own
+  template directly.
 
 ## Files
 
@@ -20,7 +21,7 @@ REVA's two Claude clients:
 | `review_guidance.md` | Always-on review governance: identity, severity/category/confidence definitions, security & conduct rules, shared skill-parameter handling | CLI |
 | `odoo19.md` | Odoo-specific review rules (prepended for Odoo repos) | CLI |
 | `skills/*.md` | Per-mode task sections (diff/delta/full/xml/migration/audit) | CLI |
-| `ticket_analysis.md`, `ticket_issues.md`, `review_memory.md` | Messages-API task prompts | Messages API |
+| `ticket_analysis.md`, `ticket_issues.md`, `timesheet_review.md`, `review_memory.md` | Messages-API task prompts | Messages API |
 | `CHANGELOG.md` | Version history; the first heading is parsed as `prompt_version` and stored on every `review_runs` row. | n/a |
 
 > On the CLI path, a reviewed repo's own `CLAUDE.md` (and `.claude/`, `.mcp.json`,

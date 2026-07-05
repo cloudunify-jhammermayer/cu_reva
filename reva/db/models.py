@@ -545,6 +545,72 @@ class TicketIssueRun(Base):
     )
 
 
+# ------------------------------------------------------- timesheet reviews
+
+
+class TimesheetReviewRun(Base):
+    __tablename__ = "timesheet_review_runs"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    job_id: Mapped[str | None] = mapped_column(Text)
+    odoo_instance_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("odoo_instances.id")
+    )
+    request_id: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    total_lines: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ok_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rewritten_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    needs_human_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    model: Mapped[str | None] = mapped_column(Text)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_creation_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    callback_payload: Mapped[Any | None] = mapped_column(JSON)
+    callback_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index(
+            "idx_timesheet_runs_pending",
+            "odoo_instance_id",
+            "request_id",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+            sqlite_where=text("status = 'pending'"),
+        ),
+        Index("idx_timesheet_runs_created", text("created_at DESC")),
+        Index("idx_timesheet_runs_status", "status"),
+    )
+
+
+class TimesheetReviewLine(Base):
+    __tablename__ = "timesheet_review_lines"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("timesheet_review_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    line_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_timesheet_lines_run_line", "run_id", "line_id", unique=True),
+    )
+
+
 # --------------------------------------------------------------- odoo_instances
 
 

@@ -604,6 +604,34 @@ func (m *MockClient) TicketIssueRuns(limit int) (*TicketIssueRunPage, error) {
 	return &TicketIssueRunPage{Items: items[:n], Total: len(items)}, nil
 }
 
+func (m *MockClient) TimesheetReviews(limit int) (*TimesheetReviewPage, error) {
+	now := time.Now()
+	f64Ptr := func(f float64) *float64 { return &f }
+	strPtr := func(s string) *string { return &s }
+	done := now.Add(-4 * time.Minute)
+	sent := now.Add(-3 * time.Minute)
+	items := []TimesheetReviewSummary{
+		{
+			ID: 12, RequestID: "TS-2026-07-05-001", Status: "completed",
+			TotalLines: 148, OkCount: 121, RewrittenCount: 23, NeedsHumanCount: 4,
+			EstimatedCostUSD: f64Ptr(0.0061), CallbackSentAt: &sent,
+			CreatedAt: now.Add(-6 * time.Minute), CompletedAt: &done,
+		},
+		{
+			ID: 11, RequestID: "TS-2026-07-05-000", Status: "failed",
+			TotalLines: 42, OkCount: 0, RewrittenCount: 0, NeedsHumanCount: 0,
+			ErrorMessage: strPtr("Odoo /hr/timesheet-results 409 (permanent)"),
+			CreatedAt:    now.Add(-40 * time.Minute),
+		},
+		{
+			ID: 10, RequestID: "TS-2026-07-04-009", Status: "pending",
+			TotalLines: 500, CreatedAt: now.Add(-2 * time.Minute),
+		},
+	}
+	n := min(limit, len(items))
+	return &TimesheetReviewPage{Items: items[:n], Total: len(items)}, nil
+}
+
 func (m *MockClient) Requeue(id int) error {
 	return nil
 }

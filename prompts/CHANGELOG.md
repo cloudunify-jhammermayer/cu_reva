@@ -1,3 +1,8 @@
+## v2.3 — Timesheet wording review
+
+- timesheet_review.md: new Messages-API prompt for Odoo timesheet wording
+  review, using structured `submit_timesheet_review` tool output.
+
 ## v2.2 — Core knowledge
 
 - ticket_analysis.md: Standard Odoo Coverage section + scoped carve-out.

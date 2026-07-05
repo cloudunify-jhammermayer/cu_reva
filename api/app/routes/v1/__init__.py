@@ -26,6 +26,7 @@ from app.routes.v1 import (
     reviews,
     ticket_analyses,
     ticket_issues,
+    timesheet_reviews,
 )
 
 router = APIRouter()
@@ -40,6 +41,7 @@ _master.include_router(pending.router)
 _master.include_router(admin.router)
 _master.include_router(ticket_analyses.router)
 _master.include_router(ticket_issues.router)
+_master.include_router(timesheet_reviews.router)
 _master.include_router(audits.router)
 _master.include_router(odoo_instances.router)
 _master.include_router(ops_events.router)
@@ -47,6 +49,7 @@ _master.include_router(ops_events.router)
 _instance = APIRouter(dependencies=[Depends(require_odoo_instance), Depends(rate_limit)])
 _instance.include_router(ticket_analyses.create_router)
 _instance.include_router(ticket_issues.create_router)
+_instance.include_router(timesheet_reviews.create_router)
 
 # Connection test: accepts master OR instance key, so it sits outside both
 # gates and does its own credential check (see routes/v1/health.py).

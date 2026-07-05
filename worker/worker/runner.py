@@ -31,6 +31,7 @@ from reva.core_knowledge import CoreKnowledge
 from reva.notifications import notify_operational_alert, notify_worker_error
 from reva.odoo_client import OdooCallbackClient
 from reva.ticket_analyzer import TicketAnalyzer
+from reva.timesheet_analyzer import TimesheetAnalyzer
 from reva.memory_distiller import MemoryDistiller
 from reva.ticket_issue_planner import TicketIssuePlanner
 from reva.db import (
@@ -89,6 +90,7 @@ class WorkerContext:
     verifier: FindingVerifier
     # Default None keeps existing WorkerContext call sites/fixtures valid;
     # build_worker_context always wires them.
+    timesheet_analyzer: TimesheetAnalyzer | None = None
     ticket_issue_planner: TicketIssuePlanner | None = None
     memory_distiller: MemoryDistiller | None = None
     core_knowledge: CoreKnowledge | None = None
@@ -171,6 +173,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         repos=repo_lookup,
     )
     ticket_analyzer = TicketAnalyzer(claude=claude, prompts_dir=settings.prompts_dir)
+    timesheet_analyzer = TimesheetAnalyzer(claude=claude, prompts_dir=settings.prompts_dir)
     ticket_issue_planner = TicketIssuePlanner(claude=claude, prompts_dir=settings.prompts_dir)
     memory_distiller = MemoryDistiller(claude=claude, prompts_dir=settings.prompts_dir)
     context = WorkerContext(
@@ -181,6 +184,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         reviewer=reviewer,
         auditor=auditor,
         ticket_analyzer=ticket_analyzer,
+        timesheet_analyzer=timesheet_analyzer,
         ticket_issue_planner=ticket_issue_planner,
         memory_distiller=memory_distiller,
         core_knowledge=core_knowledge,
