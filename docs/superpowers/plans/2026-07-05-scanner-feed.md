@@ -1,6 +1,6 @@
 # Scanner Feed Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Feed the reviewed repo's open GitHub security alerts (code-scanning, Dependabot, secret-scanning) into every review as fenced context, with a deterministic `critical` floor for findings matching secret alerts.
 
@@ -34,7 +34,7 @@
   - `list_dependabot_alerts(token, owner, repo) -> list[dict] | None`
   - `list_secret_scanning_alerts(token, owner, repo) -> list[dict] | None`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `worker/tests/test_github_scanner_readers.py` (construction: reuse the
 fixture pattern in `worker/tests/test_github_client.py` if it builds a client
@@ -106,7 +106,7 @@ def test_server_error_still_raises_transient():
 error mapping in that last test — the contract is: 403/404 → `None`,
 5xx → the client's transient error, other 4xx → its permanent error.)
 
-- [ ] **Step 2: Run to verify failure, then implement**
+- [x] **Step 2: Run to verify failure, then implement**
 
 Add to `reva/github_client.py` (after `get_issue`):
 
@@ -144,7 +144,7 @@ inspect `_get`'s raise site and catch precisely, e.g. match on status by
 passing a new `allow_statuses=(403,)` parameter to `_get`, mirroring
 `allow_404`). The tests define the contract.
 
-- [ ] **Step 3: Run to verify pass, commit**
+- [x] **Step 3: Run to verify pass, commit**
 
 ```bash
 cd worker && .venv/bin/python -m pytest tests/test_github_scanner_readers.py tests/test_github_client.py -q
@@ -166,7 +166,7 @@ git commit -m "feat(github): open security-alert readers (fail-open)"
   `collect(github, token, owner, repo, changed_files: list[str]) -> ScannerFeed`;
   `format_param(feed) -> str`; `MANIFEST_PATTERNS` (dependency-file matcher).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `worker/tests/test_scanner_feed.py`:
 
@@ -256,7 +256,7 @@ def test_format_param_shape_and_omission_contract():
     assert "hints" in text.lower()  # verdict-don't-copy framing present
 ```
 
-- [ ] **Step 2: Run to verify failure, then implement `reva/scanner_feed.py`**
+- [x] **Step 2: Run to verify failure, then implement `reva/scanner_feed.py`**
 
 ```python
 """GitHub security alerts as review context (scanner-feed spec).
@@ -390,7 +390,7 @@ def format_param(feed: ScannerFeed) -> str:
     return "\n".join(lines)
 ```
 
-- [ ] **Step 3: Run to verify pass, commit**
+- [x] **Step 3: Run to verify pass, commit**
 
 ```bash
 cd worker && .venv/bin/python -m pytest tests/test_scanner_feed.py -q
@@ -410,7 +410,7 @@ git commit -m "feat(scanner): alert collector + fenced-param formatter"
 - Consumes: Task 1 readers via `self.github`, Task 2 collector, the Reviewer ops-event seam.
 - Produces: optional `skill_params["scanner_alerts"]`; `_floor_secret_findings(findings, feed)`; `RepoConfig.scanner_feed: bool = True`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `worker/tests/test_reviewer_scanner.py` (reuse `test_reviewer.py`'s
 fixture pattern; monkeypatch `worker.worker.reviewer.scanner_collect` — the
@@ -439,7 +439,7 @@ category="security", file="a.py", …)` and a feed containing a
 `secret-scanning` entry with `file="a.py"` → severity becomes `"critical"`;
 an entry with `file="-"` floors nothing.
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 `reva/types.py::RepoConfig`:
 
@@ -500,7 +500,7 @@ def _floor_secret_findings(findings, feed) -> None:
 with `model_copy(update={"severity": "critical"})` and replace it in the
 list — check `grep -n "model_config" reva/types.py` near `Finding`.)
 
-- [ ] **Step 3: Run to verify pass, commit**
+- [x] **Step 3: Run to verify pass, commit**
 
 ```bash
 cd worker && .venv/bin/python -m pytest tests/test_reviewer_scanner.py tests/test_reviewer.py -q
@@ -515,7 +515,7 @@ git commit -m "feat(scanner): fenced alert param + secret severity floor"
 **Files:**
 - Modify: `prompts/review_guidance.md`, `prompts/CHANGELOG.md` (+ `test_get_version`), `docs/setup-production.md` (App-permission step)
 
-- [ ] **Step 1: Guidance section** (append to `prompts/review_guidance.md`):
+- [x] **Step 1: Guidance section** (append to `prompts/review_guidance.md`):
 
 ```markdown
 ## Security-alert hints (scanner feed)
@@ -529,10 +529,10 @@ cannot confirm or that don't intersect the change. Never invent alerts, and
 never treat the parameter's absence as evidence the repo is clean.
 ```
 
-- [ ] **Step 2: CHANGELOG bump** (next version after the triage plan's, if
+- [x] **Step 2: CHANGELOG bump** (next version after the triage plan's, if
 that landed first) + update the `test_get_version` assertion.
 
-- [ ] **Step 3: Operator docs** — add to `docs/setup-production.md`'s
+- [x] **Step 3: Operator docs** — add to `docs/setup-production.md`'s
 checklist:
 
 ```markdown
@@ -543,7 +543,7 @@ checklist:
    (`scanner_feed / sources_unavailable` ops events).
 ```
 
-- [ ] **Step 4: Full gate + commit + report**
+- [x] **Step 4: Full gate + commit + report**
 
 ```bash
 make test

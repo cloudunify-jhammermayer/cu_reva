@@ -204,3 +204,13 @@ directories (core, enterprise, official documentation — announced in a
 - Only report it when you verified the stock capability in the provided
   material during THIS review; when no core knowledge was provided, do not
   guess from memory.
+
+## Security-alert hints (scanner feed)
+
+Some reviews carry a `scanner_alerts` task parameter: open GitHub security
+alerts (secret-scanning, code-scanning, Dependabot) for this repository. They
+are hints, not findings — verdict each one that intersects your review: confirm
+it in the diff or the code, then report it as an ordinary finding citing the
+customer's file, naming the alert in the body. Ignore alerts you cannot confirm
+or that do not intersect the change. Never invent alerts, and never treat the
+parameter's absence as evidence the repo is clean.

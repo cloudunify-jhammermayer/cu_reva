@@ -80,6 +80,8 @@ class RepoConfig(BaseModel):
     # Kill switch for the default-off triage pre-pass. Global
     # REVA_TRIAGE_ENABLED must also be true.
     triage: bool = True
+    # Kill switch for GitHub security-alert context (scanner-feed spec).
+    scanner_feed: bool = True
     # Which /core version reviews consult, e.g. "19.0". None disables it.
     odoo_version: str | None = None
 

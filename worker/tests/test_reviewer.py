@@ -57,6 +57,9 @@ class FakeGitHub:
     compare_status_calls: int = 0
     pr_detail_body: str = "PR body from GitHub"
     issues: dict[int, dict | None] = field(default_factory=dict)
+    code_scanning_alerts: list[dict] | None = field(default_factory=list)
+    dependabot_alerts: list[dict] | None = field(default_factory=list)
+    secret_scanning_alerts: list[dict] | None = field(default_factory=list)
 
     def get_installation_token(self, installation_id: int) -> str:
         self.token_calls += 1
@@ -67,6 +70,15 @@ class FakeGitHub:
 
     def get_issue(self, token, owner, repo, issue_number) -> dict | None:
         return self.issues.get(issue_number)
+
+    def list_code_scanning_alerts(self, token, owner, repo) -> list[dict] | None:
+        return self.code_scanning_alerts
+
+    def list_dependabot_alerts(self, token, owner, repo) -> list[dict] | None:
+        return self.dependabot_alerts
+
+    def list_secret_scanning_alerts(self, token, owner, repo) -> list[dict] | None:
+        return self.secret_scanning_alerts
 
     def get_pull_request_diff(self, token, owner, repo, pr_number) -> str:
         self.diff_calls += 1

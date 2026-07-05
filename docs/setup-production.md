@@ -246,6 +246,12 @@ Test by opening a PR — you should see a Check Run appear within
 > repo audits can open issues (see the
 > [permissions table in the local guide](setup-local.md#1-create-a-github-app)).
 
+> Scanner feed requires the GitHub App to have read access to **Code scanning
+> alerts**, **Dependabot alerts**, and **Secret scanning alerts**. After changing
+> App permissions, accept the permission update on the installation. Until then
+> the scanner feed is a visible no-op via `scanner_feed / sources_unavailable`
+> ops events.
+
 ### Trigger a repository audit
 
 An audit reviews the whole repo on the default branch (deep model, Opus 4.8),

@@ -270,6 +270,39 @@ class GitHubClient:
         data = response.json()
         return {"title": data.get("title") or "", "body": data.get("body") or ""}
 
+    # --- security alerts (scanner-feed spec) -------------------------------
+
+    def _list_alerts(self, token: str, path: str) -> list[dict] | None:
+        """One page of open alerts, or None when the source is unavailable."""
+        try:
+            response = self._get(
+                token,
+                path,
+                params={"state": "open", "per_page": PAGE_SIZE},
+                allow_404=True,
+                allow_statuses=frozenset({403}),
+            )
+        except NotFound:
+            return None
+        if response.status_code == 403:
+            return None
+        return response.json()
+
+    def list_code_scanning_alerts(
+        self, token: str, owner: str, repo: str
+    ) -> list[dict] | None:
+        return self._list_alerts(token, f"/repos/{owner}/{repo}/code-scanning/alerts")
+
+    def list_dependabot_alerts(
+        self, token: str, owner: str, repo: str
+    ) -> list[dict] | None:
+        return self._list_alerts(token, f"/repos/{owner}/{repo}/dependabot/alerts")
+
+    def list_secret_scanning_alerts(
+        self, token: str, owner: str, repo: str
+    ) -> list[dict] | None:
+        return self._list_alerts(token, f"/repos/{owner}/{repo}/secret-scanning/alerts")
+
     def get_compare_diff(
         self, token: str, owner: str, repo: str, base_sha: str, head_sha: str
     ) -> str:
@@ -708,6 +741,7 @@ class GitHubClient:
         params: dict | None = None,
         extra_headers: dict | None = None,
         allow_404: bool = False,
+        allow_statuses: frozenset[int] = frozenset(),
     ) -> httpx.Response:
         url = f"{self.base_url}{path}"
         headers = {
@@ -726,6 +760,8 @@ class GitHubClient:
 
         if response.status_code == 404 and allow_404:
             raise NotFound()
+        if response.status_code in allow_statuses:
+            return response
         if response.status_code >= 300:
             raise map_github_status(response, action=path)
         return response

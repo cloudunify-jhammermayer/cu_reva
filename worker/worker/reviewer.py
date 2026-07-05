@@ -43,6 +43,11 @@ from reva.errors import PermanentError
 from reva.finding_verifier import FindingVerifier, StoredFinding
 from reva.odoo_manifest import audit_manifest, check_version_format, parse_manifest
 from reva.prompt_builder import PromptBuilder  # kept for type annotation (prompts param)
+from reva.scanner_feed import (
+    ScannerFeed,
+    collect as scanner_collect,
+    format_param as format_scanner_param,
+)
 from reva.types import (
     Finding,
     JobParams,
@@ -197,6 +202,18 @@ class GitHubReader(Protocol):
     def get_issue(
         self, token: str, owner: str, repo: str, issue_number: int
     ) -> dict | None: ...
+
+    def list_code_scanning_alerts(
+        self, token: str, owner: str, repo: str
+    ) -> list[dict] | None: ...
+
+    def list_dependabot_alerts(
+        self, token: str, owner: str, repo: str
+    ) -> list[dict] | None: ...
+
+    def list_secret_scanning_alerts(
+        self, token: str, owner: str, repo: str
+    ) -> list[dict] | None: ...
 
 
 class RepoLookup(Protocol):
@@ -574,6 +591,39 @@ class Reviewer:
         except Exception:
             log.warning("manifest_audit_failed", exc_info=True)
 
+        scanner_feed_result: ScannerFeed | None = None
+        if repo_config.scanner_feed:
+            try:
+                scanner_feed_result = scanner_collect(
+                    self.github, token, owner, name, changed_files
+                )
+                if scanner_feed_result.unavailable:
+                    self._record_ops_event(
+                        "scanner_feed",
+                        "warning",
+                        "sources_unavailable",
+                        {
+                            "repo": f"{owner}/{name}",
+                            "sources": scanner_feed_result.unavailable,
+                        },
+                    )
+                if scanner_feed_result.entries:
+                    skill_params["scanner_alerts"] = format_scanner_param(
+                        scanner_feed_result
+                    )
+                    log.info(
+                        "scanner_alerts_attached",
+                        alerts=len(scanner_feed_result.entries),
+                    )
+            except Exception:
+                log.warning("scanner_feed_failed", exc_info=True)
+                self._record_ops_event(
+                    "scanner_feed",
+                    "warning",
+                    "collect_failed",
+                    {"repo": f"{owner}/{name}"},
+                )
+
         extra_dirs: list[str] | None = None
         if self.core_knowledge is not None and repo_config.odoo_version:
             core_version = self.core_knowledge.resolve(repo_config.odoo_version)
@@ -649,6 +699,7 @@ class Reviewer:
         # Drop categories a trusted user muted for this repo (/mute) — before
         # calibration/verification so we never pay to process a muted finding.
         grounded = _drop_muted_findings(grounded, muted)
+        _floor_secret_findings(grounded, scanner_feed_result)
         # Enforce the confidence floor in code, not just the prompt: the prompt
         # asks for honest scores (v2.1), so sub-0.7 findings are expected output.
         # Drop them here (before calibration/verification, so we never pay to
@@ -991,6 +1042,20 @@ def _build_manifest_audit(
         "Deterministic `__manifest__.py` issues REVA detected — surface these as "
         "findings (trust them; don't re-derive):\n" + "\n".join(sections)
     )
+
+
+def _floor_secret_findings(findings: list[Finding], feed: ScannerFeed | None) -> None:
+    """Raise findings on files with open secret-scanning alerts to critical."""
+    if feed is None:
+        return
+    secret_files = {
+        entry.file
+        for entry in feed.entries
+        if entry.tool == "secret-scanning" and entry.file != "-"
+    }
+    for finding in findings:
+        if finding.file in secret_files and finding.severity != "critical":
+            finding.severity = "critical"
 
 
 def _format_test_coverage(coverage: list[ModuleCoverage]) -> str:

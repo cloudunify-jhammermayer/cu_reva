@@ -1,3 +1,8 @@
+## v2.5 — Scanner feed
+
+- review_guidance.md: scanner_alerts task-parameter guidance for GitHub
+  security alerts as review hints.
+
 ## v2.4 — Triage pre-pass
 
 - triage.md: new escalate-only review-depth router for push-triggered diff

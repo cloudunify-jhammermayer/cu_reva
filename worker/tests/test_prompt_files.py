@@ -44,7 +44,7 @@ def test_prompts_dir_exists():
 
 
 def test_get_version_returns_current_version(builder):
-    assert builder.get_version() == "v2.4"
+    assert builder.get_version() == "v2.5"
 
 
 def test_odoo_severity_rules_in_sync_with_odoo19_md():
@@ -185,3 +185,9 @@ def test_manifest_guidance_present():
     odoo = (PROMPTS_DIR / "odoo19.md").read_text()
     assert "exists in the module" in odoo            # missing-file check
     assert "security before views" in odoo            # order check
+
+
+def test_scanner_alert_guidance_present():
+    guidance = (PROMPTS_DIR / "review_guidance.md").read_text()
+    assert "Security-alert hints" in guidance
+    assert "scanner_alerts" in guidance
