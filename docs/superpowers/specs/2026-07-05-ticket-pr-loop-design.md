@@ -112,10 +112,12 @@ omitted (prompt-cache stable). Degradations → ops event.
 
 - Hook in the issue-state sync path (worker): after updating the union, if
   the transition closed the last open issue → `odoo.tickets_ready(ticket_id,
-  model_name, issues=union)` → `POST {base}/tickets/ready`. Failure follows
-  the callback error mapping (transient retries via RQ, permanent logged +
-  ops event — the ready signal must never break state sync itself: it runs
-  after the existing callback and catches its own errors).
+  model_name, issues=union)` → `POST {base}/tickets/ready`. Runs AFTER the
+  existing `issue_state` callback. Error semantics: **TransientError
+  re-raises** (RQ retries the whole state-sync job — it is idempotent, and a
+  swallowed transient would silently lose the ready signal until a future
+  reopen→close); **PermanentError is swallowed** + logged + ops event (a 4xx
+  from Odoo won't improve on retry, and state sync itself succeeded).
 - Digest surfaces: TUI tickets tab row indicator (✔ ready) using data the tab
   already loads; dashboard counter `tickets_ready_14d` on
   `/api/v1/metrics/dashboard`; weekly Chat report gains a "Ready for
