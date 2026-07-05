@@ -3,6 +3,7 @@
 - master gate (require_api_key): every admin/read/management route, incl. the
   ticket read/list/requeue handlers and the odoo-instances CRUD.
 - instance gate (require_odoo_instance): ONLY the two Odoo create routes.
+- any-key (own check): GET /health — the credentialed connection test.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from app.routes.v1 import (
     audits,
     failures,
     findings,
+    health,
     metrics,
     odoo_instances,
     pending,
@@ -44,5 +46,11 @@ _instance = APIRouter(dependencies=[Depends(require_odoo_instance), Depends(rate
 _instance.include_router(ticket_analyses.create_router)
 _instance.include_router(ticket_issues.create_router)
 
+# Connection test: accepts master OR instance key, so it sits outside both
+# gates and does its own credential check (see routes/v1/health.py).
+_any = APIRouter(dependencies=[Depends(rate_limit)])
+_any.include_router(health.router)
+
 router.include_router(_master)
 router.include_router(_instance)
+router.include_router(_any)
