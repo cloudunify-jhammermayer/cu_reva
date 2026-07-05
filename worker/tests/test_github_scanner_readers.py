@@ -62,3 +62,44 @@ def test_server_error_still_raises_transient():
     gh = _client(lambda req: httpx.Response(502, text="bad gateway"))
     with pytest.raises(TransientError):
         gh.list_code_scanning_alerts("tok", "a", "r")
+
+
+def test_rate_limit_403_is_transient_not_unavailable():
+    """Review finding #8: a rate-limited 403 must retry, not mislabel the
+    source as missing-permission/feature."""
+    gh = _client(lambda req: httpx.Response(
+        403, json={"message": "API rate limit exceeded"},
+        headers={"x-ratelimit-remaining": "0", "x-ratelimit-reset": "0"},
+    ))
+    with pytest.raises(TransientError):
+        gh.list_code_scanning_alerts("tok", "a", "r")
+
+
+def test_plain_403_still_unavailable():
+    gh = _client(lambda req: httpx.Response(
+        403, json={"message": "Resource not accessible by integration"},
+        headers={"x-ratelimit-remaining": "4999"},
+    ))
+    assert gh.list_secret_scanning_alerts("tok", "a", "r") is None
+
+
+def test_secret_alert_locations_happy():
+    """Review finding #1: locations come from the per-alert endpoint."""
+    payload = [{"type": "commit",
+                "details": {"path": "custom_addons/x/models/a.py",
+                            "start_line": 12}}]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/secret-scanning/alerts/3/locations")
+        assert request.headers["Authorization"] == "Bearer tok"
+        return httpx.Response(200, json=payload)
+
+    gh = _client(handle)
+    locations = gh.get_secret_alert_locations("tok", "acme", "widgets", 3)
+    assert locations[0]["details"]["start_line"] == 12
+
+
+def test_secret_alert_locations_unavailable_is_none():
+    for status in (403, 404):
+        gh = _client(lambda req, s=status: httpx.Response(s, json={}))
+        assert gh.get_secret_alert_locations("tok", "a", "r", 3) is None

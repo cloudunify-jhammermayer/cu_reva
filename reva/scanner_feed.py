@@ -80,12 +80,33 @@ def _norm_dependabot(alerts: list[dict]) -> list[ScannerEntry]:
     return out
 
 
-def _norm_secret(alerts: list[dict]) -> list[ScannerEntry]:
+# Extra per-alert API calls to resolve secret locations are bounded — the
+# floor only needs file anchors for the few (capped) alerts that make the feed.
+_SECRET_LOCATION_LOOKUPS = 5
+
+
+def _first_commit_location(locations: list[dict]) -> tuple[str, int | None]:
+    """(path, start_line) of the first commit-type location, else ("-", None)."""
+    for location in locations:
+        if location.get("type") == "commit":
+            details = location.get("details") or {}
+            path = details.get("path")
+            if path:
+                return str(path), details.get("start_line")
+    return "-", None
+
+
+def _norm_secret(
+    alerts: list[dict],
+    locations_by_number: dict[int, list[dict]] | None = None,
+) -> list[ScannerEntry]:
+    """Normalize secret alerts. The LIST endpoint returns only locations_url,
+    so file anchors come from the separately-fetched locations_by_number map
+    (review finding #1 — without it the critical-severity floor never fires)."""
+    lookup = locations_by_number or {}
     out: list[ScannerEntry] = []
     for alert in alerts:
-        locations = alert.get("locations") or []
-        location = locations[0] if locations else {}
-        details = location.get("details") or {}
+        file, line = _first_commit_location(lookup.get(alert.get("number"), []))
         out.append(ScannerEntry(
             tool="secret-scanning",
             rule=str(
@@ -94,8 +115,8 @@ def _norm_secret(alerts: list[dict]) -> list[ScannerEntry]:
                 or "secret"
             ),
             severity="critical",
-            file=str(details.get("path") or "-"),
-            line=details.get("start_line"),
+            file=file,
+            line=line,
             description=f"open secret-scanning alert #{alert.get('number', '?')}",
         ))
     return out
@@ -122,7 +143,22 @@ def collect(
     if dependabot is None:
         feed.unavailable.append("dependabot")
 
-    prioritized = _norm_secret(secret or [])
+    # Best-effort location enrichment for the first few secret alerts — this
+    # is what anchors them to files so the severity floor can fire. Any
+    # failure degrades to a repo-wide ("-") entry, never fails the feed.
+    locations_by_number: dict[int, list[dict]] = {}
+    for alert in (secret or [])[:_SECRET_LOCATION_LOOKUPS]:
+        number = alert.get("number")
+        if number is None:
+            continue
+        try:
+            locations = github.get_secret_alert_locations(token, owner, repo, number)
+        except Exception:
+            locations = None
+        if locations:
+            locations_by_number[number] = locations
+
+    prioritized = _norm_secret(secret or [], locations_by_number)
     prioritized += _norm_code(code or [], changed)
     if _manifest_touched(changed_files):
         prioritized += _norm_dependabot(dependabot or [])

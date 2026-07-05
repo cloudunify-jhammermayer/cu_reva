@@ -285,6 +285,37 @@ class GitHubClient:
         except NotFound:
             return None
         if response.status_code == 403:
+            # Distinguish rate-limit 403s (transient — retry) from
+            # missing-feature/permission 403s (source unavailable). Without
+            # this a rate-limited window mislabels all three sources as
+            # unavailable in the ops events (review finding #8).
+            if response.headers.get("x-ratelimit-remaining") == "0" or (
+                "retry-after" in response.headers
+            ):
+                raise map_github_status(response, action=path)
+            return None
+        return response.json()
+
+    def get_secret_alert_locations(
+        self, token: str, owner: str, repo: str, alert_number: int
+    ) -> list[dict] | None:
+        """First page of one secret alert's locations, or None when unavailable.
+
+        The list endpoint returns only `locations_url`; the file-anchored
+        critical-severity floor needs the actual path/line (scanner-feed spec
+        locked decision 4 — review finding #1).
+        """
+        try:
+            response = self._get(
+                token,
+                f"/repos/{owner}/{repo}/secret-scanning/alerts/{alert_number}/locations",
+                params={"per_page": PAGE_SIZE},
+                allow_404=True,
+                allow_statuses=frozenset({403}),
+            )
+        except NotFound:
+            return None
+        if response.status_code == 403:
             return None
         return response.json()
 

@@ -31,6 +31,9 @@ class FakeGH:
     code: list | None = None
     dependabot: list | None = None
     secret: list | None = None
+    # alert number -> locations list; "raise" simulates a lookup failure.
+    secret_locations: dict | None = None
+    location_calls: int = 0
 
     def list_code_scanning_alerts(self, token, owner, repo):
         return self.code
@@ -40,6 +43,13 @@ class FakeGH:
 
     def list_secret_scanning_alerts(self, token, owner, repo):
         return self.secret
+
+    def get_secret_alert_locations(self, token, owner, repo, alert_number):
+        self.location_calls += 1
+        value = (self.secret_locations or {}).get(alert_number)
+        if value == "raise":
+            raise RuntimeError("locations fetch failed")
+        return value
 
 
 def test_code_alert_filtered_to_changed_files():
@@ -118,3 +128,45 @@ def test_format_param_shape_and_omission_contract():
 
     assert "code-scanning | py/sql-injection | error | a.py:40" in text
     assert "hints" in text.lower()
+
+
+# --- secret location enrichment (review finding #1) ------------------------------
+
+_COMMIT_LOCATION = {
+    "type": "commit",
+    "details": {"path": "custom_addons/x/models/a.py", "start_line": 12},
+}
+
+
+def test_secret_alert_enriched_with_file_location():
+    """The list endpoint has no locations — the per-alert fetch anchors the
+    entry to a file so the critical-severity floor can fire."""
+    gh = FakeGH(code=[], dependabot=[], secret=[_SECRET_ALERT],
+                secret_locations={3: [_COMMIT_LOCATION]})
+    feed = collect(gh, "t", "o", "r", changed_files=[])
+    entry = next(e for e in feed.entries if e.tool == "secret-scanning")
+    assert entry.file == "custom_addons/x/models/a.py"
+    assert entry.line == 12
+
+
+def test_secret_location_failure_degrades_to_repo_wide():
+    gh = FakeGH(code=[], dependabot=[], secret=[_SECRET_ALERT],
+                secret_locations={3: "raise"})
+    feed = collect(gh, "t", "o", "r", changed_files=[])
+    entry = next(e for e in feed.entries if e.tool == "secret-scanning")
+    assert entry.file == "-" and entry.line is None
+
+
+def test_non_commit_locations_stay_repo_wide():
+    gh = FakeGH(code=[], dependabot=[], secret=[_SECRET_ALERT],
+                secret_locations={3: [{"type": "issue_comment", "details": {}}]})
+    feed = collect(gh, "t", "o", "r", changed_files=[])
+    entry = next(e for e in feed.entries if e.tool == "secret-scanning")
+    assert entry.file == "-"
+
+
+def test_secret_location_lookups_capped():
+    alerts = [dict(_SECRET_ALERT, number=n) for n in range(1, 10)]
+    gh = FakeGH(code=[], dependabot=[], secret=alerts, secret_locations={})
+    collect(gh, "t", "o", "r", changed_files=[])
+    assert gh.location_calls == 5
