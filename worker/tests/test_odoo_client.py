@@ -127,6 +127,41 @@ def test_write_field_payload_shape(monkeypatch):
     assert captured["body"]["html"] == kw["html"]
 
 
+# --- /tickets/ namespacing (Odoo-side API change, 2026-07-05) -------------------
+# callback_url is the Odoo app's REVA API base; ticket endpoints live under
+# /tickets/. Legacy configs that stored the old write-field endpoint keep
+# working — the suffix is stripped at construction.
+
+
+def _capture_url(monkeypatch) -> dict:
+    captured: dict = {}
+
+    def post(url, **kwargs):
+        captured["url"] = url
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    return captured
+
+
+@pytest.mark.parametrize("configured", [
+    "https://odoo.example.com/api/reva",                        # new: plain base
+    "https://odoo.example.com/api/reva/",                       # base, trailing slash
+    "https://odoo.example.com/api/reva/write-field",            # legacy stored form
+    "https://odoo.example.com/api/reva/tickets/write-field",    # fully-qualified new form
+])
+def test_write_field_url_from_any_configured_form(monkeypatch, configured):
+    captured = _capture_url(monkeypatch)
+    OdooCallbackClient(callback_url=configured, api_key=_KEY).write_field(**_kwargs())
+    assert captured["url"] == "https://odoo.example.com/api/reva/tickets/write-field"
+
+
+def test_reset_status_uses_tickets_namespace(monkeypatch):
+    captured = _capture_url(monkeypatch)
+    _client().reset_status(ticket_id=123, model_name="helpdesk.ticket")
+    assert captured["url"] == "https://odoo.example.com/api/reva/tickets/reset-status"
+
+
 # --- issues_created (github-issues handoff, Contract 2) ------------------------
 
 
@@ -156,8 +191,8 @@ def test_issues_created_posts_contract_payload_to_sibling_path(monkeypatch):
     monkeypatch.setattr("reva.odoo_client.httpx.post", post)
     _client().issues_created(**_issues_kwargs())
 
-    # base URL is derived from the write-field callback URL — no new config
-    assert captured["url"] == "https://odoo.example.com/api/reva/issues-created"
+    # base URL is derived from the configured callback URL — no new config
+    assert captured["url"] == "https://odoo.example.com/api/reva/tickets/issues-created"
     assert captured["auth"] == f"Bearer {_KEY}"
     assert captured["body"] == _issues_kwargs()
 
@@ -221,7 +256,7 @@ def test_issue_state_posts_snapshot_to_sibling_path(monkeypatch):
         number=42, state="closed", issues=snapshot,
     )
 
-    assert captured["url"] == "https://odoo.example.com/api/reva/issue-state"
+    assert captured["url"] == "https://odoo.example.com/api/reva/tickets/issue-state"
     assert captured["body"] == {
         "ticket_id": 123, "model_name": "helpdesk.ticket",
         "number": 42, "state": "closed", "issues": snapshot,

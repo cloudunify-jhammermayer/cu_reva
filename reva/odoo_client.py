@@ -1,14 +1,23 @@
 """Odoo callback client.
 
-Posts analysis results to the custom FastAPI endpoint that CloudUnify
-builds on the Odoo side. REVA defines the request contract; the Odoo
-endpoint is expected to match it.
+Posts analysis results to the REVA API that CloudUnify builds on the Odoo
+side. REVA defines the request contract; the Odoo endpoint is expected to
+match it.
 
-Contract:
-    POST {callback_url}
+The configured callback_url is the Odoo app's REVA API BASE (e.g.
+https://<odoo>/api/reva). Each Odoo-side feature namespaces its endpoints
+under that base — ticket generation lives under /tickets/ (Odoo-side API
+change, 2026-07-05; the un-namespaced /write-field etc. were removed):
+
+    POST {base}/tickets/write-field      — analysis result
+    POST {base}/tickets/reset-status     — set reva_status = pending
+    POST {base}/tickets/issues-created   — created GitHub issues (or failure)
+    POST {base}/tickets/issue-state      — per-issue state change
+
     Authorization: Bearer {api_key}
     Content-Type: application/json
 
+    e.g. write-field body:
     {
         "ticket_id": 123,
         "model_name": "helpdesk.ticket",
@@ -50,16 +59,21 @@ class OdooCallbackClient:
             self._callback_url = ""
             self._api_key = api_key
             return
-        # callback_url is the write-field endpoint; derive base for sibling endpoints
-        if callback_url.endswith("/write-field"):
-            self._base_url = callback_url[: -len("/write-field")]
-        else:
-            self._base_url = callback_url.rstrip("/")
+        # callback_url is the Odoo app's REVA API base; ticket endpoints live
+        # under /tickets/ (see module docstring). Deployed instance rows may
+        # still store the pre-namespacing write-field endpoint — strip either
+        # suffix so existing configs keep working without a DB touch-up.
+        base = callback_url.rstrip("/")
+        for legacy_suffix in ("/tickets/write-field", "/write-field"):
+            if base.endswith(legacy_suffix):
+                base = base[: -len(legacy_suffix)]
+                break
+        self._base_url = base
         # Fail fast on a malformed/dangerous callback URL. Internal/RFC1918 hosts
         # are allowed (Odoo is often internal); only bad schemes + metadata are
         # rejected. See reva.url_safety.
-        assert_safe_url(self._base_url + "/write-field")
-        self._callback_url = self._base_url + "/write-field"
+        assert_safe_url(self._base_url + "/tickets/write-field")
+        self._callback_url = self._base_url + "/tickets/write-field"
         self._api_key = api_key
 
     def _post(self, path: str, payload: dict) -> None:
@@ -85,7 +99,7 @@ class OdooCallbackClient:
 
     def reset_status(self, ticket_id: int, model_name: str) -> None:
         """Set reva_status = pending in Odoo before re-running analysis."""
-        self._post("/reset-status", {"ticket_id": ticket_id, "model_name": model_name})
+        self._post("/tickets/reset-status", {"ticket_id": ticket_id, "model_name": model_name})
 
     def write_field(
         self,
@@ -95,7 +109,7 @@ class OdooCallbackClient:
         html: str,
     ) -> None:
         """POST the analysis HTML to the Odoo callback endpoint."""
-        self._post("/write-field", {
+        self._post("/tickets/write-field", {
             "ticket_id": ticket_id,
             "model_name": model_name,
             "field_name": field_name,
@@ -123,7 +137,7 @@ class OdooCallbackClient:
         no longer pending or the request_id is stale — the expected outcome of
         its 10s-timeout race.
         """
-        self._post("/issues-created", {
+        self._post("/tickets/issues-created", {
             "ticket_id": ticket_id,
             "model_name": model_name,
             "request_id": request_id,
@@ -151,7 +165,7 @@ class OdooCallbackClient:
         idempotently (done issues get marked). 409 = the record's links are not
         in the 'created' state — permanent, do not retry.
         """
-        self._post("/issue-state", {
+        self._post("/tickets/issue-state", {
             "ticket_id": ticket_id,
             "model_name": model_name,
             "number": number,

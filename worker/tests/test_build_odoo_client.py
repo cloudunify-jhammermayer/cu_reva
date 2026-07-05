@@ -27,7 +27,9 @@ def test_builds_client_from_instance(db, monkeypatch):
     ctx = WorkerContext.__new__(WorkerContext)  # only .db is needed by the builder
     object.__setattr__(ctx, "db", db)
     client = build_odoo_client(ctx, iid)
-    assert client._callback_url == "https://odoo.acme/write-field"
+    # Legacy stored callback_url (old write-field endpoint) still derives the
+    # /tickets/-namespaced endpoint (Odoo-side API change, 2026-07-05).
+    assert client._callback_url == "https://odoo.acme/tickets/write-field"
     assert client._api_key == "outbound-secret"
 
 
