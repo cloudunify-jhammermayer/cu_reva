@@ -129,3 +129,14 @@ def test_failed_issues_created_sample_exists():
         for contract in contracts
         for sample in [contract.sample, *contract.extra_samples]
     )
+
+
+def test_projection_keys_match_contract_models():
+    """The wire projection tuples in odoo_client must track the contract
+    models field-for-field — otherwise contracts/ advertises a field that
+    _project_items silently strips from the wire (review finding #7)."""
+    from reva.odoo_client import _ISSUE_KEYS, _TIMESHEET_RESULT_KEYS
+    from reva.odoo_contracts import IssueRefPayload, TimesheetResultPayload
+
+    assert set(_ISSUE_KEYS) == set(IssueRefPayload.model_fields)
+    assert set(_TIMESHEET_RESULT_KEYS) == set(TimesheetResultPayload.model_fields)
