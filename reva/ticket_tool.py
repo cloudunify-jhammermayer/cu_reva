@@ -31,14 +31,23 @@ def build_ticket_tool_schema() -> dict[str, Any]:
         "definition_of_ready",
         "definition_of_done",
         "odoo_notes",
+        "standard_coverage",
     }
     properties = {k: v for k, v in schema.get("properties", {}).items() if k in allowed}
 
     input_schema: dict[str, Any] = {
         "type": "object",
         "properties": properties,
-        "required": ["summary", "missing_info", "acceptance_criteria", "test_cases",
-                     "definition_of_ready", "definition_of_done", "odoo_notes"],
+        "required": [
+            "summary",
+            "missing_info",
+            "acceptance_criteria",
+            "test_cases",
+            "definition_of_ready",
+            "definition_of_done",
+            "odoo_notes",
+            "standard_coverage",
+        ],
         "additionalProperties": False,
     }
 

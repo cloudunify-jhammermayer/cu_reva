@@ -21,6 +21,7 @@ import yaml
 from pydantic import ValidationError
 
 from reva.claude_code_runner import ClaudeCodeRunner
+from reva.core_knowledge import CoreKnowledge, extract_added_definitions
 from reva.cost import estimate_cost
 from reva.diff_utils import (
     DEFAULT_EXCLUDE_EXTENSIONS,
@@ -235,6 +236,7 @@ class Reviewer:
         max_diff_tokens: int = DEFAULT_MAX_DIFF_TOKENS,
         verifier: FindingVerifier | None = None,
         verify_findings_default: bool = True,
+        core_knowledge: CoreKnowledge | None = None,
     ) -> None:
         self.runner = runner
         self.github = github
@@ -244,6 +246,7 @@ class Reviewer:
         self.max_diff_tokens = max_diff_tokens
         self.verifier = verifier
         self.verify_findings_default = verify_findings_default
+        self.core_knowledge = core_knowledge
 
     # ------------------------------------------------------------------ public
 
@@ -528,6 +531,30 @@ class Reviewer:
         except Exception:
             log.warning("manifest_audit_failed", exc_info=True)
 
+        extra_dirs: list[str] | None = None
+        if self.core_knowledge is not None and repo_config.odoo_version:
+            core_version = self.core_knowledge.resolve(repo_config.odoo_version)
+            if core_version is None:
+                log.warning("core_knowledge_unavailable", version=repo_config.odoo_version)
+            else:
+                if skill in ("reva-full-review", "reva-repo-audit"):
+                    extra_dirs = self.core_knowledge.core_paths(core_version)
+                    skill_params["core_knowledge"] = (
+                        f"Odoo {core_version} core knowledge is available read-only under "
+                        f"{', '.join(extra_dirs)}. Use it to check whether a requirement "
+                        "is already covered by standard Odoo before proposing custom code. "
+                        f"Catalog: {self.core_knowledge.catalog_path(core_version)}. "
+                        "Use category `standard-functionality` for advisory findings where "
+                        "the custom change appears to duplicate stock Odoo behavior."
+                    )
+                else:
+                    added_models, added_fields = extract_added_definitions(diff)
+                    overlap = self.core_knowledge.core_overlap(
+                        core_version, added_models, added_fields
+                    )
+                    if overlap:
+                        skill_params["core_overlap"] = "\n".join(f"- {hint}" for hint in overlap)
+
         # What REVA is about to do — the paid call. Makes "why did this cost /
         # take so long" answerable from the logs (skill, model, size, delta).
         log.info(
@@ -545,7 +572,7 @@ class Reviewer:
             repo_path = self.runner.ensure_repo(owner, name, params.head_sha, token)
             response = self.runner.review(
                 repo_path=repo_path, skill=skill, params=skill_params,
-                model=model, odoo=repo_config.odoo,
+                model=model, odoo=repo_config.odoo, extra_dirs=extra_dirs,
             )
         completed_at = datetime.now(timezone.utc)
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)

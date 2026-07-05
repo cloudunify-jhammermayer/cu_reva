@@ -10,10 +10,16 @@ import structlog
 from reva.db import writers
 from reva.errors import PermanentError, TransientError
 from reva.ticket_formatter import format_ticket_html
+from reva.ticket_knowledge import build_knowledge_block
 from reva.types import TicketJobParams
 from worker.runner import build_odoo_client, get_context, instance_budget_exceeded
 
 logger = structlog.get_logger()
+
+
+def instance_odoo_version(ctx, odoo_instance_id: int) -> str | None:
+    row = writers.get_odoo_instance(ctx.db, odoo_instance_id)
+    return row.get("odoo_version") if row else None
 
 
 def run_ticket_analysis(job_params: dict) -> dict:
@@ -55,7 +61,47 @@ def run_ticket_analysis(job_params: dict) -> dict:
             writers.record_ticket_analysis_failed(ctx.db, params.analysis_id, error)
             raise PermanentError(error)
         try:
-            response_obj, result = ctx.ticket_analyzer.analyze_with_response(params)
+            extra_blocks = None
+            if ctx.core_knowledge is not None:
+                version = ctx.core_knowledge.resolve(
+                    instance_odoo_version(ctx, params.odoo_instance_id)
+                )
+                if version is None:
+                    log.warning("ticket_core_knowledge_unavailable")
+                    writers.record_ops_event(
+                        ctx.db,
+                        "core_knowledge",
+                        "warning",
+                        "ticket_version_unavailable",
+                        {
+                            "analysis_id": params.analysis_id,
+                            "odoo_instance_id": params.odoo_instance_id,
+                        },
+                    )
+                else:
+                    block, planner_cost, error = build_knowledge_block(
+                        ctx.claude,
+                        ctx.core_knowledge,
+                        ctx.prompts_dir,
+                        version,
+                        params.text,
+                    )
+                    if planner_cost:
+                        writers.record_claude_spend(ctx.db, "ticket_planner", planner_cost)
+                    if error is not None:
+                        writers.record_ops_event(
+                            ctx.db,
+                            "ticket_planner",
+                            "warning",
+                            "planner_failed",
+                            {"analysis_id": params.analysis_id, "error": error[:300]},
+                        )
+                    elif block is not None:
+                        extra_blocks = [block]
+            response_obj, result = ctx.ticket_analyzer.analyze_with_response(
+                params,
+                extra_system_blocks=extra_blocks,
+            )
             html = format_ticket_html(result)
         except TransientError:
             log.warning("ticket_analysis_transient_error", exc_info=True)

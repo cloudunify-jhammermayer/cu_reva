@@ -49,6 +49,23 @@ func TestOdooViewShowsBudgetColumn(t *testing.T) {
 	}
 }
 
+func TestOdooViewShowsVersionColumn(t *testing.T) {
+	o := newOdoo(&api.MockClient{})
+	version := "19.0"
+	page := &api.OdooInstancePage{
+		Items: []api.OdooInstanceSummary{
+			{ID: 1, Name: "prod", KeyPrefix: "reva_odoo_x", Active: true, OdooVersion: &version},
+		},
+		Total: 1,
+	}
+	o, _ = o.update(odooLoadedMsg{data: page})
+	o.width, o.height = 140, 30
+	out := o.view(140, 30)
+	if !strings.Contains(out, "Ver") || !strings.Contains(out, "19.0") {
+		t.Fatalf("expected version column and value in view:\n%s", out)
+	}
+}
+
 func TestOdooCreateFlowPostsAndShowsKey(t *testing.T) {
 	o := newOdoo(&api.MockClient{})
 	o.width, o.height = 140, 30

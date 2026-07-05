@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PeriodStats(BaseModel):
@@ -29,6 +29,14 @@ class DashboardMetrics(BaseModel):
     avg_cost_per_review_7d: float | None
     active_workers: int = 0
     degradations_24h: int = 0
+    core_knowledge: list["CoreVersionStatus"] = Field(default_factory=list)
+
+
+class CoreVersionStatus(BaseModel):
+    odoo_version: str
+    loaded_at: datetime
+    modules: int
+    sections: int
 
 
 class DeveloperStat(BaseModel):

@@ -90,6 +90,7 @@ def list_odoo_instances(db: Database) -> list[dict]:
                     float(r.daily_budget_usd) if r.daily_budget_usd is not None else None
                 ),
                 "rate_limit_per_minute": r.rate_limit_per_minute,
+                "odoo_version": r.odoo_version,
                 "created_at": r.created_at,
             }
             for r in rows

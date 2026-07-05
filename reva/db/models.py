@@ -568,6 +568,8 @@ class OdooInstance(Base):
     # Per-instance quotas (migration 026): NULL = unlimited.
     daily_budget_usd: Mapped[float | None] = mapped_column(Numeric(12, 2))
     rate_limit_per_minute: Mapped[int | None] = mapped_column(Integer)
+    # Which Odoo version this instance's tickets are analysed against.
+    odoo_version: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -675,6 +677,101 @@ class OpsEvent(Base):
         Index("idx_ops_events_created_at", "created_at"),
         Index("idx_ops_events_component", "component"),
     )
+
+
+# ------------------------------------------------------ core-knowledge registry
+
+
+class OdooCoreModule(Base):
+    """One core/enterprise addon module (mirrors db/migrations/028)."""
+
+    __tablename__ = "odoo_core_modules"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    odoo_version: Mapped[str] = mapped_column(Text, nullable=False)
+    module: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(Text)
+    depends: Mapped[Any | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("idx_core_modules_version", "odoo_version", "module"),)
+
+
+class OdooCoreModel(Base):
+    """One model definition/inheritance in core (mirrors db/migrations/028)."""
+
+    __tablename__ = "odoo_core_models"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    odoo_version: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    module: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    source_path: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("idx_core_models_version_model", "odoo_version", "model"),)
+
+
+class OdooCoreField(Base):
+    """One field definition in core (mirrors db/migrations/028)."""
+
+    __tablename__ = "odoo_core_fields"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    odoo_version: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    field: Mapped[str] = mapped_column(Text, nullable=False)
+    ftype: Mapped[str | None] = mapped_column(Text)
+    module: Mapped[str] = mapped_column(Text, nullable=False)
+    string: Mapped[str | None] = mapped_column(Text)
+    compute: Mapped[str | None] = mapped_column(Text)
+    related: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("idx_core_fields_version_model", "odoo_version", "model"),)
+
+
+class OdooDocsSection(Base):
+    """One heading-delimited section of the official docs."""
+
+    __tablename__ = "odoo_docs_sections"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    odoo_version: Mapped[str] = mapped_column(Text, nullable=False)
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    anchor: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("idx_docs_sections_version", "odoo_version"),)
+
+
+class CoreKnowledgeVersion(Base):
+    """Load bookkeeping: one row per loaded version."""
+
+    __tablename__ = "core_knowledge_versions"
+
+    odoo_version: Mapped[str] = mapped_column(Text, primary_key=True)
+    loaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    modules: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    models: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    fields: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sections: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 # ------------------------------------------------------------- weekly_reports

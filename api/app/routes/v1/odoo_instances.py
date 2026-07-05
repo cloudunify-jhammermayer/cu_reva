@@ -66,6 +66,7 @@ def create_instance(
         db, name=name, key_hash=key_hash, key_prefix=key_prefix,
         callback_url=body.callback_url.strip(),
         callback_api_key_enc=callback_api_key_enc,
+        odoo_version=body.odoo_version,
     )
     writers.record_admin_action(
         db, action="create_odoo_instance", actor=actor_from_request(request),
@@ -118,6 +119,8 @@ def update_instance(
         fields["daily_budget_usd"] = body.daily_budget_usd
     if "rate_limit_per_minute" in body.model_fields_set:
         fields["rate_limit_per_minute"] = body.rate_limit_per_minute
+    if "odoo_version" in body.model_fields_set:
+        fields["odoo_version"] = body.odoo_version
     if not fields:
         raise HTTPException(status_code=422, detail="no fields to update")
     if not writers.update_odoo_instance(db, instance_id, **fields):

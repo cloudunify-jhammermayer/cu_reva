@@ -34,6 +34,12 @@ func (m *MockClient) Dashboard() (*DashboardMetrics, error) {
 		TotalCost7d:        0.2814,
 		AvgCostPerReview7d: &avgCost,
 		ActiveWorkers:      2,
+		CoreKnowledge: []CoreVersionStatus{{
+			OdooVersion: "19.0",
+			LoadedAt:    time.Now().Add(-24 * time.Hour),
+			Modules:     625,
+			Sections:    9000,
+		}},
 	}, nil
 }
 
@@ -647,6 +653,7 @@ func (m *MockClient) LearnedMemory() ([]LearnedMemoryEntry, error) {
 func (m *MockClient) OdooInstances() (*OdooInstancePage, error) {
 	now := time.Now()
 	f64Ptr := func(f float64) *float64 { return &f }
+	strPtr := func(s string) *string { return &s }
 	mk := func(c float64, in, out, n int) TaskCost {
 		return TaskCost{CostUSD: c, InputTokens: in, OutputTokens: out, Count: n}
 	}
@@ -654,7 +661,8 @@ func (m *MockClient) OdooInstances() (*OdooInstancePage, error) {
 		{
 			ID: 1, Name: "ACME Production", KeyPrefix: "reva_odoo_a1b2",
 			CallbackURL: "https://odoo.acme.example/write-field", Active: true,
-			CreatedAt: now.Add(-30 * 24 * time.Hour), DailyBudgetUSD: f64Ptr(10),
+			OdooVersion: strPtr("19.0"),
+			CreatedAt:   now.Add(-30 * 24 * time.Hour), DailyBudgetUSD: f64Ptr(10),
 			Cost: OdooInstanceCost{
 				Lifetime: WindowCost{Analysis: mk(12.40, 900000, 120000, 320), Issues: mk(8.10, 400000, 90000, 55)},
 				Last24h:  WindowCost{Analysis: mk(0.42, 30000, 4000, 11), Issues: mk(0.15, 8000, 1500, 2)},

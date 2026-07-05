@@ -207,13 +207,21 @@ type TicketIssueRunPage struct {
 }
 
 type DashboardMetrics struct {
-	Last24h            PeriodStats   `json:"last_24h"`
-	Last7d             PeriodStats   `json:"last_7d"`
-	Findings24h        FindingCounts `json:"findings_24h"`
-	TotalCost7d        float64       `json:"total_cost_7d"`
-	AvgCostPerReview7d *float64      `json:"avg_cost_per_review_7d"`
-	ActiveWorkers      int           `json:"active_workers"`
-	Degradations24h    int           `json:"degradations_24h"`
+	Last24h            PeriodStats         `json:"last_24h"`
+	Last7d             PeriodStats         `json:"last_7d"`
+	Findings24h        FindingCounts       `json:"findings_24h"`
+	TotalCost7d        float64             `json:"total_cost_7d"`
+	AvgCostPerReview7d *float64            `json:"avg_cost_per_review_7d"`
+	ActiveWorkers      int                 `json:"active_workers"`
+	Degradations24h    int                 `json:"degradations_24h"`
+	CoreKnowledge      []CoreVersionStatus `json:"core_knowledge"`
+}
+
+type CoreVersionStatus struct {
+	OdooVersion string    `json:"odoo_version"`
+	LoadedAt    time.Time `json:"loaded_at"`
+	Modules     int       `json:"modules"`
+	Sections    int       `json:"sections"`
 }
 
 type OpsEventEntry struct {
@@ -285,6 +293,7 @@ type OdooInstanceSummary struct {
 	KeyPrefix   string    `json:"key_prefix"`
 	CallbackURL string    `json:"callback_url"`
 	Active      bool      `json:"active"`
+	OdooVersion *string   `json:"odoo_version"`
 	CreatedAt   time.Time `json:"created_at"`
 	// Per-instance quotas; nil = unlimited.
 	DailyBudgetUSD     *float64         `json:"daily_budget_usd"`

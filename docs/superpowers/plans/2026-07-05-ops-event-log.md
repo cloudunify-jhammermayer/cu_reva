@@ -1,6 +1,6 @@
 # Ops-Event Log Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Persistent, TUI-visible log of every caught-and-degraded component error (CodeGraph fallbacks, callback failures, git retries) — plan 1 of 2 from the odoo-core-knowledge spec.
 
@@ -33,7 +33,7 @@
   - `writers.record_ops_event(db: Database, component: str, severity: str, event: str, detail: dict | None = None) -> None` — safe-to-fail
   - `writers.purge_old_ops_events(db: Database, older_than_days: int) -> int`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `worker/tests/test_ops_events.py`:
 
@@ -101,12 +101,12 @@ def test_purge_old_events(db):
     assert writers.purge_old_ops_events(db, older_than_days=30) == 0
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_ops_events.py -q`
 Expected: FAIL — `ImportError: cannot import name 'OpsEvent'`
 
-- [ ] **Step 3: Create the migration**
+- [x] **Step 3: Create the migration**
 
 Confirm the number: `ls db/migrations/ | sort | tail -3` (take the next free; 027 assumed below). `db/migrations/027_ops_events.sql`:
 
@@ -130,7 +130,7 @@ CREATE INDEX IF NOT EXISTS idx_ops_events_created_at ON ops_events (created_at);
 CREATE INDEX IF NOT EXISTS idx_ops_events_component ON ops_events (component);
 ```
 
-- [ ] **Step 4: Add the ORM model**
+- [x] **Step 4: Add the ORM model**
 
 In `reva/db/models.py`, after `ClaudeSpend`:
 
@@ -163,7 +163,7 @@ class OpsEvent(Base):
     )
 ```
 
-- [ ] **Step 5: Add the writers**
+- [x] **Step 5: Add the writers**
 
 In `reva/db/writers.py` (add `OpsEvent` to the models import), new section next to the other purge functions:
 
@@ -205,12 +205,12 @@ def purge_old_ops_events(db: Database, older_than_days: int) -> int:
 
 (`logger`, `delete`, `datetime`/`timedelta`/`timezone` already exist in writers.py — verify with `grep -n "^logger\|^from sqlalchemy import\|^from datetime import" reva/db/writers.py` and extend imports only if missing.)
 
-- [ ] **Step 6: Run to verify pass**
+- [x] **Step 6: Run to verify pass**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_ops_events.py tests/test_db.py -q`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add db/migrations/027_ops_events.sql reva/db/models.py reva/db/writers.py worker/tests/test_ops_events.py
@@ -229,7 +229,7 @@ git commit -m "feat(db): ops_events table + safe-to-fail writer"
 - Consumes: `writers.purge_old_ops_events` (Task 1).
 - Produces: `Settings.ops_events_retention_days: int = 30` (env `REVA_OPS_EVENTS_RETENTION_DAYS`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `scheduler/tests/test_settings.py`:
 
@@ -245,12 +245,12 @@ def test_ops_events_retention_default(monkeypatch):
     assert Settings.from_env().ops_events_retention_days == 7
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd scheduler && .venv/bin/python -m pytest tests/test_settings.py -q`
 Expected: FAIL — `AttributeError: ops_events_retention_days`
 
-- [ ] **Step 3: Wire settings + purge**
+- [x] **Step 3: Wire settings + purge**
 
 `scheduler/scheduler/settings.py` — after `retention_purge_interval_seconds`:
 
@@ -305,12 +305,12 @@ and give the function both defaulted params.)
 # REVA_OPS_EVENTS_RETENTION_DAYS=30    # delete component-degradation events after N days
 ```
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cd scheduler && .venv/bin/python -m pytest tests/ -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scheduler/scheduler/settings.py scheduler/scheduler/main.py .env.example scheduler/tests/test_settings.py
@@ -329,7 +329,7 @@ git commit -m "feat(retention): purge ops_events on the daily pass"
 - Consumes: `writers.record_ops_event` (Task 1).
 - Produces: `ClaudeCodeRunner(…, ops_recorder: Callable[[str, str, str, dict], None] | None = None)`; internal helper `self._record_ops(component, severity, event, detail)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `worker/tests/test_ops_hooks.py`:
 
@@ -437,12 +437,12 @@ def test_recorder_exception_is_swallowed(tmp_path, monkeypatch):
     assert runner._codegraph_prepare(str(tmp_path)) is None  # no exception
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_ops_hooks.py -q`
 Expected: FAIL — `TypeError: unexpected keyword argument 'ops_recorder'`
 
-- [ ] **Step 3: Extend `ClaudeCodeRunner`**
+- [x] **Step 3: Extend `ClaudeCodeRunner`**
 
 Constructor (locate the `__init__` parameter list — it currently ends with `codegraph_index_timeout`): add the parameter and assignment:
 
@@ -502,7 +502,7 @@ In `_run_git`, extend the timeout branch (the transient one — permanent git fa
             ) from exc
 ```
 
-- [ ] **Step 4: Wire the recorder + the two Odoo-callback hooks**
+- [x] **Step 4: Wire the recorder + the two Odoo-callback hooks**
 
 `worker/worker/runner.py::build_worker_context` — the runner is constructed after `db` exists; add the recorder argument to the existing `ClaudeCodeRunner(...)` call:
 
@@ -526,12 +526,12 @@ In `_run_git`, extend the timeout branch (the transient one — permanent git fa
                                  {"run_id": params.run_id, "ticket_id": params.ticket_id})
 ```
 
-- [ ] **Step 5: Run to verify pass**
+- [x] **Step 5: Run to verify pass**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_ops_hooks.py tests/test_claude_code_runner.py tests/test_ticket_runner.py tests/test_ticket_issue_runner.py tests/test_runner.py -q`
 Expected: PASS (the new constructor param defaults to None, so existing fixtures are unaffected)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add reva/claude_code_runner.py worker/worker/runner.py worker/worker/ticket_runner.py worker/worker/ticket_issue_runner.py worker/tests/test_ops_hooks.py
@@ -551,7 +551,7 @@ git commit -m "feat(worker): record ops events on CodeGraph/git/callback degrada
 - Consumes: `OpsEvent` model, `record_ops_event` (Task 1).
 - Produces: `GET /api/v1/ops-events?component=&severity=&limit=&offset=` (master key) returning `{items: [{id, component, severity, event, detail, created_at}], total}`; `DashboardMetrics.degradations_24h: int` (count of ops_events in the last 24h).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `api/tests/test_v1_ops_events.py`:
 
@@ -632,12 +632,12 @@ def test_dashboard_degradations_counter(client_db):
     assert r.json()["degradations_24h"] == 2
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd api && .venv/bin/python -m pytest tests/test_v1_ops_events.py -q`
 Expected: FAIL — 404 on `/api/v1/ops-events`
 
-- [ ] **Step 3: Schemas, query, route**
+- [x] **Step 3: Schemas, query, route**
 
 `api/app/schemas/ops_events.py`:
 
@@ -752,7 +752,7 @@ def list_ops_events(
 
 `api/app/routes/v1/__init__.py`: add `ops_events` to the import list and `_master.include_router(ops_events.router)` after the `odoo_instances` line.
 
-- [ ] **Step 4: Dashboard counter**
+- [x] **Step 4: Dashboard counter**
 
 `api/app/queries/metrics.py` — add `OpsEvent` to the models import; inside `dashboard_metrics`'s `with db.session() as s:` block add:
 
@@ -777,12 +777,12 @@ and add to the returned dict:
     degradations_24h: int = 0
 ```
 
-- [ ] **Step 5: Run to verify pass**
+- [x] **Step 5: Run to verify pass**
 
 Run: `cd api && .venv/bin/python -m pytest tests/test_v1_ops_events.py tests/test_v1_metrics.py -q`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add api/app/schemas/ops_events.py api/app/queries/ops_events.py api/app/routes/v1/ops_events.py api/app/routes/v1/__init__.py api/app/queries/metrics.py api/app/schemas/metrics.py api/tests/test_v1_ops_events.py
@@ -801,7 +801,7 @@ git commit -m "feat(api): /api/v1/ops-events + dashboard degradations counter"
 - Consumes: Task 4's endpoints.
 - Produces: `ClientIface.OpsEvents(limit int) (*OpsEventPage, error)`; Failures tab key **`v`** toggles "failed runs" ⇄ "component events".
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tui/internal/ui/failures_test.go`:
 
@@ -849,12 +849,12 @@ func TestFailuresOpsEventsView(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd tui && go test ./internal/ui/ -run TestFailuresOpsEventsView`
 Expected: FAIL — `undefined: opsEventsLoadedMsg` / unknown field `showEvents`
 
-- [ ] **Step 3: API client plumbing**
+- [x] **Step 3: API client plumbing**
 
 `tui/internal/api/types.go` — after the `PendingPage` block (anywhere top-level):
 
@@ -926,7 +926,7 @@ type opsEventsLoadedMsg struct {
 }
 ```
 
-- [ ] **Step 4: Failures tab toggle**
+- [x] **Step 4: Failures tab toggle**
 
 In `tui/internal/ui/failures.go`:
 
@@ -1059,7 +1059,7 @@ and update the Failures statusBar hint:
 		hint = "j/k navigate | v=runs/events | e=requeue | r=refresh | q quit"
 ```
 
-- [ ] **Step 5: Dashboard line**
+- [x] **Step 5: Dashboard line**
 
 `tui/internal/ui/dashboard.go::renderCostCard` — after the Workers lines:
 
@@ -1070,12 +1070,12 @@ and update the Failures statusBar hint:
 	}
 ```
 
-- [ ] **Step 6: Build, vet, test**
+- [x] **Step 6: Build, vet, test**
 
 Run: `cd tui && go build ./... && go vet ./... && go test ./...`
 Expected: PASS (compiler enforces the `ClientIface` change on `mock.go`)
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tui/internal/api/types.go tui/internal/api/iface.go tui/internal/api/client.go tui/internal/api/mock.go tui/internal/ui/messages.go tui/internal/ui/failures.go tui/internal/ui/app.go tui/internal/ui/dashboard.go tui/internal/ui/failures_test.go
@@ -1089,7 +1089,7 @@ git commit -m "feat(tui): component-events view on Failures tab + dashboard coun
 **Files:**
 - Modify: `CLAUDE.md` (invariants list)
 
-- [ ] **Step 1: Add the invariant**
+- [x] **Step 1: Add the invariant**
 
 In `CLAUDE.md`, in the "Invariants the design leans on" list (after the "Untrusted content is fenced" bullet), add:
 
@@ -1097,7 +1097,7 @@ In `CLAUDE.md`, in the "Invariants the design leans on" list (after the "Untrust
 - **Degradations are visible.** Any error a component catches and degrades around (CodeGraph fallback, callback failure, retrieval miss, git retry) must both log AND `writers.record_ops_event(...)` — surfaced via `GET /api/v1/ops-events` and the TUI Failures tab. Silent `except: log-and-continue` without an ops event is a review-blocking defect in new code.
 ```
 
-- [ ] **Step 2: Full Definition of Done**
+- [x] **Step 2: Full Definition of Done**
 
 ```bash
 make test
@@ -1106,7 +1106,7 @@ cd tui && go build ./... && go vet ./... && go test ./... && cd ..
 ```
 Expected: all green. Run `make test-integration` if Docker is available (JSONB + migration SQL on real Postgres).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add CLAUDE.md

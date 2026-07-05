@@ -260,6 +260,7 @@ class ClaudeCodeRunner:
         params: dict,
         model: str | None = None,
         odoo: bool = False,
+        extra_dirs: list[str] | None = None,
     ) -> ClaudeResponse:
         """Run `claude --print` in repo_path using a skill template.
 
@@ -321,6 +322,9 @@ class ClaudeCodeRunner:
         if mcp_config_path:
             mcp_args = ["--mcp-config", mcp_config_path]
             allowed_tools = "Read,Grep,Glob,Write,mcp__codegraph__*"
+        add_dir_args: list[str] = []
+        for path in extra_dirs or []:
+            add_dir_args.extend(["--add-dir", path])
         try:
             proc = subprocess.run(
                 [
@@ -334,6 +338,7 @@ class ClaudeCodeRunner:
                     "--setting-sources", "user",
                     "--strict-mcp-config",
                     *mcp_args,
+                    *add_dir_args,
                     "--allowedTools", allowed_tools,
                 ],
                 input=task,

@@ -12,6 +12,7 @@ from sqlalchemy import Engine, case, func, select
 
 from reva.db.engine import Database
 from reva.db.models import (
+    CoreKnowledgeVersion,
     MutedCategory,
     OpsEvent,
     PullRequest,
@@ -118,6 +119,18 @@ def dashboard_metrics(db: Database, redis_conn=None) -> dict:
             select(func.count()).select_from(OpsEvent)
             .where(OpsEvent.created_at >= since_24h)
         ).scalar_one()
+        core_rows = s.execute(
+            select(CoreKnowledgeVersion).order_by(CoreKnowledgeVersion.odoo_version)
+        ).scalars().all()
+        core_knowledge = [
+            {
+                "odoo_version": row.odoo_version,
+                "loaded_at": row.loaded_at,
+                "modules": row.modules,
+                "sections": row.sections,
+            }
+            for row in core_rows
+        ]
 
     return {
         "last_24h": stats_24h,
@@ -132,6 +145,7 @@ def dashboard_metrics(db: Database, redis_conn=None) -> dict:
         "avg_cost_per_review_7d": avg_cost,
         "active_workers": _count_workers(redis_conn),
         "degradations_24h": int(degradations_24h),
+        "core_knowledge": core_knowledge,
     }
 
 

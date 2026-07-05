@@ -16,8 +16,8 @@ from reva.diff_utils import DiffHunk, find_line_in_hunks
 from reva.types import Finding, ReviewResult, Severity
 
 # Internal filesystem roots that must not leak into PR-facing error text (SECU-21):
-# the repo cache, temp dir, worker home, container app dir.
-_INTERNAL_PATH_RE = re.compile(r"/(?:repos|tmp|home|app)(?:/[A-Za-z0-9_.\-]+)*")
+# the repo cache, temp dir, worker home, container app dir, core worktree.
+_INTERNAL_PATH_RE = re.compile(r"/(?:repos|tmp|home|app|core)(?:/[A-Za-z0-9_.\-]+)*")
 
 
 def _redact_internal_paths(msg: str) -> str:

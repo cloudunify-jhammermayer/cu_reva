@@ -1914,6 +1914,7 @@ def create_odoo_instance(
     key_prefix: str,
     callback_url: str,
     callback_api_key_enc: str,
+    odoo_version: str | None = None,
 ) -> int:
     """Insert an odoo_instances row and return its id."""
     with db.session() as s:
@@ -1923,6 +1924,7 @@ def create_odoo_instance(
             key_prefix=key_prefix,
             callback_url=callback_url,
             callback_api_key_enc=callback_api_key_enc,
+            odoo_version=odoo_version,
         )
         s.add(row)
         s.flush()
@@ -1947,6 +1949,7 @@ def get_odoo_instance(db: Database, instance_id: int) -> dict | None:
                 float(row.daily_budget_usd) if row.daily_budget_usd is not None else None
             ),
             "rate_limit_per_minute": row.rate_limit_per_minute,
+            "odoo_version": row.odoo_version,
             "created_at": row.created_at,
             "updated_at": row.updated_at,
         }
@@ -1975,6 +1978,7 @@ def update_odoo_instance(db: Database, instance_id: int, **fields: object) -> bo
         "active",
         "daily_budget_usd",
         "rate_limit_per_minute",
+        "odoo_version",
     }
     with db.session() as s:
         row = s.get(OdooInstance, instance_id)

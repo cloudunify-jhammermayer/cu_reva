@@ -22,19 +22,27 @@ class TicketAnalyzer:
         self._claude = claude
         self._prompts_dir = prompts_dir
 
-    def analyze(self, params: TicketJobParams) -> TicketAnalysisResult:
+    def analyze(
+        self,
+        params: TicketJobParams,
+        extra_system_blocks: list[ContentBlock] | None = None,
+    ) -> TicketAnalysisResult:
         """Call Claude and return a validated TicketAnalysisResult."""
-        _, result = self.analyze_with_response(params)
+        _, result = self.analyze_with_response(params, extra_system_blocks=extra_system_blocks)
         return result
 
     def analyze_with_response(
-        self, params: TicketJobParams
+        self,
+        params: TicketJobParams,
+        extra_system_blocks: list[ContentBlock] | None = None,
     ) -> tuple[ClaudeResponse, TicketAnalysisResult]:
         """Call Claude and return (raw response, validated result).
 
         The raw response is needed by the runner to record token usage.
         """
         system_blocks = self._build_system()
+        if extra_system_blocks:
+            system_blocks = system_blocks + list(extra_system_blocks)
         tool_schema = build_ticket_tool_schema()
 
         response = self._claude.review(

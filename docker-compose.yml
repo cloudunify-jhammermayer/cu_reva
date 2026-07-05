@@ -95,11 +95,15 @@ services:
       REVA_VERIFY_MODEL: ${REVA_VERIFY_MODEL:-claude-haiku-4-5}
       REVA_CODEGRAPH_ENABLED: ${REVA_CODEGRAPH_ENABLED:-false}
       REVA_CODEGRAPH_INDEX_TIMEOUT: ${REVA_CODEGRAPH_INDEX_TIMEOUT:-180}
+      REVA_CORE_KNOWLEDGE_ENABLED: ${REVA_CORE_KNOWLEDGE_ENABLED:-false}
+      REVA_CORE_VERSIONS: ${REVA_CORE_VERSIONS:-}
+      REVA_CORE_KNOWLEDGE_DIR: /core
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./secrets/github-app-private-key.pem:/run/secrets/github_private_key:ro
       - repo_cache:/repos
+      - ${REVA_CORE_HOST_DIR:-./core-knowledge}:/core:ro
     depends_on:
       postgres:
         condition: service_healthy

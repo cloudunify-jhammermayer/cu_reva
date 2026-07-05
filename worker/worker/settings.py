@@ -8,7 +8,7 @@ secret on the first review.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import structlog
 
@@ -44,6 +44,11 @@ class Settings:
     # posting. Default ON (Haiku-priced, windowed, bounded); per-repo
     # `.claude-review.yml verify_findings` overrides it.
     verify_findings_default: bool = True
+    # Optional Odoo core-knowledge layer. Enabled means startup validates every
+    # configured version and refuses to boot on missing worktrees/catalog/rows.
+    core_knowledge_enabled: bool = False
+    core_knowledge_dir: str = "/core"
+    core_versions: list[str] = field(default_factory=list)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -82,6 +87,15 @@ class Settings:
             codegraph_version=os.environ.get("REVA_CODEGRAPH_VERSION", "0.9.8"),
             codegraph_index_timeout=int(os.environ.get("REVA_CODEGRAPH_INDEX_TIMEOUT", "180")),
             verify_findings_default=_verify_findings_default_from_env(),
+            core_knowledge_enabled=os.environ.get(
+                "REVA_CORE_KNOWLEDGE_ENABLED", "false"
+            ).lower() in ("1", "true", "yes"),
+            core_knowledge_dir=os.environ.get("REVA_CORE_KNOWLEDGE_DIR", "/core"),
+            core_versions=[
+                version.strip()
+                for version in os.environ.get("REVA_CORE_VERSIONS", "").split(",")
+                if version.strip()
+            ],
         )
 
 

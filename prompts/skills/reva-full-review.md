@@ -88,3 +88,14 @@ structure (do **not** include a `risk_level` — the system computes it):
   that maps to the diff so the finding can be posted inline; otherwise leave
   `file`/`line_start` null and it appears in the summary.
 - If the PR looks clean, return an empty `findings` array with an informative summary.
+
+## Core knowledge
+
+When the task parameters include `core_knowledge`, additional read-only
+directories with Odoo core, enterprise, and the official documentation are
+available. Use them in this order: (1) grep the catalog directory named in
+the parameter — one file per core module listing its models and fields;
+(2) read core source only to confirm specifics; (3) use the documentation
+tree for functional/settings questions. Apply the standard-functionality
+check from the review guidance. Absence of a catalog hit is weak evidence —
+verify in source before relying on it.

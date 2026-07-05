@@ -1,3 +1,10 @@
+## v2.2 — Core knowledge
+
+- ticket_analysis.md: Standard Odoo Coverage section + scoped carve-out.
+- core_query_planner.md: new Haiku query planner for ticket retrieval.
+- review_guidance.md: standard-functionality category + core-knowledge rules.
+- reva-full-review.md / reva-repo-audit.md: core-knowledge steering notes.
+
 ## v2.1 — Review-quality pass: examples, self-verification, evidence anchors
 
 - Removed the dead Messages-API review prompts (`system.md`, `diff_review.md`,

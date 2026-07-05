@@ -137,6 +137,7 @@ class FakeRunner:
     last_skill: str | None = None
     last_params: dict | None = None
     last_odoo: bool | None = None
+    last_extra_dirs: list[str] | None = None
     repo_path_returned: str = "/fake/repos/acme/widgets"
 
     def repo_lock(self, owner: str, name: str):
@@ -147,11 +148,13 @@ class FakeRunner:
         return self.repo_path_returned
 
     def review(self, repo_path: str, skill: str, params: dict,
-               model: str | None = None, odoo: bool = False) -> ClaudeResponse:
+               model: str | None = None, odoo: bool = False,
+               extra_dirs: list[str] | None = None) -> ClaudeResponse:
         self.last_model = model
         self.last_skill = skill
         self.last_params = params
         self.last_odoo = odoo
+        self.last_extra_dirs = extra_dirs
         if self.raise_exc:
             raise self.raise_exc
         return self.response
@@ -1755,3 +1758,47 @@ def test_delta_xml_only_stays_on_delta_skill():
                        installation_id=99, trigger_event="synchronize")
     reviewer.execute(params)
     assert runner.last_skill == "reva-delta-review"  # v1: delta unchanged by XML routing
+
+
+class FakeCoreKnowledge:
+    def resolve(self, version: str | None) -> str | None:
+        return version if version == "19.0" else None
+
+    def core_paths(self, version: str) -> list[str]:
+        return [f"/core/{version}/odoo", f"/core/{version}/documentation"]
+
+    def catalog_path(self, version: str) -> str:
+        return f"/core/{version}/catalog"
+
+    def core_overlap(self, version, added_models, added_fields):
+        assert version == "19.0"
+        return ["field `partner_id` added on `sale.order` already exists in core"]
+
+
+def test_core_knowledge_attaches_paths_steering_and_overlap():
+    diff = (
+        "diff --git a/custom_addons/x/models/sale_order.py "
+        "b/custom_addons/x/models/sale_order.py\n"
+        "+++ b/custom_addons/x/models/sale_order.py\n"
+        '+    _inherit = "sale.order"\n'
+        "+    partner_id = fields.Many2one('res.partner')\n"
+    )
+    github = FakeGitHub(
+        diff=diff,
+        files=[{"filename": "custom_addons/x/models/sale_order.py"}],
+        file_contents={".claude-review.yml": "odoo_version: '19.0'\n"},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, _, _, runner, _ = _make_reviewer(
+        github=github,
+        runner=runner,
+        core_knowledge=FakeCoreKnowledge(),
+    )
+
+    result = reviewer.execute(_params())
+
+    assert result.status == "completed"
+    assert runner.last_extra_dirs is None
+    assert "core_knowledge" not in (runner.last_params or {})
+    assert "core_overlap" in runner.last_params
+    assert "partner_id" in runner.last_params["core_overlap"]

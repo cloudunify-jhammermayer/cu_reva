@@ -179,10 +179,14 @@ services:
       REVA_VERIFY_MODEL: ${REVA_VERIFY_MODEL:-claude-haiku-4-5}
       REVA_CODEGRAPH_ENABLED: ${REVA_CODEGRAPH_ENABLED:-false}
       REVA_CODEGRAPH_INDEX_TIMEOUT: ${REVA_CODEGRAPH_INDEX_TIMEOUT:-180}
+      REVA_CORE_KNOWLEDGE_ENABLED: ${REVA_CORE_KNOWLEDGE_ENABLED:-false}
+      REVA_CORE_VERSIONS: ${REVA_CORE_VERSIONS:-}
+      REVA_CORE_KNOWLEDGE_DIR: /core
       # Optional rolling 24-hour spend cap (USD); unset = no cap.
       REVA_DAILY_BUDGET_USD: ${REVA_DAILY_BUDGET_USD:-}
     volumes:
       - repo_cache:/repos
+      - ${REVA_CORE_HOST_DIR:-/srv/reva-core}:/core:ro
     secrets:
       - github_private_key
       - anthropic_api_key

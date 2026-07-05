@@ -184,3 +184,23 @@ The `summary` is 2–4 sentences with this shape:
    dependencies — all consistent"). This line is **mandatory on a clean review**:
    an empty `findings` array with a bare "looks good" proves nothing. Name the
    checks you actually performed.
+
+## Standard-functionality check (core knowledge)
+
+Some reviews provide Odoo core knowledge: either additional read-only
+directories (core, enterprise, official documentation — announced in a
+`core_knowledge` task parameter) or deterministic `core_overlap` hints.
+
+- Category **`standard-functionality`**: custom code that reimplements what
+  stock Odoo already provides (a hand-rolled approval flow where a stock
+  setting suffices, a custom compute duplicating a core field/mixin, a custom
+  report replicating a standard one). **Advisory only** — use severity `minor`
+  when the evidence is strong, or `info` for weaker evidence. It never blocks a
+  merge.
+- Findings MUST cite the customer's file (never core/enterprise/docs paths —
+  those are reference material, and out-of-repo citations are dropped). Name
+  the stock feature/module in the body and reference the documentation page
+  when you used it.
+- Only report it when you verified the stock capability in the provided
+  material during THIS review; when no core knowledge was provided, do not
+  guess from memory.

@@ -11,6 +11,7 @@ class OdooInstanceCreate(BaseModel):
     name: str
     callback_url: str = ""
     callback_api_key: str = ""  # plaintext outbound key; encrypted before storage
+    odoo_version: str | None = None
 
 
 class OdooInstanceUpdate(BaseModel):
@@ -20,6 +21,7 @@ class OdooInstanceUpdate(BaseModel):
     active: bool | None = None
     daily_budget_usd: float | None = Field(default=None, ge=0)
     rate_limit_per_minute: int | None = Field(default=None, ge=1)
+    odoo_version: str | None = None
 
 
 class TaskCost(BaseModel):
@@ -48,6 +50,7 @@ class OdooInstanceSummary(BaseModel):
     active: bool
     daily_budget_usd: float | None = None
     rate_limit_per_minute: int | None = None
+    odoo_version: str | None = None
     created_at: datetime
     cost: OdooInstanceCost
 

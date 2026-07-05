@@ -1,6 +1,6 @@
 # Config & Performance Hardening Batch Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Fix four bug-level config defects, land five cheap performance/cost wins, sync the config surface, and add per-Odoo-instance quotas.
 
@@ -29,7 +29,7 @@
 
 **Interfaces:** none (compose-only).
 
-- [ ] **Step 1: Edit the grace period + comment**
+- [x] **Step 1: Edit the grace period + comment**
 
 Replace lines 189–193 (the comment block + `stop_grace_period`) with:
 
@@ -42,12 +42,12 @@ Replace lines 189–193 (the comment block + `stop_grace_period`) with:
     stop_grace_period: 2160s
 ```
 
-- [ ] **Step 2: Verify compose parses and the value took**
+- [x] **Step 2: Verify compose parses and the value took**
 
 Run: `docker compose -f docker-compose.prod.yml config | grep -A1 stop_grace_period`
 Expected: `stop_grace_period: 36m0s` (compose normalizes 2160s to 36m)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docker-compose.prod.yml
@@ -65,7 +65,7 @@ git commit -m "fix(compose): worker stop_grace_period covers the real 2100s job 
 
 **Interfaces:** none new.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `worker/tests/test_db.py`:
 
@@ -78,12 +78,12 @@ def test_ticket_analyses_has_created_at_index():
     assert "idx_ticket_analyses_created_at" in names
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_db.py::test_ticket_analyses_has_created_at_index -q`
 Expected: FAIL — `AssertionError`
 
-- [ ] **Step 3: Create the migration**
+- [x] **Step 3: Create the migration**
 
 `db/migrations/025_ticket_analyses_created_index.sql`:
 
@@ -96,7 +96,7 @@ CREATE INDEX IF NOT EXISTS idx_ticket_analyses_created_at
     ON ticket_analyses (created_at);
 ```
 
-- [ ] **Step 4: Add the ORM index**
+- [x] **Step 4: Add the ORM index**
 
 In `reva/db/models.py`, inside `TicketAnalysis.__table_args__`, after
 `Index("idx_ticket_analyses_ticket_id", "ticket_id"),` add:
@@ -106,12 +106,12 @@ In `reva/db/models.py`, inside `TicketAnalysis.__table_args__`, after
         Index("idx_ticket_analyses_created_at", "created_at"),
 ```
 
-- [ ] **Step 5: Run to verify pass**
+- [x] **Step 5: Run to verify pass**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_db.py -q`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add db/migrations/025_ticket_analyses_created_index.sql reva/db/models.py worker/tests/test_db.py
@@ -130,7 +130,7 @@ git commit -m "fix(db): index ticket_analyses.created_at (unindexed list sort)"
 **Interfaces:**
 - Produces: `scripts/worker_healthcheck.py::check(redis_url: str, hostname: str, connection_factory=None) -> bool` (importable, exit-code CLI wrapper in `__main__`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `worker/tests/test_worker_healthcheck.py`:
 
@@ -190,12 +190,12 @@ def test_unhealthy_when_redis_unreachable():
     ) is False
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_worker_healthcheck.py -q`
 Expected: FAIL — `FileNotFoundError` (script does not exist)
 
-- [ ] **Step 3: Create `scripts/worker_healthcheck.py`**
+- [x] **Step 3: Create `scripts/worker_healthcheck.py`**
 
 ```python
 """Container healthcheck for the RQ worker.
@@ -238,12 +238,12 @@ if __name__ == "__main__":
     sys.exit(0 if ok else 1)
 ```
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_worker_healthcheck.py -q`
 Expected: PASS (3 tests)
 
-- [ ] **Step 5: Ship the script in the worker image**
+- [x] **Step 5: Ship the script in the worker image**
 
 In `worker/Dockerfile`, next to the existing `COPY` lines that bring in
 `worker/` source (locate them with `grep -n COPY worker/Dockerfile`), add:
@@ -252,7 +252,7 @@ In `worker/Dockerfile`, next to the existing `COPY` lines that bring in
 COPY scripts/worker_healthcheck.py /app/scripts/worker_healthcheck.py
 ```
 
-- [ ] **Step 6: Wire the healthcheck in BOTH compose files**
+- [x] **Step 6: Wire the healthcheck in BOTH compose files**
 
 In `docker-compose.prod.yml`, worker service, after `stop_grace_period` add:
 
@@ -268,12 +268,12 @@ In `docker-compose.prod.yml`, worker service, after `stop_grace_period` add:
 
 Same block in `docker-compose.yml`'s worker service (after `restart: unless-stopped` or the volumes block — match surrounding indentation).
 
-- [ ] **Step 7: Verify compose parses**
+- [x] **Step 7: Verify compose parses**
 
 Run: `docker compose -f docker-compose.yml config -q && docker compose -f docker-compose.prod.yml config -q`
 Expected: no output, exit 0
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add scripts/worker_healthcheck.py worker/Dockerfile docker-compose.yml docker-compose.prod.yml worker/tests/test_worker_healthcheck.py
@@ -291,7 +291,7 @@ git commit -m "fix(worker): liveness healthcheck via RQ worker key"
 
 **Interfaces:** none new.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `api/tests/test_v1_ticket_analyses.py`:
 
@@ -307,12 +307,12 @@ def test_failure_ttl_bounded_to_one_day(client_db_queue):
     assert kwargs["failure_ttl"] <= 24 * 3600
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd api && .venv/bin/python -m pytest tests/test_v1_ticket_analyses.py::test_failure_ttl_bounded_to_one_day -q`
 Expected: FAIL — `assert 604800 <= 86400`
 
-- [ ] **Step 3: Change the constants**
+- [x] **Step 3: Change the constants**
 
 In `api/app/routes/v1/ticket_analyses.py`, replace the `_FAILURE_TTL` line and its comment:
 
@@ -325,16 +325,16 @@ _FAILURE_TTL = 24 * 3600
 
 Apply the same replacement to the `_FAILURE_TTL` definition in `api/app/routes/v1/ticket_issues.py` (locate: `grep -n _FAILURE_TTL api/app/routes/v1/ticket_issues.py`).
 
-- [ ] **Step 4: Bump Redis memory in prod compose**
+- [x] **Step 4: Bump Redis memory in prod compose**
 
 In `docker-compose.prod.yml` redis service: change `--maxmemory 256mb` to `--maxmemory 512mb` in the `command:` line, and the deploy limit `memory: 320M` to `memory: 640M`.
 
-- [ ] **Step 5: Run to verify pass**
+- [x] **Step 5: Run to verify pass**
 
 Run: `cd api && .venv/bin/python -m pytest tests/test_v1_ticket_analyses.py tests/test_v1_ticket_issues.py -q && docker compose -f docker-compose.prod.yml config -q`
 Expected: PASS, compose parses
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add api/app/routes/v1/ticket_analyses.py api/app/routes/v1/ticket_issues.py docker-compose.prod.yml api/tests/test_v1_ticket_analyses.py
@@ -351,7 +351,7 @@ git commit -m "fix(redis): 24h failure_ttl + 512mb maxmemory (noeviction headroo
 
 **Interfaces:** none new.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `worker/tests/test_claude_code_runner.py` (reuse the file's existing
 `ClaudeCodeRunner` construction pattern if one exists; otherwise this
@@ -379,12 +379,12 @@ def test_clone_uses_blob_filter(tmp_path, monkeypatch):
     assert clone.index("clone") < clone.index("--filter=blob:none")
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_claude_code_runner.py::test_clone_uses_blob_filter -q`
 Expected: FAIL — `StopIteration` or assert (no `--filter=blob:none`)
 
-- [ ] **Step 3: Change the clone invocation**
+- [x] **Step 3: Change the clone invocation**
 
 In `reva/claude_code_runner.py` `ensure_repo`, replace:
 
@@ -405,12 +405,12 @@ with:
                 )
 ```
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_claude_code_runner.py -q`
 Expected: PASS (whole file — existing clone tests must still pass; if one asserts the exact clone argv, update it to include the filter flag)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add reva/claude_code_runner.py worker/tests/test_claude_code_runner.py
@@ -429,7 +429,7 @@ Note for the operator (goes in the PR/commit body, not code): staging live-gate 
 
 **Interfaces:** none new.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `worker/tests/test_finding_verifier.py` (reuse the file's existing
 fake-Claude pattern if present; otherwise this self-contained fake):
@@ -476,12 +476,12 @@ def test_system_prompts_are_cache_controlled():
     assert captured["system_blocks"][0]["cache_control"] == {"type": "ephemeral"}
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_finding_verifier.py::test_system_prompts_are_cache_controlled -q`
 Expected: FAIL — `KeyError: 'cache_control'`
 
-- [ ] **Step 3: Add the cache markers**
+- [x] **Step 3: Add the cache markers**
 
 In `reva/finding_verifier.py::is_resolved`, replace:
 
@@ -517,12 +517,12 @@ with:
         ]
 ```
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_finding_verifier.py -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add reva/finding_verifier.py worker/tests/test_finding_verifier.py
@@ -543,12 +543,12 @@ the measurement.
 
 **Interfaces:** none (compose-only).
 
-- [ ] **Step 1: Confirm the prerequisite**
+- [x] **Step 1: Confirm the prerequisite**
 
 Run: `grep -n container_name docker-compose.prod.yml`
 Expected: no output (replicas are incompatible with `container_name`; if any service has one on the worker, remove it).
 
-- [ ] **Step 2: Add replicas**
+- [x] **Step 2: Add replicas**
 
 In the worker service's `deploy:` block, add `replicas: 2` above `resources:`:
 
@@ -568,12 +568,12 @@ In the worker service's `deploy:` block, add `replicas: 2` above `resources:`:
           memory: 256M
 ```
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run: `docker compose -f docker-compose.prod.yml config | grep -B2 -A2 replicas`
 Expected: `replicas: 2` present, config parses.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docker-compose.prod.yml
@@ -591,7 +591,7 @@ Operator note for the PR body: confirm prod-host memory headroom before deploy (
 
 **Interfaces:** none.
 
-- [ ] **Step 1: Edit the CMD**
+- [x] **Step 1: Edit the CMD**
 
 Replace the final line of `api/Dockerfile`:
 
@@ -609,12 +609,12 @@ with:
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
 ```
 
-- [ ] **Step 2: Verify the image builds**
+- [x] **Step 2: Verify the image builds**
 
 Run: `docker build -f api/Dockerfile -t reva-api-test . && docker rmi reva-api-test`
 Expected: build succeeds. (Skip if Docker unavailable in the environment; then verification is the next prod deploy.)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add api/Dockerfile
@@ -631,7 +631,7 @@ git commit -m "perf(api): uvicorn --workers 2"
 
 **Interfaces:** none new (the tool dicts gain a `"strict": True` key).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `worker/tests/test_strict_tools.py`:
 
@@ -660,12 +660,12 @@ def test_verifier_tools_are_strict():
     assert _VERIFY_PRESENT_TOOL["strict"] is True
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_strict_tools.py -q`
 Expected: FAIL — `KeyError: 'strict'`
 
-- [ ] **Step 3: Add the flag to all four tool definitions**
+- [x] **Step 3: Add the flag to all four tool definitions**
 
 `reva/ticket_tool.py` — in the returned dict of `build_ticket_tool_schema`:
 
@@ -684,12 +684,12 @@ Expected: FAIL — `KeyError: 'strict'`
 
 `reva/finding_verifier.py` — add `"strict": True,` after the `"description"` key in both `_VERIFY_TOOL` and `_VERIFY_PRESENT_TOOL` dicts.
 
-- [ ] **Step 4: Run to verify pass**
+- [x] **Step 4: Run to verify pass**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_strict_tools.py tests/test_ticket_analyzer.py tests/test_finding_verifier.py tests/test_ticket_issue_planner.py -q`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add reva/ticket_tool.py reva/ticket_issue_tool.py reva/finding_verifier.py worker/tests/test_strict_tools.py
@@ -712,7 +712,7 @@ subset) before prod.
 
 **Interfaces:** none new.
 
-- [ ] **Step 1: Write the failing drift test**
+- [x] **Step 1: Write the failing drift test**
 
 Create `worker/tests/test_env_example.py`:
 
@@ -759,12 +759,12 @@ def test_env_example_documents_every_reva_var():
     assert not missing, f".env.example is missing: {missing}"
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_env_example.py -q`
 Expected: FAIL — lists ~18 missing vars
 
-- [ ] **Step 3: Rewrite `.env.example`**
+- [x] **Step 3: Rewrite `.env.example`**
 
 Replace the sections from `# --- Models (optional, worker) ---` to the end of the file with (keep everything above `# --- Models` unchanged):
 
@@ -842,7 +842,7 @@ Replace the sections from `# --- Models (optional, worker) ---` to the end of th
 
 Also fix the stale default in the existing `# REVA_DEFAULT_MODEL=claude-sonnet-4-6` line — it is replaced by the block above. Note: `REVA_SPEND_RETENTION_DAYS` lands in Task 11; documenting it here first is fine (the drift test only checks code→example, not example→code).
 
-- [ ] **Step 4: Wire `REVA_VERIFY_MODEL` through both compose files**
+- [x] **Step 4: Wire `REVA_VERIFY_MODEL` through both compose files**
 
 In `docker-compose.yml` worker env, after `REVA_DEEP_MODEL: …` add:
 
@@ -852,12 +852,12 @@ In `docker-compose.yml` worker env, after `REVA_DEEP_MODEL: …` add:
 
 Same line in `docker-compose.prod.yml` worker env after its `REVA_DEEP_MODEL` line.
 
-- [ ] **Step 5: Run to verify pass**
+- [x] **Step 5: Run to verify pass**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_env_example.py -q && docker compose -f docker-compose.yml config -q && docker compose -f docker-compose.prod.yml config -q`
 Expected: PASS, both compose files parse
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add .env.example docker-compose.yml docker-compose.prod.yml worker/tests/test_env_example.py
@@ -876,7 +876,7 @@ git commit -m "chore(config): document every REVA_* tunable + drift test; wire R
 **Interfaces:**
 - Produces: `writers.purge_old_claude_spend(db: Database, older_than_days: int) -> int`; `scheduler Settings.spend_retention_days: int = 400` (env `REVA_SPEND_RETENTION_DAYS`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `worker/tests/test_spend_retention.py`:
 
@@ -924,12 +924,12 @@ def test_idempotent(db):
     assert writers.purge_old_claude_spend(db, 400) == 0
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_spend_retention.py -q`
 Expected: FAIL — `AttributeError: module 'reva.db.writers' has no attribute 'purge_old_claude_spend'`
 
-- [ ] **Step 3: Add the writer**
+- [x] **Step 3: Add the writer**
 
 In `reva/db/writers.py`, after `purge_old_github_events`:
 
@@ -948,7 +948,7 @@ def purge_old_claude_spend(db: Database, older_than_days: int) -> int:
 
 (`delete` and `ClaudeSpend` are already imported in writers.py — verify with `grep -n "^from reva.db.models import\|from sqlalchemy import" reva/db/writers.py` and extend those imports if `ClaudeSpend` is missing.)
 
-- [ ] **Step 4: Wire scheduler settings + retention pass**
+- [x] **Step 4: Wire scheduler settings + retention pass**
 
 `scheduler/scheduler/settings.py` — add after `retention_purge_interval_seconds`:
 
@@ -990,12 +990,12 @@ and at the call site in `main()`:
             )
 ```
 
-- [ ] **Step 5: Run to verify pass**
+- [x] **Step 5: Run to verify pass**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_spend_retention.py -q && cd ../scheduler && .venv/bin/python -m pytest tests/ -q`
 Expected: PASS (both)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add reva/db/writers.py scheduler/scheduler/settings.py scheduler/scheduler/main.py worker/tests/test_spend_retention.py
@@ -1013,12 +1013,12 @@ git commit -m "feat(retention): purge claude_spend past REVA_SPEND_RETENTION_DAY
 
 **Interfaces:** none.
 
-- [ ] **Step 1: Delete the stale uv.lock**
+- [x] **Step 1: Delete the stale uv.lock**
 
 Run: `rm /home/joseph/Projects/Cloudunify/cu_reva/uv.lock`
 (uv migration was explicitly deferred as its own project — decision in the spec.)
 
-- [ ] **Step 2: Check each patch against main**
+- [x] **Step 2: Check each patch against main**
 
 Run for each of `reva-prod-fixes.patch` and `reva-tui-cf-access.patch`:
 
@@ -1035,7 +1035,7 @@ Then read each patch. Decision rule:
   wait for his decision.** (Spec: "never auto-apply", especially the
   CF-Access TUI patch.)
 
-- [ ] **Step 3: Add the CF-Access step to the operator docs**
+- [x] **Step 3: Add the CF-Access step to the operator docs**
 
 In `docs/setup-production.md`, find the operator/setup checklist for the
 Cloudflare tunnel (grep for "cloudflared" or "Cloudflare") and add a numbered
@@ -1050,7 +1050,7 @@ step:
    site is reachable by anyone who can reach the tunnel hostname.
 ```
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run: `git status --short` — expect deletions of resolved files only, plus the docs change; no `.patch` file may be silently applied.
 
@@ -1077,7 +1077,7 @@ git commit -m "chore: remove stale uv.lock/superseded patches; document CF-Acces
   `writers.update_odoo_instance` accepts the two new field names;
   `writers.get_odoo_instance` dict includes both new keys.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `worker/tests/test_instance_quota_writers.py`:
 
@@ -1168,12 +1168,12 @@ def test_sum_empty_is_zero(db):
     assert writers.sum_instance_cost_since(db, iid, since) == 0.0
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_instance_quota_writers.py -q`
 Expected: FAIL — `KeyError: 'daily_budget_usd'`
 
-- [ ] **Step 3: Create the migration**
+- [x] **Step 3: Create the migration**
 
 `db/migrations/026_odoo_instance_quotas.sql`:
 
@@ -1187,7 +1187,7 @@ ALTER TABLE odoo_instances ADD COLUMN IF NOT EXISTS daily_budget_usd NUMERIC(12,
 ALTER TABLE odoo_instances ADD COLUMN IF NOT EXISTS rate_limit_per_minute INTEGER;
 ```
 
-- [ ] **Step 4: Extend the ORM model**
+- [x] **Step 4: Extend the ORM model**
 
 In `reva/db/models.py::OdooInstance`, after `active`:
 
@@ -1197,7 +1197,7 @@ In `reva/db/models.py::OdooInstance`, after `active`:
     rate_limit_per_minute: Mapped[int | None] = mapped_column(Integer)
 ```
 
-- [ ] **Step 5: Extend the writers**
+- [x] **Step 5: Extend the writers**
 
 In `reva/db/writers.py::update_odoo_instance`, change the allowed set:
 
@@ -1237,12 +1237,12 @@ def sum_instance_cost_since(db: Database, odoo_instance_id: int, since: datetime
     return total
 ```
 
-- [ ] **Step 6: Run to verify pass**
+- [x] **Step 6: Run to verify pass**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_instance_quota_writers.py tests/test_odoo_instance_writers.py tests/test_odoo_instance_model.py -q`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add db/migrations/026_odoo_instance_quotas.sql reva/db/models.py reva/db/writers.py worker/tests/test_instance_quota_writers.py
@@ -1266,7 +1266,7 @@ git commit -m "feat(db): per-instance quota columns + 24h instance spend sum"
   - `app.queries.odoo_instances.instance_limits(db, instance_id) -> tuple[float | None, int | None]`
   - `OdooInstanceUpdate` + `OdooInstanceSummary` carry the two new fields; PATCH persists them (explicit `null` clears).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `api/tests/test_instance_quotas.py`:
 
@@ -1414,12 +1414,12 @@ def test_instance_rate_limit_429(client_db_queue):
     assert r.status_code == 429
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd api && .venv/bin/python -m pytest tests/test_instance_quotas.py -q`
 Expected: FAIL — PATCH ignores the fields (`no fields to update` 422) and submits return 202.
 
-- [ ] **Step 3: ratelimit — shared window check + instance branch**
+- [x] **Step 3: ratelimit — shared window check + instance branch**
 
 In `api/app/ratelimit.py`, add below `_sweep`:
 
@@ -1459,7 +1459,7 @@ def rate_limit(request: Request, settings: Settings = Depends(get_settings)) -> 
     _check_window(_client_key(request), limit, "Rate limit exceeded")
 ```
 
-- [ ] **Step 4: queries + dependencies**
+- [x] **Step 4: queries + dependencies**
 
 `api/app/queries/odoo_instances.py` — add:
 
@@ -1541,7 +1541,7 @@ def assert_instance_within_budget(db: Database, instance: ResolvedOdooInstance) 
         )
 ```
 
-- [ ] **Step 5: wire the create routes**
+- [x] **Step 5: wire the create routes**
 
 `api/app/routes/v1/ticket_analyses.py::submit_ticket_analysis` — first
 statement of the function body (before the attachment check), plus extend the
@@ -1554,7 +1554,7 @@ statement of the function body (before the attachment check), plus extend the
 Same first-statement call in `api/app/routes/v1/ticket_issues.py`'s
 instance-gated create handler (locate: `grep -n "create_router.post" api/app/routes/v1/ticket_issues.py`).
 
-- [ ] **Step 6: schemas + PATCH**
+- [x] **Step 6: schemas + PATCH**
 
 `api/app/schemas/odoo_instances.py`:
 
@@ -1588,12 +1588,12 @@ from pydantic import BaseModel, Field
         fields["rate_limit_per_minute"] = body.rate_limit_per_minute
 ```
 
-- [ ] **Step 7: Run to verify pass**
+- [x] **Step 7: Run to verify pass**
 
 Run: `cd api && .venv/bin/python -m pytest tests/test_instance_quotas.py tests/test_v1_odoo_instances.py tests/test_odoo_instance_auth.py tests/test_v1_ticket_analyses.py tests/test_v1_ticket_issues.py tests/test_ratelimit.py -q`
 Expected: PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add api/app/ratelimit.py api/app/dependencies.py api/app/queries/odoo_instances.py api/app/schemas/odoo_instances.py api/app/routes/v1/odoo_instances.py api/app/routes/v1/ticket_analyses.py api/app/routes/v1/ticket_issues.py api/tests/test_instance_quotas.py
@@ -1612,7 +1612,7 @@ git commit -m "feat(api): per-instance budget 429 + rate limit + quota PATCH"
 - Consumes: `writers.sum_instance_cost_since`, `writers.get_odoo_instance` (Task 13); existing `_send_failed_callback` (issue runner), `writers.record_ticket_analysis_failed`, `writers.record_ticket_issue_run_failed`.
 - Produces: `worker.runner.instance_budget_exceeded(ctx: WorkerContext, odoo_instance_id: int) -> float | None`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `worker/tests/test_ticket_runner.py`:
 
@@ -1661,12 +1661,12 @@ def test_instance_budget_gate_declines_planning(ctx_and_fakes, monkeypatch):
     assert s["odoo"].calls[0]["status"] == "failed"
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_ticket_runner.py::test_instance_budget_gate_declines_before_paid_call -q`
 Expected: FAIL — `AttributeError` (no `instance_budget_exceeded` import in ticket_runner)
 
-- [ ] **Step 3: Add the gate function**
+- [x] **Step 3: Add the gate function**
 
 In `worker/worker/runner.py`, directly below `budget_exceeded`:
 
@@ -1684,7 +1684,7 @@ def instance_budget_exceeded(ctx: WorkerContext, odoo_instance_id: int) -> float
     return spent if spent >= float(inst["daily_budget_usd"]) else None
 ```
 
-- [ ] **Step 4: Gate the ticket runner**
+- [x] **Step 4: Gate the ticket runner**
 
 In `worker/worker/ticket_runner.py`: extend the import to
 `from worker.runner import build_odoo_client, get_context, instance_budget_exceeded`,
@@ -1705,7 +1705,7 @@ directly before the `try:` around `analyze_with_response`):
             raise PermanentError(error)
 ```
 
-- [ ] **Step 5: Gate the issue runner**
+- [x] **Step 5: Gate the issue runner**
 
 In `worker/worker/ticket_issue_runner.py`: extend its `from worker.runner
 import …` line with `instance_budget_exceeded`, then directly before
@@ -1729,12 +1729,12 @@ import …` line with `instance_budget_exceeded`, then directly before
 (The reconcile path — issues already found on GitHub — is deliberately NOT
 gated: it makes no paid call.)
 
-- [ ] **Step 6: Run to verify pass**
+- [x] **Step 6: Run to verify pass**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_ticket_runner.py tests/test_ticket_issue_runner.py tests/test_runner.py -q`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add worker/worker/runner.py worker/worker/ticket_runner.py worker/worker/ticket_issue_runner.py worker/tests/test_ticket_runner.py worker/tests/test_ticket_issue_runner.py
@@ -1752,7 +1752,7 @@ git commit -m "feat(worker): per-instance budget gate before paid ticket/issue c
 **Interfaces:**
 - Consumes: the API's new `daily_budget_usd` / `rate_limit_per_minute` summary fields (Task 14).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tui/internal/ui/odoo_test.go` (match the file's existing
 construction pattern for the `Odoo` model — locate with `grep -n "func Test" tui/internal/ui/odoo_test.go`; the essential assertions):
@@ -1786,12 +1786,12 @@ func TestOdooViewShowsBudgetColumn(t *testing.T) {
 (If the odoo loaded message type has a different name, mirror the one
 `odoo.go`'s `update` handles — `grep -n "case odoo" tui/internal/ui/odoo.go`.)
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd tui && go test ./internal/ui/ -run TestOdooViewShowsBudgetColumn`
 Expected: FAIL — unknown field `DailyBudgetUSD`
 
-- [ ] **Step 3: Extend the Go types + mock**
+- [x] **Step 3: Extend the Go types + mock**
 
 `tui/internal/api/types.go` — in `OdooInstanceSummary`, after `CreatedAt`:
 
@@ -1814,7 +1814,7 @@ item literal:
 (reuse the file's existing `f64Ptr` helper; if that mock function lacks one,
 declare `f64Ptr := func(f float64) *float64 { return &f }` at its top.)
 
-- [ ] **Step 4: Render the column**
+- [x] **Step 4: Render the column**
 
 In `tui/internal/ui/odoo.go::view`, replace the column layout + row rendering
 (lines 214–252) with:
@@ -1872,12 +1872,12 @@ In `tui/internal/ui/odoo.go::view`, replace the column layout + row rendering
 	}
 ```
 
-- [ ] **Step 5: Build, vet, test**
+- [x] **Step 5: Build, vet, test**
 
 Run: `cd tui && go build ./... && go vet ./... && go test ./...`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tui/internal/api/types.go tui/internal/api/mock.go tui/internal/ui/odoo.go tui/internal/ui/odoo_test.go
@@ -1890,7 +1890,7 @@ git commit -m "feat(tui): per-instance budget column on the Odoo tab"
 
 **Files:** none new.
 
-- [ ] **Step 1: Full test gate**
+- [x] **Step 1: Full test gate**
 
 ```bash
 make test
@@ -1901,11 +1901,11 @@ docker compose -f docker-compose.prod.yml config -q
 ```
 Expected: everything green.
 
-- [ ] **Step 2: Optional Postgres pass**
+- [x] **Step 2: Optional Postgres pass**
 
 If Docker is available: `make test-integration` (exercises the new migrations' raw SQL + the partial-unique/index constructs on real Postgres). Otherwise: first staging boot, per repo convention.
 
-- [ ] **Step 3: Report**
+- [x] **Step 3: Report**
 
 State honestly in the final report:
 - which items carry **staging live-gates** still owed (B5 partial-clone review, B6 cache measurement, B9 strict-mode acceptance),

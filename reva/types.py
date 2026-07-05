@@ -25,6 +25,7 @@ Category = Literal[
     "style",
     "architecture",
     "odoo",
+    "standard-functionality",
 ]
 RiskLevel = Literal["low", "medium", "high", "critical"]
 # "diff-all" = diff-depth review (like "diff") but over ALL changed paths, not
@@ -76,6 +77,8 @@ class RepoConfig(BaseModel):
     # Kill switch for per-repo learned memory (Tier 3 B): false disables both
     # injecting the learned block and distilling new versions for this repo.
     learned_memory: bool = True
+    # Which /core version reviews consult, e.g. "19.0". None disables it.
+    odoo_version: str | None = None
 
 
 # --- Finding ------------------------------------------------------------------
@@ -253,6 +256,30 @@ class MissingInfoItem(BaseModel):
     confidence: Literal["certain", "likely", "possible"] = "likely"
 
 
+class CoverageFeature(BaseModel):
+    """One stock Odoo capability that covers part of a ticket."""
+
+    name: str
+    module: str = ""
+    kind: Literal["app", "setting", "feature"] = "feature"
+    how: str = ""
+    reference: str = ""
+    confidence: Literal["high", "medium", "low"] = "medium"
+
+
+class StandardCoverage(BaseModel):
+    """Build-vs-configure verdict for a ticket."""
+
+    coverage: Literal["full", "partial", "none", "unknown"] = "unknown"
+    features: list[CoverageFeature] = Field(default_factory=list)
+    notes: str = ""
+
+    @field_validator("features", mode="before")
+    @classmethod
+    def _parse_json_string_list(cls, v: object) -> object:
+        return _unwrap_json_list(v)
+
+
 class TicketAnalysisResult(BaseModel):
     """Structured output from the ticket analysis tool_use call."""
 
@@ -263,6 +290,7 @@ class TicketAnalysisResult(BaseModel):
     definition_of_ready: list[SourcedItem] = Field(default_factory=list)
     definition_of_done: list[SourcedItem] = Field(default_factory=list)
     odoo_notes: list[SourcedItem] = Field(default_factory=list)
+    standard_coverage: StandardCoverage = Field(default_factory=StandardCoverage)
 
     @field_validator(
         "missing_info", "acceptance_criteria", "test_cases",

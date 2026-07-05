@@ -7,12 +7,12 @@ Fakes for TicketAnalyzer and OdooCallbackClient.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.errors import PermanentError, TransientError
-from reva.ticket_formatter import format_ticket_html
 from reva.types import (
     AcceptanceCriterion,
     ClaudeResponse,
@@ -25,6 +25,8 @@ from reva.types import (
 from worker.runner import WorkerContext, set_context
 from worker.ticket_runner import run_ticket_analysis
 
+_PROMPTS_DIR = str(Path(__file__).resolve().parents[2] / "prompts")
+
 
 # --- Fakes -------------------------------------------------------------------
 
@@ -34,11 +36,15 @@ class FakeTicketAnalyzer:
     result: TicketAnalysisResult | None = None
     raise_exc: Exception | None = None
     call_count: int = 0
+    extra_blocks: list | None = None
 
     def analyze_with_response(
-        self, params: TicketJobParams
+        self,
+        params: TicketJobParams,
+        extra_system_blocks: list | None = None,
     ) -> tuple[ClaudeResponse, TicketAnalysisResult]:
         self.call_count += 1
+        self.extra_blocks = extra_system_blocks
         if self.raise_exc:
             raise self.raise_exc
         assert self.result is not None
@@ -275,3 +281,34 @@ def test_instance_budget_gate_declines_before_paid_call(ctx_and_fakes, monkeypat
     assert row["status"] == "failed"
     assert "budget" in row["error_message"].lower()
     assert s["analyzer"].call_count == 0
+
+
+def test_knowledge_block_passed_and_spend_recorded(ctx_and_fakes, monkeypatch):
+    s = ctx_and_fakes
+    block = {
+        "type": "text",
+        "text": "Retrieved Odoo knowledge ...",
+        "cache_control": {"type": "ephemeral"},
+    }
+    monkeypatch.setattr(
+        "worker.ticket_runner.build_knowledge_block",
+        lambda claude, core, prompts, version, text: (block, 0.002, None),
+    )
+    monkeypatch.setattr(
+        "worker.ticket_runner.instance_odoo_version",
+        lambda ctx, iid: "19.0",
+    )
+    fake_core = type("CK", (), {"resolve": lambda self, version: "19.0"})()
+    object.__setattr__(s["ctx"], "core_knowledge", fake_core)
+    object.__setattr__(s["ctx"], "prompts_dir", _PROMPTS_DIR)
+    params = _make_params(s["db"])
+
+    out = run_ticket_analysis(params)
+
+    assert out["status"] == "completed"
+    assert s["analyzer"].extra_blocks == [block]
+
+    from datetime import datetime, timedelta, timezone
+
+    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    assert writers.sum_estimated_cost_since(s["db"], since) >= 0.002

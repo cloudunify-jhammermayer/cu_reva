@@ -27,6 +27,7 @@ from rq import get_current_job
 from reva import secrets_crypto
 from reva.claude_client import ClaudeClient
 from reva.claude_code_runner import ClaudeCodeRunner
+from reva.core_knowledge import CoreKnowledge
 from reva.notifications import notify_operational_alert, notify_worker_error
 from reva.odoo_client import OdooCallbackClient
 from reva.ticket_analyzer import TicketAnalyzer
@@ -90,9 +91,11 @@ class WorkerContext:
     # build_worker_context always wires them.
     ticket_issue_planner: TicketIssuePlanner | None = None
     memory_distiller: MemoryDistiller | None = None
+    core_knowledge: CoreKnowledge | None = None
     google_chat_webhook_url: str = ""
     daily_budget_usd: float | None = None
     repo_cache_ttl_days: int = 30
+    prompts_dir: str = "/app/prompts"
 
 
 # Module-level singleton so RQ task functions (which can't take extra args)
@@ -127,6 +130,11 @@ def build_worker_context(settings: Settings) -> WorkerContext:
     engine = create_engine_from_url(settings.database_url)
     db = Database(engine)
     db.migrate(settings.migrations_dir)
+
+    core_knowledge: CoreKnowledge | None = None
+    if settings.core_knowledge_enabled:
+        core_knowledge = CoreKnowledge(db, settings.core_knowledge_dir, settings.core_versions)
+        core_knowledge.validate_startup()
 
     claude = ClaudeClient(api_key=settings.anthropic_api_key)
     runner = ClaudeCodeRunner(
@@ -175,10 +183,12 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         ticket_analyzer=ticket_analyzer,
         ticket_issue_planner=ticket_issue_planner,
         memory_distiller=memory_distiller,
+        core_knowledge=core_knowledge,
         verifier=verifier,
         google_chat_webhook_url=settings.google_chat_webhook_url,
         daily_budget_usd=settings.daily_budget_usd,
         repo_cache_ttl_days=settings.repo_cache_ttl_days,
+        prompts_dir=settings.prompts_dir,
     )
     set_context(context)
     return context

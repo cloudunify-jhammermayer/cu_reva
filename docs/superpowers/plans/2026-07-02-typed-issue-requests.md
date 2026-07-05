@@ -1,6 +1,6 @@
 # Typed Issue Requests + Unified Title Convention — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Odoo can send an ad-hoc, optionally-typed issue request (wizard text → 1..N GitHub issues); all REVA-created issues adopt the `[TYPE] <ticket_id> - <tldr>` title convention, type labels, one-epic-per-ticket attachment, and union-snapshot callbacks so multiple requests per ticket accumulate instead of wiping each other.
 
@@ -35,7 +35,7 @@
 - Consumes: existing `TicketIssueJobParams`, `TicketIssueItem`, writers.
 - Produces: `ISSUE_TYPE_CODES: tuple[str, ...]` and `IssueTypeCode` (Literal) in `reva.types`; `TicketIssueItem.type: IssueTypeCode = "DEV"`; `TicketIssueJobParams.issue_type: str | None = None`; `ticket_issue_runs.issue_type` column; `compute_planning_basis` returns `"cr:text:<sha1>"`-style values for typed requests; `get_ticket_issue_run(...)["issue_type"]`.
 
-- [ ] **Step 1: Write the failing tests** — append to `worker/tests/test_ticket_issue_writers.py`, reusing its existing imports/fixtures (it builds a SQLite `Database` like `test_ticket_issue_runner.py`; reuse its params helper if one exists, else add `_typed_params` below):
+- [x] **Step 1: Write the failing tests** — append to `worker/tests/test_ticket_issue_writers.py`, reusing its existing imports/fixtures (it builds a SQLite `Database` like `test_ticket_issue_runner.py`; reuse its params helper if one exists, else add `_typed_params` below):
 
 ```python
 def _typed_params(**overrides):
@@ -67,12 +67,12 @@ def test_issue_type_persisted_roundtrip(db):
 
 (`db` = the file's existing SQLite Database fixture; if the file has none, add one modeled on `ctx_and_fakes` in `worker/tests/test_ticket_issue_runner.py:141-145`.)
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_writers.py -k "typed_prefix or roundtrip" -v`
 Expected: FAIL (`issue_type` unexpected keyword / KeyError).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `reva/types.py` — above `TicketIssueItem` (~line 297):
 
@@ -128,12 +128,12 @@ ALTER TABLE ticket_issue_runs ADD COLUMN IF NOT EXISTS issue_type TEXT;
 
 `record_ticket_issue_run_created` — add `issue_type=params.issue_type,` to the `TicketIssueRun(...)` kwargs (after `planning_basis=...`). `get_ticket_issue_run` — add `"issue_type": row.issue_type,` after `"planning_basis"`.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_writers.py -v`
 Expected: PASS (all, incl. pre-existing).
 
-- [ ] **Step 5: Commit** (in cu_reva)
+- [x] **Step 5: Commit** (in cu_reva)
 
 ```bash
 git add reva/types.py reva/db/models.py reva/db/writers.py db/migrations/023_ticket_issue_type.sql worker/tests/test_ticket_issue_writers.py
@@ -154,7 +154,7 @@ git commit -m "feat(issues): issue_type plumbing — types, migration 023, typed
   - `get_ticket_issue_union(db, odoo_instance_id: int | None, ticket_id: int, model_name: str) -> list[dict]` — items `{"number": int, "title": str, "url": str | None, "state": "open"|"closed"}`, sorted by number, deduped (newest run wins), only items with a GitHub number.
   - `get_latest_ticket_issue_parent(db, odoo_instance_id: int | None, ticket_id: int, model_name: str, repo_full_name: str, exclude_run_id: int) -> dict | None` — the newest other run's `parent_issue` dict for this record+repo.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def _complete_run(db, params, issues):
@@ -200,9 +200,9 @@ def test_latest_parent_scoped_and_excludes_self(db):
     assert writers.get_latest_ticket_issue_parent(db, 2, 91, "helpdesk.ticket", "org/repo", exclude_run_id=999) is None
 ```
 
-- [ ] **Step 2: Run to verify failure** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_writers.py -k "union or latest_parent" -v` → FAIL (AttributeError).
+- [x] **Step 2: Run to verify failure** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_writers.py -k "union or latest_parent" -v` → FAIL (AttributeError).
 
-- [ ] **Step 3: Implement** — append to `reva/db/writers.py` after `update_ticket_issue_state`:
+- [x] **Step 3: Implement** — append to `reva/db/writers.py` after `update_ticket_issue_state`:
 
 ```python
 def _instance_filter(odoo_instance_id: int | None):
@@ -281,9 +281,9 @@ def get_latest_ticket_issue_parent(
         return dict(row.parent_issue) if row is not None else None
 ```
 
-- [ ] **Step 4: Run tests** — same command → PASS.
+- [x] **Step 4: Run tests** — same command → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add reva/db/writers.py worker/tests/test_ticket_issue_writers.py
@@ -303,7 +303,7 @@ git commit -m "feat(issues): union-snapshot and cross-run parent lookup writers"
 - Consumes: Task 1's `TicketIssueJobParams.issue_type`, `get_ticket_issue_run()["issue_type"]`.
 - Produces: `CreateIssuesRequest.issue_type: Literal[8 codes] | None = None` ("" coerced to None). `submit_create_issues` passes it through automatically (`**body.model_dump()`), requeue re-sends the stored value.
 
-- [ ] **Step 1: Write the failing tests** — append to `api/tests/test_v1_ticket_issues.py` (fixture `client_db_queue` yields `(tc, db, queue, headers)`):
+- [x] **Step 1: Write the failing tests** — append to `api/tests/test_v1_ticket_issues.py` (fixture `client_db_queue` yields `(tc, db, queue, headers)`):
 
 ```python
 def test_create_issues_accepts_issue_type(client_db_queue):
@@ -346,9 +346,9 @@ def test_requeue_preserves_issue_type(client_db_queue):
 
 (The requeue route sits behind the master-key gate, not the instance key — check how this file's existing requeue tests authenticate that call and copy their header/override pattern.)
 
-- [ ] **Step 2: Verify failure** — `cd api && .venv/bin/python -m pytest tests/test_v1_ticket_issues.py -k issue_type -v` → FAIL (`issue_type` missing from enqueued params / 202 vs 422).
+- [x] **Step 2: Verify failure** — `cd api && .venv/bin/python -m pytest tests/test_v1_ticket_issues.py -k issue_type -v` → FAIL (`issue_type` missing from enqueued params / 202 vs 422).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `api/app/schemas/ticket_issues.py` — extend imports: `from typing import Literal`, `from pydantic import BaseModel, Field, field_validator`. In `CreateIssuesRequest`, after `ticket_url` (note the class docstring says the field set is fixed — update it: fixed for *required* fields; optional additive fields are fine):
 
@@ -374,9 +374,9 @@ def test_requeue_preserves_issue_type(client_db_queue):
 
 (`submit_create_issues` needs no change: `stub`/`params` are built with `**body.model_dump()`.)
 
-- [ ] **Step 4: Run tests** — `cd api && .venv/bin/python -m pytest tests/test_v1_ticket_issues.py -v` → PASS.
+- [x] **Step 4: Run tests** — `cd api && .venv/bin/python -m pytest tests/test_v1_ticket_issues.py -v` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/app/schemas/ticket_issues.py api/app/routes/v1/ticket_issues.py api/tests/test_v1_ticket_issues.py
@@ -397,7 +397,7 @@ git commit -m "feat(issues): accept optional issue_type on POST /api/v1/create-i
 - Consumes: `TicketIssueItem.type` (Task 1); tool schema auto-derives from `TicketIssuePlan`.
 - Produces: user prompt ends with the fixed-type instruction when `params.issue_type` is set; tool schema exposes the 8-code `type` enum.
 
-- [ ] **Step 1: Write the failing tests** — append to `worker/tests/test_ticket_issue_planner.py` (reuse its existing params/factory helpers for `TicketIssueJobParams`; if none fit, use `_typed_params` from Task 1 inline):
+- [x] **Step 1: Write the failing tests** — append to `worker/tests/test_ticket_issue_planner.py` (reuse its existing params/factory helpers for `TicketIssueJobParams`; if none fit, use `_typed_params` from Task 1 inline):
 
 ```python
 def test_user_prompt_carries_fixed_type():
@@ -414,9 +414,9 @@ def test_tool_schema_exposes_type_enum():
     assert props["type"]["enum"] == ["BUG", "FEAT", "CR", "CONF", "DEV", "MIG", "SUP", "DOC"]
 ```
 
-- [ ] **Step 2: Verify failure** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_planner.py -k "fixed_type or type_enum" -v` → the schema test may already PASS (Task 1 added the field); the prompt test must FAIL.
+- [x] **Step 2: Verify failure** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_planner.py -k "fixed_type or type_enum" -v` → the schema test may already PASS (Task 1 added the field); the prompt test must FAIL.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 `reva/ticket_issue_planner.py` `_build_user_prompt` — the docx branch currently `return`s directly (line 82). Restructure so both branches produce `sections` and share one typed tail; behavior for untyped requests stays byte-identical:
 
@@ -474,9 +474,9 @@ def test_tool_schema_exposes_type_enum():
   label. Typed requests (Odoo wizard) fix the type for every issue.
 ```
 
-- [ ] **Step 4: Run tests** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_planner.py -v` → PASS.
+- [x] **Step 4: Run tests** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_planner.py -v` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add prompts/ticket_issues.md prompts/CHANGELOG.md reva/ticket_issue_planner.py worker/tests/test_ticket_issue_planner.py
@@ -495,7 +495,7 @@ git commit -m "feat(issues): planner emits per-issue type; fixed-type instructio
 - Consumes: `TicketIssueJobParams.issue_type`, plan items with `.type`.
 - Produces: child titles `[CR] 123 - <tldr> (1/2)` (`(n/total)` only when total ≥ 2); parent title `[DEV] 123 - <name tldr>`; issues created with labels `["reva-ticket", <TYPE>]`; plan items persist `"type"`; helpers `_item_type(params, item)`, `_dominant_type(params, issues)`, `_TYPE_LABELS`.
 
-- [ ] **Step 1: Update existing tests + add new ones.** The title change breaks existing assertions in `test_ticket_issue_runner.py` — update them all to the new format (grep for `"[Ticket ` / `"[Task ` / `labels_ensured`). E.g. in `test_happy_path_creates_issues_and_calls_back`:
+- [x] **Step 1: Update existing tests + add new ones.** The title change breaks existing assertions in `test_ticket_issue_runner.py` — update them all to the new format (grep for `"[Ticket ` / `"[Task ` / `labels_ensured`). E.g. in `test_happy_path_creates_issues_and_calls_back`:
 
 ```python
     assert s["github"].labels_ensured == ["reva-ticket", "DEV"]
@@ -569,9 +569,9 @@ def test_mixed_types_title_sequence_and_dominant_parent(ctx_and_fakes):
     assert sorted(s["github"].labels_ensured) == ["DEV", "FEAT", "reva-ticket"]
 ```
 
-- [ ] **Step 2: Verify failure** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_runner.py -v` → new tests FAIL, updated old assertions FAIL against current code.
+- [x] **Step 2: Verify failure** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_runner.py -v` → new tests FAIL, updated old assertions FAIL against current code.
 
-- [ ] **Step 3: Implement** in `worker/worker/ticket_issue_runner.py`:
+- [x] **Step 3: Implement** in `worker/worker/ticket_issue_runner.py`:
 
 Add near `_TICKET_ISSUE_LABEL` (line 43), plus `from collections import Counter` to imports:
 
@@ -679,9 +679,9 @@ In `_plan_and_create`:
         }
 ```
 
-- [ ] **Step 4: Run tests** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_runner.py -v` → PASS (all).
+- [x] **Step 4: Run tests** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_runner.py -v` → PASS (all).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add worker/worker/ticket_issue_runner.py worker/tests/test_ticket_issue_runner.py
@@ -701,7 +701,7 @@ git commit -m "feat(issues): [TYPE] id - tldr title convention + type labels in 
 - Consumes: `get_ticket_issue_union`, `get_latest_ticket_issue_parent` (Task 2).
 - Produces: `issues_created` callback payload = union items `{number,title,url,state}`; `issue_state` snapshot = same union; new runs adopt the ticket's existing parent (attach even a single issue); parent created only when none exists and ≥ 2 issues.
 
-- [ ] **Step 1: Write failing tests + update the happy path.** In `test_happy_path_creates_issues_and_calls_back`, add `"state": "open"` to both expected callback items. New tests:
+- [x] **Step 1: Write failing tests + update the happy path.** In `test_happy_path_creates_issues_and_calls_back`, add `"state": "open"` to both expected callback items. New tests:
 
 ```python
 def test_second_run_attaches_to_existing_epic_and_sends_union(ctx_and_fakes):
@@ -755,9 +755,9 @@ def test_state_sync_sends_union_snapshot(ctx_and_fakes):
     assert numbers == {102: "closed", 103: "open", 104: "open"}
 ```
 
-- [ ] **Step 2: Verify failure** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_runner.py -k "epic or union or flat" -v` → FAIL.
+- [x] **Step 2: Verify failure** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_runner.py -k "epic or union or flat" -v` → FAIL.
 
-- [ ] **Step 3: Implement** in `ticket_issue_runner.py`:
+- [x] **Step 3: Implement** in `ticket_issue_runner.py`:
 
 1. **Parent adoption** — in `_plan_and_create`, right after the plan-adoption block (after line 329, before the early-exit `if issues is not None:` block):
 
@@ -809,9 +809,9 @@ Update the comment above the second one: an adopted parent attaches everything (
 
 5. **`reva/odoo_client.py`** — update the `issues_created` docstring (items are `{"number","title","url","state"}` and the full union across the record's runs) and the `issue_state` docstring (snapshot = the same union). No code changes.
 
-- [ ] **Step 4: Run the whole worker suite** — `cd worker && .venv/bin/python -m pytest tests/ -v` → PASS.
+- [x] **Step 4: Run the whole worker suite** — `cd worker && .venv/bin/python -m pytest tests/ -v` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add worker/worker/ticket_issue_runner.py reva/odoo_client.py worker/tests/test_ticket_issue_runner.py
@@ -833,7 +833,7 @@ git commit -m "feat(issues): one epic per ticket + union-snapshot Odoo callbacks
 - Consumes: `ticket_issue_runs.issue_type` (Task 1).
 - Produces: `TicketIssueRunSummary.issue_type: str | None` (JSON `issue_type`); Go `TicketIssueRunSummary.IssueType *string`; detail header shows `· type CR` for typed runs.
 
-- [ ] **Step 1: Failing API test:**
+- [x] **Step 1: Failing API test:**
 
 ```python
 def test_run_list_exposes_issue_type(client_db_queue):
@@ -845,9 +845,9 @@ def test_run_list_exposes_issue_type(client_db_queue):
 
 Run: `cd api && .venv/bin/python -m pytest tests/test_v1_ticket_issues.py -k exposes_issue_type -v` → FAIL (KeyError).
 
-- [ ] **Step 2: Implement REVA side.** `TicketIssueRunSummary`: add `issue_type: str | None = None` after `status`. `api/app/queries/ticket_issues.py`: add `"issue_type": r.issue_type,` after `"status": r.status,`. Re-run → PASS.
+- [x] **Step 2: Implement REVA side.** `TicketIssueRunSummary`: add `issue_type: str | None = None` after `status`. `api/app/queries/ticket_issues.py`: add `"issue_type": r.issue_type,` after `"status": r.status,`. Re-run → PASS.
 
-- [ ] **Step 3: TUI.** `types.go` `TicketIssueRunSummary`: add after `Status`:
+- [x] **Step 3: TUI.** `types.go` `TicketIssueRunSummary`: add after `Status`:
 
 ```go
 	IssueType        *string          `json:"issue_type"`
@@ -884,9 +884,9 @@ func TestDetailViewShowsIssueType(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Gate** — `cd tui && go build ./... && go vet ./... && go test ./...` → PASS.
+- [x] **Step 4: Gate** — `cd tui && go build ./... && go vet ./... && go test ./...` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/app/schemas/ticket_issues.py api/app/queries/ticket_issues.py api/tests/test_v1_ticket_issues.py tui/internal/api/types.go tui/internal/ui/tickets.go tui/internal/ui/tickets_test.go
@@ -900,14 +900,14 @@ git commit -m "feat(issues): expose issue_type in run feed + TUI Tickets detail"
 **Files:**
 - Modify: `/home/joseph/Projects/Cloudunify/cu_reva/docs/github-issue-creation.md`
 
-- [ ] **Step 1: Update the doc.** Precise claims to correct/add (verify line positions against the file):
+- [x] **Step 1: Update the doc.** Precise claims to correct/add (verify line positions against the file):
   - Contract 1 field table: add optional `issue_type` (8 codes, "" treated as unset; wizard flow).
   - Title format line (~docs:83): now `[TYPE] <ticket_id> - <tldr ≤30 chars> (n/total)`; `(n/total)` omitted for single-issue requests; parent = `[TYPE] <ticket_id> - <name tldr>` with dominant child type.
   - Labels: `reva-ticket` + the type code.
   - Contract 2: payload items now `{number, title, url, state}` and are the **union** across the record's runs (replace-safe); same union for Contract 3 snapshots.
   - Epic semantics: one parent per ticket+repo, adopted across runs.
   - Marker section (~docs:74): fix the stale description — the digest also folds in `planning_basis` (and typed requests prefix the basis with the lowercased type code); mention the separate `revaticketparent` marker.
-- [ ] **Step 2: Full gate** (shared `reva/` was touched → all three services):
+- [x] **Step 2: Full gate** (shared `reva/` was touched → all three services):
 
 ```bash
 make test
@@ -917,7 +917,7 @@ cd tui && go build ./... && go vet ./... && go test ./...
 
 Expected: all green. (Migration 023's raw SQL is Postgres-only — validated by `make test-integration` or first staging boot; state this in the summary honestly.)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/github-issue-creation.md
@@ -940,7 +940,7 @@ Repo: `/home/joseph/Projects/Cloudunify/ast-odoo` (separate git repo). Addon: `c
 - Consumes: REVA's union payload with per-item `state`.
 - Produces: `_apply_reva_issues("created", items)` honors `item["state"]`; `_apply_reva_issues("failed", ...)` no longer unlinks; issue list visible whenever records exist.
 
-- [ ] **Step 1: Failing tests** — add to the class in `tests/test_mixin.py` that exercises `_apply_reva_issues` (reuse its setUp; it creates a ticket):
+- [x] **Step 1: Failing tests** — add to the class in `tests/test_mixin.py` that exercises `_apply_reva_issues` (reuse its setUp; it creates a ticket):
 
 ```python
     def test_apply_issues_honours_state(self):
@@ -962,9 +962,9 @@ Repo: `/home/joseph/Projects/Cloudunify/ast-odoo` (separate git repo). Addon: `c
         self.assertEqual(len(self.ticket.reva_issue_ids), 1)
 ```
 
-- [ ] **Step 2: Verify failure** — run the addon suite (`--test-tags cu_reva`, command in Global Constraints) → the two new tests FAIL (`state` KeyError-ish / records unlinked).
+- [x] **Step 2: Verify failure** — run the addon suite (`--test-tags cu_reva`, command in Global Constraints) → the two new tests FAIL (`state` KeyError-ish / records unlinked).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
 
 `routers/reva_router.py` `IssueItem`:
 
@@ -990,9 +990,9 @@ Both view files: change line 89 (helpdesk) / the matching line (project_task):
 
 (keeps the list visible while a follow-up request is pending/failed).
 
-- [ ] **Step 4: Run the addon suite** → PASS (all, incl. `test_callback.py` — its payloads omit `state`, covered by the default).
+- [x] **Step 4: Run the addon suite** → PASS (all, incl. `test_callback.py` — its payloads omit `state`, covered by the default).
 
-- [ ] **Step 5: Commit** (in ast-odoo, match its commit style)
+- [x] **Step 5: Commit** (in ast-odoo, match its commit style)
 
 ```bash
 git add custom_addons/cu_reva_ticket_analysis
@@ -1012,7 +1012,7 @@ git commit -m "[IMP] cu_reva_ticket_analysis: issue state passthrough, failed ca
 - Consumes: REVA's optional `issue_type` (Task 3), `_reva_headers`/`_reva_error_message` (existing).
 - Produces: `record._send_issue_request(description, analysis_html="", issue_type=None, extra=None)`; `record.action_open_issue_wizard()`; TransientModel `reva.issue.wizard` with `action_send()`.
 
-- [ ] **Step 1: Failing tests** — extend the create-issues test class in `tests/test_action.py` (the class exercising `action_create_github_issues`; reuse its setUp — a ticket whose project has `reva_github_url` + `reva_enabled` — and its 202-mock helper, which returns `{"request_id": ...}`):
+- [x] **Step 1: Failing tests** — extend the create-issues test class in `tests/test_action.py` (the class exercising `action_create_github_issues`; reuse its setUp — a ticket whose project has `reva_github_url` + `reva_enabled` — and its 202-mock helper, which returns `{"request_id": ...}`):
 
 ```python
     def test_wizard_sends_typed_request(self):
@@ -1051,9 +1051,9 @@ git commit -m "[IMP] cu_reva_ticket_analysis: issue state passthrough, failed ca
 
 (If that class's 202-mock helper has a different name/shape, reuse it as-is — it must return `{"request_id": <int>}`.)
 
-- [ ] **Step 2: Verify failure** — addon suite → FAIL (unknown model `reva.issue.wizard`).
+- [x] **Step 2: Verify failure** — addon suite → FAIL (unknown model `reva.issue.wizard`).
 
-- [ ] **Step 3: Implement.**
+- [x] **Step 3: Implement.**
 
 **`models/reva_mixin.py`** — replace `action_create_github_issues` (lines 311-381) with a thin wrapper + shared sender, and add the wizard opener:
 
@@ -1274,9 +1274,9 @@ access_reva_issue_wizard_user,reva.issue.wizard.user,model_reva_issue_wizard,bas
 
 **`__manifest__.py`** — `"version": "19.0.9.0.0"`, and add `"views/reva_issue_wizard_views.xml"` to `data` (after the ticket views).
 
-- [ ] **Step 4: Run the addon suite** (with `-u cu_reva_ticket_analysis` so the new view/security files load) → PASS.
+- [x] **Step 4: Run the addon suite** (with `-u cu_reva_ticket_analysis` so the new view/security files load) → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add custom_addons/cu_reva_ticket_analysis
@@ -1290,12 +1290,12 @@ git commit -m "[ADD] cu_reva_ticket_analysis: ad-hoc typed issue-request wizard 
 **Files:**
 - Modify: `custom_addons/cu_reva_ticket_analysis/docs/github-issues-handoff.md`, `README.md` (if it documents the buttons)
 
-- [ ] **Step 1: Update the handoff doc:** Contract 1 gains optional `issue_type` (8 codes); Contract 2 items gain `state` and the payload is the union of all the record's runs (so replace semantics stay correct); the failed callback no longer clears the issue list; new wizard flow description; version note 19.0.9.0.0.
-- [ ] **Step 2: Full addon test run** (`--test-tags cu_reva`) → PASS. Commit:
+- [x] **Step 1: Update the handoff doc:** Contract 1 gains optional `issue_type` (8 codes); Contract 2 items gain `state` and the payload is the union of all the record's runs (so replace semantics stay correct); the failed callback no longer clears the issue list; new wizard flow description; version note 19.0.9.0.0.
+- [x] **Step 2: Full addon test run** (`--test-tags cu_reva`) → PASS. Commit:
 
 ```bash
 git add custom_addons/cu_reva_ticket_analysis
 git commit -m "[IMP] cu_reva_ticket_analysis: document typed issue requests + union callback semantics"
 ```
 
-- [ ] **Step 3 (cu_reva): honest closing summary.** State what is unit-tested vs not: migration 023 raw SQL and the Postgres-only paths need `make test-integration`/staging; the live Claude planner + real GitHub/Odoo round-trip is untested until a smoke test against a throwaway repo. Deploy REVA first, then upgrade the addon (`-u cu_reva_ticket_analysis`).
+- [x] **Step 3 (cu_reva): honest closing summary.** State what is unit-tested vs not: migration 023 raw SQL and the Postgres-only paths need `make test-integration`/staging; the live Claude planner + real GitHub/Odoo round-trip is untested until a smoke test against a throwaway repo. Deploy REVA first, then upgrade the addon (`-u cu_reva_ticket_analysis`).

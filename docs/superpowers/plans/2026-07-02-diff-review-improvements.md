@@ -1,6 +1,6 @@
 # Diff-Review Improvements Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Re-price both finding-verifier passes onto Haiku with real usage accounting and windowed input, turn verification on by default, and honor `custom_instructions` / muted categories in the review prompt.
 
@@ -33,7 +33,7 @@
 - Consumes: nothing new.
 - Produces: `PRICING["claude-haiku-4-5"]` — later tasks price verifier calls through `estimate_cost("claude-haiku-4-5…", …)`; without this entry Haiku silently prices at the Sonnet 4.6 fallback.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `worker/tests/test_cost.py`:
 
@@ -54,12 +54,12 @@ def test_haiku_cache_rates():
     assert estimate_cost("claude-haiku-4-5", 0, 0, 0, 1_000_000) == 1.25
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_cost.py -v`
 Expected: the three new tests FAIL (Haiku falls back to Sonnet 4.6 rates: 3.0/15.0), existing tests PASS.
 
-- [ ] **Step 3: Add the PRICING entry**
+- [x] **Step 3: Add the PRICING entry**
 
 In `reva/cost.py`, inside the `PRICING` dict (after the `"claude-sonnet-4-6"` entry, before `"claude-opus-4-8"`), add:
 
@@ -74,12 +74,12 @@ In `reva/cost.py`, inside the `PRICING` dict (after the `"claude-sonnet-4-6"` en
 
 Also extend the module docstring's first line list ("Sonnet 5, Sonnet 4.6, and Opus 4.8") to include Haiku 4.5.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_cost.py -v`
 Expected: ALL PASS. (Note: `_resolve_rates` matches the *longest contained key*, so `claude-haiku-4-5-20251001` resolves to the Haiku entry — no code change needed there.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add reva/cost.py worker/tests/test_cost.py
@@ -104,7 +104,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   - `reva.finding_verifier.VerifierVerdict` frozen dataclass: `verdict: bool`, `model: str = ""`, `input_tokens: int = 0`, `output_tokens: int = 0`, `cache_read_tokens: int = 0`, `cache_creation_tokens: int = 0`, `cost_usd: float = 0.0`.
   - `FindingVerifier(claude, model: str = VERIFY_MODEL)`; `is_resolved(...) -> VerifierVerdict`; `is_substantiated(...) -> VerifierVerdict`. Error semantics unchanged: `is_resolved` still raises on API failure and on a missing tool call; `is_substantiated` returns a keep-verdict (`verdict=True`) on a missing tool call.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `worker/tests/test_finding_verifier.py`:
 
@@ -161,7 +161,7 @@ def test_substantiated_missing_tool_call_keeps_with_real_usage():
     assert v.cost_usd > 0
 ```
 
-- [ ] **Step 2: Convert the existing boolean assertions**
+- [x] **Step 2: Convert the existing boolean assertions**
 
 Every existing test in this file that asserts on the return of `is_resolved` / `is_substantiated` as a bool now needs `.verdict`. Mechanical rule — for example:
 
@@ -174,12 +174,12 @@ assert verifier.is_resolved(_finding(), "def foo():\n    pass\n").verdict is Tru
 
 Apply the same transformation in `test_is_resolved_returns_false_when_claude_says_not_resolved` and every `is_substantiated` assertion in the "is_substantiated (feature 6…)" section. `test_is_resolved_raises_on_api_error` and the fencing test are unchanged (they don't assert on the return value).
 
-- [ ] **Step 3: Run tests to verify the new ones fail**
+- [x] **Step 3: Run tests to verify the new ones fail**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_finding_verifier.py -v`
 Expected: new tests FAIL (`AttributeError: 'bool' object has no attribute 'verdict'` / model kwarg is None); converted tests also FAIL until Step 4.
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 In `reva/config.py`, directly after `DEEP_MODEL`:
 
@@ -282,14 +282,14 @@ class FindingVerifier:
         )
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_finding_verifier.py -v`
 Expected: ALL PASS.
 
 Note: `worker/tests/test_reviewer.py` and `worker/tests/test_runner.py` still pass at this point — they use their own fakes (`FakeVerifier`, `MagicMock`), which are converted in Tasks 4 and 5.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add reva/config.py reva/finding_verifier.py worker/tests/test_finding_verifier.py
@@ -310,7 +310,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Consumes: Task 2's `FindingVerifier` internals.
 - Produces: `_window_content(file_content, line_start, file_path) -> tuple[str, str]` (module-private; `(label, content)`); `_fenced_file_block(file_content, label="")` gains the label parameter. External call signatures (`is_resolved` / `is_substantiated`) unchanged — callers keep passing the **full** file content; windowing happens inside.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `worker/tests/test_finding_verifier.py`:
 
@@ -376,12 +376,12 @@ def test_windowed_content_is_still_nonce_fenced():
     assert prompt.index("Excerpt:") < prompt.index(f"<file_content_{m.group(1)}>")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_finding_verifier.py -k window -v`
 Expected: FAIL (whole file always sent, no label).
 
-- [ ] **Step 3: Implement windowing**
+- [x] **Step 3: Implement windowing**
 
 In `reva/finding_verifier.py`:
 
@@ -442,12 +442,12 @@ You may be shown only an excerpt of the file around the cited location; when so,
 the excerpt's absolute line range is stated above the content.
 ```
 
-- [ ] **Step 4: Run the full verifier suite**
+- [x] **Step 4: Run the full verifier suite**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_finding_verifier.py -v`
 Expected: ALL PASS (small-file tests keep passing because content ≤ 301 lines bypasses windowing).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add reva/finding_verifier.py worker/tests/test_finding_verifier.py
@@ -474,7 +474,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
   - `Settings.verify_findings_default: bool = True`; module function `worker.settings._verify_findings_default_from_env() -> bool` (env `REVA_VERIFY_FINDINGS`, default true; legacy `REVA_VERIFY_HIGH_COST` honored with a deprecation log when the new var is unset).
   - `Reviewer._verify_findings(findings, repo_path, mode, block_on_severity, verify_budget_ok)` — the `model` parameter is **gone** (it existed only for the estimate).
 
-- [ ] **Step 1: Write the failing settings tests**
+- [x] **Step 1: Write the failing settings tests**
 
 Create `worker/tests/test_settings.py`:
 
@@ -509,7 +509,7 @@ def test_legacy_var_honored_when_new_unset(monkeypatch):
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_settings.py -v`
 Expected: FAIL — `ImportError: cannot import name '_verify_findings_default_from_env'`.
 
-- [ ] **Step 2: Implement settings**
+- [x] **Step 2: Implement settings**
 
 In `worker/worker/settings.py`:
 
@@ -553,7 +553,7 @@ def _verify_findings_default_from_env() -> bool:
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_settings.py -v`
 Expected: PASS.
 
-- [ ] **Step 3: Rename + rewire reviewer and worker context**
+- [x] **Step 3: Rename + rewire reviewer and worker context**
 
 Find every remaining occurrence first: `grep -rn "verify_high_cost" /Users/joseph/Projects/cu_reva/worker/` — after this step only test files may still match (fixed in Step 5).
 
@@ -624,12 +624,12 @@ In `worker/worker/runner.py`, `build_worker_context` (~line 156):
         verify_findings_default=settings.verify_findings_default,
 ```
 
-- [ ] **Step 4: Run the reviewer suite to see exactly what broke**
+- [x] **Step 4: Run the reviewer suite to see exactly what broke**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_reviewer.py -v 2>&1 | tail -30`
 Expected: failures only in the verify-section tests — `TypeError: ... unexpected keyword argument 'verify_high_cost'` and verdict-shape errors.
 
-- [ ] **Step 5: Update the reviewer test fixtures**
+- [x] **Step 5: Update the reviewer test fixtures**
 
 In `worker/tests/test_reviewer.py`:
 
@@ -680,12 +680,12 @@ def test_repo_verify_findings_overrides_global_default(tmp_path):
     assert run("verify_findings: true\n", False) == set()  # repo on wins: dropped
 ```
 
-- [ ] **Step 6: Run the worker suite**
+- [x] **Step 6: Run the worker suite**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_reviewer.py tests/test_settings.py -v 2>&1 | tail -15`
 Expected: ALL PASS. Then confirm zero stale references: `grep -rn "verify_high_cost" /Users/joseph/Projects/cu_reva/worker/ /Users/joseph/Projects/cu_reva/reva/` → only the deprecation shim in `settings.py` (env-var string) may match.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add worker/worker/reviewer.py worker/worker/settings.py worker/worker/runner.py worker/tests/test_reviewer.py worker/tests/test_settings.py
@@ -706,7 +706,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Consumes: `VerifierVerdict` from Task 2 via `ctx.verifier.is_resolved(...)`.
 - Produces: no signature changes — spend is still recorded as `record_claude_spend(ctx.db, "delta_verify", verify_cost)`, but `verify_cost` is now the sum of `verdict.cost_usd`.
 
-- [ ] **Step 1: Update the fixtures to verdict objects (tests first)**
+- [x] **Step 1: Update the fixtures to verdict objects (tests first)**
 
 In `worker/tests/test_runner.py`, the resolve tests configure a `MagicMock` verifier. Convert every configuration site — the mechanical rules:
 
@@ -745,12 +745,12 @@ def test_delta_verify_ledgers_actual_verdict_cost():
 
 (Mirror the exact patch/target/argument shape of the neighbouring M1 spend test at ~line 955 — if its helper signature differs from the sketch above, follow the existing test's shape and assert `spend[0].args[2] == 0.002`.)
 
-- [ ] **Step 2: Run to verify current code fails the new test**
+- [x] **Step 2: Run to verify current code fails the new test**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_runner.py -k "resolve or delta" -v 2>&1 | tail -20`
 Expected: the new test FAILS (cost is the old estimate, not 0.002); converted tests fail on truthiness (a `VerifierVerdict(verdict=False)` object is truthy) — which proves the production change is required.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `worker/worker/runner.py`, `_verify_and_resolve_findings`:
 
@@ -784,12 +784,12 @@ In `worker/worker/runner.py`, `_verify_and_resolve_findings`:
 
 4. Remove the now-unused import at line 30 (`from reva.cost import estimate_cost`) — confirmed sole use: `grep -n "estimate_cost" worker/worker/runner.py` must return nothing after the edit.
 
-- [ ] **Step 4: Run the runner suite**
+- [x] **Step 4: Run the runner suite**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_runner.py -v 2>&1 | tail -10`
 Expected: ALL PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add worker/worker/runner.py worker/tests/test_runner.py
@@ -810,7 +810,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Consumes: `RepoConfig.custom_instructions: str | None` (exists — `reva/types.py:69`); `FakeRunner.last_params` capture in tests.
 - Produces: optional skill param `custom_instructions` (nonce-fenced by the runner like every param); constant `_CUSTOM_INSTRUCTIONS_MAX_CHARS = 4000`. Task 8's skill-doc section refers to the param by exactly this name.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `worker/tests/test_reviewer.py` (a new section after the muted-categories tests):
 
@@ -847,12 +847,12 @@ def test_custom_instructions_truncated_at_cap():
     assert len(runner.last_params["custom_instructions"]) == 4000
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_reviewer.py -k custom_instructions -v`
 Expected: FAIL — `KeyError: 'custom_instructions'` on the first and third; the second passes trivially (fine).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `worker/worker/reviewer.py`:
 
@@ -882,12 +882,12 @@ _CUSTOM_INSTRUCTIONS_MAX_CHARS = 4000
             skill_params["custom_instructions"] = instructions
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_reviewer.py -v 2>&1 | tail -8`
 Expected: ALL PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add worker/worker/reviewer.py worker/tests/test_reviewer.py
@@ -908,7 +908,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Consumes: `RepoLookup.get_muted_categories(repository_id) -> set[str]` (exists); `FakeRepos(muted_categories={...})` test fixture (exists).
 - Produces: optional skill param `muted_categories` (exact rendered sentence below — Task 8's skill docs refer to it); `_drop_muted_findings` unchanged as backstop.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `worker/tests/test_reviewer.py`, next to the existing muted-categories tests (~line 1424):
 
@@ -950,12 +950,12 @@ def test_test_coverage_suppressed_when_test_muted():
 
 (The enabled baseline — `test_coverage` present for `_LOGIC_DIFF` when nothing is muted — is already covered by the existing `test_test_coverage_param_present_for_untested_logic`.)
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_reviewer.py -k muted -v`
 Expected: the two new param tests FAIL; the two pre-existing drop tests still PASS.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `worker/worker/reviewer.py`, inside `execute`:
 
@@ -1006,12 +1006,12 @@ to:
         grounded = _drop_muted_findings(grounded, muted)
 ```
 
-- [ ] **Step 4: Run the reviewer suite**
+- [x] **Step 4: Run the reviewer suite**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_reviewer.py -v 2>&1 | tail -8`
 Expected: ALL PASS (including the pre-existing mute-drop and test-coverage tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add worker/worker/reviewer.py worker/tests/test_reviewer.py
@@ -1032,7 +1032,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - Consumes: param names `custom_instructions` / `muted_categories` exactly as produced in Tasks 6-7.
 - Produces: prompt version `v1.9` (parsed by `PromptBuilder.get_version()` from the first `##` heading of the CHANGELOG — the bump re-baselines the content hashes so the worker doesn't flag `prompt_drift_detected` on boot).
 
-- [ ] **Step 1: Add the shared section to all five skills**
+- [x] **Step 1: Add the shared section to all five skills**
 
 Insert the following section into each of the five files, immediately **before** its `## Output format` heading (every file has one — verify with `grep -n "## Output format" prompts/skills/reva-*.md`). Identical text in all five:
 
@@ -1050,7 +1050,7 @@ trusted user muted for this repo. Do not report findings in those categories;
 spend that effort on the categories the team reads.
 ```
 
-- [ ] **Step 2: Bump the prompt version**
+- [x] **Step 2: Bump the prompt version**
 
 Add a new entry at the **top** of `prompts/CHANGELOG.md`:
 
@@ -1073,12 +1073,12 @@ Add a new entry at the **top** of `prompts/CHANGELOG.md`:
   renumbered) — `get_version()` reads the first `##` heading.
 ```
 
-- [ ] **Step 3: Verify the prompt plumbing**
+- [x] **Step 3: Verify the prompt plumbing**
 
 Run: `cd /Users/joseph/Projects/cu_reva/worker && .venv/bin/python -m pytest tests/test_prompt_files.py -v`
 Expected: ALL PASS (the hash tests are content-agnostic; `get_version` tests read the live CHANGELOG heading — if one pins the old version string, update it to `v1.9`).
 
-- [ ] **Step 4: Full gate — all three services + ruff**
+- [x] **Step 4: Full gate — all three services + ruff**
 
 ```bash
 cd /Users/joseph/Projects/cu_reva && make test
@@ -1087,7 +1087,7 @@ ruff check reva worker/worker api/app scheduler/scheduler
 
 Expected: worker, api, and scheduler suites green (shared `reva/` was touched); ruff clean. Fix anything that surfaces before committing. Honest-caveat note for the final report: the Haiku verifier path and the live CLI prompt rendering are unit-tested with mocks only — first staging deploy exercises them for real.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add prompts/skills/ prompts/CHANGELOG.md
@@ -1100,9 +1100,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ## Post-implementation checklist (for the executing agent's final report)
 
-- [ ] `grep -rn "verify_high_cost" reva worker api scheduler` → only the legacy env-var string in `worker/worker/settings.py`.
-- [ ] Confirm no TUI change was needed (spec: no new at-a-glance data).
-- [ ] Rollout notes to surface to Joseph verbatim:
+- [x] `grep -rn "verify_high_cost" reva worker api scheduler` → only the legacy env-var string in `worker/worker/settings.py`.
+- [x] Confirm no TUI change was needed (spec: no new at-a-glance data).
+- [x] Rollout notes to surface to Joseph verbatim:
   - Repos that already set `custom_instructions` in `.claude-review.yml` go from silently-ignored to live on their next review — announce before deploy.
   - Verification is now on by default; kill switch is `REVA_VERIFY_FINDINGS=false` (env, no code change) or per-repo `verify_findings: false`.
   - Watch `findings_verification_done` / `finding_unsubstantiated_dropped` / `delta_resolution_done` in worker logs after deploy.

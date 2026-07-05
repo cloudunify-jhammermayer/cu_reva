@@ -211,10 +211,11 @@ func (o Odoo) view(w, h int) string {
 				styleSubtitle.Render("No Odoo instances — press n to add one")))
 	}
 
-	colName, colPrefix, colHost, colA, colI, colW, colB := 24, 16, 26, 10, 10, 9, 12
+	colName, colPrefix, colHost, colVer, colA, colI, colW, colB := 24, 16, 24, 6, 10, 10, 9, 12
 	hdr := lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
-		fmt.Sprintf("   %-*s  %-*s  %-*s  %*s  %*s  %*s  %*s  %*s",
+		fmt.Sprintf("   %-*s  %-*s  %-*s  %-*s  %*s  %*s  %*s  %*s  %*s",
 			colName, "Name", colPrefix, "Key", colHost, "Callback",
+			colVer, "Ver",
 			colA, "Life A$", colI, "Life I$", colW, "24h$", colW, "30d$",
 			colB, "Budget"))
 
@@ -233,6 +234,10 @@ func (o Odoo) view(w, h int) string {
 		if host == "" {
 			host = "—"
 		}
+		version := "—"
+		if it.OdooVersion != nil && *it.OdooVersion != "" {
+			version = *it.OdooVersion
+		}
 		life := it.Cost.Lifetime
 		d24 := it.Cost.Last24h.Analysis.CostUSD + it.Cost.Last24h.Issues.CostUSD
 		d30 := it.Cost.Last30d.Analysis.CostUSD + it.Cost.Last30d.Issues.CostUSD
@@ -246,11 +251,12 @@ func (o Odoo) view(w, h int) string {
 		if !it.Active {
 			active = "x"
 		}
-		line := fmt.Sprintf("  %s  %-*s  %-*s  %-*s  %*.2f  %*.2f  %*.2f  %*.2f  %*s",
+		line := fmt.Sprintf("  %s  %-*s  %-*s  %-*s  %-*s  %*.2f  %*.2f  %*.2f  %*.2f  %*s",
 			active,
 			colName, truncate(it.Name, colName),
 			colPrefix, truncate(it.KeyPrefix, colPrefix),
 			colHost, truncate(host, colHost),
+			colVer, truncate(version, colVer),
 			colA, life.Analysis.CostUSD, colI, life.Issues.CostUSD,
 			colW, d24, colW, d30, colB, budget)
 		if i == o.cursor {

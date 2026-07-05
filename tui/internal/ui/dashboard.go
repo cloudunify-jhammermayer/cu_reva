@@ -144,5 +144,13 @@ func (d Dashboard) renderCostCard(m *api.DashboardMetrics, pendingCount, w int) 
 		b.WriteString(fmt.Sprintf("  Degrade %s\n",
 			styleStatusFailed.Render(fmt.Sprintf("%d events (24h)", m.Degradations24h))))
 	}
+	if len(m.CoreKnowledge) > 0 {
+		versions := make([]string, 0, len(m.CoreKnowledge))
+		for _, status := range m.CoreKnowledge {
+			versions = append(versions, status.OdooVersion)
+		}
+		b.WriteString(fmt.Sprintf("  Core    %s\n",
+			styleStatusCompleted.Render(strings.Join(versions, ", "))))
+	}
 	return styleBorder.Width(w).Render(b.String())
 }

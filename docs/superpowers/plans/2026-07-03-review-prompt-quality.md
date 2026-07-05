@@ -11,7 +11,7 @@
 > Task 5's field), Task 10 (`odoo_version` repo config). Task 11 (finalize/
 > handoff) after those.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Raise review quality across all six CLI skills: calibrated worked examples, a mandatory pre-output self-verification step, honest confidence scoring with code-side enforcement, a verbatim `code_excerpt` evidence anchor threaded through ground-check → verifier → DB, an `odoo_version` repo config so non-19 repos stop getting wrong-version deprecation noise, deduplicated shared prompt blocks, a defined summary shape, severities for every `odoo19.md` rule, and removal of the dead Messages-API review prompt path.
 
@@ -42,8 +42,8 @@
 
 **Why first:** `PromptBuilder.get_version()` reads the first `##` heading; the drift guard re-baselines content hashes under a new version. All later prompt edits must land under v2.1 or the guard alerts on boot.
 
-- [ ] **Step 1:** Update the assertion in `worker/tests/test_prompt_files.py:85` to `assert builder.get_version() == "v2.1"`. Run `cd worker && .venv/bin/python -m pytest tests/test_prompt_files.py -k version -v` — expect FAIL.
-- [ ] **Step 2:** Prepend to `prompts/CHANGELOG.md`:
+- [x] **Step 1:** Update the assertion in `worker/tests/test_prompt_files.py:85` to `assert builder.get_version() == "v2.1"`. Run `cd worker && .venv/bin/python -m pytest tests/test_prompt_files.py -k version -v` — expect FAIL.
+- [x] **Step 2:** Prepend to `prompts/CHANGELOG.md`:
 
 ```markdown
 ## v2.1 — Review-quality pass: examples, self-verification, evidence anchors
@@ -52,7 +52,7 @@
   as they land; summary at plan completion.)
 ```
 
-- [ ] **Step 3:** Re-run the test — PASS. Commit:
+- [x] **Step 3:** Re-run the test — PASS. Commit:
 
 ```bash
 git add prompts/CHANGELOG.md worker/tests/test_prompt_files.py
@@ -76,10 +76,10 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 **Kept:** `reva/review_tool.py` (`build_review_tool_schema` derives the CLI output shape docs and is exercised by tests) — verify with grep before assuming; if it too has no production caller, note that in the commit message but do **not** delete it in this plan (out of scope).
 
-- [ ] **Step 1:** `grep -rn 'build_system_blocks\|build_user_prompt\|system\.md\|diff_review\.md\|deep_review\.md' --include='*.py' reva worker api scheduler` — confirm only `prompt_builder.py`, `types.py:205`, and tests hit.
-- [ ] **Step 2:** Delete the three files and the two methods; update the docstring (PromptBuilder now = versioning + hashes only), `types.py` comment, `prompts/README.md`.
-- [ ] **Step 3:** Remove/adjust the affected tests in `worker/tests/test_prompt_files.py` (keep every `get_version`/`compute_prompt_hashes` test).
-- [ ] **Step 4:** Full suites + ruff (`make test`; reva touched). Append a CHANGELOG bullet under v2.1 ("removed dead Messages-API review prompts: system.md, diff_review.md, deep_review.md"). Commit `refactor(prompts): remove dead Messages-API review prompt path`.
+- [x] **Step 1:** `grep -rn 'build_system_blocks\|build_user_prompt\|system\.md\|diff_review\.md\|deep_review\.md' --include='*.py' reva worker api scheduler` — confirm only `prompt_builder.py`, `types.py:205`, and tests hit.
+- [x] **Step 2:** Delete the three files and the two methods; update the docstring (PromptBuilder now = versioning + hashes only), `types.py` comment, `prompts/README.md`.
+- [x] **Step 3:** Remove/adjust the affected tests in `worker/tests/test_prompt_files.py` (keep every `get_version`/`compute_prompt_hashes` test).
+- [x] **Step 4:** Full suites + ruff (`make test`; reva touched). Append a CHANGELOG bullet under v2.1 ("removed dead Messages-API review prompts: system.md, diff_review.md, deep_review.md"). Commit `refactor(prompts): remove dead Messages-API review prompt path`.
 
 ---
 
@@ -95,9 +95,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 **Scope guard:** move ONLY this block. The "Security-model consistency" (3 variants) and "Manifest checks" (4 variants) sections differ deliberately by mode-scoping — leave them in place.
 
-- [ ] **Step 1:** Add a test asserting `review_guidance.md` contains the `team_review_preferences` paragraph and that no `skills/*.md` file contains the phrase "If a `custom_instructions` parameter is present" (loop over the skills dir).  Run — FAIL.
-- [ ] **Step 2:** Move the block into `review_guidance.md` as `## Team configuration parameters (when present)` (verbatim content from the skills, singular source). Delete the section from the five skills.
-- [ ] **Step 3:** Tests PASS; `make test` + ruff. CHANGELOG bullet. Commit `refactor(prompts): single-source the team-configuration block in review_guidance`.
+- [x] **Step 1:** Add a test asserting `review_guidance.md` contains the `team_review_preferences` paragraph and that no `skills/*.md` file contains the phrase "If a `custom_instructions` parameter is present" (loop over the skills dir).  Run — FAIL.
+- [x] **Step 2:** Move the block into `review_guidance.md` as `## Team configuration parameters (when present)` (verbatim content from the skills, singular source). Delete the section from the five skills.
+- [x] **Step 3:** Tests PASS; `make test` + ruff. CHANGELOG bullet. Commit `refactor(prompts): single-source the team-configuration block in review_guidance`.
 
 ---
 
@@ -109,11 +109,11 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 **Why:** Today the ≥ 0.7 bar exists only as a prompt instruction — which trains the model to *never emit* a number below 0.7 (borderline findings get inflated to exactly 0.7 rather than dropped), so confidence stops carrying signal for `_cap_findings` and the verifier. Task 5 changes the prompt to "score honestly; the system filters" — this task adds the filter that makes that true, plus telemetry on what gets dropped.
 
-- [ ] **Step 1: Failing tests** in `worker/tests/test_reviewer.py`:
+- [x] **Step 1: Failing tests** in `worker/tests/test_reviewer.py`:
   - a finding with `confidence=0.69` is absent from `ReviewResult.findings`; one with `0.7` survives;
   - dropped findings never reach `_verify_findings` (assert the verifier fake is not called for them);
   - the drop is logged (`findings_dropped_low_confidence` with `count`).
-- [ ] **Step 2:** In `worker/worker/reviewer.py`, next to `MAX_FINDINGS` (:56), add `MIN_CONFIDENCE = 0.7`. In `execute` step 12, after `_drop_muted_findings` (:576) and **before** `_calibrate_odoo_severity` / the verify pass (don't pay to verify sub-threshold findings):
+- [x] **Step 2:** In `worker/worker/reviewer.py`, next to `MAX_FINDINGS` (:56), add `MIN_CONFIDENCE = 0.7`. In `execute` step 12, after `_drop_muted_findings` (:576) and **before** `_calibrate_odoo_severity` / the verify pass (don't pay to verify sub-threshold findings):
 
 ```python
         # Enforce the confidence floor in code, not just in the prompt: the
@@ -130,7 +130,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
         grounded = confident
 ```
 
-- [ ] **Step 3:** Tests PASS; worker suite + ruff. Commit `feat(review): enforce the 0.7 confidence floor in code with drop telemetry`.
+- [x] **Step 3:** Tests PASS; worker suite + ruff. Commit `feat(review): enforce the 0.7 confidence floor in code with drop telemetry`.
 
 ---
 
@@ -150,22 +150,22 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 **Matching rules (the load-bearing design):** normalize by taking the excerpt's **first non-empty line**, stripping one leading `+`/`-`, collapsing whitespace runs to single spaces, and trimming. Skip the check entirely (keep the finding, keep the excerpt) when: the finding has no excerpt, no `file`, the normalized line is shorter than 10 chars, or the file is unreadable (fail-open). Drop the finding only when the file was read and the normalized line is not a substring of any normalized file line. Log `findings_dropped_excerpt_unmatched` with titles.
 
-- [ ] **Step 1: Failing tests.**
+- [x] **Step 1: Failing tests.**
   - `types`: `Finding(code_excerpt=...)` accepted, defaults to `None`, truncated at 1000 chars (mirror the body-truncation validator pattern, :107).
   - `reviewer`: excerpt matching table — exact match kept; match with `+` prefix and extra indentation kept; unmatched ≥10-char excerpt dropped; <10-char excerpt kept unchecked; missing file → kept (ground-check drops it separately); unreadable file → kept.
   - `verifier`: `_finding_header` output contains a `**Cited code:**` line iff `StoredFinding.code_excerpt` is set.
   - `writers`: insert + read-back round-trips `code_excerpt` (SQLite via ORM).
-- [ ] **Step 2:** `reva/types.py`: add `code_excerpt: str | None = None` with a 1000-char truncation validator.
-- [ ] **Step 3:** Migration `024_finding_code_excerpt.sql`:
+- [x] **Step 2:** `reva/types.py`: add `code_excerpt: str | None = None` with a 1000-char truncation validator.
+- [x] **Step 3:** Migration `024_finding_code_excerpt.sql`:
 
 ```sql
 ALTER TABLE review_findings ADD COLUMN IF NOT EXISTS code_excerpt TEXT;
 ```
 
   ORM: `code_excerpt: Mapped[str | None]` on `ReviewFinding`. Writer insert (:1841) gains `code_excerpt=f.code_excerpt`; every query that constructs `StoredFinding` for delta-resolution/verification selects and passes it.
-- [ ] **Step 4:** `reva/finding_verifier.py`: `StoredFinding` gains `code_excerpt: str | None = None`; `_finding_header` appends `f"\n**Cited code:** `{finding.code_excerpt}`"` when set. (Header is REVA-rendered from our own DB row — same trust level as title/body, which already ride unfenced; no new fencing needed, note this in a comment.)
-- [ ] **Step 5:** `worker/worker/reviewer.py`: implement `_drop_unmatched_excerpts(findings, repo_path)` per the matching rules; call it in step 12 immediately after `_ground_findings` (:570). Update the in-process `StoredFinding` construction in `_verify_findings` to pass the excerpt.
-- [ ] **Step 6:** Skills: add to each output-format JSON example `"code_excerpt": "cr.execute(f\"... {barcode} ...\")"` and this bullet under the format notes:
+- [x] **Step 4:** `reva/finding_verifier.py`: `StoredFinding` gains `code_excerpt: str | None = None`; `_finding_header` appends `f"\n**Cited code:** `{finding.code_excerpt}`"` when set. (Header is REVA-rendered from our own DB row — same trust level as title/body, which already ride unfenced; no new fencing needed, note this in a comment.)
+- [x] **Step 5:** `worker/worker/reviewer.py`: implement `_drop_unmatched_excerpts(findings, repo_path)` per the matching rules; call it in step 12 immediately after `_ground_findings` (:570). Update the in-process `StoredFinding` construction in `_verify_findings` to pass the excerpt.
+- [x] **Step 6:** Skills: add to each output-format JSON example `"code_excerpt": "cr.execute(f\"... {barcode} ...\")"` and this bullet under the format notes:
 
 ```markdown
 - `code_excerpt`: the exact offending line(s), copied verbatim from the
@@ -174,7 +174,7 @@ ALTER TABLE review_findings ADD COLUMN IF NOT EXISTS code_excerpt TEXT;
   so copy exactly. `null` only for findings with no specific location.
 ```
 
-- [ ] **Step 7:** All suites (`make test` — reva + worker touched) + ruff. Note honestly: the migration's raw SQL is exercised only on real Postgres → run `make test-integration` or flag for first staging boot (CLAUDE.md). CHANGELOG bullet. Commit `feat(review): verbatim code_excerpt evidence anchor through ground-check, verifier, and DB`.
+- [x] **Step 7:** All suites (`make test` — reva + worker touched) + ruff. Note honestly: the migration's raw SQL is exercised only on real Postgres → run `make test-integration` or flag for first staging boot (CLAUDE.md). CHANGELOG bullet. Commit `feat(review): verbatim code_excerpt evidence anchor through ground-check, verifier, and DB`.
 
 ---
 
@@ -187,8 +187,8 @@ ALTER TABLE review_findings ADD COLUMN IF NOT EXISTS code_excerpt TEXT;
 
 **Why:** The skills' review process ends at "keep only ≥ 0.7" with no instruction to verify anything, and rule 1 asks for diff-mappable line numbers without saying how to get them (models get hunk arithmetic wrong; they have Read). This targets the classic FP modes: misread citation, "X is unused" without grepping, flagging behavior the parent class already handles.
 
-- [ ] **Step 1:** Failing content tests: guidance contains "Verify before you write"; no skill contains the string "confidence ≥ 0.7" (the bar is now stated once, honestly, in the guidance).
-- [ ] **Step 2:** Add to `review_guidance.md`:
+- [x] **Step 1:** Failing content tests: guidance contains "Verify before you write"; no skill contains the string "confidence ≥ 0.7" (the bar is now stated once, honestly, in the guidance).
+- [x] **Step 2:** Add to `review_guidance.md`:
 
 ```markdown
 ## Verify before you write
@@ -218,8 +218,8 @@ honest 0.6 that gets filtered is better than a false 0.7 that wastes a
 developer's time.
 ```
 
-- [ ] **Step 3:** In each skill's process list, replace the "Keep only findings…≥ 0.7" step with: `Verify each candidate finding per the guidance ("Verify before you write"), then score confidence honestly.`
-- [ ] **Step 4:** Tests PASS; worker suite + ruff. CHANGELOG bullet. Commit `feat(prompts): mandatory pre-output verification pass + honest confidence scoring`.
+- [x] **Step 3:** In each skill's process list, replace the "Keep only findings…≥ 0.7" step with: `Verify each candidate finding per the guidance ("Verify before you write"), then score confidence honestly.`
+- [x] **Step 4:** Tests PASS; worker suite + ruff. CHANGELOG bullet. Commit `feat(prompts): mandatory pre-output verification pass + honest confidence scoring`.
 
 ---
 
@@ -231,8 +231,8 @@ developer's time.
 
 **Why:** The prompts define severity/confidence abstractly but never show a model of excellence or a withheld borderline case. Examples calibrate; definitions don't. Placed in the guidance so all six skills inherit them. Uses `code_excerpt` — Task 5 must land first.
 
-- [ ] **Step 1:** Failing content test: guidance contains "Worked examples".
-- [ ] **Step 2:** Add (exact content):
+- [x] **Step 1:** Failing content test: guidance contains "Worked examples".
+- [x] **Step 2:** Add (exact content):
 
 ````markdown
 ## Worked examples
@@ -275,7 +275,7 @@ actual N+1 access (then report it with the line quoted), or drop it.
 One finding with the other locations named — never one finding per occurrence.
 ````
 
-- [ ] **Step 3:** Tests PASS; worker suite + ruff. CHANGELOG bullet. Commit `feat(prompts): worked calibration examples in review guidance`.
+- [x] **Step 3:** Tests PASS; worker suite + ruff. CHANGELOG bullet. Commit `feat(prompts): worked calibration examples in review guidance`.
 
 ---
 
@@ -288,8 +288,8 @@ One finding with the other locations named — never one finding per occurrence.
 
 **Why:** Skills say only "2-3 sentence overview". On a clean PR the summary *is* the whole review, and a bare "looks good" builds no trust and proves no work. Asking for "what was verified" also forces the verification to happen.
 
-- [ ] **Step 1:** Failing content test: guidance contains "Summary contract".
-- [ ] **Step 2:** Add to `review_guidance.md`:
+- [x] **Step 1:** Failing content test: guidance contains "Summary contract".
+- [x] **Step 2:** Add to `review_guidance.md`:
 
 ```markdown
 ## Summary contract
@@ -304,7 +304,7 @@ The `summary` is 2-4 sentences with this shape:
 ```
 
   In each skill's output JSON, change the summary placeholder to `"summary": "What the PR does; top concern or none; what was verified clean (see guidance: Summary contract)"` (keep the delta skill's "new changes" wording flavor).
-- [ ] **Step 3:** Tests PASS; worker suite + ruff. CHANGELOG bullet. Commit `feat(prompts): defined summary shape incl. what-was-verified line`.
+- [x] **Step 3:** Tests PASS; worker suite + ruff. CHANGELOG bullet. Commit `feat(prompts): defined summary shape incl. what-was-verified line`.
 
 ---
 
@@ -316,7 +316,7 @@ The `summary` is 2-4 sentences with this shape:
 
 **Why:** Most rules carry explicit severities; the unlabeled ones drift run-to-run in a way the Tier-0 deterministic calibration can't floor (it only floors rules it knows). Also `odoo19.md:27` says translations JSONB is "16+" while `:64` says "17+" — JSONB translations landed in Odoo 16; make both say 16+.
 
-- [ ] **Step 1:** Assign severities to the unlabeled rules (edit each line in place):
+- [x] **Step 1:** Assign severities to the unlabeled rules (edit each line in place):
   - `with_context()` misuse (:16) → **Minor**
   - `search_count()` limit awareness (:24) → **Minor**
   - `_search_display_name` preference (:25) → **Info**
@@ -327,7 +327,7 @@ The `summary` is 2-4 sentences with this shape:
   - file-naming conventions (:55) → **Minor**
   - JSONB translations format (:64) → **Major** (matches the migration skill) + unify "16+"
   - Python 3.12 type-system patterns (:71) → **Info**
-- [ ] **Step 2:** worker suite (prompt-content tests) + ruff untouched. CHANGELOG bullet. Commit `fix(prompts): explicit severity on every odoo19.md rule`.
+- [x] **Step 2:** worker suite (prompt-content tests) + ruff untouched. CHANGELOG bullet. Commit `fix(prompts): explicit severity on every odoo19.md rule`.
 
 ---
 
@@ -342,11 +342,11 @@ The `summary` is 2-4 sentences with this shape:
 
 **Why:** `RepoConfig.odoo` is a bare bool (:67), so a repo on 16/17/18 gets `odoo19.md`'s 19-only deprecation/rename rules (`_sql_constraints` → `Constraint`, `group_operator` → `aggregator`, `inselect`, `_flush_search`, …) as review criteria — wrong-version noise, worst exactly during an upgrade window. Minimal fix: annotate rule applicability in the one rules file and tell the model the repo's target version via an optional param. No new per-version rule files (speculative until a real non-19 repo needs more).
 
-- [ ] **Step 1: Failing tests.**
+- [x] **Step 1: Failing tests.**
   - `RepoConfig` parses `odoo_version: 17` (int, `ge=12`); absent → `None`.
   - With `odoo: true, odoo_version: 17` → `skill_params["odoo_version"]` present with the note text; with `odoo_version: 19` or unset → key absent (prompt-prefix stability).
-- [ ] **Step 2:** `reva/types.py`: `odoo_version: int | None = Field(default=None, ge=12)` with a comment ("target Odoo major; None = assume current (19). Only consulted when `odoo: true`.").
-- [ ] **Step 3:** `worker/worker/reviewer.py`, after the muted-categories injection:
+- [x] **Step 2:** `reva/types.py`: `odoo_version: int | None = Field(default=None, ge=12)` with a comment ("target Odoo major; None = assume current (19). Only consulted when `odoo: true`.").
+- [x] **Step 3:** `worker/worker/reviewer.py`, after the muted-categories injection:
 
 ```python
         # Non-19 Odoo repos: the rules preamble is written for 19; tell the
@@ -361,19 +361,19 @@ The `summary` is 2-4 sentences with this shape:
             )
 ```
 
-- [ ] **Step 4:** `prompts/odoo19.md`: add under the title: *"Rules marked `(19)` / `(17+)` / `(16+)` apply only when the repo's target version qualifies; an `odoo_version` task parameter, when present, states the target."* Annotate: `(19)` — `_sql_constraints`/Constraint, `inselect`, `group_operator`→`aggregator`, `_flush_search`, `search_count` limit, `_search_display_name`, record-rule OR logic, `check_access`/`has_access`, `search_fetch` note if 17+ (verify: `search_fetch` landed in 17 → `(17+)`), `GROUPING SETS`/`any!`, `<card>` Kanban, explicit `inherit_id`, Python-3.11 minimum; `(17+)` — `name_get`→`display_name`; `(16+)` — `t-esc`→`t-out`, JSONB translations. Version-agnostic rules (SQL injection, `cr.commit`, `@api.depends`, `sudo()`, ACL/ir.rule, N+1, manifest checks) stay unmarked.
-- [ ] **Step 5:** Docs: add `odoo_version` to the README `.claude-review.yml` example and the CLAUDE.md overrides list. All suites + ruff. CHANGELOG bullet. Commit `feat(review): odoo_version repo config gates version-specific rules`.
+- [x] **Step 4:** `prompts/odoo19.md`: add under the title: *"Rules marked `(19)` / `(17+)` / `(16+)` apply only when the repo's target version qualifies; an `odoo_version` task parameter, when present, states the target."* Annotate: `(19)` — `_sql_constraints`/Constraint, `inselect`, `group_operator`→`aggregator`, `_flush_search`, `search_count` limit, `_search_display_name`, record-rule OR logic, `check_access`/`has_access`, `search_fetch` note if 17+ (verify: `search_fetch` landed in 17 → `(17+)`), `GROUPING SETS`/`any!`, `<card>` Kanban, explicit `inherit_id`, Python-3.11 minimum; `(17+)` — `name_get`→`display_name`; `(16+)` — `t-esc`→`t-out`, JSONB translations. Version-agnostic rules (SQL injection, `cr.commit`, `@api.depends`, `sudo()`, ACL/ir.rule, N+1, manifest checks) stay unmarked.
+- [x] **Step 5:** Docs: add `odoo_version` to the README `.claude-review.yml` example and the CLAUDE.md overrides list. All suites + ruff. CHANGELOG bullet. Commit `feat(review): odoo_version repo config gates version-specific rules`.
 
 ---
 
 ### Task 11: Finalize — CHANGELOG, full definition of done, staging notes
 
-- [ ] **Step 1:** Rewrite the v2.1 CHANGELOG entry as a coherent summary of everything above (examples, verify-before-write, honest confidence + code floor, `code_excerpt`, summary contract, team-config dedup, odoo19 severities + version annotations, dead-file removal, `odoo_version`).
-- [ ] **Step 2:** Definition of done (CLAUDE.md): `make test` (worker + api + scheduler — shared `reva/` changed), `ruff check reva worker/worker api/app scheduler/scheduler`, and `make test-integration` for migration `024` (or state explicitly it awaits first staging boot). `tui/` untouched — no Go gate.
-- [ ] **Step 3:** Update `HANDOFF.md`: add this plan to the resume section; note the two follow-ups this plan deliberately does **not** cover:
+- [x] **Step 1:** Rewrite the v2.1 CHANGELOG entry as a coherent summary of everything above (examples, verify-before-write, honest confidence + code floor, `code_excerpt`, summary contract, team-config dedup, odoo19 severities + version annotations, dead-file removal, `odoo_version`).
+- [x] **Step 2:** Definition of done (CLAUDE.md): `make test` (worker + api + scheduler — shared `reva/` changed), `ruff check reva worker/worker api/app scheduler/scheduler`, and `make test-integration` for migration `024` (or state explicitly it awaits first staging boot). `tui/` untouched — no Go gate.
+- [x] **Step 3:** Update `HANDOFF.md`: add this plan to the resume section; note the two follow-ups this plan deliberately does **not** cover:
   - **Measurement gap:** none of these changes is measurable without the golden-PR replay harness (Tier 3, `FEATURE_ROADMAP.md`) — recommend it as the next tier-3 item, seeded with a handful of PRs reviewed before/after v2.1.
   - **Live-CLI staging gate** (A1/A2 pattern): run one real diff review and one delta review on staging; watch for `code_excerpt` population rate, `findings_dropped_excerpt_unmatched` false-drop rate (a high rate means the matching normalization needs loosening — the excerpt check is the one risky drop in this plan), `findings_dropped_low_confidence` volume, and summary shape adherence.
-- [ ] **Step 4:** Commit `docs: v2.1 changelog + handoff for review-quality pass`.
+- [x] **Step 4:** Commit `docs: v2.1 changelog + handoff for review-quality pass`.
 
 ---
 

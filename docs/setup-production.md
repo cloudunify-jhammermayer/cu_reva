@@ -198,7 +198,42 @@ curl https://reva.dev.cloudunify.org/health   # should return {"status":"ok"}
 
 ---
 
-## 7. Set the GitHub App webhook URL
+## 7. Optional: Odoo core knowledge
+
+Core knowledge lets PR reviews and ticket analyses compare custom work against
+operator-provided Odoo core, enterprise, and official documentation checkouts.
+
+One-time on the host:
+
+```bash
+sudo mkdir -p /srv/odoo-mirrors /srv/reva-core
+git clone --no-checkout https://github.com/odoo/odoo /srv/odoo-mirrors/odoo
+git clone --no-checkout <enterprise-remote> /srv/odoo-mirrors/enterprise
+git clone --no-checkout https://github.com/odoo/documentation /srv/odoo-mirrors/documentation
+```
+
+Load the versions you want:
+
+```bash
+scripts/core_sync.sh 17.0 18.0 19.0
+```
+
+Then set these in `.env` and restart the worker:
+
+```dotenv
+REVA_CORE_KNOWLEDGE_ENABLED=true
+REVA_CORE_VERSIONS=17.0,18.0,19.0
+REVA_CORE_HOST_DIR=/srv/reva-core
+```
+
+The worker validates every listed version at boot and refuses to start if a
+worktree, catalog, or registry load is missing. Per repo, set
+`.claude-review.yml: odoo_version: "19.0"`. Per Odoo instance, set
+`odoo_version` with `PATCH /api/v1/odoo-instances/{id}`.
+
+---
+
+## 8. Set the GitHub App webhook URL
 
 In your GitHub App settings set:
 
@@ -226,7 +261,7 @@ or from the TUI **Repos** tab (press `a`). Read findings via
 
 ---
 
-## 8. Deploying updates
+## 9. Deploying updates
 
 ```bash
 cd /opt/reva
@@ -242,7 +277,7 @@ The deploy script:
 
 ---
 
-## 9. Useful operations
+## 10. Useful operations
 
 ```bash
 # Tail all logs (prod compose)
@@ -270,7 +305,7 @@ curl -X POST https://reva.dev.cloudunify.org/api/v1/reviews/<id>/requeue
 
 ---
 
-## 10. TUI against production
+## 11. TUI against production
 
 Build the TUI binary once on your local machine:
 
