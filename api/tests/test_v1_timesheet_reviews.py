@@ -106,7 +106,9 @@ def test_submit_enqueues_timesheet_review(client_db_queue):
     assert params["request_id"] == "req-1"
     assert params["run_id"] == body["run_id"]
     assert kwargs.get("retry") is not None
-    assert kwargs["failure_ttl"] == 7 * 24 * 3600
+    # A4 bound: fat line-batch payloads must not sit in noeviction Redis
+    # for a week (requeue rebuilds from the DB row, never the Redis payload).
+    assert kwargs["failure_ttl"] <= 24 * 3600
     assert kwargs["job_timeout"] == 600
 
 

@@ -35,7 +35,10 @@ create_router = APIRouter()
 logger = structlog.get_logger()
 
 _RETRY = Retry(max=3, interval=[60, 300, 900])
-_FAILURE_TTL = 7 * 24 * 3600
+# Failed jobs keep their serialized args (full line batches) in Redis; requeue
+# rebuilds from the DB row, so week-long retention only risks noeviction
+# write-rejection (hardening A4 — same 24h bound as the other Odoo routes).
+_FAILURE_TTL = 24 * 3600
 _STALE_PENDING = timedelta(minutes=60)
 
 
