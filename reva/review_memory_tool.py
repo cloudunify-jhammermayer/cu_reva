@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from reva.tool_schema import require_no_extra_properties
 from reva.types import ReviewMemoryPlan
 
 REVIEW_MEMORY_TOOL_NAME = "submit_review_memory"
@@ -29,6 +30,7 @@ def build_review_memory_tool_schema() -> dict[str, Any]:
     }
     if "$defs" in schema:
         input_schema["$defs"] = schema["$defs"]
+    input_schema = require_no_extra_properties(input_schema)
     return {
         "name": REVIEW_MEMORY_TOOL_NAME,
         "description": _TOOL_DESCRIPTION,

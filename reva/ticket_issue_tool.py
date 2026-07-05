@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from reva.tool_schema import require_no_extra_properties
 from reva.types import TicketIssuePlan
 
 TICKET_ISSUE_TOOL_NAME = "submit_ticket_issues"
@@ -35,6 +36,7 @@ def build_ticket_issue_tool_schema() -> dict[str, Any]:
 
     if "$defs" in schema:
         input_schema["$defs"] = schema["$defs"]
+    input_schema = require_no_extra_properties(input_schema)
 
     return {
         "name": TICKET_ISSUE_TOOL_NAME,

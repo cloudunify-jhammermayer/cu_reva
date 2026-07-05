@@ -8,6 +8,8 @@ Loads `Settings` from environment, builds the singleton `WorkerContext`
 
 from __future__ import annotations
 
+import socket
+
 import structlog
 from redis import Redis
 from rq import Queue, Worker
@@ -27,7 +29,7 @@ def main() -> None:
 
     connection = Redis.from_url(settings.redis_url)
     queue = Queue(settings.queue_name, connection=connection)
-    worker = Worker([queue], connection=connection)
+    worker = Worker([queue], connection=connection, name=socket.gethostname())
 
     logger.info(
         "worker_starting",

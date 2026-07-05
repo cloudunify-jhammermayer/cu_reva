@@ -231,6 +231,27 @@ def test_happy_path_creates_issues_and_calls_back(ctx_and_fakes):
     ]
 
 
+def test_placeholder_plan_copies_ticket_into_issue_body(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["planner"].plan = TicketIssuePlan(issues=[
+        TicketIssueItem(title="placeholder", body="placeholder")
+    ])
+    params = _make_params(
+        s["db"],
+        name="test",
+        description="Customer says the approval button is missing on project tasks.",
+        analysis_html="<h2>Summary</h2><p>Need an approval action.</p>",
+    )
+
+    run_ticket_issues(params)
+
+    child = s["github"].created[0]
+    assert child["title"] == "[DEV] 123 - test"
+    assert "placeholder" not in child["body"].lower()
+    assert "Customer says the approval button is missing" in child["body"]
+    assert "Need an approval action" in child["body"]
+
+
 def test_github_username_assigns_created_issues(ctx_and_fakes):
     s = ctx_and_fakes
     params = _make_params(s["db"], github_username="jane-doe")
@@ -285,23 +306,21 @@ def test_two_issues_creates_parent_and_attaches_children(ctx_and_fakes):
     assert all(i["number"] != pnum for i in cb["issues"])
 
 
-def test_single_issue_creates_epic_and_attaches(ctx_and_fakes):
-    """Every ticket gets an epic — even a single-issue plan creates the parent
-    and attaches the one child to it."""
+def test_single_issue_stays_flat(ctx_and_fakes):
+    """A single planned issue is already the ticket work item; no parent."""
     s = ctx_and_fakes
     s["planner"].plan = _plan(1)
     params = _make_params(s["db"])
 
     out = run_ticket_issues(params)
     assert out["status"] == "completed"
-    assert len(s["github"].created) == 2            # parent + 1 child
-    assert s["github"].created[0]["title"] == "[DEV] 123 - Login page broken"
-    assert "<!-- revaticketparent" in s["github"].created[0]["body"]
+    assert len(s["github"].created) == 1
+    assert s["github"].created[0]["title"] == "[DEV] 123 - Issue 1"
+    assert "<!-- revaticketparent" not in s["github"].created[0]["body"]
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
-    assert row["parent_issue"]["number"] == 101
-    assert s["github"].sub_issues == [(101, 900_000 + 102)]
-    # the Odoo callback carries only the child, not the epic
-    assert [i["number"] for i in s["odoo"].calls[0]["issues"]] == [102]
+    assert row["parent_issue"] is None
+    assert s["github"].sub_issues == []
+    assert [i["number"] for i in s["odoo"].calls[0]["issues"]] == [101]
 
 
 def test_second_run_attaches_to_existing_epic_and_sends_union(ctx_and_fakes):
@@ -327,17 +346,15 @@ def test_second_run_attaches_to_existing_epic_and_sends_union(ctx_and_fakes):
     assert all(i["state"] == "open" for i in cb["issues"])
 
 
-def test_single_issue_without_epic_creates_one(ctx_and_fakes):
-    """A single-issue request on a ticket with no epic yet creates the epic
-    itself (ticket id in the title) instead of staying flat."""
+def test_single_issue_without_epic_creates_no_parent(ctx_and_fakes):
     s = ctx_and_fakes
     s["planner"].plan = TicketIssuePlan(issues=[
         TicketIssueItem(title="One thing", body="B")])
     params = _make_params(s["db"])
     run_ticket_issues(params)
-    assert len(s["github"].created) == 2             # epic + the issue
-    assert "123" in s["github"].created[0]["title"]  # epic carries the ticket id
-    assert len(s["github"].sub_issues) == 1
+    assert len(s["github"].created) == 1
+    assert s["github"].created[0]["title"] == "[DEV] 123 - One thing"
+    assert len(s["github"].sub_issues) == 0
 
 
 def test_state_sync_sends_union_snapshot(ctx_and_fakes):
@@ -392,11 +409,10 @@ def test_typed_single_issue_title_and_labels(ctx_and_fakes):
     run_ticket_issues(params)
 
     created = s["github"].created
-    assert len(created) == 2                      # epic + the single issue
-    assert created[0]["title"] == "[CR] 123 - Login page broken"   # epic, request type
+    assert len(created) == 1
     # request type CR overrides the planner's FEAT; tldr truncated to 30; no (n/total)
-    assert created[1]["title"] == "[CR] 123 - Adjust delivery slip layout th"
-    assert created[1]["labels"] == ["reva-ticket", "CR"]
+    assert created[0]["title"] == "[CR] 123 - Adjust delivery slip layout th"
+    assert created[0]["labels"] == ["reva-ticket", "CR"]
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
     assert row["issues"][0]["type"] == "CR"
 

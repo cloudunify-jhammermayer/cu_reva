@@ -26,6 +26,7 @@ Differences from the ticket-analysis runner worth knowing:
 from __future__ import annotations
 
 import hashlib
+import re
 from collections import Counter
 
 import structlog
@@ -57,6 +58,16 @@ _TYPE_LABELS = {
 }
 _FALLBACK_TYPE = "DEV"  # plans persisted before the type rollout carry no type
 _TLDR_MAX = 30
+_BODY_MAX_CHARS = 900
+_PLACEHOLDER_VALUES = {
+    "",
+    "placeholder",
+    "todo",
+    "tbd",
+    "n/a",
+    "na",
+    "-",
+}
 
 
 def _retries_remaining() -> bool:
@@ -138,7 +149,7 @@ def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str) ->
     Odoo back-link (Contract 1: ticket_url) and the hidden dedup marker."""
     # .get: the retention purge strips bodies from old plans; a requeued
     # post-purge item still renders its criteria + back-link.
-    lines = [item.get("body", "")]
+    lines = [_compact_issue_body(item.get("body", ""))]
     if item.get("acceptance_criteria"):
         lines += ["", "### Acceptance criteria", ""]
         lines += [f"- [ ] {criterion}" for criterion in item["acceptance_criteria"]]
@@ -151,6 +162,97 @@ def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str) ->
         f"<!-- {marker} -->",
     ]
     return "\n".join(lines)
+
+
+def _plain_text(value: str) -> str:
+    """Small HTML-to-text fallback for REVA analysis snippets in issue bodies."""
+    text = re.sub(r"<[^>]+>", " ", value)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _compact_issue_body(value: str) -> str:
+    body = value.strip()
+    if len(body) <= _BODY_MAX_CHARS:
+        return body
+    cutoff = body.rfind("\n\n", 0, _BODY_MAX_CHARS)
+    if cutoff < 300:
+        cutoff = body.rfind(". ", 0, _BODY_MAX_CHARS)
+        if cutoff >= 300:
+            cutoff += 1
+    if cutoff < 300:
+        cutoff = _BODY_MAX_CHARS
+    return body[:cutoff].rstrip() + "\n\n_(Trimmed by REVA; see the Odoo ticket for full context.)_"
+
+
+def _is_placeholder(value: object) -> bool:
+    if not isinstance(value, str):
+        return True
+    normalized = re.sub(r"\s+", " ", value).strip().lower()
+    return normalized in _PLACEHOLDER_VALUES
+
+
+def _fallback_issue_title(params: TicketIssueJobParams) -> str:
+    title = params.name.strip()
+    return title if title and not _is_placeholder(title) else "Clarify ticket requirements"
+
+
+def _fallback_issue_body(params: TicketIssueJobParams) -> str:
+    sections = [
+        "Create the implementation issue from the original Odoo ticket.",
+        "",
+        f"### Ticket",
+        params.name.strip() or f"{params.model_name} #{params.ticket_id}",
+    ]
+    if params.description.strip():
+        sections += ["", "### Description", params.description.strip()]
+    if params.analysis_html.strip():
+        analysis = _plain_text(params.analysis_html)
+        if analysis:
+            sections += ["", "### REVA analysis", analysis]
+    if params.description_docx is not None:
+        sections += [
+            "",
+            "### Attachment",
+            f"Original request included `{params.description_docx.filename}`. "
+            "The file is not retained after planning; see the Odoo ticket.",
+        ]
+    return "\n".join(sections)
+
+
+def _normalize_planned_issue(item, params: TicketIssueJobParams) -> dict:
+    """Never let an empty/placeholder Claude plan create an empty GitHub issue."""
+    title = item.title
+    body = item.body
+    if _is_placeholder(title):
+        title = _fallback_issue_title(params)
+    if _is_placeholder(body):
+        body = _fallback_issue_body(params)
+    return {
+        "title": title,
+        "body": body,
+        "acceptance_criteria": item.acceptance_criteria,
+        "type": params.issue_type or item.type,
+        "number": None,
+        "url": None,
+        "state": None,
+        "id": None,
+        "attached": False,
+    }
+
+
+def _needs_parent_issue(parent: dict | None, issues: list[dict]) -> bool:
+    """Create/maintain an epic only when it adds structure.
+
+    A single planned issue is already the ticket's work item; adding a parent
+    creates two near-identical GitHub issues. Multi-issue plans still get a
+    parent, and later single-issue runs attach to an existing parent when one
+    already exists for that ticket.
+    """
+    if parent is not None:
+        return True
+    if len(issues) < 2:
+        return False
+    return any(i.get("number") is None for i in issues)
 
 
 def _parent_title(params: TicketIssueJobParams, dominant: str) -> str:
@@ -395,9 +497,7 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             log.info("ticket_issue_parent_adopted", issue=parent.get("number"))
 
     if issues is not None:
-        need_parent = parent is not None or any(
-            i.get("number") is None for i in issues
-        )
+        need_parent = _needs_parent_issue(parent, issues)
         done = all(i.get("number") is not None for i in issues)
         if need_parent:
             done = done and parent is not None and all(i.get("attached") for i in issues)
@@ -443,20 +543,7 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
                 _send_failed_callback(ctx, params, error, log)
                 raise PermanentError(error)
             response, plan = ctx.ticket_issue_planner.plan_with_response(params)
-            issues = [
-                {
-                    "title": item.title,
-                    "body": item.body,
-                    "acceptance_criteria": item.acceptance_criteria,
-                    "type": params.issue_type or item.type,
-                    "number": None,
-                    "url": None,
-                    "state": None,
-                    "id": None,
-                    "attached": False,
-                }
-                for item in plan.issues
-            ]
+            issues = [_normalize_planned_issue(item, params) for item in plan.issues]
             # Plan + spend persist BEFORE any GitHub call: a partial failure must
             # resume from this plan, never re-plan (titles would drift and the
             # issue set would duplicate).
@@ -468,9 +555,7 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
     # wizard) requests. Pre-feature runs reconciled with all issues already
     # created and no parent stay flat — we don't backfill epics (spec scope),
     # and attaching them is impossible anyway (no GitHub id on legacy items).
-    need_parent = parent is not None or any(
-        i.get("number") is None for i in issues
-    )
+    need_parent = _needs_parent_issue(parent, issues)
 
     ctx.github.ensure_label(
         token, owner, repo, _TICKET_ISSUE_LABEL,

@@ -9,16 +9,31 @@
 # Usage: scripts/core_sync.sh 17.0 18.0 19.0
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+if [ -f "$PROJECT_ROOT/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$PROJECT_ROOT/.env"
+  set +a
+fi
+
 CORE="${REVA_CORE_HOST_DIR:-/srv/reva-core}"
 CLONES="${REVA_CORE_CLONES:-/srv/odoo-mirrors}"
-COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
+COMPOSE_FILE="${COMPOSE_FILE:-$PROJECT_ROOT/docker-compose.prod.yml}"
+SYNC_ENTERPRISE="${REVA_CORE_SYNC_ENTERPRISE:-true}"
+SYNC_FETCH="${REVA_CORE_SYNC_FETCH:-true}"
 
 [ "$#" -ge 1 ] || { echo "usage: $0 <version> [version...]" >&2; exit 2; }
 
 sync_worktree() {
   local repo="$1" version="$2" dest="$3"
   shift 3
-  git -C "$CLONES/$repo" fetch origin "$version"
+  if [ "$SYNC_FETCH" = "true" ]; then
+    git -C "$CLONES/$repo" fetch origin "$version"
+  else
+    echo "  using existing $repo origin/$version because REVA_CORE_SYNC_FETCH=$SYNC_FETCH"
+  fi
   if [ ! -d "$dest" ]; then
     git -C "$CLONES/$repo" worktree add --no-checkout "$dest" "origin/$version"
     git -C "$dest" sparse-checkout init --no-cone
@@ -35,8 +50,12 @@ for version in "$@"; do
 
   sync_worktree odoo "$version" "$vdir/odoo" \
     '/*' '!**/i18n/' '!**/*.po' '!**/*.pot'
-  sync_worktree enterprise "$version" "$vdir/enterprise" \
-    '/*' '!**/i18n/' '!**/*.po' '!**/*.pot'
+  if [ "$SYNC_ENTERPRISE" = "true" ]; then
+    sync_worktree enterprise "$version" "$vdir/enterprise" \
+      '/*' '!**/i18n/' '!**/*.po' '!**/*.pot'
+  else
+    echo "  skipped enterprise@$version because REVA_CORE_SYNC_ENTERPRISE=$SYNC_ENTERPRISE"
+  fi
   sync_worktree documentation "$version" "$vdir/documentation" \
     '/content/' '!**/*.png' '!**/*.gif' '!/locale/'
 
