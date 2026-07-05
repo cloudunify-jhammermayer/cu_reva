@@ -18,7 +18,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from rq import Retry
 from sqlalchemy.exc import IntegrityError
 
-from app.dependencies import get_db, get_github_client, require_odoo_instance, ResolvedOdooInstance
+from app.dependencies import (
+    ResolvedOdooInstance,
+    assert_instance_within_budget,
+    get_db,
+    get_github_client,
+    require_odoo_instance,
+)
 from app.pagination import clamp_limit, clamp_offset
 from app.queries import ticket_issues as q
 from app.schemas.ticket_issues import (
@@ -45,9 +51,10 @@ _JOB_TIMEOUT = 300  # seconds
 # 5xx/network with this backoff; the runner resumes idempotently from its
 # persisted plan, so retrying the whole job is safe.
 _RETRY = Retry(max=3, interval=[30, 120, 300])
-# Failed jobs keep their serialized args (incl. the customer docx) in Redis —
-# RQ's default failure TTL is a YEAR, far past the 30-day DB retention purge.
-_FAILURE_TTL = 7 * 24 * 3600
+# Failed jobs keep their serialized args (incl. the customer ticket text and
+# any base64 attachment) in Redis; requeue rebuilds params from the DB row, so
+# retention buys nothing past debugging. 24h keeps redis noeviction headroom.
+_FAILURE_TTL = 24 * 3600
 # A pending run older than this has no live job (job timeout is 300s plus the
 # retry backoff above) — let ops requeue it instead of wedging the ticket.
 _STALE_PENDING = timedelta(minutes=30)
@@ -94,6 +101,7 @@ def submit_create_issues(
     Odoo's outbound timeout is 10 s and any non-202 is shown to the user with a
     transaction rollback — so validation must happen here, not in the worker.
     """
+    assert_instance_within_budget(db, instance)
     parsed = parse_github_repo_url(body.github_url)
     if parsed is None:
         raise HTTPException(

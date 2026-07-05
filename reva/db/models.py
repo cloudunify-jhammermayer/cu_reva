@@ -449,6 +449,8 @@ class TicketAnalysis(Base):
         ),
         Index("idx_ticket_analyses_status", "status"),
         Index("idx_ticket_analyses_ticket_id", "ticket_id"),
+        # List endpoint orders by created_at DESC — migration 025.
+        Index("idx_ticket_analyses_created_at", "created_at"),
         # One pending analysis per (instance, ticket, model, field) — migration
         # 020. Backs the submit dedup against a concurrent-POST race (M10).
         Index(
@@ -563,6 +565,9 @@ class OdooInstance(Base):
     callback_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
     callback_api_key_enc: Mapped[str] = mapped_column(Text, nullable=False, default="")
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Per-instance quotas (migration 026): NULL = unlimited.
+    daily_budget_usd: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    rate_limit_per_minute: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

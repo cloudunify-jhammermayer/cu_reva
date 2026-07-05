@@ -142,7 +142,7 @@ def test_ensure_repo_cold_clone_no_sha_lands_on_default_branch(runner, tmp_path)
         # ensure_repo clones the hard-coded GitHub URL; point it at our bare repo.
         cmd = list(cmd)
         if "clone" in cmd:
-            cmd[cmd.index("clone") + 1] = str(bare)
+            cmd[cmd.index("https://github.com/acme/widgets")] = str(bare)
         return real_run(cmd, *a, **k)
 
     with patch("subprocess.run", side_effect=redirect):
@@ -192,7 +192,7 @@ def test_ensure_repo_force_resets_dirty_tree(runner, tmp_path):
         # Point clone/fetch at the local bare repo instead of github.com.
         cmd = list(cmd)
         if "clone" in cmd:
-            cmd[cmd.index("clone") + 1] = str(bare)
+            cmd[cmd.index("https://github.com/acme/widgets")] = str(bare)
         elif "set-url" in cmd:
             cmd[-1] = str(bare)
         return real_run(cmd, *a, **k)
@@ -1148,3 +1148,24 @@ def test_codegraph_mcp_config_removed_after_run(cg_runner, tmp_path):
     argv = _claude_argv(mock_run)
     cfg = argv[argv.index("--mcp-config") + 1]
     assert not os.path.exists(cfg)  # temp config cleaned up like the output file
+
+
+def test_clone_uses_blob_filter(tmp_path, monkeypatch):
+    """New clones are partial clones: full history, blobs fetched on demand."""
+    from reva.claude_code_runner import ClaudeCodeRunner
+
+    runner = ClaudeCodeRunner(
+        repo_cache_dir=str(tmp_path),
+        api_key="k",
+        skills_dir=str(tmp_path),
+        prompts_dir=str(tmp_path),
+    )
+    calls: list[list[str]] = []
+    monkeypatch.setattr(runner, "_run_git_transient", lambda args: calls.append(list(args)))
+    monkeypatch.setattr(runner, "_run_git_permanent", lambda args: calls.append(list(args)))
+
+    runner.ensure_repo("owner", "repo", "a" * 40, token="tok")
+
+    clone = next(c for c in calls if "clone" in c)
+    assert "--filter=blob:none" in clone
+    assert clone.index("clone") < clone.index("--filter=blob:none")

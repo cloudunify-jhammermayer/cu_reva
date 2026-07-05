@@ -1385,3 +1385,11 @@ def test_repos_due_below_threshold_excluded(db_session):
         fid = _seed_finding(db_session, run_id, github_comment_id=200 + i)
         _add_dismissed(db_session, run_id, fid, 200 + i)
     assert writers.repos_due_for_memory_distill(db_session, min_dismissals=3) == []
+
+
+def test_ticket_analyses_has_created_at_index():
+    """The list endpoint orders by created_at DESC; migration 025 backs it."""
+    from reva.db.models import TicketAnalysis
+
+    names = {idx.name for idx in TicketAnalysis.__table__.indexes}
+    assert "idx_ticket_analyses_created_at" in names

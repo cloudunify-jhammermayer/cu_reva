@@ -39,6 +39,7 @@ def build_ticket_issue_tool_schema() -> dict[str, Any]:
     return {
         "name": TICKET_ISSUE_TOOL_NAME,
         "description": _TOOL_DESCRIPTION,
+        "strict": True,
         "input_schema": input_schema,
     }
 

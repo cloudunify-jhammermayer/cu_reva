@@ -48,6 +48,9 @@ def build_ticket_tool_schema() -> dict[str, Any]:
     return {
         "name": TICKET_TOOL_NAME,
         "description": _TOOL_DESCRIPTION,
+        # Strict structured outputs: the API validates tool input against the
+        # schema server-side, so list-as-JSON-string drift can't reach us.
+        "strict": True,
         "input_schema": input_schema,
     }
 

@@ -211,11 +211,12 @@ func (o Odoo) view(w, h int) string {
 				styleSubtitle.Render("No Odoo instances — press n to add one")))
 	}
 
-	colName, colPrefix, colHost, colA, colI, colW := 24, 16, 26, 10, 10, 9
+	colName, colPrefix, colHost, colA, colI, colW, colB := 24, 16, 26, 10, 10, 9, 12
 	hdr := lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
-		fmt.Sprintf("   %-*s  %-*s  %-*s  %*s  %*s  %*s  %*s",
+		fmt.Sprintf("   %-*s  %-*s  %-*s  %*s  %*s  %*s  %*s  %*s",
 			colName, "Name", colPrefix, "Key", colHost, "Callback",
-			colA, "Life A$", colI, "Life I$", colW, "24h$", colW, "30d$"))
+			colA, "Life A$", colI, "Life I$", colW, "24h$", colW, "30d$",
+			colB, "Budget"))
 
 	visibleRows := h - 6
 	if visibleRows < 1 {
@@ -235,19 +236,27 @@ func (o Odoo) view(w, h int) string {
 		life := it.Cost.Lifetime
 		d24 := it.Cost.Last24h.Analysis.CostUSD + it.Cost.Last24h.Issues.CostUSD
 		d30 := it.Cost.Last30d.Analysis.CostUSD + it.Cost.Last30d.Issues.CostUSD
+		budget := "—"
+		overBudget := false
+		if it.DailyBudgetUSD != nil {
+			budget = fmt.Sprintf("%.2f/%.0f", d24, *it.DailyBudgetUSD)
+			overBudget = *it.DailyBudgetUSD > 0 && d24 >= 0.9*(*it.DailyBudgetUSD)
+		}
 		active := "+"
 		if !it.Active {
 			active = "x"
 		}
-		line := fmt.Sprintf("  %s  %-*s  %-*s  %-*s  %*.2f  %*.2f  %*.2f  %*.2f",
+		line := fmt.Sprintf("  %s  %-*s  %-*s  %-*s  %*.2f  %*.2f  %*.2f  %*.2f  %*s",
 			active,
 			colName, truncate(it.Name, colName),
 			colPrefix, truncate(it.KeyPrefix, colPrefix),
 			colHost, truncate(host, colHost),
 			colA, life.Analysis.CostUSD, colI, life.Issues.CostUSD,
-			colW, d24, colW, d30)
+			colW, d24, colW, d30, colB, budget)
 		if i == o.cursor {
 			line = styleSelected.Width(w - 2).Render(line)
+		} else if overBudget {
+			line = styleStatusFailed.Render(line)
 		}
 		rows = append(rows, line)
 	}

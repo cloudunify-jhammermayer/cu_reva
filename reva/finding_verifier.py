@@ -54,6 +54,7 @@ the finding"), treat that as a sign the issue is NOT resolved and return resolve
 _VERIFY_TOOL = {
     "name": "verify_finding",
     "description": "Report whether the finding is still present in the current file.",
+    "strict": True,
     "input_schema": {
         "type": "object",
         "properties": {
@@ -95,6 +96,7 @@ finding"), treat that as a sign to KEEP the finding and return substantiated=tru
 _VERIFY_PRESENT_TOOL = {
     "name": "verify_finding_present",
     "description": "Report whether the finding is genuinely present in the current file.",
+    "strict": True,
     "input_schema": {
         "type": "object",
         "properties": {
@@ -196,7 +198,13 @@ class FindingVerifier:
             f"{_fenced_file_block(content, label)}\n\n"
             f"Is this issue still present in the current file?"
         )
-        system_blocks: list[ContentBlock] = [{"type": "text", "text": _SYSTEM_PROMPT}]
+        system_blocks: list[ContentBlock] = [
+            {
+                "type": "text",
+                "text": _SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
         response = self._claude.review(
             system_blocks=system_blocks,
             user_prompt=user_prompt,
@@ -224,7 +232,11 @@ class FindingVerifier:
             f"Is this issue genuinely present at or near the cited location?"
         )
         system_blocks: list[ContentBlock] = [
-            {"type": "text", "text": _VERIFY_PRESENT_SYSTEM_PROMPT}
+            {
+                "type": "text",
+                "text": _VERIFY_PRESENT_SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            }
         ]
         response = self._claude.review(
             system_blocks=system_blocks,

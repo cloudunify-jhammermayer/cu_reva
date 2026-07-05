@@ -40,6 +40,7 @@ RUN pip install --no-cache-dir -r worker-requirements.txt
 COPY worker/worker/ ./worker/
 COPY prompts/ ./prompts/
 COPY db/migrations/ ./db/migrations/
+COPY scripts/worker_healthcheck.py /app/scripts/worker_healthcheck.py
 
 COPY worker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

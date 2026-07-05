@@ -258,3 +258,20 @@ def test_dedup_pending(ctx_and_fakes):
     assert existing is not None
     assert existing["id"] == params["analysis_id"]
     assert existing["status"] == "pending"
+
+
+def test_instance_budget_gate_declines_before_paid_call(ctx_and_fakes, monkeypatch):
+    """An over-budget instance's queued job fails fast: no paid analyzer call."""
+    s = ctx_and_fakes
+    monkeypatch.setattr(
+        "worker.ticket_runner.instance_budget_exceeded", lambda ctx, iid: 12.5
+    )
+    params = _make_params(s["db"])
+
+    with pytest.raises(PermanentError):
+        run_ticket_analysis(params)
+
+    row = writers.get_ticket_analysis(s["db"], params["analysis_id"])
+    assert row["status"] == "failed"
+    assert "budget" in row["error_message"].lower()
+    assert s["analyzer"].call_count == 0

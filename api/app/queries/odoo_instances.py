@@ -24,6 +24,19 @@ def resolve_odoo_instance_by_key(db: Database, token: str) -> tuple[int, str] | 
         return (row[0], row[1]) if row is not None else None
 
 
+def instance_limits(db: Database, instance_id: int) -> tuple[float | None, int | None]:
+    """Return (daily_budget_usd, rate_limit_per_minute) for one instance."""
+    with db.session() as s:
+        row = s.execute(
+            select(OdooInstance.daily_budget_usd, OdooInstance.rate_limit_per_minute)
+            .where(OdooInstance.id == instance_id)
+        ).first()
+        if row is None:
+            return None, None
+        budget = float(row[0]) if row[0] is not None else None
+        return budget, row[1]
+
+
 def _sum_for(s, model, instance_id: int, since: datetime | None) -> dict:
     q = select(
         func.coalesce(func.sum(model.estimated_cost_usd), 0),
@@ -73,6 +86,10 @@ def list_odoo_instances(db: Database) -> list[dict]:
                 "key_prefix": r.key_prefix,
                 "callback_url": r.callback_url,
                 "active": r.active,
+                "daily_budget_usd": (
+                    float(r.daily_budget_usd) if r.daily_budget_usd is not None else None
+                ),
+                "rate_limit_per_minute": r.rate_limit_per_minute,
                 "created_at": r.created_at,
             }
             for r in rows

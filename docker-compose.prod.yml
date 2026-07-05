@@ -176,6 +176,7 @@ services:
       REVA_REPO_CACHE_DIR: /repos
       REVA_DEFAULT_MODEL: ${REVA_DEFAULT_MODEL:-claude-sonnet-5}
       REVA_DEEP_MODEL: ${REVA_DEEP_MODEL:-claude-opus-4-8}
+      REVA_VERIFY_MODEL: ${REVA_VERIFY_MODEL:-claude-haiku-4-5}
       REVA_CODEGRAPH_ENABLED: ${REVA_CODEGRAPH_ENABLED:-false}
       REVA_CODEGRAPH_INDEX_TIMEOUT: ${REVA_CODEGRAPH_INDEX_TIMEOUT:-180}
       # Optional rolling 24-hour spend cap (USD); unset = no cap.
@@ -187,16 +188,29 @@ services:
       - anthropic_api_key
       - reva_secret_key
     # On deploy/stop, give RQ's warm shutdown time to finish an in-flight review
-    # before Docker SIGKILLs it. Matches the review job timeout (1800s) plus a
-    # small margin. A review still in flight past this is SIGKILLed and then
-    # swept by the scheduler's stale-running reaper (REVA_STALE_RUNNING_SECONDS).
-    stop_grace_period: 1830s
+    # before Docker SIGKILLs it. Must exceed REVIEW_JOB_TIMEOUT (= LOCK_WAIT_BUDGET
+    # + SUBPROCESS_TIMEOUT + JOB_TIMEOUT_BUFFER = 2100s, reva/claude_code_runner.py);
+    # 2160s = timeout + 60s margin. A review still in flight past this is SIGKILLed
+    # and then swept by the scheduler's stale-running reaper (REVA_STALE_RUNNING_SECONDS).
+    stop_grace_period: 2160s
+    healthcheck:
+      # Liveness via RQ's TTL-refreshed rq:worker:<hostname>.* Redis key.
+      test: ["CMD-SHELL", "python /app/scripts/worker_healthcheck.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
     deploy:
+      # Two concurrent jobs: a customer-facing ticket analysis no longer queues
+      # behind a 35-min Opus audit. Cross-replica safety is designed in
+      # (advisory repo locks, atomic claims, is_already_posted) and was
+      # validated 2026-06-14. NOTE: resource limits below are PER REPLICA.
+      replicas: 2
       resources:
         limits:
           cpus: "2.0"
@@ -252,7 +266,7 @@ services:
     # metadata is tiny, so that headroom is ample. appendonly + a persistent
     # volume means a restart replays the queue instead of losing it (the
     # stale-running reaper only recovers rows that already started).
-    command: redis-server --maxmemory 256mb --maxmemory-policy noeviction --appendonly yes --requirepass ${REDIS_PASSWORD}
+    command: redis-server --maxmemory 512mb --maxmemory-policy noeviction --appendonly yes --requirepass ${REDIS_PASSWORD}
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep -q PONG"]
       interval: 10s
@@ -262,7 +276,7 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 320M
+          memory: 640M
     volumes:
       - redis_data:/data
     logging:

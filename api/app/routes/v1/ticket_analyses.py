@@ -13,7 +13,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from rq import Retry
 from sqlalchemy.exc import IntegrityError
 
-from app.dependencies import get_db, require_odoo_instance, ResolvedOdooInstance
+from app.dependencies import (
+    ResolvedOdooInstance,
+    assert_instance_within_budget,
+    get_db,
+    require_odoo_instance,
+)
 from app.pagination import clamp_limit, clamp_offset
 from app.queries import ticket_analyses as q
 from app.schemas.ticket_analyses import (
@@ -38,9 +43,10 @@ _JOB_TIMEOUT = 300  # seconds
 # "pending"). The runner resumes idempotently (reuses persisted HTML), so
 # retrying the whole job never re-pays Claude for a callback-only failure (H7).
 _RETRY = Retry(max=3, interval=[30, 120, 300])
-# Failed jobs keep their serialized args (incl. the customer ticket text) in
-# Redis; cap the TTL well under the 30-day DB retention purge.
-_FAILURE_TTL = 7 * 24 * 3600
+# Failed jobs keep their serialized args (incl. the customer ticket text and
+# any base64 attachment) in Redis; requeue rebuilds params from the DB row, so
+# retention buys nothing past debugging. 24h keeps redis noeviction headroom.
+_FAILURE_TTL = 24 * 3600
 # A pending row older than this has no live job (timeout 300s + retry backoff) —
 # let ops requeue it instead of the dedup wedging the ticket forever (H6).
 _STALE_PENDING = timedelta(minutes=30)
@@ -89,6 +95,7 @@ def submit_ticket_analysis(
     instance: ResolvedOdooInstance = Depends(require_odoo_instance),
 ) -> dict:
     """Accept a ticket text, enqueue the analysis job, and return immediately."""
+    assert_instance_within_budget(db, instance)
     if body.attachment is not None:
         try:
             classify_attachment(body.attachment.filename, body.attachment.content_base64)

@@ -58,7 +58,9 @@ def maybe_distill_memories(queue, db, now, last_distill, interval_s, min_dismiss
     return now
 
 
-def maybe_purge_ticket_text(db, now, last_purge, interval_s, retention_days):
+def maybe_purge_ticket_text(
+    db, now, last_purge, interval_s, retention_days, spend_retention_days: int = 400
+):
     """Scrub raw ticket text past the retention window if a purge is due (F1/SECU-8).
 
     Pure DB, so the scheduler runs it directly (unlike eviction). Returns the new
@@ -78,6 +80,13 @@ def maybe_purge_ticket_text(db, now, last_purge, interval_s, retention_days):
     if purged_events:
         logger.info("github_events_purged", rows=purged_events,
                     retention_days=retention_days)
+    purged_spend = writers.purge_old_claude_spend(db, spend_retention_days)
+    if purged_spend:
+        logger.info(
+            "claude_spend_purged",
+            rows=purged_spend,
+            retention_days=spend_retention_days,
+        )
     return now
 
 
@@ -168,7 +177,7 @@ def main() -> None:
         try:
             last_purge = maybe_purge_ticket_text(
                 db, now, last_purge, settings.retention_purge_interval_seconds,
-                settings.ticket_text_retention_days,
+                settings.ticket_text_retention_days, settings.spend_retention_days,
             )
         except Exception:
             logger.exception("scheduler_retention_purge_error")

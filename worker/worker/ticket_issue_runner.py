@@ -35,7 +35,7 @@ from reva.db import writers
 from reva.errors import PermanentError, TransientError
 from reva.github_urls import parse_github_repo_url
 from reva.types import TicketIssueJobParams
-from worker.runner import build_odoo_client, get_context
+from worker.runner import build_odoo_client, get_context, instance_budget_exceeded
 
 logger = structlog.get_logger()
 
@@ -400,6 +400,16 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             writers.update_ticket_issue_progress(ctx.db, params.run_id, issues)
             log.info("ticket_issues_reconciled", existing=len(existing), children=len(children))
         else:
+            spent = instance_budget_exceeded(ctx, params.odoo_instance_id)
+            if spent is not None:
+                error = (
+                    f"Odoo instance daily budget reached (~${spent:.2f} in 24h); "
+                    f"issue planning declined."
+                )
+                log.warning("ticket_issues_instance_over_budget", spent_usd=round(spent, 2))
+                writers.record_ticket_issue_run_failed(ctx.db, params.run_id, error)
+                _send_failed_callback(ctx, params, error, log)
+                raise PermanentError(error)
             response, plan = ctx.ticket_issue_planner.plan_with_response(params)
             issues = [
                 {

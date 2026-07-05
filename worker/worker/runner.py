@@ -315,6 +315,17 @@ def budget_exceeded(ctx: WorkerContext) -> float | None:
     return spent if spent >= ctx.daily_budget_usd else None
 
 
+def instance_budget_exceeded(ctx: WorkerContext, odoo_instance_id: int) -> float | None:
+    """Rolling 24h spend (USD) if an Odoo instance's cap is reached, else None."""
+    inst = writers.get_odoo_instance(ctx.db, odoo_instance_id)
+    if inst is None or inst.get("daily_budget_usd") is None:
+        return None
+    spent = writers.sum_instance_cost_since(
+        ctx.db, odoo_instance_id, datetime.now(timezone.utc) - timedelta(days=1)
+    )
+    return spent if spent >= float(inst["daily_budget_usd"]) else None
+
+
 def _budget_decline_if_exceeded(ctx: WorkerContext, log) -> ReviewResult | None:
     """Return a declined ReviewResult if the rolling 24h spend cap is reached, else None."""
     spent = budget_exceeded(ctx)
@@ -877,5 +888,4 @@ def _iso(dt: datetime | None) -> str | None:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
 

@@ -265,13 +265,16 @@ type OdooInstanceCost struct {
 }
 
 type OdooInstanceSummary struct {
-	ID          int              `json:"id"`
-	Name        string           `json:"name"`
-	KeyPrefix   string           `json:"key_prefix"`
-	CallbackURL string           `json:"callback_url"`
-	Active      bool             `json:"active"`
-	CreatedAt   time.Time        `json:"created_at"`
-	Cost        OdooInstanceCost `json:"cost"`
+	ID          int       `json:"id"`
+	Name        string    `json:"name"`
+	KeyPrefix   string    `json:"key_prefix"`
+	CallbackURL string    `json:"callback_url"`
+	Active      bool      `json:"active"`
+	CreatedAt   time.Time `json:"created_at"`
+	// Per-instance quotas; nil = unlimited.
+	DailyBudgetUSD     *float64         `json:"daily_budget_usd"`
+	RateLimitPerMinute *int             `json:"rate_limit_per_minute"`
+	Cost               OdooInstanceCost `json:"cost"`
 }
 
 type OdooInstancePage struct {

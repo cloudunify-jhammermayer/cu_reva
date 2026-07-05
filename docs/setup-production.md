@@ -168,6 +168,12 @@ sudo systemctl enable --now cloudflared
 (You can also use a token-based tunnel from the Zero Trust dashboard:
 `cloudflared service install <TOKEN>` with the ingress configured in the UI.)
 
+Gate the docs surface with Cloudflare Access. Create a Cloudflare Access
+application for `https://$REVA_DOMAIN` covering the paths `/docs` and
+`/repo-docs` (the consultant docs SPA plus its data API). Leave `/webhooks`
+(GitHub cannot SSO), `/api`, and `/health` ungated. Until this application
+exists, the docs site is reachable by anyone who can reach the tunnel hostname.
+
 ---
 
 ## 6. Start the stack

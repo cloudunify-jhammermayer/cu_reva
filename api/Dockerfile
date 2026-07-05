@@ -24,4 +24,7 @@ COPY db/migrations/ ./db/migrations/
 
 USER api
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Two processes: webhook bursts + TUI polling + docs traffic stop sharing one
+# event loop / sync-dep threadpool. The in-memory rate limiter becomes
+# per-process; nginx limit_req zones remain the real gate.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]

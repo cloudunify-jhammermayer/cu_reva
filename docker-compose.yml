@@ -92,6 +92,7 @@ services:
       REVA_REPO_CACHE_DIR: /repos
       REVA_DEFAULT_MODEL: ${REVA_DEFAULT_MODEL:-claude-sonnet-5}
       REVA_DEEP_MODEL: ${REVA_DEEP_MODEL:-claude-opus-4-8}
+      REVA_VERIFY_MODEL: ${REVA_VERIFY_MODEL:-claude-haiku-4-5}
       REVA_CODEGRAPH_ENABLED: ${REVA_CODEGRAPH_ENABLED:-false}
       REVA_CODEGRAPH_INDEX_TIMEOUT: ${REVA_CODEGRAPH_INDEX_TIMEOUT:-180}
     extra_hosts:
@@ -107,6 +108,13 @@ services:
     networks:
       - reva-net
     restart: unless-stopped
+    healthcheck:
+      # Liveness via RQ's TTL-refreshed rq:worker:<hostname>.* Redis key.
+      test: ["CMD-SHELL", "python /app/scripts/worker_healthcheck.py"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     logging: *default-logging
 
   postgres:

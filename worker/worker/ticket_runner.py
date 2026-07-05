@@ -11,7 +11,7 @@ from reva.db import writers
 from reva.errors import PermanentError, TransientError
 from reva.ticket_formatter import format_ticket_html
 from reva.types import TicketJobParams
-from worker.runner import build_odoo_client, get_context
+from worker.runner import build_odoo_client, get_context, instance_budget_exceeded
 
 logger = structlog.get_logger()
 
@@ -45,6 +45,15 @@ def run_ticket_analysis(job_params: dict) -> dict:
         log.info("ticket_analysis_resume_completed")
         html = existing["result_html"]
     else:
+        spent = instance_budget_exceeded(ctx, params.odoo_instance_id)
+        if spent is not None:
+            error = (
+                f"Odoo instance daily budget reached (~${spent:.2f} in 24h); "
+                f"analysis declined."
+            )
+            log.warning("ticket_analysis_instance_over_budget", spent_usd=round(spent, 2))
+            writers.record_ticket_analysis_failed(ctx.db, params.analysis_id, error)
+            raise PermanentError(error)
         try:
             response_obj, result = ctx.ticket_analyzer.analyze_with_response(params)
             html = format_ticket_html(result)

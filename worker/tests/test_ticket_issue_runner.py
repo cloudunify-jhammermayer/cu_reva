@@ -847,3 +847,22 @@ def test_reconcile_single_issue_has_no_parent(ctx_and_fakes):
     assert [i["number"] for i in s["odoo"].calls[-1]["issues"]] == [60]
     assert writers.get_ticket_issue_run(s["db"], params["run_id"])["parent_issue"] is None
     assert s["github"].sub_issues == []          # single issue, nothing attached
+
+
+def test_instance_budget_gate_declines_planning(ctx_and_fakes, monkeypatch):
+    """Over-budget instance: failed run + callback, no paid planning call."""
+    s = ctx_and_fakes
+    monkeypatch.setattr(
+        "worker.ticket_issue_runner.instance_budget_exceeded", lambda ctx, iid: 12.5
+    )
+    params = _make_params(s["db"])
+
+    with pytest.raises(PermanentError):
+        run_ticket_issues(params)
+
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["status"] == "failed"
+    assert "budget" in row["error_message"].lower()
+    assert s["planner"].call_count == 0
+    assert s["odoo"].calls
+    assert s["odoo"].calls[0]["status"] == "failed"

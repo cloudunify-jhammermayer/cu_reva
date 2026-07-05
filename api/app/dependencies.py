@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
@@ -59,6 +60,9 @@ def get_github_client(request: Request):
 class ResolvedOdooInstance:
     id: int
     name: str
+    # Per-instance quotas; None = unlimited.
+    daily_budget_usd: float | None = None
+    rate_limit_per_minute: int | None = None
 
 
 def require_odoo_instance(
@@ -78,7 +82,36 @@ def require_odoo_instance(
     resolved = q.resolve_odoo_instance_by_key(db, token)
     if resolved is None:
         raise HTTPException(status_code=401, detail="Invalid Odoo instance key")
-    return ResolvedOdooInstance(id=resolved[0], name=resolved[1])
+    budget, rpm = q.instance_limits(db, resolved[0])
+    from app.ratelimit import enforce_instance_rate_limit  # local: avoid cycle
+
+    enforce_instance_rate_limit(resolved[0], rpm)
+    return ResolvedOdooInstance(
+        id=resolved[0],
+        name=resolved[1],
+        daily_budget_usd=budget,
+        rate_limit_per_minute=rpm,
+    )
+
+
+def assert_instance_within_budget(db: Database, instance: ResolvedOdooInstance) -> None:
+    """429 when the instance's rolling-24h spend has reached its cap."""
+    if instance.daily_budget_usd is None:
+        return
+    from reva.db import writers
+
+    spent = writers.sum_instance_cost_since(
+        db, instance.id, datetime.now(timezone.utc) - timedelta(days=1)
+    )
+    if spent >= instance.daily_budget_usd:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Odoo instance daily budget reached "
+                f"(~${spent:.2f} of ${instance.daily_budget_usd:.2f} in 24h); "
+                f"try again after spend rolls off or raise the cap."
+            ),
+        )
 
 
 def require_api_key(request: Request, settings: Settings = Depends(get_settings)) -> None:

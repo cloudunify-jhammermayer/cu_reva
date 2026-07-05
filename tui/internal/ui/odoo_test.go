@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,6 +20,32 @@ func TestOdooLoadsAndShowsCost(t *testing.T) {
 	out := o.view(140, 30)
 	if out == "" {
 		t.Fatal("empty view")
+	}
+}
+
+func TestOdooViewShowsBudgetColumn(t *testing.T) {
+	o := newOdoo(&api.MockClient{})
+	b := 10.0
+	page := &api.OdooInstancePage{
+		Items: []api.OdooInstanceSummary{
+			{
+				ID: 1, Name: "capped", KeyPrefix: "reva_odoo_x", Active: true,
+				DailyBudgetUSD: &b,
+				Cost: api.OdooInstanceCost{Last24h: api.WindowCost{
+					Analysis: api.TaskCost{CostUSD: 3.2}}},
+			},
+			{ID: 2, Name: "unlimited", KeyPrefix: "reva_odoo_y", Active: true},
+		},
+		Total: 2,
+	}
+	o, _ = o.update(odooLoadedMsg{data: page})
+	o.width, o.height = 140, 30
+	out := o.view(140, 30)
+	if !strings.Contains(out, "3.20/10") {
+		t.Fatalf("expected budget cell '3.20/10' in view:\n%s", out)
+	}
+	if !strings.Contains(out, "Budget") {
+		t.Fatalf("expected Budget column header:\n%s", out)
 	}
 }
 

@@ -114,6 +114,10 @@ def update_instance(
         fields["callback_api_key_enc"] = _seal_outbound(body.callback_api_key)
     if body.active is not None:
         fields["active"] = body.active
+    if "daily_budget_usd" in body.model_fields_set:
+        fields["daily_budget_usd"] = body.daily_budget_usd
+    if "rate_limit_per_minute" in body.model_fields_set:
+        fields["rate_limit_per_minute"] = body.rate_limit_per_minute
     if not fields:
         raise HTTPException(status_code=422, detail="no fields to update")
     if not writers.update_odoo_instance(db, instance_id, **fields):

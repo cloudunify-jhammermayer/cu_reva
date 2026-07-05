@@ -139,6 +139,14 @@ def test_submit_enqueues_with_retry(client_db_queue):
     assert kwargs.get("failure_ttl")
 
 
+def test_failure_ttl_bounded_to_one_day(client_db_queue):
+    """Failed-job payloads carry full request bodies; keep Redis retention short."""
+    client, _, queue, headers = client_db_queue
+    client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers)
+    _, _, kwargs = queue.enqueued[0]
+    assert kwargs["failure_ttl"] <= 24 * 3600
+
+
 def test_duplicate_submit_dedups_to_one_job(client_db_queue):
     """A re-click while pending returns the same id and enqueues no second (paid) job."""
     client, _, queue, headers = client_db_queue

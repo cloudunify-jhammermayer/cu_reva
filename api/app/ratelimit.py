@@ -56,12 +56,9 @@ def _sweep(now: float) -> None:
         del _hits[key]
 
 
-def rate_limit(request: Request, settings: Settings = Depends(get_settings)) -> None:
-    limit = settings.rate_limit_per_minute
-    if not limit:
-        return
+def _check_window(key: str, limit: int, detail: str) -> None:
+    """Rolling-window check shared by global and per-instance limiters."""
     now = time.monotonic()
-    key = _client_key(request)
     global _last_sweep
     with _lock:
         if now - _last_sweep > _SWEEP_INTERVAL:
@@ -72,5 +69,19 @@ def rate_limit(request: Request, settings: Settings = Depends(get_settings)) -> 
         while window and window[0] < cutoff:
             window.popleft()
         if len(window) >= limit:
-            raise HTTPException(status_code=429, detail="Rate limit exceeded")
+            raise HTTPException(status_code=429, detail=detail)
         window.append(now)
+
+
+def enforce_instance_rate_limit(instance_id: int, limit: int | None) -> None:
+    """Per-Odoo-instance request cap. None/0 = unlimited."""
+    if not limit:
+        return
+    _check_window(f"instance:{instance_id}", limit, "Instance rate limit exceeded")
+
+
+def rate_limit(request: Request, settings: Settings = Depends(get_settings)) -> None:
+    limit = settings.rate_limit_per_minute
+    if not limit:
+        return
+    _check_window(_client_key(request), limit, "Rate limit exceeded")

@@ -1320,6 +1320,19 @@ def purge_old_github_events(db: Database, older_than_days: int) -> int:
         return result.rowcount
 
 
+def purge_old_claude_spend(db: Database, older_than_days: int) -> int:
+    """Delete claude_spend ledger rows older than `older_than_days`.
+
+    The rolling budget cap reads only the trailing 24h; cost dashboards read
+    weeks. Past the window the rows are pure unbounded growth. Returns the
+    number of rows deleted.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+    with db.session() as s:
+        result = s.execute(delete(ClaudeSpend).where(ClaudeSpend.created_at < cutoff))
+        return result.rowcount
+
+
 def get_pending_ticket_analysis(
     db: Database, ticket_id: int, model_name: str, field_name: str, odoo_instance_id: int
 ) -> dict | None:
@@ -1892,6 +1905,10 @@ def get_odoo_instance(db: Database, instance_id: int) -> dict | None:
             "callback_url": row.callback_url,
             "callback_api_key_enc": row.callback_api_key_enc,
             "active": row.active,
+            "daily_budget_usd": (
+                float(row.daily_budget_usd) if row.daily_budget_usd is not None else None
+            ),
+            "rate_limit_per_minute": row.rate_limit_per_minute,
             "created_at": row.created_at,
             "updated_at": row.updated_at,
         }
@@ -1912,8 +1929,15 @@ def rotate_odoo_instance_key(
 
 
 def update_odoo_instance(db: Database, instance_id: int, **fields: object) -> bool:
-    """Update name/callback_url/callback_api_key_enc/active. Returns False if missing."""
-    allowed = {"name", "callback_url", "callback_api_key_enc", "active"}
+    """Update mutable Odoo instance fields. Returns False if missing."""
+    allowed = {
+        "name",
+        "callback_url",
+        "callback_api_key_enc",
+        "active",
+        "daily_budget_usd",
+        "rate_limit_per_minute",
+    }
     with db.session() as s:
         row = s.get(OdooInstance, instance_id)
         if row is None:
@@ -1924,3 +1948,22 @@ def update_odoo_instance(db: Database, instance_id: int, **fields: object) -> bo
             setattr(row, key, value)
         row.updated_at = datetime.now(timezone.utc)
         return True
+
+
+def sum_instance_cost_since(db: Database, odoo_instance_id: int, since: datetime) -> float:
+    """Rolling spend (USD) for one Odoo instance across its run tables.
+
+    Extension point: when new instance-scoped paid paths land, add their tables
+    here so every per-instance budget gate reads one source.
+    """
+    total = 0.0
+    with db.session() as s:
+        for model in (TicketAnalysis, TicketIssueRun):
+            value = s.execute(
+                select(func.coalesce(func.sum(model.estimated_cost_usd), 0)).where(
+                    model.odoo_instance_id == odoo_instance_id,
+                    model.created_at >= since,
+                )
+            ).scalar_one()
+            total += float(value)
+    return total

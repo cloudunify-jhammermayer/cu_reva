@@ -188,6 +188,41 @@ def test_substantiated_missing_tool_call_keeps_with_real_usage():
     assert v.cost_usd > 0
 
 
+def test_system_prompts_are_cache_controlled():
+    """Verifier system prompts are static across calls and should be cacheable."""
+    captured = {}
+
+    class _Fake:
+        def review(self, *, system_blocks, user_prompt, tools, tool_choice, model, max_tokens):
+            captured["system_blocks"] = system_blocks
+
+            class R:
+                model = "claude-haiku-4-5"
+                input_tokens = output_tokens = 0
+                cache_read_tokens = cache_creation_tokens = 0
+                tool_use_input = {"resolved": True, "reason": "x"}
+
+            return R()
+
+    FindingVerifier(_Fake()).is_resolved(_finding(), "content")
+    assert captured["system_blocks"][0]["cache_control"] == {"type": "ephemeral"}
+
+    class _FakePresent(_Fake):
+        def review(self, **kwargs):
+            captured["system_blocks"] = kwargs["system_blocks"]
+
+            class R:
+                model = "claude-haiku-4-5"
+                input_tokens = output_tokens = 0
+                cache_read_tokens = cache_creation_tokens = 0
+                tool_use_input = {"substantiated": True, "reason": "x"}
+
+            return R()
+
+    FindingVerifier(_FakePresent()).is_substantiated(_finding(), "content")
+    assert captured["system_blocks"][0]["cache_control"] == {"type": "ephemeral"}
+
+
 # --- content windowing ----------------------------------------------------------
 
 

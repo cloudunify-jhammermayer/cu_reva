@@ -213,7 +213,11 @@ class ClaudeCodeRunner:
         if not os.path.isdir(repo_path):
             os.makedirs(os.path.dirname(repo_path), exist_ok=True)
             try:
-                self._run_git_transient(auth_args + ["clone", clean_url, repo_path])
+                # Partial clone: full commit history (delta-base ancestry
+                # checks keep working) but blobs download on demand at checkout.
+                self._run_git_transient(
+                    auth_args + ["clone", "--filter=blob:none", clean_url, repo_path]
+                )
             except Exception:
                 # Don't leave a partial clone behind — it would wedge the next
                 # attempt on the fetch path (see above).

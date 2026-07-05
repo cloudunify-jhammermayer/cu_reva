@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class OdooInstanceCreate(BaseModel):
@@ -18,6 +18,8 @@ class OdooInstanceUpdate(BaseModel):
     callback_url: str | None = None
     callback_api_key: str | None = None  # plaintext; re-encrypted when present
     active: bool | None = None
+    daily_budget_usd: float | None = Field(default=None, ge=0)
+    rate_limit_per_minute: int | None = Field(default=None, ge=1)
 
 
 class TaskCost(BaseModel):
@@ -44,6 +46,8 @@ class OdooInstanceSummary(BaseModel):
     key_prefix: str
     callback_url: str
     active: bool
+    daily_budget_usd: float | None = None
+    rate_limit_per_minute: int | None = None
     created_at: datetime
     cost: OdooInstanceCost
 
