@@ -175,6 +175,8 @@ class ReviewRun(Base):
     # Learned-memory version injected into this review's prompt (migration 024),
     # or NULL when no memory was active. Attribution for dismiss-rate trends.
     learned_memory_version: Mapped[int | None] = mapped_column(Integer)
+    # Triage pre-pass escalation ("full"/"deep"), NULL = none/off.
+    triage_escalation: Mapped[str | None] = mapped_column(Text)
     # Set when an explicit re-review clears the row's posted state; scopes crash
     # recovery to the current attempt (H3). NULL until first re-review.
     reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

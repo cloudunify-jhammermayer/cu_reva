@@ -1,3 +1,8 @@
+## v2.4 — Triage pre-pass
+
+- triage.md: new escalate-only review-depth router for push-triggered diff
+  reviews.
+
 ## v2.3 — Timesheet wording review
 
 - timesheet_review.md: new Messages-API prompt for Odoo timesheet wording

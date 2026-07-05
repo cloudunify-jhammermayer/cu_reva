@@ -166,6 +166,11 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         prompts=prompts,
         verifier=verifier,
         verify_findings_default=settings.verify_findings_default,
+        claude=claude,
+        triage_enabled=settings.triage_enabled,
+        spend_recorder=lambda k, c: writers.record_claude_spend(db, k, c),
+        ops_recorder=lambda c, s, e, d: writers.record_ops_event(db, c, s, e, d),
+        core_knowledge=core_knowledge,
     )
     auditor = Auditor(
         runner=runner,

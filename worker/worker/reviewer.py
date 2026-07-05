@@ -20,7 +20,9 @@ import structlog
 import yaml
 from pydantic import ValidationError
 
+from reva import triage as triage_mod
 from reva.claude_code_runner import ClaudeCodeRunner
+from reva.claude_client import ClaudeClient
 from reva.core_knowledge import CoreKnowledge, extract_added_definitions
 from reva.cost import estimate_cost
 from reva.diff_utils import (
@@ -237,6 +239,10 @@ class Reviewer:
         verifier: FindingVerifier | None = None,
         verify_findings_default: bool = True,
         core_knowledge: CoreKnowledge | None = None,
+        claude: ClaudeClient | None = None,
+        triage_enabled: bool = False,
+        spend_recorder: Callable[[str, float], None] | None = None,
+        ops_recorder: Callable[[str, str, str, dict], None] | None = None,
     ) -> None:
         self.runner = runner
         self.github = github
@@ -247,6 +253,10 @@ class Reviewer:
         self.verifier = verifier
         self.verify_findings_default = verify_findings_default
         self.core_knowledge = core_knowledge
+        self.claude = claude
+        self.triage_enabled = triage_enabled
+        self.spend_recorder = spend_recorder
+        self.ops_recorder = ops_recorder
 
     # ------------------------------------------------------------------ public
 
@@ -431,11 +441,44 @@ class Reviewer:
             log.info("review_skipped_trivial", diff_lines=diff_lines)
             return _skipped_trivial()
 
-        # 8c. Select the skill from the final (post-skip_paths, non-trivial) diff so
-        # content-driven routing (migration scripts, XML-only) sees what Claude will.
-        skill = _select_skill(params.review_mode, delta_base_sha is not None, diff)
+        # 8c. Optional triage pre-pass. It can only upgrade push-triggered diff
+        # reviews; explicit human intent and comment/manual jobs keep their mode.
+        effective_mode = params.review_mode
+        triage_escalation: str | None = None
+        if self._triage_allowed(params, repo_config):
+            decision, triage_cost = triage_mod.decide(
+                self.claude,  # type: ignore[arg-type]
+                getattr(self.runner, "prompts_dir", "prompts"),
+                diff,
+                changed_files,
+                params.review_mode,
+            )
+            self._record_spend("triage", triage_cost)
+            if decision.reason.startswith("error:"):
+                self._record_ops_event(
+                    "triage",
+                    "warning",
+                    "decide_failed",
+                    {
+                        "repository_id": params.repository_id,
+                        "pull_request_id": params.pull_request_id,
+                        "reason": decision.reason[:300],
+                    },
+                )
+            if decision.escalate != "none":
+                effective_mode = decision.escalate
+                triage_escalation = decision.escalate
+                log.info(
+                    "review_triage_escalated",
+                    to=decision.escalate,
+                    reason=decision.reason,
+                )
 
-        # 8d. Optional stricter cap for XML-only PRs (view dumps are verbose). Only
+        # 8d. Select the skill from the final (post-skip_paths, non-trivial) diff so
+        # content-driven routing (migration scripts, XML-only) sees what Claude will.
+        skill = _select_skill(effective_mode, delta_base_sha is not None, diff)
+
+        # 8e. Optional stricter cap for XML-only PRs (view dumps are verbose). Only
         # acts when configured; the general max_diff_lines/tokens guard already ran.
         if skill == "reva-xml-review":
             if repo_config.max_xml_diff_lines is not None and diff_lines > repo_config.max_xml_diff_lines:
@@ -452,7 +495,7 @@ class Reviewer:
                 )
 
         # 9. Select model.
-        model = self.runner.deep_model if params.review_mode == "deep" else self.runner.default_model
+        model = self.runner.deep_model if effective_mode == "deep" else self.runner.default_model
 
         # Muted categories, fetched once: steer the prompt away from them
         # (below) and keep the post-hoc drop as the enforcement backstop.
@@ -632,7 +675,7 @@ class Reviewer:
         verify_cost = 0.0
         if verify_enabled:
             grounded, verify_cost = self._verify_findings(
-                grounded, repo_path, params.review_mode,
+                grounded, repo_path, effective_mode,
                 repo_config.block_on_severity, verify_budget_ok,
             )
         capped = _cap_findings(grounded, MAX_FINDINGS)
@@ -668,9 +711,46 @@ class Reviewer:
             delta_base_sha=delta_base_sha,
             learned_memory_version=learned_memory_version,
             block_on_severity=repo_config.block_on_severity,
+            triage_escalation=triage_escalation,
         )
 
     # ----------------------------------------------------------------- helpers
+
+    def _triage_allowed(self, params: JobParams, repo_config: RepoConfig) -> bool:
+        return (
+            self.triage_enabled
+            and self.claude is not None
+            and repo_config.triage
+            and params.review_mode in ("diff", "diff-all")
+            and params.trigger_event in (
+                "opened",
+                "synchronize",
+                "reopened",
+                "ready_for_review",
+            )
+        )
+
+    def _record_spend(self, kind: str, cost: float) -> None:
+        if self.spend_recorder is None or cost <= 0:
+            return
+        try:
+            self.spend_recorder(kind, cost)
+        except Exception:
+            logger.warning("spend_recorder_failed", kind=kind, exc_info=True)
+
+    def _record_ops_event(
+        self,
+        component: str,
+        severity: str,
+        event: str,
+        detail: dict,
+    ) -> None:
+        if self.ops_recorder is None:
+            return
+        try:
+            self.ops_recorder(component, severity, event, detail)
+        except Exception:
+            logger.warning("ops_recorder_failed", ops_event=event, exc_info=True)
 
     def _verify_findings(
         self,

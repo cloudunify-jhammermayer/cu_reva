@@ -201,6 +201,7 @@ def record_review_completed(db: Database, params: JobParams, result: ReviewResul
         run.estimated_cost_usd = result.estimated_cost_usd
         run.risk_level = result.risk_level
         run.summary = result.summary
+        run.triage_escalation = result.triage_escalation
         run.finding_count = len(result.findings)
         run.decline_reason = None
         run.error_message = None

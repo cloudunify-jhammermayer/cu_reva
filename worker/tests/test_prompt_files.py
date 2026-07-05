@@ -44,7 +44,7 @@ def test_prompts_dir_exists():
 
 
 def test_get_version_returns_current_version(builder):
-    assert builder.get_version() == "v2.3"
+    assert builder.get_version() == "v2.4"
 
 
 def test_odoo_severity_rules_in_sync_with_odoo19_md():

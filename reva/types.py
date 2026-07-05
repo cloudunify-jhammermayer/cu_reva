@@ -77,6 +77,9 @@ class RepoConfig(BaseModel):
     # Kill switch for per-repo learned memory (Tier 3 B): false disables both
     # injecting the learned block and distilling new versions for this repo.
     learned_memory: bool = True
+    # Kill switch for the default-off triage pre-pass. Global
+    # REVA_TRIAGE_ENABLED must also be true.
+    triage: bool = True
     # Which /core version reviews consult, e.g. "19.0". None disables it.
     odoo_version: str | None = None
 
@@ -182,6 +185,8 @@ class ReviewResult(BaseModel):
     # Learned-memory version injected into this review's prompt (Tier 3 B), or
     # None when none was active/allowed. Runner stamps it onto the run row.
     learned_memory_version: int | None = None
+    # Set when the triage pre-pass upgraded this run's effective review depth.
+    triage_escalation: str | None = None
 
 
 # --- Job parameters -----------------------------------------------------------

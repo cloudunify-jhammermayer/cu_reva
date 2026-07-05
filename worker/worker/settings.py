@@ -49,6 +49,8 @@ class Settings:
     core_knowledge_enabled: bool = False
     core_knowledge_dir: str = "/core"
     core_versions: list[str] = field(default_factory=list)
+    # Escalate-only Haiku pre-pass for push-triggered diff reviews. Default off.
+    triage_enabled: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -96,6 +98,8 @@ class Settings:
                 for version in os.environ.get("REVA_CORE_VERSIONS", "").split(",")
                 if version.strip()
             ],
+            triage_enabled=os.environ.get("REVA_TRIAGE_ENABLED", "false").lower()
+            in ("1", "true", "yes"),
         )
 
 
