@@ -243,6 +243,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case failuresLoadedMsg:
 		a.failures, _ = a.failures.update(msg)
 
+	case opsEventsLoadedMsg:
+		a.failures, _ = a.failures.update(msg)
+
 	case findingsLoadedMsg:
 		a.findings, _ = a.findings.update(msg)
 
@@ -438,7 +441,7 @@ func (a *App) statusBar() string {
 	case viewFindings:
 		hint = "j/k·g/G·pgup/dn nav | / filter | o=open PR | a/c/m/n/i severity | r=refresh | q quit"
 	case viewFailures:
-		hint = "j/k navigate | e=requeue | r=refresh | q quit"
+		hint = "j/k navigate | v=runs/events | e=requeue | r=refresh | q quit"
 	case viewRepos:
 		hint = "j/k·g/G nav | / filter | n=add repo | a=audit | o=open in browser | r=refresh | q quit"
 	case viewPending:

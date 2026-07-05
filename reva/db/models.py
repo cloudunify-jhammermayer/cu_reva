@@ -654,6 +654,29 @@ class ClaudeSpend(Base):
     __table_args__ = (Index("idx_claude_spend_created", "created_at"),)
 
 
+# ------------------------------------------------------------------ ops_events
+
+
+class OpsEvent(Base):
+    """A caught-and-degraded component error (mirrors db/migrations/027)."""
+
+    __tablename__ = "ops_events"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    component: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(Text, nullable=False)
+    event: Mapped[str] = mapped_column(Text, nullable=False)
+    detail: Mapped[Any | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_ops_events_created_at", "created_at"),
+        Index("idx_ops_events_component", "component"),
+    )
+
+
 # ------------------------------------------------------------- weekly_reports
 
 

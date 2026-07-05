@@ -110,6 +110,11 @@ func (c *Client) Failures(limit int) (*FailurePage, error) {
 	return &p, c.get(fmt.Sprintf("/failures?limit=%d", limit), &p)
 }
 
+func (c *Client) OpsEvents(limit int) (*OpsEventPage, error) {
+	var p OpsEventPage
+	return &p, c.get(fmt.Sprintf("/ops-events?limit=%d", limit), &p)
+}
+
 func (c *Client) Pending() (*PendingPage, error) {
 	var p PendingPage
 	return &p, c.get("/pending", &p)

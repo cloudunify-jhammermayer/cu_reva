@@ -41,6 +41,9 @@ class Settings:
     # Delete claude_spend ledger rows older than this; budget cap needs 24h,
     # dashboards keep more than a year.
     spend_retention_days: int = 400
+    # Ops-event log retention: component degradations older than this are
+    # deleted by the daily retention pass.
+    ops_events_retention_days: int = 30
     # Per-repo learned-memory distillation (Tier 3 feature B). Daily by default;
     # a repo is due when it has >= this many dismissals with newer signal than
     # its active memory version.
@@ -78,6 +81,9 @@ class Settings:
                 os.environ.get("REVA_RETENTION_PURGE_INTERVAL_SECONDS", "86400")
             ),
             spend_retention_days=int(os.environ.get("REVA_SPEND_RETENTION_DAYS", "400")),
+            ops_events_retention_days=int(
+                os.environ.get("REVA_OPS_EVENTS_RETENTION_DAYS", "30")
+            ),
             memory_distill_interval_seconds=int(
                 os.environ.get("REVA_MEMORY_DISTILL_INTERVAL_SECONDS", "86400")
             ),

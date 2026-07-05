@@ -82,6 +82,10 @@ def run_ticket_analysis(job_params: dict) -> dict:
     except (PermanentError, TransientError):
         # DB row is already completed; log and let RQ handle retry/failure.
         log.warning("ticket_analysis_odoo_callback_error", exc_info=True)
+        writers.record_ops_event(ctx.db, "odoo_callback", "error", "write_field_failed", {
+            "analysis_id": params.analysis_id,
+            "ticket_id": params.ticket_id,
+        })
         raise
 
     log.info("ticket_analysis_done")

@@ -213,6 +213,21 @@ type DashboardMetrics struct {
 	TotalCost7d        float64       `json:"total_cost_7d"`
 	AvgCostPerReview7d *float64      `json:"avg_cost_per_review_7d"`
 	ActiveWorkers      int           `json:"active_workers"`
+	Degradations24h    int           `json:"degradations_24h"`
+}
+
+type OpsEventEntry struct {
+	ID        int            `json:"id"`
+	Component string         `json:"component"`
+	Severity  string         `json:"severity"`
+	Event     string         `json:"event"`
+	Detail    map[string]any `json:"detail"`
+	CreatedAt time.Time      `json:"created_at"`
+}
+
+type OpsEventPage struct {
+	Items []OpsEventEntry `json:"items"`
+	Total int             `json:"total"`
 }
 
 // LearningStat is one (repo, category) row of the Tier-3 feedback statistic:

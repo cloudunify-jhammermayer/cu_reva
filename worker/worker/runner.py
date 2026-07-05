@@ -136,6 +136,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         prompts_dir=settings.prompts_dir,
         codegraph_enabled=settings.codegraph_enabled,
         codegraph_index_timeout=settings.codegraph_index_timeout,
+        ops_recorder=lambda c, s, e, d: writers.record_ops_event(db, c, s, e, d),
     )
     runner.evict_stale_repos(ttl_days=settings.repo_cache_ttl_days)
     logger.info("repo_cache_eviction_done", ttl_days=settings.repo_cache_ttl_days)
@@ -888,4 +889,3 @@ def _iso(dt: datetime | None) -> str | None:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-

@@ -295,6 +295,32 @@ func (m *MockClient) Failures(limit int) (*FailurePage, error) {
 	return &FailurePage{Items: items[:n], Total: len(items)}, nil
 }
 
+func (m *MockClient) OpsEvents(limit int) (*OpsEventPage, error) {
+	now := time.Now()
+	items := []OpsEventEntry{
+		{
+			ID: 3, Component: "codegraph", Severity: "warning", Event: "index_failed",
+			Detail:    map[string]any{"repo": "acme/odoo-modules"},
+			CreatedAt: now.Add(-10 * time.Minute),
+		},
+		{
+			ID: 2, Component: "odoo_callback", Severity: "error", Event: "write_field_failed",
+			Detail:    map[string]any{"analysis_id": 12},
+			CreatedAt: now.Add(-1 * time.Hour),
+		},
+		{
+			ID: 1, Component: "git", Severity: "warning", Event: "timeout",
+			Detail:    map[string]any{"cmd": "fetch"},
+			CreatedAt: now.Add(-3 * time.Hour),
+		},
+	}
+	n := limit
+	if n > len(items) {
+		n = len(items)
+	}
+	return &OpsEventPage{Items: items[:n], Total: len(items)}, nil
+}
+
 func (m *MockClient) Pending() (*PendingPage, error) {
 	now := time.Now()
 	items := []PendingReview{

@@ -6,6 +6,7 @@ type ClientIface interface {
 	Reviews(limit int, repo, status, author string) (*ReviewPage, error)
 	ReviewDetail(id int) (*ReviewDetail, error)
 	Failures(limit int) (*FailurePage, error)
+	OpsEvents(limit int) (*OpsEventPage, error)
 	Requeue(id int) error
 	Pending() (*PendingPage, error)
 	Findings(severity, category string, limit int) (*FindingPage, error)

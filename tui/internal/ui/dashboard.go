@@ -140,5 +140,9 @@ func (d Dashboard) renderCostCard(m *api.DashboardMetrics, pendingCount, w int) 
 		b.WriteString(fmt.Sprintf("  Workers %s\n",
 			styleSubtitle.Render("0 active")))
 	}
+	if m.Degradations24h > 0 {
+		b.WriteString(fmt.Sprintf("  Degrade %s\n",
+			styleStatusFailed.Render(fmt.Sprintf("%d events (24h)", m.Degradations24h))))
+	}
 	return styleBorder.Width(w).Render(b.String())
 }

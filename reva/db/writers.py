@@ -32,6 +32,7 @@ from reva.db.models import (
     GithubEvent,
     MutedCategory,
     OdooInstance,
+    OpsEvent,
     PendingReview,
     PromptVersion,
     PullRequest,
@@ -1330,6 +1331,43 @@ def purge_old_claude_spend(db: Database, older_than_days: int) -> int:
     cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
     with db.session() as s:
         result = s.execute(delete(ClaudeSpend).where(ClaudeSpend.created_at < cutoff))
+        return result.rowcount
+
+
+# ------------------------------------------------------------------ ops events
+
+
+def record_ops_event(
+    db: Database,
+    component: str,
+    severity: str,
+    event: str,
+    detail: dict | None = None,
+) -> None:
+    """Persist a caught-and-degraded component error.
+
+    Safe-to-fail by contract: this is called from degradation paths, so an
+    ops-log write must never break the operation it observes.
+    """
+    try:
+        with db.session() as s:
+            s.add(OpsEvent(
+                component=component,
+                severity=severity,
+                event=event,
+                detail=detail,
+            ))
+    except Exception:
+        logger.warning(
+            "ops_event_write_failed", component=component, ops_event=event, exc_info=True
+        )
+
+
+def purge_old_ops_events(db: Database, older_than_days: int) -> int:
+    """Delete ops_events older than the retention window. Returns rows deleted."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+    with db.session() as s:
+        result = s.execute(delete(OpsEvent).where(OpsEvent.created_at < cutoff))
         return result.rowcount
 
 

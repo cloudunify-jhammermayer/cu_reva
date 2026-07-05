@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -112,6 +113,7 @@ class ClaudeCodeRunner:
         deep_model: str = DEEP_MODEL,
         codegraph_enabled: bool = False,
         codegraph_index_timeout: int = _CODEGRAPH_INDEX_TIMEOUT,
+        ops_recorder: Callable[[str, str, str, dict], None] | None = None,
     ) -> None:
         self.repo_cache_dir = repo_cache_dir
         self.api_key = api_key
@@ -125,6 +127,7 @@ class ClaudeCodeRunner:
         # MCP (cheaper, more cross-file-aware). Default off; pinned/validated first.
         self.codegraph_enabled = codegraph_enabled
         self.codegraph_index_timeout = codegraph_index_timeout
+        self.ops_recorder = ops_recorder
 
     # ------------------------------------------------------------------ public
 
@@ -424,6 +427,20 @@ class ClaudeCodeRunner:
         env["GIT_TERMINAL_PROMPT"] = "0"
         return env
 
+    def _record_ops(self, component: str, severity: str, event: str, detail: dict) -> None:
+        """Forward a degradation to the injected ops recorder.
+
+        The runner stays DB-free; the worker injects a closure over
+        writers.record_ops_event. Never raises because the observer must not
+        break the observed operation.
+        """
+        if self.ops_recorder is None:
+            return
+        try:
+            self.ops_recorder(component, severity, event, detail)
+        except Exception:
+            logger.warning("ops_recorder_failed", ops_event=event, exc_info=True)
+
     def _codegraph_prepare(self, repo_path: str) -> str | None:
         """Index the clone with CodeGraph and write an MCP config for the CLI.
 
@@ -444,10 +461,18 @@ class ClaudeCodeRunner:
             )
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
             logger.warning("codegraph_index_skipped", repo=repo_path, error=str(exc))
+            self._record_ops(
+                "codegraph", "warning", "index_skipped",
+                {"repo": repo_path, "error": str(exc)},
+            )
             return None
         if result.returncode != 0:
             logger.warning(
                 "codegraph_index_failed", repo=repo_path, stderr=(result.stderr or "")[:200]
+            )
+            self._record_ops(
+                "codegraph", "warning", "index_failed",
+                {"repo": repo_path, "error": (result.stderr or "")[:200]},
             )
             return None
         # Positive signal: the index built and the MCP server will be exposed to
@@ -572,6 +597,10 @@ class ClaudeCodeRunner:
             # A timeout is always transient (network/load), regardless of the
             # caller's error_class — retrying is the right move, and it must not
             # be allowed to hang forever under the per-repo lock.
+            self._record_ops(
+                "git", "warning", "timeout",
+                {"cmd": cmd, "timeout_s": _GIT_TIMEOUT},
+            )
             raise TransientError(
                 f"git {cmd} timed out after {_GIT_TIMEOUT}s"
             ) from exc

@@ -13,6 +13,7 @@ from sqlalchemy import Engine, case, func, select
 from reva.db.engine import Database
 from reva.db.models import (
     MutedCategory,
+    OpsEvent,
     PullRequest,
     RepoReviewMemory,
     Repository,
@@ -113,6 +114,10 @@ def dashboard_metrics(db: Database, redis_conn=None) -> dict:
         ).one()
         total_cost = float(cost_row.total)
         avg_cost = float(total_cost / cost_row.cnt) if cost_row.cnt else None
+        degradations_24h = s.execute(
+            select(func.count()).select_from(OpsEvent)
+            .where(OpsEvent.created_at >= since_24h)
+        ).scalar_one()
 
     return {
         "last_24h": stats_24h,
@@ -126,6 +131,7 @@ def dashboard_metrics(db: Database, redis_conn=None) -> dict:
         "total_cost_7d": total_cost,
         "avg_cost_per_review_7d": avg_cost,
         "active_workers": _count_workers(redis_conn),
+        "degradations_24h": int(degradations_24h),
     }
 
 

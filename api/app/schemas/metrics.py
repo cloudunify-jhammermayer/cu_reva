@@ -28,6 +28,7 @@ class DashboardMetrics(BaseModel):
     total_cost_7d: float
     avg_cost_per_review_7d: float | None
     active_workers: int = 0
+    degradations_24h: int = 0
 
 
 class DeveloperStat(BaseModel):

@@ -20,6 +20,11 @@ type Failures struct {
 	width     int
 	height    int
 	statusMsg string
+
+	showEvents  bool
+	events      []api.OpsEventEntry
+	eventsTotal int
+	eventsErr   error
 }
 
 func newFailures(client api.ClientIface) Failures {
@@ -27,10 +32,17 @@ func newFailures(client api.ClientIface) Failures {
 }
 
 func (f Failures) load() tea.Cmd {
-	return func() tea.Msg {
-		data, err := f.client.Failures(50)
-		return failuresLoadedMsg{data: data, err: err}
-	}
+	client := f.client
+	return tea.Batch(
+		func() tea.Msg {
+			data, err := client.Failures(50)
+			return failuresLoadedMsg{data: data, err: err}
+		},
+		func() tea.Msg {
+			data, err := client.OpsEvents(100)
+			return opsEventsLoadedMsg{data: data, err: err}
+		},
+	)
 }
 
 func (f Failures) update(msg tea.Msg) (Failures, tea.Cmd) {
@@ -50,6 +62,13 @@ func (f Failures) update(msg tea.Msg) (Failures, tea.Cmd) {
 			f.offset = 0
 		}
 
+	case opsEventsLoadedMsg:
+		f.eventsErr = m.err
+		if m.data != nil {
+			f.events = m.data.Items
+			f.eventsTotal = m.data.Total
+		}
+
 	case requeuedMsg:
 		if m.err != nil {
 			f.statusMsg = styleStatusFailed.Render("requeue failed: " + m.err.Error())
@@ -67,6 +86,10 @@ func (f Failures) update(msg tea.Msg) (Failures, tea.Cmd) {
 			return f, nil
 		}
 		switch m.String() {
+		case "v":
+			f.showEvents = !f.showEvents
+			f.cursor, f.offset = 0, 0
+			return f, nil
 		case "r":
 			f.loading = true
 			f.statusMsg = ""
@@ -86,6 +109,9 @@ func (f Failures) update(msg tea.Msg) (Failures, tea.Cmd) {
 }
 
 func (f Failures) view(w, h int) string {
+	if f.showEvents {
+		return f.eventsView(w, h)
+	}
 
 	header := styleTitle.Padding(0, 1).Render(fmt.Sprintf("Failures  (%d)", f.total))
 
@@ -188,6 +214,62 @@ func (f Failures) view(w, h int) string {
 		return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", detail, "", posLine)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, "", table, "", posLine)
+}
+
+func (f Failures) eventsView(w, h int) string {
+	header := styleTitle.Padding(0, 1).Render(
+		fmt.Sprintf("Component Events (%d)", f.eventsTotal))
+	if f.eventsErr != nil {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "",
+			styleStatusFailed.Render("  Error: "+f.eventsErr.Error()))
+	}
+	if len(f.events) == 0 {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "",
+			lipgloss.Place(w, h-3, lipgloss.Center, lipgloss.Center,
+				styleSubtitle.Render("No component degradations — all good")),
+			styleSubtitle.Render("  [v] back to failed runs"))
+	}
+
+	visibleRows := h - 5
+	if visibleRows < 1 {
+		visibleRows = 1
+	}
+	colSev, colComp, colEvent, colWhen := 8, 16, 28, 10
+	colDetail := w - colSev - colComp - colEvent - colWhen - 12
+	if colDetail < 10 {
+		colDetail = 10
+	}
+
+	hdr := lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
+		fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s",
+			colSev, "Severity", colComp, "Component", colEvent, "Event",
+			colWhen, "When", colDetail, "Detail"))
+	rows := []string{hdr}
+
+	end := visibleRows
+	if end > len(f.events) {
+		end = len(f.events)
+	}
+	for _, e := range f.events[:end] {
+		detail := ""
+		for k, v := range e.Detail {
+			detail += fmt.Sprintf("%s=%v ", k, v)
+		}
+		sev := e.Severity
+		if e.Severity == "error" {
+			sev = styleStatusFailed.Render("error")
+		}
+		rows = append(rows, fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s",
+			colSev, sev,
+			colComp, truncate(e.Component, colComp),
+			colEvent, truncate(e.Event, colEvent),
+			colWhen, relativeTime(e.CreatedAt),
+			colDetail, truncate(strings.TrimSpace(detail), colDetail)))
+	}
+	footer := styleSubtitle.Render("  [v] back to failed runs   [r] refresh") +
+		cappedNote(end, f.eventsTotal)
+	return lipgloss.JoinVertical(lipgloss.Left, header, "",
+		strings.Join(rows, "\n"), "", footer)
 }
 
 func (f Failures) renderDetail(item api.ReviewDetail, w int) string {

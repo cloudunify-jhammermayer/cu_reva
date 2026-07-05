@@ -19,6 +19,10 @@ type failuresLoadedMsg struct {
 	data *api.FailurePage
 	err  error
 }
+type opsEventsLoadedMsg struct {
+	data *api.OpsEventPage
+	err  error
+}
 type requeuedMsg struct {
 	id  int
 	err error

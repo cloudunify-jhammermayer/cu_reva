@@ -190,6 +190,13 @@ def _send_failed_callback(ctx, params: TicketIssueJobParams, error: str, log) ->
         )
     except Exception:
         log.warning("ticket_issues_failed_callback_error", exc_info=True)
+        writers.record_ops_event(
+            ctx.db,
+            "odoo_callback",
+            "error",
+            "issues_failed_callback_error",
+            {"run_id": params.run_id, "ticket_id": params.ticket_id},
+        )
 
 
 def run_ticket_issues(job_params: dict) -> dict:
