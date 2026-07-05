@@ -239,8 +239,10 @@ func (o Odoo) view(w, h int) string {
 			version = *it.OdooVersion
 		}
 		life := it.Cost.Lifetime
-		d24 := it.Cost.Last24h.Analysis.CostUSD + it.Cost.Last24h.Issues.CostUSD
-		d30 := it.Cost.Last30d.Analysis.CostUSD + it.Cost.Last30d.Issues.CostUSD
+		// Total() covers every kind the quota gate sums (incl. timesheets) —
+		// the budget cell must agree with the API's 429 behavior.
+		d24 := it.Cost.Last24h.Total()
+		d30 := it.Cost.Last30d.Total()
 		budget := "—"
 		overBudget := false
 		if it.DailyBudgetUSD != nil {

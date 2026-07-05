@@ -34,6 +34,9 @@ class TaskCost(BaseModel):
 class WindowCost(BaseModel):
     analysis: TaskCost
     issues: TaskCost
+    # Defaulted so pre-timesheet payloads/fixtures still validate.
+    timesheets: TaskCost = TaskCost(cost_usd=0.0, input_tokens=0,
+                                    output_tokens=0, count=0)
 
 
 class OdooInstanceCost(BaseModel):

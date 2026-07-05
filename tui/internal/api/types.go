@@ -299,8 +299,16 @@ type TaskCost struct {
 }
 
 type WindowCost struct {
-	Analysis TaskCost `json:"analysis"`
-	Issues   TaskCost `json:"issues"`
+	Analysis   TaskCost `json:"analysis"`
+	Issues     TaskCost `json:"issues"`
+	Timesheets TaskCost `json:"timesheets"`
+}
+
+// Total is the window's full spend — every kind the per-instance quota gate
+// sums. Display code must use this (not Analysis+Issues) or the shown spend
+// disagrees with the API's 429 behavior.
+func (w WindowCost) Total() float64 {
+	return w.Analysis.CostUSD + w.Issues.CostUSD + w.Timesheets.CostUSD
 }
 
 type OdooInstanceCost struct {

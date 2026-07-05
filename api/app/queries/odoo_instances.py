@@ -8,7 +8,12 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 
 from reva.db.engine import Database
-from reva.db.models import OdooInstance, TicketAnalysis, TicketIssueRun
+from reva.db.models import (
+    OdooInstance,
+    TicketAnalysis,
+    TicketIssueRun,
+    TimesheetReviewRun,
+)
 
 
 def resolve_odoo_instance_by_key(db: Database, token: str) -> tuple[int, str] | None:
@@ -69,6 +74,10 @@ def get_odoo_instance_cost(db: Database, instance_id: int) -> dict:
             out[label] = {
                 "analysis": _sum_for(s, TicketAnalysis, instance_id, since),
                 "issues": _sum_for(s, TicketIssueRun, instance_id, since),
+                # Must cover every table the quota gate sums
+                # (writers.sum_instance_cost_since) or the displayed 24h spend
+                # disagrees with the 429 behavior (review finding #4).
+                "timesheets": _sum_for(s, TimesheetReviewRun, instance_id, since),
             }
     return out
 
