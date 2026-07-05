@@ -20,6 +20,7 @@
 - Constants fixed by the spec: chunk size **100**; stale-pending threshold **60 min**; RQ `Retry(max=3, interval=[60, 300, 900])`; `failure_ttl` 7 days; `job_timeout = max(600, 120 * n_chunks)`; request caps: lines ≤ 5000, description ≤ 4000 chars, flagged_words ≤ 500 items × ≤ 100 chars, request_id ≤ 128 chars.
 - Roles enum: exactly `developer`, `consultant`, `sales`. Line statuses: exactly `ok`, `rewritten`, `needs_human`.
 - TUI: `cd tui && go build ./... && go vet ./... && go test ./...` must stay green.
+- Contract publication (contract-tests spec, 2026-07-05): the `/hr/timesheet-results` callback must have a payload model + `CONTRACTS` entry in `reva/odoo_contracts.py` and a regenerated `contracts/`; the coverage drift test fails otherwise.
 
 ---
 

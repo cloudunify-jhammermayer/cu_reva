@@ -1,6 +1,6 @@
 # Odoo↔REVA Contract Tests Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Machine-checkable Odoo↔REVA contracts: Pydantic payload models used at runtime, generated `contracts/` artifacts (schemas + samples + path manifest), drift/coverage tests, and a sync script for the ast-odoo repo — so path/shape drift fails tests instead of production.
 
@@ -30,7 +30,7 @@
   - Models: `WriteFieldPayload(ticket_id, model_name, field_name, html)`, `ResetStatusPayload(ticket_id, model_name)`, `IssueRefPayload(number, title, url, state)`, `IssuesCreatedPayload(ticket_id, model_name, request_id, status, issues, error)`, `IssueStatePayload(ticket_id, model_name, number, state, issues)`
   - `CONTRACTS: list[Contract]` (dataclass: `name, direction, method, path, auth, model | None, sample: dict`) — the single source for the manifest; inbound entries reference `TicketAnalysisRequest`, `CreateIssuesRequest`, and the health/error shapes.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `worker/tests/test_odoo_contracts.py`:
 
@@ -123,12 +123,12 @@ def test_failed_issues_created_sample_exists():
     assert any(s.get("status") == "failed" for c in ic for s in c.extra_samples + [c.sample])
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_odoo_contracts.py -q`
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 3: Implement `reva/odoo_contracts.py`**
+- [x] **Step 3: Implement `reva/odoo_contracts.py`**
 
 ```python
 """Odoo↔REVA contract source of truth (contract-tests spec).
@@ -303,7 +303,7 @@ union construction — the docstring contract says `{"number","title","url",
 `IssueRefPayload` is a *deliberate contract enforcement*; note it in the
 commit message.
 
-- [ ] **Step 4: Add the api-side inbound validation test**
+- [x] **Step 4: Add the api-side inbound validation test**
 
 The worker suite cannot import `app.*`, so the inbound samples validate in
 the api suite. Create `api/tests/test_contracts_inbound.py`:
@@ -339,12 +339,12 @@ def test_all_inbound_request_contracts_covered():
     )
 ```
 
-- [ ] **Step 5: Run to verify pass**
+- [x] **Step 5: Run to verify pass**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_odoo_contracts.py -q && cd ../api && .venv/bin/python -m pytest tests/test_contracts_inbound.py -q`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add reva/odoo_contracts.py worker/tests/test_odoo_contracts.py api/tests/test_contracts_inbound.py
@@ -359,7 +359,7 @@ git commit -m "feat(contracts): payload models + CONTRACTS table + samples"
 - Modify: `reva/odoo_client.py` (four methods)
 - Test: existing `worker/tests/test_odoo_client.py` must pass UNCHANGED (it asserts exact wire bodies — that's the regression gate)
 
-- [ ] **Step 1: Rewrite the four bodies**
+- [x] **Step 1: Rewrite the four bodies**
 
 In `reva/odoo_client.py`, import the models:
 
@@ -402,12 +402,12 @@ and replace each inline dict:
 
 (keep each method's docstring + logging lines untouched).
 
-- [ ] **Step 2: Run the regression gate**
+- [x] **Step 2: Run the regression gate**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_odoo_client.py tests/test_ticket_runner.py tests/test_ticket_issue_runner.py -q`
 Expected: PASS with **zero test edits**. If `test_issues_created_posts_contract_payload_to_sibling_path` fails on the body equality, the runner passed richer issue dicts than documented — inspect the diff: only undocumented keys (`id`, `attached`, `body`, `acceptance_criteria`, `type`) may disappear. Update that one test's expectation to the documented shape and say so in the commit message (contract enforcement, verified against the Odoo handler's documented reader fields).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add reva/odoo_client.py worker/tests/test_odoo_client.py
@@ -426,7 +426,7 @@ git commit -m "refactor(odoo): callbacks build bodies via contract models"
 **Interfaces:**
 - Produces: `generate(out_dir: Path) -> str` (returns `contracts_version` hash; deterministic output); `check(committed_dir: Path) -> list[str]` (differences, empty = current); CLI `python -m reva.odoo_contracts generate [--check]`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `worker/tests/test_contracts_generator.py`:
 
@@ -479,7 +479,7 @@ def test_every_contract_has_schema_or_shape(tmp_path):
     assert len(manifest["contracts"]) == len(CONTRACTS)
 ```
 
-- [ ] **Step 2: Run to verify failure, then append the generator**
+- [x] **Step 2: Run to verify failure, then append the generator**
 
 Append to `reva/odoo_contracts.py`:
 
@@ -594,7 +594,7 @@ if __name__ == "__main__":
     _main()
 ```
 
-- [ ] **Step 3: Generate + hand-write the README**
+- [x] **Step 3: Generate + hand-write the README**
 
 ```bash
 cd /home/joseph/Projects/Cloudunify/cu_reva && worker/.venv/bin/python -m reva.odoo_contracts generate
@@ -615,7 +615,7 @@ ast-odoo repo with `scripts/sync_contracts.sh <ast-odoo-path>`; the manifest's
 `contracts_version` is the freshness pin the addon tests assert against.
 ```
 
-- [ ] **Step 4: Run to verify pass, commit**
+- [x] **Step 4: Run to verify pass, commit**
 
 ```bash
 cd worker && .venv/bin/python -m pytest tests/test_contracts_generator.py -q && cd ..
@@ -630,7 +630,7 @@ git commit -m "feat(contracts): deterministic generator + committed contracts/"
 **Files:**
 - Test: `worker/tests/test_contracts_drift.py`
 
-- [ ] **Step 1: Write the tests (they should PASS immediately — they guard the future)**
+- [x] **Step 1: Write the tests (they should PASS immediately — they guard the future)**
 
 Create `worker/tests/test_contracts_drift.py`:
 
@@ -678,7 +678,7 @@ def test_every_callback_method_has_a_contract():
     assert methods, "sanity: introspection found no public methods"
 ```
 
-- [ ] **Step 2: Run, commit**
+- [x] **Step 2: Run, commit**
 
 ```bash
 cd worker && .venv/bin/python -m pytest tests/test_contracts_drift.py -q
@@ -694,7 +694,7 @@ git commit -m "test(contracts): drift + coverage guards"
 - Create: `scripts/sync_contracts.sh`
 - Modify: `docs/superpowers/plans/2026-07-03-timesheet-wording-review.md`, `docs/superpowers/plans/2026-07-05-odoo-core-knowledge.md`? — no; timesheet + `docs/superpowers/plans/2026-07-04-metasoul-website-analysis.md` (one coordination line each), `CLAUDE.md`
 
-- [ ] **Step 1: Create `scripts/sync_contracts.sh`**
+- [x] **Step 1: Create `scripts/sync_contracts.sh`**
 
 ```bash
 #!/usr/bin/env bash
@@ -713,7 +713,7 @@ echo "and bump the version pin in the addon's contract tests."
 
 `chmod +x scripts/sync_contracts.sh`.
 
-- [ ] **Step 2: Coordination pointers**
+- [x] **Step 2: Coordination pointers**
 
 Append to the **Global Constraints** of the timesheet plan:
 
@@ -725,7 +725,7 @@ Same line (with `/metasoul/website-analysis-result`) in the metasoul plan's Glob
 
 `CLAUDE.md` — in the definition-of-done paragraph, extend the sentence about suites with: `; a change to any Odoo↔REVA contract additionally requires regenerating contracts/ (python -m reva.odoo_contracts generate) and re-syncing ast-odoo`.
 
-- [ ] **Step 3: Full gate + commit**
+- [x] **Step 3: Full gate + commit**
 
 ```bash
 make test && worker/.venv/bin/ruff check reva worker/worker api/app scheduler/scheduler

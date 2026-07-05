@@ -1,0 +1,64 @@
+{
+  "$defs": {
+    "Attachment": {
+      "description": "A file forwarded by Odoo ({filename, content_base64}). Accepted types are\n.docx / .pdf / .txt \u2014 the filename extension is the authoritative gate (see\nreva.attachment_text). Shared by the ticket-analysis attachment and the\ncreate-issues description_docx; on a create-issues request it is THE basis\nfor the issue split.",
+      "properties": {
+        "content_base64": {
+          "title": "Content Base64",
+          "type": "string"
+        },
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        }
+      },
+      "required": [
+        "filename",
+        "content_base64"
+      ],
+      "title": "Attachment",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "attachment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Attachment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional .docx/.pdf/.txt file; its text is extracted and folded into the analysis prompt alongside `text`"
+    },
+    "field_name": {
+      "description": "Field on the Odoo record where the result will be written",
+      "title": "Field Name",
+      "type": "string"
+    },
+    "model_name": {
+      "description": "Odoo model name, e.g. \"helpdesk.ticket\" or \"project.task\"",
+      "title": "Model Name",
+      "type": "string"
+    },
+    "text": {
+      "description": "Ticket description text to analyse",
+      "title": "Text",
+      "type": "string"
+    },
+    "ticket_id": {
+      "title": "Ticket Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "ticket_id",
+    "model_name",
+    "field_name",
+    "text"
+  ],
+  "title": "TicketAnalysisRequest",
+  "type": "object"
+}

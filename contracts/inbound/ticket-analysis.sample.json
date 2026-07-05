@@ -1,0 +1,7 @@
+{
+  "attachment": null,
+  "field_name": "x_reva_analysis",
+  "model_name": "helpdesk.ticket",
+  "text": "The login page is broken.",
+  "ticket_id": 42
+}

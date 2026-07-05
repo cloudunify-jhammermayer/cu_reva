@@ -1,0 +1,86 @@
+{
+  "$defs": {
+    "IssueRefPayload": {
+      "description": "Documented per-issue shape; internal planning keys are stripped.",
+      "properties": {
+        "number": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Number"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "State"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        }
+      },
+      "title": "IssueRefPayload",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/IssueRefPayload"
+      },
+      "title": "Issues",
+      "type": "array"
+    },
+    "model_name": {
+      "title": "Model Name",
+      "type": "string"
+    },
+    "number": {
+      "title": "Number",
+      "type": "integer"
+    },
+    "state": {
+      "title": "State",
+      "type": "string"
+    },
+    "ticket_id": {
+      "title": "Ticket Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "ticket_id",
+    "model_name",
+    "number",
+    "state",
+    "issues"
+  ],
+  "title": "IssueStatePayload",
+  "type": "object"
+}

@@ -40,6 +40,13 @@ import structlog
 
 import httpx
 
+from reva.odoo_contracts import (
+    IssuesCreatedPayload,
+    IssueStatePayload,
+    ResetStatusPayload,
+    TimesheetResultsPayload,
+    WriteFieldPayload,
+)
 from reva.url_safety import assert_safe_url
 
 from reva.errors import PermanentError, TransientError
@@ -47,6 +54,13 @@ from reva.errors import PermanentError, TransientError
 logger = structlog.get_logger()
 
 _TIMEOUT = 15.0
+_ISSUE_KEYS = ("number", "title", "url", "state")
+_TIMESHEET_RESULT_KEYS = ("line_id", "status", "updated_desc", "reason")
+
+
+def _project_items(items: list[dict], allowed: tuple[str, ...]) -> list[dict]:
+    """Validate through Pydantic models but preserve optional-key omission."""
+    return [{key: item[key] for key in allowed if key in item} for item in items]
 
 
 class OdooCallbackClient:
@@ -100,7 +114,10 @@ class OdooCallbackClient:
 
     def reset_status(self, ticket_id: int, model_name: str) -> None:
         """Set reva_status = pending in Odoo before re-running analysis."""
-        self._post("/tickets/reset-status", {"ticket_id": ticket_id, "model_name": model_name})
+        self._post(
+            "/tickets/reset-status",
+            ResetStatusPayload(ticket_id=ticket_id, model_name=model_name).model_dump(),
+        )
 
     def write_field(
         self,
@@ -110,12 +127,15 @@ class OdooCallbackClient:
         html: str,
     ) -> None:
         """POST the analysis HTML to the Odoo callback endpoint."""
-        self._post("/tickets/write-field", {
-            "ticket_id": ticket_id,
-            "model_name": model_name,
-            "field_name": field_name,
-            "html": html,
-        })
+        self._post(
+            "/tickets/write-field",
+            WriteFieldPayload(
+                ticket_id=ticket_id,
+                model_name=model_name,
+                field_name=field_name,
+                html=html,
+            ).model_dump(),
+        )
         logger.bind(ticket_id=ticket_id, model_name=model_name).info("odoo_callback_ok")
 
     def timesheet_results(
@@ -125,11 +145,17 @@ class OdooCallbackClient:
         stats: dict,
     ) -> None:
         """POST timesheet wording-review results to the Odoo callback."""
-        self._post("/hr/timesheet-results", {
-            "request_id": request_id,
-            "results": results,
-            "stats": stats,
-        })
+        payload = TimesheetResultsPayload(
+            request_id=request_id,
+            results=results,
+            stats=stats,
+        )
+        body = payload.model_dump(exclude={"results"})
+        body["results"] = _project_items(results, _TIMESHEET_RESULT_KEYS)
+        self._post(
+            "/hr/timesheet-results",
+            body,
+        )
         logger.bind(request_id=request_id).info("odoo_timesheet_results_ok")
 
     def issues_created(
@@ -152,14 +178,20 @@ class OdooCallbackClient:
         no longer pending or the request_id is stale — the expected outcome of
         its 10s-timeout race.
         """
-        self._post("/tickets/issues-created", {
-            "ticket_id": ticket_id,
-            "model_name": model_name,
-            "request_id": request_id,
-            "status": status,
-            "issues": issues,
-            "error": error,
-        })
+        payload = IssuesCreatedPayload(
+            ticket_id=ticket_id,
+            model_name=model_name,
+            request_id=request_id,
+            status=status,
+            issues=issues,
+            error=error,
+        )
+        body = payload.model_dump(exclude={"issues"})
+        body["issues"] = _project_items(issues, _ISSUE_KEYS)
+        self._post(
+            "/tickets/issues-created",
+            body,
+        )
         logger.bind(ticket_id=ticket_id, model_name=model_name).info(
             "odoo_issues_created_ok"
         )
@@ -180,13 +212,19 @@ class OdooCallbackClient:
         idempotently (done issues get marked). 409 = the record's links are not
         in the 'created' state — permanent, do not retry.
         """
-        self._post("/tickets/issue-state", {
-            "ticket_id": ticket_id,
-            "model_name": model_name,
-            "number": number,
-            "state": state,
-            "issues": issues,
-        })
+        payload = IssueStatePayload(
+            ticket_id=ticket_id,
+            model_name=model_name,
+            number=number,
+            state=state,
+            issues=issues,
+        )
+        body = payload.model_dump(exclude={"issues"})
+        body["issues"] = _project_items(issues, _ISSUE_KEYS)
+        self._post(
+            "/tickets/issue-state",
+            body,
+        )
         logger.bind(ticket_id=ticket_id, model_name=model_name, number=number).info(
             "odoo_issue_state_ok"
         )

@@ -1,0 +1,112 @@
+{
+  "$defs": {
+    "Attachment": {
+      "description": "A file forwarded by Odoo ({filename, content_base64}). Accepted types are\n.docx / .pdf / .txt \u2014 the filename extension is the authoritative gate (see\nreva.attachment_text). Shared by the ticket-analysis attachment and the\ncreate-issues description_docx; on a create-issues request it is THE basis\nfor the issue split.",
+      "properties": {
+        "content_base64": {
+          "title": "Content Base64",
+          "type": "string"
+        },
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        }
+      },
+      "required": [
+        "filename",
+        "content_base64"
+      ],
+      "title": "Attachment",
+      "type": "object"
+    }
+  },
+  "description": "Contract 1 payload. The field set is fixed for *required* fields by the\nshipped Odoo addon \u2014 do not add required fields (every real request would\n422). Optional additive fields are fine.",
+  "properties": {
+    "analysis_html": {
+      "description": "Completed REVA analysis HTML, or \"\" if none",
+      "title": "Analysis Html",
+      "type": "string"
+    },
+    "description": {
+      "description": "Plain-text ticket description (HTML stripped by Odoo)",
+      "title": "Description",
+      "type": "string"
+    },
+    "description_docx": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Attachment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Consultant file (tasks only): .docx, .pdf, or .txt. When present it is THE basis for the issue split instead of description/analysis_html. (Field name fixed by the Odoo addon.)"
+    },
+    "github_url": {
+      "description": "Repository URL from the record's project",
+      "title": "Github Url",
+      "type": "string"
+    },
+    "issue_type": {
+      "anyOf": [
+        {
+          "enum": [
+            "BUG",
+            "FEAT",
+            "CR",
+            "CONF",
+            "DEV",
+            "MIG",
+            "SUP",
+            "DOC"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Fixed work-item type for every issue of this request (Odoo wizard flow). Omitted/empty: the planner picks per issue.",
+      "title": "Issue Type"
+    },
+    "model_name": {
+      "description": "Odoo model name, e.g. \"helpdesk.ticket\" or \"project.task\"",
+      "title": "Model Name",
+      "type": "string"
+    },
+    "name": {
+      "description": "Ticket/task title",
+      "title": "Name",
+      "type": "string"
+    },
+    "priority": {
+      "description": "Odoo priority key, \"0\" (low) \u2026 \"3\" (urgent)",
+      "title": "Priority",
+      "type": "string"
+    },
+    "ticket_id": {
+      "title": "Ticket Id",
+      "type": "integer"
+    },
+    "ticket_url": {
+      "description": "Deep link back to the Odoo record",
+      "title": "Ticket Url",
+      "type": "string"
+    }
+  },
+  "required": [
+    "ticket_id",
+    "model_name",
+    "github_url",
+    "name",
+    "description",
+    "analysis_html",
+    "priority",
+    "ticket_url"
+  ],
+  "title": "CreateIssuesRequest",
+  "type": "object"
+}

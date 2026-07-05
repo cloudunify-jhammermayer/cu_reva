@@ -1,0 +1,6 @@
+{
+  "field_name": "x_reva_analysis",
+  "html": "<h2>Summary</h2>",
+  "model_name": "helpdesk.ticket",
+  "ticket_id": 123
+}

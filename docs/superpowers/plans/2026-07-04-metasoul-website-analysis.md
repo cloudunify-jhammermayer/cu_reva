@@ -21,6 +21,7 @@
 - Security comment codes: the new fetch guard is **SECU-21**; untrusted-content fencing follows **SECU-5**.
 - The element key enum is fixed (order matters, it is the Odoo mapping contract): `contact_email, cookies, cmp, analytics, newsletter_signup, contact_form, booking_tool, error_tracking, review_platforms, live_chat, captcha, maps, feedback_form, remote_fonts, survey_forms, other`.
 - Callback contract: `POST {instance callback base}/metasoul/website-analysis-result` with `{"record_id", "model_name", "status": "completed"|"failed", "result": {...}|null, "error": str|null}`.
+- Contract publication (contract-tests spec, 2026-07-05): the `/metasoul/website-analysis-result` callback must have a payload model + `CONTRACTS` entry in `reva/odoo_contracts.py` and a regenerated `contracts/`; the coverage drift test fails otherwise.
 - Model selection: the analyzer passes no `model=` → `REVA_DEFAULT_MODEL`. Spend ledger kind: `"website"`. Budget gate: `worker.runner.budget_exceeded` **is** applied (unlike tickets).
 
 ---

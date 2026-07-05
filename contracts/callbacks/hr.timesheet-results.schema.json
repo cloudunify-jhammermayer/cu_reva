@@ -1,0 +1,73 @@
+{
+  "$defs": {
+    "TimesheetResultPayload": {
+      "properties": {
+        "line_id": {
+          "title": "Line Id",
+          "type": "integer"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "updated_desc": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Updated Desc"
+        }
+      },
+      "required": [
+        "line_id",
+        "status"
+      ],
+      "title": "TimesheetResultPayload",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "results": {
+      "items": {
+        "$ref": "#/$defs/TimesheetResultPayload"
+      },
+      "title": "Results",
+      "type": "array"
+    },
+    "stats": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Stats",
+      "type": "object"
+    }
+  },
+  "required": [
+    "request_id",
+    "results",
+    "stats"
+  ],
+  "title": "TimesheetResultsPayload",
+  "type": "object"
+}

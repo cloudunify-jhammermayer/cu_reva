@@ -97,7 +97,7 @@ Unit tests need no Docker or network: SQLite in-memory replaces Postgres, `httpx
 
 Tests build tables from the ORM models (`create_all`), **not** the SQL files in `db/migrations/` — so a migration's raw SQL and any Postgres-only query construct (e.g. `count(distinct case(...))`) are exercised only on real Postgres. Validate those via `make test-integration` or the first staging boot.
 
-**Definition of done before committing a feature:** the suites for every service you touched are green, plus `ruff`. A change to shared `reva/` affects all three services — run `worker`, `api`, **and** `scheduler` (`make test`). Touching `tui/` requires `cd tui && go build ./... && go vet ./... && go test ./...`. State outcomes honestly: if a path is only unit-tested (not live-CLI / not Postgres), say so.
+**Definition of done before committing a feature:** the suites for every service you touched are green, plus `ruff`. A change to shared `reva/` affects all three services — run `worker`, `api`, **and** `scheduler` (`make test`). Touching `tui/` requires `cd tui && go build ./... && go vet ./...`. A change to any Odoo<->REVA contract additionally requires regenerating `contracts/` (`python -m reva.odoo_contracts generate`) and re-syncing ast-odoo. State outcomes honestly: if a path is only unit-tested (not live-CLI / not Postgres), say so.
 
 ## Architecture
 

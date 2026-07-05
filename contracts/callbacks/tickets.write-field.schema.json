@@ -1,0 +1,28 @@
+{
+  "properties": {
+    "field_name": {
+      "title": "Field Name",
+      "type": "string"
+    },
+    "html": {
+      "title": "Html",
+      "type": "string"
+    },
+    "model_name": {
+      "title": "Model Name",
+      "type": "string"
+    },
+    "ticket_id": {
+      "title": "Ticket Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "ticket_id",
+    "model_name",
+    "field_name",
+    "html"
+  ],
+  "title": "WriteFieldPayload",
+  "type": "object"
+}

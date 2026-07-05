@@ -1,0 +1,80 @@
+{
+  "$defs": {
+    "TimesheetLine": {
+      "description": "One Odoo time-booking line submitted for wording review.",
+      "properties": {
+        "description": {
+          "maxLength": 4000,
+          "title": "Description",
+          "type": "string"
+        },
+        "line_id": {
+          "title": "Line Id",
+          "type": "integer"
+        },
+        "project_name": {
+          "title": "Project Name",
+          "type": "string"
+        },
+        "task_name": {
+          "title": "Task Name",
+          "type": "string"
+        },
+        "user_name": {
+          "title": "User Name",
+          "type": "string"
+        },
+        "user_role": {
+          "enum": [
+            "developer",
+            "consultant",
+            "sales"
+          ],
+          "title": "User Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "line_id",
+        "task_name",
+        "project_name",
+        "user_name",
+        "user_role",
+        "description"
+      ],
+      "title": "TimesheetLine",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "flagged_words": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 500,
+      "title": "Flagged Words",
+      "type": "array"
+    },
+    "lines": {
+      "items": {
+        "$ref": "#/$defs/TimesheetLine"
+      },
+      "maxItems": 5000,
+      "minItems": 1,
+      "title": "Lines",
+      "type": "array"
+    },
+    "request_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_id",
+    "lines"
+  ],
+  "title": "TimesheetReviewRequest",
+  "type": "object"
+}

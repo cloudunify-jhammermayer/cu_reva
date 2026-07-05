@@ -1,0 +1,96 @@
+{
+  "contracts": [
+    {
+      "auth": "bearer:instance-outbound-key",
+      "direction": "reva->odoo",
+      "method": "POST",
+      "name": "tickets.write-field",
+      "path": "/tickets/write-field",
+      "sample": "callbacks/tickets.write-field.sample.json",
+      "schema": "callbacks/tickets.write-field.schema.json"
+    },
+    {
+      "auth": "bearer:instance-outbound-key",
+      "direction": "reva->odoo",
+      "method": "POST",
+      "name": "tickets.reset-status",
+      "path": "/tickets/reset-status",
+      "sample": "callbacks/tickets.reset-status.sample.json",
+      "schema": "callbacks/tickets.reset-status.schema.json"
+    },
+    {
+      "auth": "bearer:instance-outbound-key",
+      "direction": "reva->odoo",
+      "method": "POST",
+      "name": "tickets.issues-created",
+      "path": "/tickets/issues-created",
+      "sample": "callbacks/tickets.issues-created.sample.json",
+      "schema": "callbacks/tickets.issues-created.schema.json"
+    },
+    {
+      "auth": "bearer:instance-outbound-key",
+      "direction": "reva->odoo",
+      "method": "POST",
+      "name": "tickets.issue-state",
+      "path": "/tickets/issue-state",
+      "sample": "callbacks/tickets.issue-state.sample.json",
+      "schema": "callbacks/tickets.issue-state.schema.json"
+    },
+    {
+      "auth": "bearer:instance-outbound-key",
+      "direction": "reva->odoo",
+      "method": "POST",
+      "name": "hr.timesheet-results",
+      "path": "/hr/timesheet-results",
+      "sample": "callbacks/hr.timesheet-results.sample.json",
+      "schema": "callbacks/hr.timesheet-results.schema.json"
+    },
+    {
+      "auth": "bearer:instance-inbound-key",
+      "direction": "odoo->reva",
+      "method": "POST",
+      "name": "ticket-analysis",
+      "path": "/api/v1/ticket-analysis",
+      "sample": "inbound/ticket-analysis.sample.json",
+      "schema": "inbound/ticket-analysis.schema.json"
+    },
+    {
+      "auth": "bearer:instance-inbound-key",
+      "direction": "odoo->reva",
+      "method": "POST",
+      "name": "create-issues",
+      "path": "/api/v1/create-issues",
+      "sample": "inbound/create-issues.sample.json",
+      "schema": "inbound/create-issues.schema.json"
+    },
+    {
+      "auth": "bearer:instance-inbound-key",
+      "direction": "odoo->reva",
+      "method": "POST",
+      "name": "timesheet-review",
+      "path": "/api/v1/timesheet-review",
+      "sample": "inbound/timesheet-review.sample.json",
+      "schema": "inbound/timesheet-review.schema.json"
+    },
+    {
+      "auth": "bearer:any",
+      "direction": "odoo->reva",
+      "method": "GET",
+      "name": "health.response",
+      "path": "/api/v1/health",
+      "sample": "inbound/health.response.sample.json",
+      "schema": "inbound/health.response.schema.json"
+    },
+    {
+      "auth": "*",
+      "direction": "odoo->reva",
+      "method": "*",
+      "name": "error",
+      "path": "*",
+      "sample": "inbound/error.sample.json",
+      "schema": "inbound/error.schema.json"
+    }
+  ],
+  "contracts_version": "f07c2c2e6bf1d70878bf7a314398f74bb8afb6c78c9371ead25d036c01ce8bd1",
+  "generated_from": "reva/odoo_contracts.py"
+}

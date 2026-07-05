@@ -1,0 +1,16 @@
+{
+  "flagged_words": [
+    "stupid"
+  ],
+  "lines": [
+    {
+      "description": "fixed stupid bug",
+      "line_id": 1,
+      "project_name": "ACME",
+      "task_name": "Reports",
+      "user_name": "Jo",
+      "user_role": "developer"
+    }
+  ],
+  "request_id": "req-1"
+}

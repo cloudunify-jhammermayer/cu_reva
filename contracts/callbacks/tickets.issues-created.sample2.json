@@ -1,0 +1,8 @@
+{
+  "error": "GitHub authentication failed",
+  "issues": [],
+  "model_name": "helpdesk.ticket",
+  "request_id": 7,
+  "status": "failed",
+  "ticket_id": 123
+}
