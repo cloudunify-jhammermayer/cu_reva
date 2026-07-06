@@ -176,6 +176,50 @@ def test_analyze_no_tool_call():
         analyzer.analyze(_params())
 
 
+def test_request_raises_max_tokens():
+    """The eight analysis sections can exceed review()'s 8192 default and
+    truncate the tool call, so the analyzer must raise the ceiling."""
+    captured: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(req.content)
+        return httpx.Response(200, content=_fixture_response())
+
+    analyzer = _make_analyzer(handler)
+    analyzer.analyze(_params())
+    assert captured["body"]["max_tokens"] > 8192
+
+
+def test_truncated_tool_call_names_max_tokens():
+    """A tool call cut off at max_tokens returns partial input (a required
+    field missing). The error must name the truncation, not report a
+    misleading schema-validation failure (prod incident 2026-07-06)."""
+    payload = {
+        "id": "msg_01",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-4-6",
+        "stop_reason": "max_tokens",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "toolu_01",
+                "name": TICKET_TOOL_NAME,
+                "input": {"missing_info": [], "acceptance_criteria": []},  # no summary
+            }
+        ],
+        "usage": {"input_tokens": 10, "output_tokens": 8192,
+                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+    }
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=json.dumps(payload).encode())
+
+    analyzer = _make_analyzer(handler)
+    with pytest.raises(PermanentError, match="max_tokens"):
+        analyzer.analyze(_params())
+
+
 def test_analyze_bad_tool_input():
     payload = {
         "id": "msg_01",

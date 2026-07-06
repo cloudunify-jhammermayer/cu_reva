@@ -16,6 +16,13 @@ from reva.errors import PermanentError
 from reva.ticket_tool import TICKET_TOOL_NAME, build_ticket_tool_schema, ticket_tool_choice
 from reva.types import ClaudeResponse, ContentBlock, TicketAnalysisResult, TicketJobParams
 
+# Eight required sections (summary, ACs, test cases, DoR/DoD, coverage, ...)
+# can exceed review()'s 8192 default. Truncation cuts the tool call mid-JSON
+# (stop_reason=max_tokens) and the salvaged partial input fails validation
+# with a missing required field — same failure the issue planner guards
+# against with its own raised ceiling.
+_MAX_TOKENS = 16384
+
 
 class TicketAnalyzer:
     def __init__(self, claude: ClaudeClient, prompts_dir: str) -> None:
@@ -50,6 +57,7 @@ class TicketAnalyzer:
             user_prompt=self._build_user_prompt(params),
             tools=[tool_schema],
             tool_choice=ticket_tool_choice(),
+            max_tokens=_MAX_TOKENS,
         )
 
         if response.tool_use_input is None:
@@ -58,11 +66,19 @@ class TicketAnalyzer:
                 f"(stop_reason={response.stop_reason})"
             )
 
+        if response.stop_reason == "max_tokens":
+            # Truncated mid-tool-call: the input is partial by definition;
+            # validating it would report a misleading missing-field error.
+            raise PermanentError(
+                f"ticket analysis tool call truncated at max_tokens={_MAX_TOKENS}"
+            )
+
         try:
             result = TicketAnalysisResult.model_validate(response.tool_use_input)
         except Exception as exc:
             raise PermanentError(
-                f"ticket analysis result failed schema validation: {exc}"
+                f"ticket analysis result failed schema validation "
+                f"(stop_reason={response.stop_reason}): {exc}"
             ) from exc
 
         return response, result
