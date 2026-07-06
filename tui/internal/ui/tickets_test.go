@@ -83,6 +83,95 @@ func TestIssueRunsMappedLatestPerRecord(t *testing.T) {
 	}
 }
 
+func TestAnalysesLatestPerTicketWins(t *testing.T) {
+	tab := newTickets(&api.MockClient{}, "")
+	newer := api.TicketAnalysisSummary{
+		ID: 19, TicketID: 5, ModelName: "helpdesk.ticket", FieldName: "x_reva_analysis",
+		Status: "completed", CreatedAt: time.Now(),
+	}
+	older := api.TicketAnalysisSummary{
+		ID: 18, TicketID: 5, ModelName: "helpdesk.ticket", FieldName: "x_reva_analysis",
+		Status: "failed", CreatedAt: time.Now().Add(-time.Hour),
+	}
+	// feed is newest-first; a resent analysis must shadow the failed one
+	tab, _ = tab.update(ticketAnalysesLoadedMsg{
+		data: &api.TicketAnalysisPage{Items: []api.TicketAnalysisSummary{newer, older}, Total: 2},
+	})
+	if len(tab.rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(tab.rows))
+	}
+	if a := tab.rows[0].analysis; a == nil || a.ID != 19 || a.Status != "completed" {
+		t.Fatalf("expected latest analysis 19/completed on the row, got %+v", a)
+	}
+}
+
+func TestIssueRunsMergeOlderCreatedIssues(t *testing.T) {
+	tab := newTickets(&api.MockClient{}, "")
+	epic := api.TicketIssueRef{Number: intPtr(78), Title: "epic"}
+	feedback := api.TicketIssueRunSummary{
+		ID: 9, TicketID: 1181, ModelName: "helpdesk.ticket", Status: "completed",
+		GithubURL: "https://github.com/Cloudunify/bmd-test",
+		Issues:    []api.TicketIssueRef{{Number: intPtr(82), Title: "new"}},
+		CreatedAt: time.Now(),
+	}
+	initial := api.TicketIssueRunSummary{
+		ID: 4, TicketID: 1181, ModelName: "helpdesk.ticket", Status: "completed",
+		GithubURL:   "https://github.com/Cloudunify/bmd-test",
+		ParentIssue: &epic,
+		Issues: []api.TicketIssueRef{
+			{Number: intPtr(79), Title: "a"},
+			{Number: intPtr(80), Title: "b"},
+			{Number: intPtr(81), Title: "c", State: strPtr("closed")},
+		},
+		CreatedAt: time.Now().Add(-time.Hour),
+	}
+	tab, _ = tab.update(ticketIssueRunsLoadedMsg{
+		data: &api.TicketIssueRunPage{Items: []api.TicketIssueRunSummary{feedback, initial}, Total: 2},
+	})
+
+	got := tab.issueRuns[issueRunKey("helpdesk.ticket", 1181)]
+	if got.ID != 9 {
+		t.Fatalf("expected newest run 9 kept, got %d", got.ID)
+	}
+	if len(got.Issues) != 4 {
+		t.Fatalf("expected 4 merged issues, got %d: %+v", len(got.Issues), got.Issues)
+	}
+	for i, want := range []int{79, 80, 81, 82} {
+		if got.Issues[i].Number == nil || *got.Issues[i].Number != want {
+			t.Fatalf("issue %d = %+v, want #%d", i, got.Issues[i], want)
+		}
+	}
+	if got.ParentIssue == nil || *got.ParentIssue.Number != 78 {
+		t.Fatalf("epic not adopted from the older run: %+v", got.ParentIssue)
+	}
+	if counts := issueRunCounts(got); counts != "4" {
+		t.Fatalf("counts = %q, want 4", counts)
+	}
+}
+
+func TestIssueRunsDoNotMergeAcrossRepos(t *testing.T) {
+	tab := newTickets(&api.MockClient{}, "")
+	newer := api.TicketIssueRunSummary{
+		ID: 9, TicketID: 1, ModelName: "helpdesk.ticket", Status: "completed",
+		GithubURL: "https://github.com/acme/alpha",
+		Issues:    []api.TicketIssueRef{{Number: intPtr(5), Title: "new"}},
+		CreatedAt: time.Now(),
+	}
+	older := api.TicketIssueRunSummary{
+		ID: 4, TicketID: 1, ModelName: "helpdesk.ticket", Status: "completed",
+		GithubURL: "https://github.com/acme/beta",
+		Issues:    []api.TicketIssueRef{{Number: intPtr(3), Title: "other repo"}},
+		CreatedAt: time.Now().Add(-time.Hour),
+	}
+	tab, _ = tab.update(ticketIssueRunsLoadedMsg{
+		data: &api.TicketIssueRunPage{Items: []api.TicketIssueRunSummary{newer, older}, Total: 2},
+	})
+	got := tab.issueRuns[issueRunKey("helpdesk.ticket", 1)]
+	if len(got.Issues) != 1 || *got.Issues[0].Number != 5 {
+		t.Fatalf("issues from another repo were merged: %+v", got.Issues)
+	}
+}
+
 func TestIssueRunsErrorDoesNotBlankMap(t *testing.T) {
 	tab := ticketsWithData()
 	before := len(tab.issueRuns)

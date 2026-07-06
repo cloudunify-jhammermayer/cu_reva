@@ -88,7 +88,11 @@ func (t *Tickets) rebuildRows() {
 	for i := range t.analyses {
 		a := &t.analyses[i]
 		r := get(a.ModelName, a.TicketID)
-		r.analysis = a
+		if r.analysis == nil {
+			// Feed is newest-first, so first seen wins — a resent analysis
+			// must shadow its older failed sibling, not the other way round.
+			r.analysis = a
+		}
 		if a.CreatedAt.After(r.activity) {
 			r.activity = a.CreatedAt
 		}
@@ -257,9 +261,16 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 			runs := make(map[string]api.TicketIssueRunSummary, len(m.data.Items))
 			for _, run := range m.data.Items {
 				key := issueRunKey(run.ModelName, run.TicketID)
-				if _, seen := runs[key]; !seen { // feed is newest-first
+				kept, seen := runs[key]
+				if !seen { // feed is newest-first — the latest run carries status/meta
 					runs[key] = run
+					continue
 				}
+				// A re-plan over changed inputs (e.g. a feedback request) only
+				// carries its own new issues; the ones created by earlier runs
+				// still exist on GitHub. Fold them in so the ticket keeps
+				// showing all of them.
+				runs[key] = mergeOlderRunIssues(kept, run)
 			}
 			t.issueRuns = runs
 			t.rebuildRows()
@@ -704,6 +715,46 @@ func plainStatusSymbol(status string, createdAt time.Time) string {
 	default:
 		return "-"
 	}
+}
+
+// mergeOlderRunIssues folds an older run's created issues into the kept
+// (newest) run for the same ticket: refs missing by number are appended, the
+// epic is adopted when the newest run has none, and the list is re-ordered by
+// issue number (planned, number-less refs last). Runs against a different
+// repo are left alone — their issues belong to another issue set.
+func mergeOlderRunIssues(kept, older api.TicketIssueRunSummary) api.TicketIssueRunSummary {
+	if !sameRepoURL(kept.GithubURL, older.GithubURL) {
+		return kept
+	}
+	have := map[int]bool{}
+	for _, ref := range kept.Issues {
+		if ref.Number != nil {
+			have[*ref.Number] = true
+		}
+	}
+	for _, ref := range older.Issues {
+		if ref.Number != nil && !have[*ref.Number] {
+			kept.Issues = append(kept.Issues, ref)
+			have[*ref.Number] = true
+		}
+	}
+	if kept.ParentIssue == nil {
+		kept.ParentIssue = older.ParentIssue
+	}
+	sort.SliceStable(kept.Issues, func(i, j int) bool {
+		a, b := kept.Issues[i].Number, kept.Issues[j].Number
+		if a == nil || b == nil {
+			return a != nil && b == nil
+		}
+		return *a < *b
+	})
+	return kept
+}
+
+func sameRepoURL(a, b string) bool {
+	ao, an, aok := parseOwnerName(a)
+	bo, bn, bok := parseOwnerName(b)
+	return aok && bok && strings.EqualFold(ao+"/"+an, bo+"/"+bn)
 }
 
 // issueRunCounts renders the created-issue count of a run: "3" when all
