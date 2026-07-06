@@ -242,14 +242,23 @@ class ClaudeCodeRunner:
             # clean -fdx drops any untracked/ignored files the CLI wrote, so each
             # review starts from a pristine tree matching its head SHA (no
             # cross-PR contamination). Mirrors the audit branch below.
-            self._run_git_permanent(["-C", repo_path, "reset", "--hard", head_sha])
+            #
+            # auth_args is required: the clone is blobless (--filter=blob:none),
+            # so materializing the tree triggers a lazy promisor fetch of the
+            # missing blobs. The remote URL is token-less (SECU), so without the
+            # extraHeader that fetch has no credentials and fails on private
+            # repos ("could not read Username … could not fetch <sha> from
+            # promisor remote"). `-c` propagates to the child fetch via
+            # GIT_CONFIG_PARAMETERS.
+            self._run_git_permanent(auth_args + ["-C", repo_path, "reset", "--hard", head_sha])
             self._run_git_permanent(["-C", repo_path, "clean", "-fdx"])
         else:
             # origin/HEAD, not FETCH_HEAD: a fresh clone writes no FETCH_HEAD (only
             # fetch does), so a cold-cache audit — first-ever review of a repo —
             # would fail. origin/HEAD is set by clone and updated by fetch, always
-            # resolving to the default-branch tip.
-            self._run_git_permanent(["-C", repo_path, "reset", "--hard", "origin/HEAD"])
+            # resolving to the default-branch tip. auth_args as above: the lazy
+            # promisor blob fetch needs the credential on private repos.
+            self._run_git_permanent(auth_args + ["-C", repo_path, "reset", "--hard", "origin/HEAD"])
 
         return repo_path
 

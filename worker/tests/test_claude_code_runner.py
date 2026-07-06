@@ -98,6 +98,29 @@ def test_ensure_repo_fetches_when_exists(runner, tmp_path):
     assert any("clean" in c for c in calls)
 
 
+def test_ensure_repo_reset_carries_auth_header(runner, tmp_path):
+    """Regression: reset --hard must carry the transient http.extraHeader.
+
+    The clone is blobless (--filter=blob:none), so `reset --hard <sha>`
+    materializes the tree by lazily fetching missing blobs from the promisor
+    remote. The stored remote URL is token-less (SECU), so without the auth
+    header that fetch has no credentials and fails on private repos
+    ("could not read Username ... could not fetch <sha> from promisor remote").
+    The `-c` propagates to the child fetch via GIT_CONFIG_PARAMETERS.
+    """
+    import base64
+
+    with patch("subprocess.run", return_value=_ok()) as mock_run:
+        runner.ensure_repo("acme", "widgets", "abcd1234", "tok")
+
+    expected = base64.b64encode(b"x-access-token:tok").decode()
+    calls = [c.args[0] for c in mock_run.call_args_list]
+    reset_call = next(c for c in calls if "reset" in c and "--hard" in c)
+    assert any(f"Authorization: Basic {expected}" in part for part in reset_call), (
+        "reset --hard must carry the auth extraHeader for the lazy promisor fetch"
+    )
+
+
 def test_ensure_repo_no_sha_resets_to_default_branch(runner, tmp_path):
     repo_path = tmp_path / "repos" / "acme" / "widgets"
     repo_path.mkdir(parents=True)
