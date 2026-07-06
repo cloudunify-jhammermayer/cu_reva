@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 
 from reva.db import Base, Database, create_engine_from_url, writers
-from reva.errors import PermanentError, TransientError
+from reva.db.models import OpsEvent
+from reva.errors import MalformedModelOutput, PermanentError, TransientError
 from reva.types import (
     AcceptanceCriterion,
     ClaudeResponse,
@@ -35,6 +36,7 @@ _PROMPTS_DIR = str(Path(__file__).resolve().parents[2] / "prompts")
 class FakeTicketAnalyzer:
     result: TicketAnalysisResult | None = None
     raise_exc: Exception | None = None
+    raise_once: Exception | None = None  # raised on the first call only
     call_count: int = 0
     extra_blocks: list | None = None
 
@@ -45,6 +47,9 @@ class FakeTicketAnalyzer:
     ) -> tuple[ClaudeResponse, TicketAnalysisResult]:
         self.call_count += 1
         self.extra_blocks = extra_system_blocks
+        if self.raise_once:
+            exc, self.raise_once = self.raise_once, None
+            raise exc
         if self.raise_exc:
             raise self.raise_exc
         assert self.result is not None
@@ -197,6 +202,37 @@ def test_permanent_error_from_analyzer(ctx_and_fakes):
     with pytest.raises(PermanentError):
         run_ticket_analysis(params)
 
+    row = writers.get_ticket_analysis(s["db"], params["analysis_id"])
+    assert row["status"] == "failed"
+    assert s["odoo"].call_count == 0
+
+
+def test_malformed_output_retried_once_then_completes(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["analyzer"].raise_once = MalformedModelOutput("truncated at max_tokens=16384")
+    params = _make_params(s["db"])
+
+    out = run_ticket_analysis(params)
+
+    assert out["status"] == "completed"
+    assert s["analyzer"].call_count == 2
+    row = writers.get_ticket_analysis(s["db"], params["analysis_id"])
+    assert row["status"] == "completed"
+    # The absorbed first attempt must be visible as an ops event.
+    with s["db"].session() as session:
+        event = session.query(OpsEvent).filter_by(event="malformed_output_retried").one()
+        assert event.severity == "warning"
+
+
+def test_malformed_output_twice_fails_permanently(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["analyzer"].raise_exc = MalformedModelOutput("schema validation: summary missing")
+    params = _make_params(s["db"])
+
+    with pytest.raises(PermanentError):
+        run_ticket_analysis(params)
+
+    assert s["analyzer"].call_count == 2
     row = writers.get_ticket_analysis(s["db"], params["analysis_id"])
     assert row["status"] == "failed"
     assert s["odoo"].call_count == 0

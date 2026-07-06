@@ -12,7 +12,7 @@ import httpx
 import pytest
 
 from reva.claude_client import ClaudeClient
-from reva.errors import PermanentError
+from reva.errors import MalformedModelOutput, PermanentError
 from reva.ticket_analyzer import TicketAnalyzer
 from reva.ticket_formatter import format_ticket_html
 from reva.ticket_tool import TICKET_TOOL_NAME
@@ -216,7 +216,8 @@ def test_truncated_tool_call_names_max_tokens():
         return httpx.Response(200, content=json.dumps(payload).encode())
 
     analyzer = _make_analyzer(handler)
-    with pytest.raises(PermanentError, match="max_tokens"):
+    # MalformedModelOutput: the runner retries this class once in-process.
+    with pytest.raises(MalformedModelOutput, match="max_tokens"):
         analyzer.analyze(_params())
 
 
@@ -243,7 +244,8 @@ def test_analyze_bad_tool_input():
         return httpx.Response(200, content=json.dumps(payload).encode())
 
     analyzer = _make_analyzer(handler)
-    with pytest.raises(PermanentError, match="validation"):
+    # MalformedModelOutput: the runner retries this class once in-process.
+    with pytest.raises(MalformedModelOutput, match="validation"):
         analyzer.analyze(_params())
 
 

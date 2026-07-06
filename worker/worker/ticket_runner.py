@@ -8,7 +8,7 @@ from __future__ import annotations
 import structlog
 
 from reva.db import writers
-from reva.errors import PermanentError, TransientError
+from reva.errors import MalformedModelOutput, PermanentError, TransientError
 from reva.ticket_formatter import format_ticket_html
 from reva.ticket_knowledge import build_knowledge_block
 from reva.types import TicketJobParams
@@ -98,10 +98,28 @@ def run_ticket_analysis(job_params: dict) -> dict:
                         )
                     elif block is not None:
                         extra_blocks = [block]
-            response_obj, result = ctx.ticket_analyzer.analyze_with_response(
-                params,
-                extra_system_blocks=extra_blocks,
-            )
+            try:
+                response_obj, result = ctx.ticket_analyzer.analyze_with_response(
+                    params,
+                    extra_system_blocks=extra_blocks,
+                )
+            except MalformedModelOutput as exc:
+                # Truncated/schema-invalid tool call — usually a one-off
+                # formatting hiccup, not a doomed input. One paid retry before
+                # the consultant sees a failure; a second miss falls through to
+                # the PermanentError handler below.
+                log.warning("ticket_analysis_malformed_output_retry", error=str(exc))
+                writers.record_ops_event(
+                    ctx.db,
+                    "ticket_analysis",
+                    "warning",
+                    "malformed_output_retried",
+                    {"analysis_id": params.analysis_id, "error": str(exc)[:300]},
+                )
+                response_obj, result = ctx.ticket_analyzer.analyze_with_response(
+                    params,
+                    extra_system_blocks=extra_blocks,
+                )
             html = format_ticket_html(result)
         except TransientError:
             log.warning("ticket_analysis_transient_error", exc_info=True)

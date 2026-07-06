@@ -12,7 +12,7 @@ import secrets
 
 from reva.attachment_text import extract_attachment_text
 from reva.claude_client import ClaudeClient
-from reva.errors import PermanentError
+from reva.errors import MalformedModelOutput, PermanentError
 from reva.ticket_tool import TICKET_TOOL_NAME, build_ticket_tool_schema, ticket_tool_choice
 from reva.types import ClaudeResponse, ContentBlock, TicketAnalysisResult, TicketJobParams
 
@@ -60,23 +60,25 @@ class TicketAnalyzer:
             max_tokens=_MAX_TOKENS,
         )
 
+        if response.stop_reason == "max_tokens":
+            # Truncated mid-tool-call (checked before the None-input case: a cut
+            # before the tool block yields no input at all): the input is partial
+            # by definition; validating it would report a misleading
+            # missing-field error.
+            raise MalformedModelOutput(
+                f"ticket analysis tool call truncated at max_tokens={_MAX_TOKENS}"
+            )
+
         if response.tool_use_input is None:
             raise PermanentError(
                 f"Claude did not call {TICKET_TOOL_NAME} "
                 f"(stop_reason={response.stop_reason})"
             )
 
-        if response.stop_reason == "max_tokens":
-            # Truncated mid-tool-call: the input is partial by definition;
-            # validating it would report a misleading missing-field error.
-            raise PermanentError(
-                f"ticket analysis tool call truncated at max_tokens={_MAX_TOKENS}"
-            )
-
         try:
             result = TicketAnalysisResult.model_validate(response.tool_use_input)
         except Exception as exc:
-            raise PermanentError(
+            raise MalformedModelOutput(
                 f"ticket analysis result failed schema validation "
                 f"(stop_reason={response.stop_reason}): {exc}"
             ) from exc

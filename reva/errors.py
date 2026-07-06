@@ -24,3 +24,11 @@ class PermanentError(WorkerError):
     """Non-retryable failure (4xx, invalid response, validation failure)."""
 
 
+class MalformedModelOutput(PermanentError):
+    """Claude returned a truncated or schema-invalid tool call.
+
+    Permanent at the RQ boundary (re-running a doomed job re-pays Claude), but
+    usually a one-off formatting hiccup — callers may retry once in-process
+    before treating it as a failure the user sees."""
+
+
