@@ -238,7 +238,14 @@ func (t Tickets) groupKeys() []string {
 func (t Tickets) requeueCmd(id int) tea.Cmd {
 	return func() tea.Msg {
 		err := t.client.RequeueTicket(id)
-		return ticketRequeuedMsg{id: id, err: err}
+		return ticketRequeuedMsg{id: id, kind: "analysis", err: err}
+	}
+}
+
+func (t Tickets) requeueIssueRunCmd(id int) tea.Cmd {
+	return func() tea.Msg {
+		err := t.client.RequeueIssueRun(id)
+		return ticketRequeuedMsg{id: id, kind: "issues run", err: err}
 	}
 }
 
@@ -280,7 +287,7 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 		if m.err != nil {
 			t.statusMsg = fmt.Sprintf("requeue failed: %s", m.err)
 		} else {
-			t.statusMsg = fmt.Sprintf("analysis #%d requeued", m.id)
+			t.statusMsg = fmt.Sprintf("%s #%d requeued", m.kind, m.id)
 		}
 
 	case tea.KeyMsg:
@@ -393,6 +400,12 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 			return t, t.load()
 		case "e":
 			if !cur.header {
+				// A failed create-issues run takes precedence: it resumes from
+				// the persisted plan (only missing issues get created), and a
+				// failed analysis alongside it is the rarer, cheaper re-run.
+				if run := cur.row.issueRun; run != nil && run.Status == "failed" {
+					return t, t.requeueIssueRunCmd(run.ID)
+				}
 				if cur.row.analysis == nil {
 					t.statusMsg = "no analysis to requeue for this ticket"
 				} else if cur.row.analysis.Status == "failed" || cur.row.analysis.Status == "completed" {

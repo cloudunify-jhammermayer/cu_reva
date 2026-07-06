@@ -69,8 +69,9 @@ type timesheetsLoadedMsg struct {
 	err  error
 }
 type ticketRequeuedMsg struct {
-	id  int
-	err error
+	id   int
+	kind string // "analysis" or "issues run" — which requeue endpoint was hit
+	err  error
 }
 type feedbackLoadedMsg struct {
 	stats  []api.LearningStat

@@ -83,6 +83,68 @@ func TestIssueRunsMappedLatestPerRecord(t *testing.T) {
 	}
 }
 
+func TestRequeuePrefersFailedIssueRun(t *testing.T) {
+	tab := newTickets(&api.MockClient{}, "")
+	tab.width, tab.height = 120, 30
+	tab, _ = tab.update(ticketAnalysesLoadedMsg{data: &api.TicketAnalysisPage{
+		Items: []api.TicketAnalysisSummary{{
+			ID: 7, TicketID: 1, ModelName: "helpdesk.ticket",
+			Status: "completed", CreatedAt: time.Now(),
+		}},
+		Total: 1,
+	}})
+	tab, _ = tab.update(ticketIssueRunsLoadedMsg{data: &api.TicketIssueRunPage{
+		Items: []api.TicketIssueRunSummary{{
+			ID: 33, TicketID: 1, ModelName: "helpdesk.ticket", Status: "failed",
+			GithubURL: "https://github.com/acme/alpha", CreatedAt: time.Now(),
+		}},
+		Total: 1,
+	}})
+	tab = onRow(tab, 1)
+
+	tab, cmd := tab.update(keyMsg("e"))
+	if cmd == nil {
+		t.Fatal("e produced no command")
+	}
+	msg, ok := cmd().(ticketRequeuedMsg)
+	if !ok || msg.kind != "issues run" || msg.id != 33 {
+		t.Fatalf("expected issues-run requeue of #33, got %+v", msg)
+	}
+	tab, _ = tab.update(msg)
+	if !strings.Contains(tab.statusMsg, "issues run #33 requeued") {
+		t.Fatalf("statusMsg = %q", tab.statusMsg)
+	}
+}
+
+func TestRequeueFallsBackToAnalysisWhenRunNotFailed(t *testing.T) {
+	tab := newTickets(&api.MockClient{}, "")
+	tab.width, tab.height = 120, 30
+	tab, _ = tab.update(ticketAnalysesLoadedMsg{data: &api.TicketAnalysisPage{
+		Items: []api.TicketAnalysisSummary{{
+			ID: 7, TicketID: 1, ModelName: "helpdesk.ticket",
+			Status: "failed", CreatedAt: time.Now(),
+		}},
+		Total: 1,
+	}})
+	tab, _ = tab.update(ticketIssueRunsLoadedMsg{data: &api.TicketIssueRunPage{
+		Items: []api.TicketIssueRunSummary{{
+			ID: 33, TicketID: 1, ModelName: "helpdesk.ticket", Status: "completed",
+			GithubURL: "https://github.com/acme/alpha", CreatedAt: time.Now(),
+		}},
+		Total: 1,
+	}})
+	tab = onRow(tab, 1)
+
+	tab, cmd := tab.update(keyMsg("e"))
+	if cmd == nil {
+		t.Fatal("e produced no command")
+	}
+	msg, ok := cmd().(ticketRequeuedMsg)
+	if !ok || msg.kind != "analysis" || msg.id != 7 {
+		t.Fatalf("expected analysis requeue of #7, got %+v", msg)
+	}
+}
+
 func TestAnalysesLatestPerTicketWins(t *testing.T) {
 	tab := newTickets(&api.MockClient{}, "")
 	newer := api.TicketAnalysisSummary{

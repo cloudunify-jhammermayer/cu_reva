@@ -200,6 +200,10 @@ func (c *Client) RequeueTicket(id int) error {
 	return c.post(fmt.Sprintf("/ticket-analysis/%d/requeue", id))
 }
 
+func (c *Client) RequeueIssueRun(id int) error {
+	return c.post(fmt.Sprintf("/create-issues/%d/requeue", id))
+}
+
 func (c *Client) Learning() ([]LearningStat, error) {
 	var out []LearningStat
 	return out, c.get("/metrics/learning", &out)

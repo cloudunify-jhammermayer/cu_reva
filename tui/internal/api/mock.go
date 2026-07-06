@@ -650,6 +650,10 @@ func (m *MockClient) RequeueTicket(id int) error {
 	return nil
 }
 
+func (m *MockClient) RequeueIssueRun(id int) error {
+	return nil
+}
+
 func (m *MockClient) Learning() ([]LearningStat, error) {
 	return []LearningStat{
 		{Repo: "acme/odoo-modules", Category: "style", Findings: 18, Dismissed: 11, ResolvedByFix: 2, StillOpenAtMerge: 1},

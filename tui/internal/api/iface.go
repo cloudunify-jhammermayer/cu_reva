@@ -19,6 +19,7 @@ type ClientIface interface {
 	TicketIssueRuns(limit int) (*TicketIssueRunPage, error)
 	TimesheetReviews(limit int) (*TimesheetReviewPage, error)
 	RequeueTicket(id int) error
+	RequeueIssueRun(id int) error
 	Learning() ([]LearningStat, error)
 	Mutes() ([]MuteEntry, error)
 	LearnedMemory() ([]LearnedMemoryEntry, error)
