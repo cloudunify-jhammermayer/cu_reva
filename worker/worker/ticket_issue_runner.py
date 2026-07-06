@@ -200,7 +200,7 @@ def _fallback_issue_body(params: TicketIssueJobParams) -> str:
     sections = [
         "Create the implementation issue from the original Odoo ticket.",
         "",
-        f"### Ticket",
+        "### Ticket",
         params.name.strip() or f"{params.model_name} #{params.ticket_id}",
     ]
     if params.description.strip():

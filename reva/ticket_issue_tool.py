@@ -38,6 +38,14 @@ def build_ticket_issue_tool_schema() -> dict[str, Any]:
         input_schema["$defs"] = schema["$defs"]
     input_schema = require_no_extra_properties(input_schema)
 
+    # Strict structured output lets Claude omit any non-required field —
+    # fields with Pydantic defaults (acceptance_criteria, type) came back
+    # missing in production plans. Require every issue field in the tool
+    # schema; the model defaults stay lenient for persisted plans.
+    item = input_schema.get("$defs", {}).get("TicketIssueItem")
+    if isinstance(item, dict) and "properties" in item:
+        item["required"] = list(item["properties"].keys())
+
     return {
         "name": TICKET_ISSUE_TOOL_NAME,
         "description": _TOOL_DESCRIPTION,

@@ -303,3 +303,11 @@ def test_tool_schema_exposes_type_enum():
     schema = build_ticket_issue_tool_schema()
     props = schema["input_schema"]["$defs"]["TicketIssueItem"]["properties"]
     assert props["type"]["enum"] == ["BUG", "FEAT", "CR", "CONF", "DEV", "MIG", "SUP", "DOC"]
+
+
+def test_tool_schema_requires_every_issue_field():
+    """Strict structured output lets Claude drop non-required fields — issues
+    were created without acceptance_criteria once `strict` shipped. Every
+    TicketIssueItem field must be required in the tool schema."""
+    item = build_ticket_issue_tool_schema()["input_schema"]["$defs"]["TicketIssueItem"]
+    assert sorted(item["required"]) == sorted(item["properties"].keys())
