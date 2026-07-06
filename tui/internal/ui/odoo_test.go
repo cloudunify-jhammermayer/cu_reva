@@ -66,6 +66,65 @@ func TestOdooViewShowsVersionColumn(t *testing.T) {
 	}
 }
 
+func TestOdooRotateShowsKeyUntilExplicitDismiss(t *testing.T) {
+	o := newOdoo(&api.MockClient{})
+	o.width, o.height = 140, 30
+	data, _ := (&api.MockClient{}).OdooInstances()
+	o, _ = o.update(odooLoadedMsg{data: data})
+
+	o, _ = o.update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if !o.confirmingRotate {
+		t.Fatal("ctrl+r did not enter confirm mode")
+	}
+	o, cmd := o.update(keyMsg("y"))
+	if cmd == nil {
+		t.Fatal("y produced no rotate command")
+	}
+	o, _ = o.update(cmd().(odooCreatedMsg))
+	if o.newKey == "" {
+		t.Fatal("rotated key not surfaced")
+	}
+	if !strings.Contains(o.view(140, 30), "ROTATED") {
+		t.Fatal("view does not show the rotated key")
+	}
+	// A stray keypress (e.g. a double-tapped y buffered during the rotate
+	// round-trip) must not eat the banner — only esc/enter dismiss it.
+	o, _ = o.update(keyMsg("y"))
+	if o.newKey == "" {
+		t.Fatal("stray key dismissed the key banner")
+	}
+	o, _ = o.update(keyMsg("esc"))
+	if o.newKey != "" {
+		t.Fatal("esc did not dismiss the key banner")
+	}
+}
+
+func TestOdooDeleteFlowConfirmsThenDeletes(t *testing.T) {
+	o := newOdoo(&api.MockClient{})
+	o.width, o.height = 140, 30
+	data, _ := (&api.MockClient{}).OdooInstances()
+	o, _ = o.update(odooLoadedMsg{data: data})
+
+	o, _ = o.update(keyMsg("D"))
+	if !o.confirmingDelete {
+		t.Fatal("ctrl+d did not enter confirm mode")
+	}
+	// Anything but y cancels.
+	o, cmd := o.update(keyMsg("n"))
+	if o.confirmingDelete || cmd != nil {
+		t.Fatal("non-y did not cancel the delete")
+	}
+	o, _ = o.update(keyMsg("D"))
+	o, cmd = o.update(keyMsg("y"))
+	if cmd == nil {
+		t.Fatal("y produced no delete command")
+	}
+	msg, ok := cmd().(odooActionMsg)
+	if !ok || msg.err != nil {
+		t.Fatalf("delete command failed: %+v", msg)
+	}
+}
+
 func TestOdooCreateFlowPostsAndShowsKey(t *testing.T) {
 	o := newOdoo(&api.MockClient{})
 	o.width, o.height = 140, 30

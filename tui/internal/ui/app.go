@@ -473,7 +473,7 @@ func (a *App) statusBar() string {
 	case viewFeedback:
 		hint = "j/k scroll | dismissals & mutes per repo/category | r=refresh | q quit"
 	case viewOdoo:
-		hint = "j/k navigate | n=add · ^R=rotate key · t=toggle active · r=refresh | q quit"
+		hint = "j/k navigate | n=add · ^R=rotate key · D=delete · t=toggle active · r=refresh | q quit"
 	case viewTimesheets:
 		hint = "j/k navigate | r=refresh | q quit"
 	default:

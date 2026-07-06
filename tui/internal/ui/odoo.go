@@ -29,6 +29,7 @@ type Odoo struct {
 	createKey  string
 
 	confirmingRotate bool // awaiting y/n confirmation for an irreversible key rotation
+	confirmingDelete bool // awaiting y/n confirmation for an instance delete
 
 	newKey string // plaintext key to display once after create/rotate
 }
@@ -78,8 +79,13 @@ func (o Odoo) update(msg tea.Msg) (Odoo, tea.Cmd) {
 		return o, o.load()
 
 	case tea.KeyMsg:
-		if o.newKey != "" { // dismiss the key banner on any key
-			o.newKey = ""
+		if o.newKey != "" {
+			// Dismiss the key banner only on an explicit ack. A stray key —
+			// e.g. a buffered Enter typed right after the rotate confirm —
+			// must not eat the one chance to copy the key.
+			if m.String() == "esc" || m.String() == "enter" {
+				o.newKey = ""
+			}
 			return o, nil
 		}
 		if o.confirmingRotate {
@@ -94,6 +100,19 @@ func (o Odoo) update(msg tea.Msg) (Odoo, tea.Cmd) {
 				}
 			}
 			o.statusMsg = styleSubtitle.Render("rotation cancelled")
+			return o, nil
+		}
+		if o.confirmingDelete {
+			o.confirmingDelete = false
+			if m.String() == "y" && o.cursor < len(o.items) {
+				it := o.items[o.cursor]
+				client := o.client
+				o.statusMsg = styleSubtitle.Render("deleting " + it.Name + " ...")
+				return o, func() tea.Msg {
+					return odooActionMsg{err: client.DeleteOdooInstance(it.ID)}
+				}
+			}
+			o.statusMsg = styleSubtitle.Render("delete cancelled")
 			return o, nil
 		}
 		if o.creating {
@@ -119,6 +138,15 @@ func (o Odoo) update(msg tea.Msg) (Odoo, tea.Cmd) {
 				o.confirmingRotate = true
 				o.statusMsg = styleStatusFailed.Render(
 					"rotate API key for " + o.items[o.cursor].Name + "? invalidates the current key — press y to confirm, any other key to cancel")
+			}
+		case "D":
+			// Deleting is destructive (removes the instance and detaches its
+			// run history), so it's confirm-gated like key rotation. ctrl+d
+			// is taken — listNav uses it for half-page-down.
+			if o.cursor < len(o.items) {
+				o.confirmingDelete = true
+				o.statusMsg = styleStatusFailed.Render(
+					"delete " + o.items[o.cursor].Name + "? removes the instance and detaches its history — press y to confirm, any other key to cancel")
 			}
 		case "t":
 			if o.cursor < len(o.items) {
@@ -191,7 +219,7 @@ func (o Odoo) view(w, h int) string {
 			"",
 			"    "+styleTitle.Render(o.newKey),
 			"",
-			styleSubtitle.Render("  press any key to dismiss"))
+			styleSubtitle.Render("  press esc or enter to dismiss"))
 		return lipgloss.JoinVertical(lipgloss.Left, header, "", banner)
 	}
 	if o.creating {
@@ -269,7 +297,7 @@ func (o Odoo) view(w, h int) string {
 		rows = append(rows, line)
 	}
 
-	pos := styleSubtitle.Render(fmt.Sprintf("  %d/%d   n add · ^R rotate key · t toggle · r refresh", o.cursor+1, len(o.items)))
+	pos := styleSubtitle.Render(fmt.Sprintf("  %d/%d   n add · ^R rotate key · D delete · t toggle · r refresh", o.cursor+1, len(o.items)))
 	if o.statusMsg != "" {
 		pos = "  " + o.statusMsg
 	}

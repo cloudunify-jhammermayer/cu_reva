@@ -64,6 +64,38 @@ def test_patch_toggles_active(client):
     assert client.get("/api/v1/odoo-instances").json()["items"][0]["active"] is False
 
 
+def test_delete_removes_instance_and_detaches_history(client):
+    from reva.db.models import ChangeNote, TicketAnalysis
+
+    iid = client.post("/api/v1/odoo-instances", json={
+        "name": "ACME", "callback_url": "", "callback_api_key": "",
+    }).json()["id"]
+
+    db = app.dependency_overrides[get_db]()
+    with db.session() as s:
+        s.add(TicketAnalysis(
+            ticket_id=7, model_name="helpdesk.ticket", field_name="description",
+            odoo_instance_id=iid, input_text="x",
+        ))
+        s.add(ChangeNote(
+            repo_full_name="acme/repo", pr_number=1, ticket_id=7,
+            odoo_instance_id=iid, model_name="helpdesk.ticket",
+        ))
+
+    r = client.delete(f"/api/v1/odoo-instances/{iid}")
+    assert r.status_code == 200
+    assert r.json() == {"id": iid, "deleted": True}
+    assert client.get("/api/v1/odoo-instances").json()["total"] == 0
+
+    with db.session() as s:
+        analysis = s.query(TicketAnalysis).one()
+        assert analysis.odoo_instance_id is None
+        assert s.query(ChangeNote).count() == 0
+
+    # Second delete: the row is gone.
+    assert client.delete(f"/api/v1/odoo-instances/{iid}").status_code == 404
+
+
 def test_create_requires_secret_key_when_outbound_set(client, monkeypatch):
     monkeypatch.delenv("REVA_SECRET_KEY", raising=False)
     r = client.post("/api/v1/odoo-instances", json={

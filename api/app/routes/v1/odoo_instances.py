@@ -101,6 +101,20 @@ def rotate_key(
     return {"id": instance_id, "name": row["name"], "key_prefix": key_prefix, "api_key": plaintext}
 
 
+@router.delete("/odoo-instances/{instance_id}", status_code=200)
+def delete_instance(
+    instance_id: int, request: Request, db: Database = Depends(get_db)
+) -> dict:
+    row = writers.get_odoo_instance(db, instance_id)
+    if row is None or not writers.delete_odoo_instance(db, instance_id):
+        raise HTTPException(status_code=404, detail="Odoo instance not found")
+    writers.record_admin_action(
+        db, action="delete_odoo_instance", actor=actor_from_request(request),
+        target=row["name"], detail={"instance_id": instance_id},
+    )
+    return {"id": instance_id, "deleted": True}
+
+
 @router.patch("/odoo-instances/{instance_id}", status_code=200)
 def update_instance(
     instance_id: int, body: OdooInstanceUpdate, request: Request,

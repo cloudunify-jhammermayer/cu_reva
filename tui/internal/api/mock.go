@@ -718,6 +718,8 @@ func (m *MockClient) RotateOdooInstanceKey(id int) (*OdooInstanceCreated, error)
 
 func (m *MockClient) SetOdooInstanceActive(id int, active bool) error { return nil }
 
+func (m *MockClient) DeleteOdooInstance(id int) error { return nil }
+
 func min(a, b int) int {
 	if a < b {
 		return a

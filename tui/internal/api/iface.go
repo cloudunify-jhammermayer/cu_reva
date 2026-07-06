@@ -26,4 +26,5 @@ type ClientIface interface {
 	CreateOdooInstance(name, callbackURL, callbackKey string) (*OdooInstanceCreated, error)
 	RotateOdooInstanceKey(id int) (*OdooInstanceCreated, error)
 	SetOdooInstanceActive(id int, active bool) error
+	DeleteOdooInstance(id int) error
 }

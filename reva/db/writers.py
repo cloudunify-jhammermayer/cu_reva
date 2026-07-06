@@ -2392,6 +2392,28 @@ def update_odoo_instance(db: Database, instance_id: int, **fields: object) -> bo
         return True
 
 
+def delete_odoo_instance(db: Database, instance_id: int) -> bool:
+    """Hard-delete an Odoo instance. Returns False if the row is missing.
+
+    Run history keeps its data but loses the instance link: the nullable
+    odoo_instance_id FKs are set NULL, and change_notes rows (NOT NULL FK)
+    are deleted with the instance.
+    """
+    with db.session() as s:
+        row = s.get(OdooInstance, instance_id)
+        if row is None:
+            return False
+        for model in (TicketAnalysis, TicketIssueRun, TimesheetReviewRun):
+            s.execute(
+                update(model)
+                .where(model.odoo_instance_id == instance_id)
+                .values(odoo_instance_id=None)
+            )
+        s.execute(delete(ChangeNote).where(ChangeNote.odoo_instance_id == instance_id))
+        s.delete(row)
+        return True
+
+
 def sum_instance_cost_since(db: Database, odoo_instance_id: int, since: datetime) -> float:
     """Rolling spend (USD) for one Odoo instance across its run tables.
 

@@ -271,6 +271,12 @@ func (c *Client) RotateOdooInstanceKey(id int) (*OdooInstanceCreated, error) {
 	)
 }
 
+func (c *Client) DeleteOdooInstance(id int) error {
+	return c.postJSON(
+		http.MethodDelete, fmt.Sprintf("/odoo-instances/%d", id), nil, nil, http.StatusOK,
+	)
+}
+
 func (c *Client) SetOdooInstanceActive(id int, active bool) error {
 	return c.postJSON(
 		http.MethodPatch, fmt.Sprintf("/odoo-instances/%d", id),
