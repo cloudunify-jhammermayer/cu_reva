@@ -1277,6 +1277,31 @@ def record_ticket_analysis_failed(
         row.completed_at = datetime.now(timezone.utc)
 
 
+def record_ticket_analysis_callback_sent(db: Database, analysis_id: int) -> None:
+    """Record a successful Odoo callback: the completed analysis reached Odoo.
+
+    Clears any prior callback_error so a successful retry overwrites the failure.
+    """
+    with db.session() as s:
+        row = s.get(TicketAnalysis, analysis_id)
+        if row is None:
+            return
+        row.callback_sent_at = datetime.now(timezone.utc)
+        row.callback_error = None
+
+
+def record_ticket_analysis_callback_failed(
+    db: Database, analysis_id: int, error: str
+) -> None:
+    """Record a failed Odoo callback: the analysis completed but never reached
+    Odoo. Leaves callback_sent_at NULL so the row reads 'not in Odoo'."""
+    with db.session() as s:
+        row = s.get(TicketAnalysis, analysis_id)
+        if row is None:
+            return
+        row.callback_error = error
+
+
 def reset_ticket_analysis(db: Database, analysis_id: int) -> None:
     """Reset a failed ticket analysis to pending so it can be re-enqueued."""
     with db.session() as s:

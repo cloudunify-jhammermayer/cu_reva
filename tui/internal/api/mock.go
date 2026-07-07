@@ -526,6 +526,8 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 			Status: "completed", Model: strPtr("claude-sonnet-4-6"),
 			InputTokens: intPtr(1840), OutputTokens: intPtr(712),
 			EstimatedCostUSD: f64Ptr(0.0032), CreatedAt: now.Add(-2 * time.Minute), CompletedAt: &t1,
+			CallbackSentAt:   &t1,
+			EstimateHoursMin: f64Ptr(12), EstimateHoursMax: f64Ptr(20),
 		},
 		{
 			ID: 2, TicketID: 123, ModelName: "project.task", FieldName: "description",
@@ -542,12 +544,15 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 		},
 		{
 			// Analysis-only ticket (no create-issues run) — groups under
-			// "(no repo yet)" in the Tickets tab.
+			// "(no repo yet)" in the Tickets tab. Completed but the Odoo callback
+			// failed, so it reads "completed ⚠ not in Odoo".
 			ID: 4, TicketID: 777, ModelName: "helpdesk.ticket", FieldName: "description",
 			Status: "completed", Model: strPtr("claude-sonnet-4-6"),
 			InputTokens: intPtr(920), OutputTokens: intPtr(204),
 			EstimatedCostUSD: f64Ptr(0.0011), CreatedAt: now.Add(-45 * time.Minute),
-			CompletedAt: &t1,
+			CompletedAt:      &t1,
+			CallbackError:    strPtr("Odoo write_field timed out"),
+			EstimateHoursMin: f64Ptr(3), EstimateHoursMax: f64Ptr(6),
 		},
 	}
 	n := limit

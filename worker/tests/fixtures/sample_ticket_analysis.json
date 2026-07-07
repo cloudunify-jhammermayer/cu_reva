@@ -16,40 +16,20 @@
           {"text": "Expected behaviour after button click is not described", "confidence": "certain"},
           {"text": "No mention of which Odoo module or view is affected", "confidence": "possible"}
         ],
-        "acceptance_criteria": [
-          {
-            "given": "a logged-in helpdesk agent on the ticket form",
-            "when": "they click the new button",
-            "then": "the configured action is triggered and a success toast appears"
-          }
-        ],
-        "test_cases": [
-          {
-            "category": "happy_path",
-            "description": "Agent clicks button on an open ticket — action fires and toast shown"
-          },
-          {
-            "category": "edge_case",
-            "description": "Button clicked on a closed ticket — action is blocked with an error message"
-          },
-          {
-            "category": "error_scenario",
-            "description": "User without helpdesk agent role cannot see the button"
-          }
-        ],
-        "definition_of_ready": [
-          {"text": "Affected Odoo view and model are identified", "confidence": "inferred"},
-          {"text": "Button label and icon agreed with stakeholder", "confidence": "inferred"},
-          {"text": "Action triggered by button is fully specified", "confidence": "inferred"}
-        ],
-        "definition_of_done": [
-          {"text": "Button renders in the helpdesk ticket form view", "confidence": "inferred"},
-          {"text": "Access rights verified for agent and non-agent roles", "confidence": "inferred"},
-          {"text": "All acceptance criteria verified on staging", "confidence": "inferred"}
-        ],
         "odoo_notes": [
-          {"text": "Affects helpdesk.ticket form view — ir.ui.view XML change required", "confidence": "inferred"},
-          {"text": "May require security rule update in helpdesk/security/ir.model.access.csv", "confidence": "inferred"}
+          {"text": "Affects the helpdesk ticket form view", "confidence": "inferred"},
+          {"text": "May require an access-rights update for the agent role", "confidence": "inferred"}
+        ],
+        "standard_coverage": {"coverage": "unknown", "features": [], "notes": ""},
+        "estimates": [
+          {
+            "story": "As a helpdesk agent I want a button on the ticket form to trigger the configured action.",
+            "kind": "custom_dev",
+            "min_hours": 4,
+            "max_hours": 8,
+            "confidence": "medium",
+            "assumptions": ["Reuses the existing helpdesk form view", "No data migration needed"]
+          }
         ]
       }
     }

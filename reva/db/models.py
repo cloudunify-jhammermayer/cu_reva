@@ -440,6 +440,10 @@ class TicketAnalysis(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Delivery visibility (migration 033): the Odoo write_field callback happens
+    # after the row is 'completed'; callback_sent_at is NULL until it lands.
+    callback_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    callback_error: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         # Partial UNIQUE index (migration 006): job_id is unique only when set.

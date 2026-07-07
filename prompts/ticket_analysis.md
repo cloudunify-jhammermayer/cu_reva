@@ -61,6 +61,39 @@ Base this section ONLY on the retrieved knowledge block — never on memory. No
 knowledge block, or nothing relevant in it → `coverage: "unknown"` and empty
 features. Name apps/settings/features only — no models, fields, or code.
 
+### 4. Development Estimate
+
+Split the ticket into **user stories**, then estimate development time per story.
+Fill `estimates[]` — one entry per story.
+
+Split with the SAME rules the issue planner uses:
+
+- **Default to ONE story.** Most tickets are one coherent piece of work; a single
+  story covering the whole ticket is the normal outcome, not a fallback. When
+  unsure, return exactly one story.
+- Split only when the ticket clearly contains **several independently
+  deliverable pieces of work** — a piece a developer could implement, test, and
+  hand over without waiting on the others.
+- Do not split per requirement or per gap: several requirements that verify the
+  same piece of work belong to ONE story.
+
+For each story:
+
+- `story` — a one-sentence user story ("As a … I want … so that …", or a plain
+  one-line statement of the deliverable).
+- `kind` — `"custom_dev"` when it needs new code, `"configuration"` when stock
+  Odoo covers it and the work is purely enabling/configuring a standard feature
+  (say so), or `"mixed"` when it is both.
+- `min_hours` / `max_hours` — an hour **range** for **implementation + developer
+  testing** performed by a **mid-level Odoo developer working AI-assisted**.
+  Never a bare point estimate; always give a range. **Exclude** deployment,
+  project management, and customer communication from the number.
+- `confidence` — `"high"`, `"medium"`, or `"low"`, reflecting how much the ticket
+  pins the work down.
+- `assumptions` — the concrete assumptions the range depends on (e.g. "reuses the
+  existing report layout", "no data migration needed"). State them explicitly;
+  a range without its assumptions is not useful.
+
 
 ## Rules
 

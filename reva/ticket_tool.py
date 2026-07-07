@@ -27,12 +27,9 @@ def build_ticket_tool_schema() -> dict[str, Any]:
     allowed = {
         "summary",
         "missing_info",
-        "acceptance_criteria",
-        "test_cases",
-        "definition_of_ready",
-        "definition_of_done",
         "odoo_notes",
         "standard_coverage",
+        "estimates",
     }
     properties = {k: v for k, v in schema.get("properties", {}).items() if k in allowed}
 
@@ -42,12 +39,9 @@ def build_ticket_tool_schema() -> dict[str, Any]:
         "required": [
             "summary",
             "missing_info",
-            "acceptance_criteria",
-            "test_cases",
-            "definition_of_ready",
-            "definition_of_done",
             "odoo_notes",
             "standard_coverage",
+            "estimates",
         ],
         "additionalProperties": False,
     }

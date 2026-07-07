@@ -242,19 +242,6 @@ def _unwrap_json_list(v: object) -> object:
     return v
 
 
-class AcceptanceCriterion(BaseModel):
-    given: str
-    when: str
-    then: str
-    confidence: Literal["explicit", "inferred", "assumed"] = "inferred"
-
-
-class TicketTestCase(BaseModel):
-    category: Literal["happy_path", "edge_case", "error_scenario"]
-    description: str
-    confidence: Literal["explicit", "inferred", "assumed"] = "inferred"
-
-
 class SourcedItem(BaseModel):
     text: str
     confidence: Literal["explicit", "inferred", "assumed"] = "inferred"
@@ -289,23 +276,32 @@ class StandardCoverage(BaseModel):
         return _unwrap_json_list(v)
 
 
+class StoryEstimate(BaseModel):
+    """Development-time estimate for one user story split out of a ticket."""
+
+    story: str                      # one-sentence user story
+    kind: Literal["custom_dev", "configuration", "mixed"] = "custom_dev"
+    min_hours: float
+    max_hours: float
+    confidence: Literal["high", "medium", "low"] = "medium"
+    assumptions: list[str] = Field(default_factory=list)
+
+    @field_validator("assumptions", mode="before")
+    @classmethod
+    def _parse_json_string_list(cls, v: object) -> object:
+        return _unwrap_json_list(v)
+
+
 class TicketAnalysisResult(BaseModel):
     """Structured output from the ticket analysis tool_use call."""
 
     summary: str
     missing_info: list[MissingInfoItem] = Field(default_factory=list)
-    acceptance_criteria: list[AcceptanceCriterion] = Field(default_factory=list)
-    test_cases: list[TicketTestCase] = Field(default_factory=list)
-    definition_of_ready: list[SourcedItem] = Field(default_factory=list)
-    definition_of_done: list[SourcedItem] = Field(default_factory=list)
     odoo_notes: list[SourcedItem] = Field(default_factory=list)
     standard_coverage: StandardCoverage = Field(default_factory=StandardCoverage)
+    estimates: list[StoryEstimate] = Field(default_factory=list)
 
-    @field_validator(
-        "missing_info", "acceptance_criteria", "test_cases",
-        "definition_of_ready", "definition_of_done", "odoo_notes",
-        mode="before",
-    )
+    @field_validator("missing_info", "odoo_notes", "estimates", mode="before")
     @classmethod
     def _parse_json_string_list(cls, v: object) -> object:
         return _unwrap_json_list(v)

@@ -179,6 +179,47 @@ def test_pending_unique_index_rejects_second_pending(client_db_queue):
             ))
 
 
+def test_list_serializes_callback_and_estimate_fields(client_db_queue):
+    """A completed-but-undelivered row exposes its callback failure and the
+    per-story estimate sums to the list endpoint (feeds the TUI warning)."""
+    from reva.db.models import TicketAnalysis
+
+    client, db, _, headers = client_db_queue
+    with db.session() as s:
+        s.add(TicketAnalysis(
+            odoo_instance_id=None, ticket_id=5, model_name="helpdesk.ticket",
+            field_name="x", input_text="t", status="completed",
+            callback_error="Odoo write_field timed out",
+            result_structured={"estimates": [
+                {"story": "a", "min_hours": 4, "max_hours": 8},
+                {"story": "b", "min_hours": 1.5, "max_hours": 2},
+            ]},
+        ))
+
+    item = client.get("/api/v1/ticket-analyses").json()["items"][0]
+    assert item["callback_sent_at"] is None
+    assert item["callback_error"] == "Odoo write_field timed out"
+    assert item["estimate_hours_min"] == 5.5
+    assert item["estimate_hours_max"] == 10.0
+
+
+def test_list_estimate_sums_null_when_absent(client_db_queue):
+    from reva.db.models import TicketAnalysis
+
+    client, db, _, headers = client_db_queue
+    with db.session() as s:
+        s.add(TicketAnalysis(
+            odoo_instance_id=None, ticket_id=6, model_name="helpdesk.ticket",
+            field_name="x", input_text="t", status="completed",
+            result_structured={"summary": "s"},
+        ))
+
+    item = client.get("/api/v1/ticket-analyses").json()["items"][0]
+    assert item["estimate_hours_min"] is None
+    assert item["estimate_hours_max"] is None
+    assert item["callback_error"] is None
+
+
 def test_fresh_pending_cannot_be_requeued(client_db_queue):
     """A pending analysis with a presumably-live job must not be requeued."""
     client, _, _, headers = client_db_queue

@@ -168,6 +168,12 @@ type TicketAnalysisSummary struct {
 	CreatedAt        time.Time  `json:"created_at"`
 	CompletedAt      *time.Time `json:"completed_at"`
 	ErrorMessage     *string    `json:"error_message"`
+	// CallbackSentAt is nil until the Odoo write_field callback lands; a
+	// completed analysis with a nil value never reached Odoo.
+	CallbackSentAt   *time.Time `json:"callback_sent_at"`
+	CallbackError    *string    `json:"callback_error"`
+	EstimateHoursMin *float64   `json:"estimate_hours_min"`
+	EstimateHoursMax *float64   `json:"estimate_hours_max"`
 }
 
 type TicketAnalysisPage struct {

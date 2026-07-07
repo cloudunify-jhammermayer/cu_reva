@@ -446,6 +446,36 @@ func TestIssueRunWithoutAnalysisStillAppears(t *testing.T) {
 	}
 }
 
+func TestCompletedButUndeliveredFlaggedNotInOdoo(t *testing.T) {
+	// Mock ticket 777 is completed but its Odoo callback failed (CallbackSentAt
+	// nil, CallbackError set) — the status cell must warn and the extras line
+	// must surface the callback error.
+	tab := ticketsWithData()
+	tab = onRow(tab, 777)
+	out := tab.view(120, 30)
+	if !strings.Contains(out, "not in Odoo") {
+		t.Fatalf("view missing the 'not in Odoo' delivery warning, got:\n%s", out)
+	}
+	if !strings.Contains(out, "callback error: Odoo write_field timed out") {
+		t.Fatalf("view missing the callback error extras line, got:\n%s", out)
+	}
+}
+
+func TestDeliveredAnalysisNotFlaggedNotInOdoo(t *testing.T) {
+	// Mock ticket 456 is completed AND delivered (CallbackSentAt set) — it must
+	// render a plain "completed", never the delivery warning, and show its
+	// estimate range in the extras.
+	tab := ticketsWithData()
+	tab = onRow(tab, 456)
+	out := tab.view(120, 30)
+	if strings.Contains(out, "not in Odoo") {
+		t.Fatalf("delivered analysis wrongly flagged 'not in Odoo':\n%s", out)
+	}
+	if !strings.Contains(out, "est. 12–20h") {
+		t.Fatalf("view missing the estimate line, got:\n%s", out)
+	}
+}
+
 func TestTicketsGroupedByRepo(t *testing.T) {
 	tab := ticketsWithData()
 	out := tab.view(120, 30)

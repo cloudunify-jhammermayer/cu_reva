@@ -12,16 +12,14 @@ from pathlib import Path
 import pytest
 
 from reva.db import Base, Database, create_engine_from_url, writers
-from reva.db.models import OpsEvent
+from reva.db.models import OpsEvent, TicketAnalysis
 from reva.errors import MalformedModelOutput, PermanentError, TransientError
 from reva.types import (
-    AcceptanceCriterion,
     ClaudeResponse,
     MissingInfoItem,
     SourcedItem,
     TicketAnalysisResult,
     TicketJobParams,
-    TicketTestCase,
 )
 from worker.runner import WorkerContext, set_context
 from worker.ticket_runner import run_ticket_analysis
@@ -90,14 +88,6 @@ def _good_result() -> TicketAnalysisResult:
     return TicketAnalysisResult(
         summary="The ticket is well-written.",
         missing_info=[MissingInfoItem(text="User role unspecified")],
-        acceptance_criteria=[
-            AcceptanceCriterion(given="user", when="clicks", then="action fires")
-        ],
-        test_cases=[
-            TicketTestCase(category="happy_path", description="Standard click"),
-        ],
-        definition_of_ready=[SourcedItem(text="Scope clear")],
-        definition_of_done=[SourcedItem(text="Code reviewed")],
         odoo_notes=[SourcedItem(text="Affects helpdesk.ticket")],
     )
 
@@ -284,6 +274,88 @@ def test_retry_after_callback_failure_does_not_reanalyze(ctx_and_fakes):
     assert out["status"] == "completed"
     assert s["analyzer"].call_count == 1  # not re-analyzed (no re-pay)
     assert s["odoo"].call_count == 2      # callback was retried
+
+
+def _callback_fields(db: Database, analysis_id: int) -> tuple:
+    with db.session() as s:
+        row = s.get(TicketAnalysis, analysis_id)
+        return row.callback_sent_at, row.callback_error
+
+
+def test_callback_sent_recorded_on_success(ctx_and_fakes):
+    s = ctx_and_fakes
+    params = _make_params(s["db"])
+
+    run_ticket_analysis(params)
+
+    sent_at, error = _callback_fields(s["db"], params["analysis_id"])
+    assert sent_at is not None
+    assert error is None
+
+
+def test_callback_failed_recorded_on_odoo_error(ctx_and_fakes):
+    """A failed Odoo callback leaves callback_sent_at NULL and records the error
+    (so the tab reads 'not in Odoo'), in addition to the existing ops event."""
+    s = ctx_and_fakes
+    s["odoo"].raise_exc = TransientError("Odoo 503")
+    params = _make_params(s["db"])
+
+    with pytest.raises(TransientError):
+        run_ticket_analysis(params)
+
+    sent_at, error = _callback_fields(s["db"], params["analysis_id"])
+    assert sent_at is None
+    assert error is not None and "503" in error
+    with s["db"].session() as session:
+        assert session.query(OpsEvent).filter_by(event="write_field_failed").count() == 1
+
+
+def test_successful_retry_clears_prior_callback_error(ctx_and_fakes):
+    """H7 resume path: after a callback failure, a successful retry overwrites the
+    failure with callback_sent_at and clears callback_error."""
+    s = ctx_and_fakes
+    params = _make_params(s["db"])
+
+    s["odoo"].raise_exc = TransientError("Odoo 503")
+    with pytest.raises(TransientError):
+        run_ticket_analysis(params)
+    assert _callback_fields(s["db"], params["analysis_id"])[1] is not None
+
+    s["odoo"].raise_exc = None
+    run_ticket_analysis(params)
+    sent_at, error = _callback_fields(s["db"], params["analysis_id"])
+    assert sent_at is not None
+    assert error is None
+
+
+def test_malformed_html_repaired_and_ops_event_recorded(ctx_and_fakes, monkeypatch):
+    """A malformed render must not fail the job: it is repaired, delivered, and an
+    ops event is recorded (degradations must be visible)."""
+    s = ctx_and_fakes
+    monkeypatch.setattr(
+        "worker.ticket_runner.format_ticket_html", lambda result: "<p>oops"
+    )
+    params = _make_params(s["db"])
+
+    out = run_ticket_analysis(params)
+
+    assert out["status"] == "completed"
+    # Odoo received the repaired (well-formed) HTML, not the broken input.
+    assert s["odoo"].calls[-1]["html"] == "<p>oops</p>"
+    with s["db"].session() as session:
+        event = session.query(OpsEvent).filter_by(event="html_repaired").one()
+        assert event.component == "ticket_analysis"
+        assert event.severity == "warning"
+
+
+def test_wellformed_html_records_no_repair_event(ctx_and_fakes):
+    s = ctx_and_fakes
+    params = _make_params(s["db"])
+
+    run_ticket_analysis(params)
+
+    with s["db"].session() as session:
+        assert session.query(OpsEvent).filter_by(event="html_repaired").count() == 0
 
 
 def test_dedup_pending(ctx_and_fakes):

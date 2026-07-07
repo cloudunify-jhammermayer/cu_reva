@@ -9,6 +9,7 @@ import structlog
 
 from reva.db import writers
 from reva.errors import MalformedModelOutput, PermanentError, TransientError
+from reva.html_guard import ensure_renderable
 from reva.ticket_formatter import format_ticket_html
 from reva.ticket_knowledge import build_knowledge_block
 from reva.types import TicketJobParams
@@ -142,6 +143,17 @@ def run_ticket_analysis(job_params: dict) -> dict:
             result_structured=result.model_dump(mode="json"),
         )
 
+    # Well-formedness guard right before the callback: a malformed render must
+    # not fail the job — repair it, deliver it, and record an ops event
+    # (degradations must be visible, never silent).
+    html, was_repaired = ensure_renderable(html)
+    if was_repaired:
+        log.warning("ticket_analysis_html_repaired")
+        writers.record_ops_event(ctx.db, "ticket_analysis", "warning", "html_repaired", {
+            "analysis_id": params.analysis_id,
+            "ticket_id": params.ticket_id,
+        })
+
     try:
         odoo.write_field(
             ticket_id=params.ticket_id,
@@ -149,14 +161,18 @@ def run_ticket_analysis(job_params: dict) -> dict:
             field_name=params.field_name,
             html=html,
         )
-    except (PermanentError, TransientError):
-        # DB row is already completed; log and let RQ handle retry/failure.
+    except (PermanentError, TransientError) as exc:
+        # DB row is already completed; record the delivery failure (so the tab
+        # shows "not in Odoo") in addition to the ops event, then let RQ handle
+        # retry/failure.
         log.warning("ticket_analysis_odoo_callback_error", exc_info=True)
+        writers.record_ticket_analysis_callback_failed(ctx.db, params.analysis_id, str(exc))
         writers.record_ops_event(ctx.db, "odoo_callback", "error", "write_field_failed", {
             "analysis_id": params.analysis_id,
             "ticket_id": params.ticket_id,
         })
         raise
 
+    writers.record_ticket_analysis_callback_sent(ctx.db, params.analysis_id)
     log.info("ticket_analysis_done")
     return {"status": "completed", "analysis_id": params.analysis_id}

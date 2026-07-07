@@ -466,7 +466,8 @@ func (t Tickets) view(w, h int) string {
 
 	colTicket := 9
 	colModule := 10
-	colAnalysis := 12
+	// Wide enough for the "completed ⚠ not in Odoo" delivery-warning label.
+	colAnalysis := 24
 	colIssues := 12
 	colCost := 10
 	colWhen := w - colTicket - colModule - colAnalysis - colIssues - colCost - 14
@@ -489,8 +490,15 @@ func (t Tickets) view(w, h int) string {
 		analysisPlain, analysisColored := "—", styleStatusOther.Render("—")
 		cost := ""
 		if a := row.analysis; a != nil {
-			analysisPlain = strings.TrimSpace(plainStatusSymbol(a.Status, a.CreatedAt) + " " + a.Status)
-			analysisColored = strings.TrimSpace(ticketStatusSymbol(a.Status, a.CreatedAt) + " " + a.Status)
+			if a.Status == "completed" && a.CallbackSentAt == nil {
+				// Completed but never delivered to Odoo — the consultant never
+				// saw it. Flag it distinctly rather than a green "completed".
+				analysisPlain = "completed ⚠ not in Odoo"
+				analysisColored = styleStatusStale.Render("completed ⚠ not in Odoo")
+			} else {
+				analysisPlain = strings.TrimSpace(plainStatusSymbol(a.Status, a.CreatedAt) + " " + a.Status)
+				analysisColored = strings.TrimSpace(ticketStatusSymbol(a.Status, a.CreatedAt) + " " + a.Status)
+			}
 			if a.EstimatedCostUSD != nil {
 				cost = fmt.Sprintf("$%.4f", *a.EstimatedCostUSD)
 			}
@@ -561,9 +569,15 @@ func (t Tickets) view(w, h int) string {
 			if a.InputTokens != nil && a.OutputTokens != nil {
 				meta = append(meta, fmt.Sprintf("tokens:%d in / %d out", *a.InputTokens, *a.OutputTokens))
 			}
+			if a.EstimateHoursMin != nil && a.EstimateHoursMax != nil {
+				meta = append(meta, fmt.Sprintf("est. %g–%gh", *a.EstimateHoursMin, *a.EstimateHoursMax))
+			}
 			extras = append(extras, styleSubtitle.Render("  "+strings.Join(meta, "  ")))
 			if a.ErrorMessage != nil && *a.ErrorMessage != "" {
 				extras = append(extras, styleStatusFailed.Render(truncate("  analysis error: "+*a.ErrorMessage, w-2)))
+			}
+			if a.CallbackError != nil && *a.CallbackError != "" {
+				extras = append(extras, styleStatusFailed.Render(truncate("  callback error: "+*a.CallbackError, w-2)))
 			}
 		}
 		if run := sel.issueRun; run != nil {

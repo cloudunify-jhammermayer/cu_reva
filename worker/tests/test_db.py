@@ -323,6 +323,41 @@ def test_purge_old_ticket_text_scrubs_pii_keeps_analysis(db):
     assert writers.purge_old_ticket_text(db, older_than_days=30) == 0
 
 
+def _new_analysis(db: Database, ticket_id: int = 1) -> int:
+    return writers.record_ticket_analysis_created(
+        db, TicketJobParams(analysis_id=0, odoo_instance_id=1, ticket_id=ticket_id,
+                            model_name="helpdesk.ticket", field_name="description", text="t")
+    )
+
+
+def test_record_ticket_analysis_callback_sent(db):
+    aid = _new_analysis(db)
+    writers.record_ticket_analysis_callback_sent(db, aid)
+    with db.session() as s:
+        row = s.get(TicketAnalysis, aid)
+        assert row.callback_sent_at is not None
+        assert row.callback_error is None
+
+
+def test_record_ticket_analysis_callback_failed_leaves_sent_null(db):
+    aid = _new_analysis(db)
+    writers.record_ticket_analysis_callback_failed(db, aid, "Odoo 503")
+    with db.session() as s:
+        row = s.get(TicketAnalysis, aid)
+        assert row.callback_sent_at is None
+        assert row.callback_error == "Odoo 503"
+
+
+def test_callback_sent_clears_prior_error(db):
+    aid = _new_analysis(db)
+    writers.record_ticket_analysis_callback_failed(db, aid, "Odoo 503")
+    writers.record_ticket_analysis_callback_sent(db, aid)
+    with db.session() as s:
+        row = s.get(TicketAnalysis, aid)
+        assert row.callback_sent_at is not None
+        assert row.callback_error is None
+
+
 def test_sum_estimated_cost_counts_all_kinds(db):
     """The rolling cap counts every Claude call via the ledger — not just reviews
     (SECU-3/SECU-4): audits and replies record spend through record_claude_spend."""

@@ -16,11 +16,11 @@ from reva.errors import MalformedModelOutput, PermanentError
 from reva.ticket_tool import TICKET_TOOL_NAME, build_ticket_tool_schema, ticket_tool_choice
 from reva.types import ClaudeResponse, ContentBlock, TicketAnalysisResult, TicketJobParams
 
-# Eight required sections (summary, ACs, test cases, DoR/DoD, coverage, ...)
-# can exceed review()'s 8192 default. Truncation cuts the tool call mid-JSON
-# (stop_reason=max_tokens) and the salvaged partial input fails validation
-# with a missing required field — same failure the issue planner guards
-# against with its own raised ceiling.
+# The analysis sections (summary, missing info, Odoo notes, standard coverage,
+# per-story estimates) can exceed review()'s 8192 default. Truncation cuts the
+# tool call mid-JSON (stop_reason=max_tokens) and the salvaged partial input
+# fails validation with a missing required field — same failure the issue
+# planner guards against with its own raised ceiling.
 _MAX_TOKENS = 16384
 
 

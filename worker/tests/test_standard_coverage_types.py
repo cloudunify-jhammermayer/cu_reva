@@ -26,6 +26,21 @@ def test_tool_schema_includes_standard_coverage():
     assert "standard_coverage" in schema["input_schema"]["required"]
 
 
+def test_tool_schema_is_lean_with_estimates():
+    """The lean output keeps summary/missing_info/odoo_notes/standard_coverage,
+    adds estimates, and drops the AC/test/DoR/DoD fields entirely."""
+    schema = build_ticket_tool_schema()
+    props = schema["input_schema"]["properties"]
+    required = schema["input_schema"]["required"]
+    for kept in ("summary", "missing_info", "odoo_notes", "standard_coverage", "estimates"):
+        assert kept in props and kept in required, kept
+    for dropped in (
+        "acceptance_criteria", "test_cases", "definition_of_ready", "definition_of_done"
+    ):
+        assert dropped not in props, dropped
+        assert dropped not in required, dropped
+
+
 def test_html_renders_coverage_section():
     result = _result(
         coverage="partial",

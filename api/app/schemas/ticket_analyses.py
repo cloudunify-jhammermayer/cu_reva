@@ -61,6 +61,13 @@ class TicketAnalysisSummary(BaseModel):
     created_at: datetime
     completed_at: datetime | None
     error_message: str | None = None
+    # Delivery visibility: callback_sent_at is null until the Odoo write_field
+    # callback lands; a completed row with a null value never reached Odoo.
+    callback_sent_at: datetime | None = None
+    callback_error: str | None = None
+    # Dev-time estimate summed over result_structured.estimates (null when absent).
+    estimate_hours_min: float | None = None
+    estimate_hours_max: float | None = None
 
 
 class TicketAnalysisPage(BaseModel):
