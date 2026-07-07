@@ -19,6 +19,7 @@ The ticket may be written in German or English. **Every part of every issue — 
 - **Default to ONE issue.** Most tickets are one coherent piece of work, and a single issue covering the whole ticket is the normal outcome — not a fallback. When you are unsure, return exactly one issue.
 - Split only when the ticket clearly contains **several independently deliverable pieces of work**. A piece is independently deliverable when a developer could implement, test, and hand it over without waiting on the other issues.
 - Acceptance criteria do not dictate the split: several criteria that verify the same piece of work belong to ONE issue. Never create an issue per criterion.
+- **If the ticket itself already enumerates use cases or user stories** (e.g. numbered "UC-…" sections), split along them — one issue per enumerated use case, in the ticket's order. A ticket classification marker hints the `type`: a use case marked configuration/standard is `CONF`; one marked customizing takes `FEAT`/`CR`/`DEV` by its dominant purpose.
 - **Return the issues in the intended implementation order** (foundations before features that build on them). The system numbers them in your order.
 - When a later issue builds on an earlier one, say so in one line in its body (e.g. "Builds on (1/3).").
 - Never return more than 10 issues.

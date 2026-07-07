@@ -17,7 +17,9 @@ security issue uses `category: security` with `is_odoo_specific: true`).
 - Verify field naming: Many2one ends with `_id`; Many2many/One2many end with `_ids` (Odoo 19 convention). **Minor**.
 - Flag deprecated `name_get()` — use the `display_name` field instead. **Minor**.
 - Flag deprecated `odoo.osv` namespace usage. **Minor**.
-- Flag deprecated `_sql_constraints` — use the `Constraint` class in Odoo 19. **Minor**.
+- Flag legacy `_sql_constraints` lists — Odoo 19 **silently ignores** them (only `models.Constraint` class attributes create constraints), so an old-style list means **no DB constraint at all**. **Major** — this is a missing data-integrity guarantee, not a style nit.
+- Flag writes to a related field whose intermediate many2one can be empty — `_inverse_related` **silently drops** the write when the chain is broken; the intermediate record must exist before the inverse runs, or the user's input vanishes without an error. **Major**.
+- Flag status/state writes performed in the same transaction directly before a `raise` (e.g. `UserError`) — the write **rolls back with the transaction**, so the persisted "error state" is unreachable. Failure states must be recorded from a separate transaction (cron, callback) or not promised in the UI. **Major**.
 - Flag the `inselect` operator — removed in Odoo 19; use `in` with a `Query`/`SQL` object. **Minor**.
 - Flag `group_operator` attribute — renamed to `aggregator` in Odoo 19. **Minor**.
 - Flag `_flush_search()` calls — deprecated; flushing is now handled by `execute_query()`. **Minor**.
@@ -32,6 +34,7 @@ security issue uses `category: security` with `is_odoo_specific: true`).
 - Flag `sudo()` in controllers without input validation. **Critical** in many cases.
 - Record rules now support native OR logic — flag complex workarounds that can be simplified. **Minor**.
 - Prefer `check_access`, `has_access`, and `_filtered_access` (new in Odoo 19) over manual access checks where appropriate. **Info**.
+- Verify inbound/async callback endpoints guard against late, replayed, or cross-record callbacks: check terminal states (done/cancelled) before mutating, compare a stored request/job id for staleness, and scope record lookups to the authenticated caller. **Major** — missing guards let stale callbacks mutate finished records.
 
 ## Views and Templates
 
@@ -60,6 +63,9 @@ security issue uses `category: security` with `is_odoo_specific: true`).
 ## Data and Migrations
 
 - Verify migration scripts (`pre-migrate.py`, `post-migrate.py`) handle existing data safely. **Major** if they don't.
+- Flag a dropped or renamed model column without a `migrations/<version>/` script. **Major**.
+- Flag `ir.sequence` data records without `<field name="company_id" eval="False"/>` when the sequence is meant to be global — the record binds to the installing company and `next_by_code` **silently returns nothing** in every other company. **Major** on multi-company databases.
+- Flag boolean `config_parameter` settings that are seeded via data files or given a default — a stored `'False'` reads back truthy (`bool('False') is True`), so the checkbox becomes stuck-on and kill-switches silently re-enable. A **missing parameter is the correct "off"**. **Major**.
 - Flag destructive operations (column drops, data deletions) without a backup or migration strategy. **Major or critical**.
 - Check that the JSONB translations format is used (required since Odoo 16+). **Major** — a plain-column copy of a translated field corrupts translations.
 - Verify XML data records use `noupdate="1"` where appropriate. **Minor**.

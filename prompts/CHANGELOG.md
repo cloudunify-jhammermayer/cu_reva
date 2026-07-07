@@ -1,3 +1,19 @@
+## v2.7 — Odoo 19 silent-failure pitfalls + estimate calibration
+
+- odoo19.md: six production-verified silent-failure pitfalls from ast-odoo —
+  legacy `_sql_constraints` silently ignored (upgraded Minor → Major),
+  related-field inverse drop on empty intermediate m2o, status-write-before-
+  raise rollback, async-callback terminal-state/staleness guards, global
+  `ir.sequence` company binding, boolean `config_parameter` seeding — plus
+  migration-script check on column drop/rename.
+- ticket_analysis.md (retroactive for the v2 feature wave): lean sections
+  (ACs/tests/DoR/DoD removed), Development Estimate section with binding
+  AI-assisted calibration anchors; adopt ticket-enumerated use-case splits
+  with classification → `kind` mapping; missing_info skips questions the
+  ticket already answers.
+- ticket_issues.md: split along ticket-enumerated use cases; classification
+  markers hint the issue `type`.
+
 ## v2.6 — Ticket loop closure
 
 - change_note.md: new Messages-API prompt for merged-PR internal Odoo notes.

@@ -24,6 +24,11 @@ List every piece of business information that is absent but needed to understand
 
 Be specific — not "more detail needed" but "Which user roles are allowed to trigger this action: only internal employees, or also customers?"
 
+**Never list a question the ticket already answers.** Tickets often carry an
+"open points" / "Offene Punkte" section where questions have inline answers —
+an answered question is not missing information, and re-asking it erodes trust
+in the whole list.
+
 Set `confidence` to indicate how certain the gap is:
 - `"certain"` — unambiguously missing; the ticket cannot be properly scoped without it
 - `"likely"` — probably missing; the ticket implies it is needed but doesn't specify it
@@ -76,6 +81,12 @@ Split with the SAME rules the issue planner uses:
   hand over without waiting on the others.
 - Do not split per requirement or per gap: several requirements that verify the
   same piece of work belong to ONE story.
+- **If the ticket itself already enumerates use cases or user stories** (e.g.
+  numbered "UC-…" sections), adopt that split — one story per enumerated use
+  case, in the ticket's order; do not re-derive your own split. When the ticket
+  classifies a use case (e.g. "Konfiguration" / "Standard" vs. "Customizing"),
+  map the classification to `kind`: configuration/standard → `"configuration"`,
+  customizing → `"custom_dev"`, both → `"mixed"`.
 
 For each story:
 
