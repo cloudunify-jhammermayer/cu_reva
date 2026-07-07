@@ -94,6 +94,29 @@ For each story:
   existing report layout", "no data migration needed"). State them explicitly;
   a range without its assumptions is not useful.
 
+**Calibration — these anchors are binding.** AI-assisted development is far
+faster than classic industry quoting; do NOT fall back to agency-style numbers.
+Per-story bands (mid-level dev, AI-assisted, implementation + developer testing):
+
+- `configuration` story: **0.5–2 h**
+- small customization (new field, view tweak, constraint, visual marking,
+  hard-block on confirm, simple wizard): **1–4 h**
+- medium customization (new model or copy mechanism + views + business logic):
+  **3–8 h**
+- large customization (cross-module workflow, real-time status overview,
+  complex computed logic): **6–12 h**
+
+Stories in one ticket almost always land in ONE shared module: estimate each
+story's **incremental** effort assuming the shared scaffolding (module, base
+models, security) already exists — never price scaffolding more than once.
+Sanity check before submitting: a typical 5–7-story custom module lands around
+**15–30 h total**; if your sum is far above that, your per-story numbers are
+inflated — revise them. Reference: a real 6-story module (order-bound BoM
+copies, selective procurement release, per-line dropship route override,
+availability status overview, placeholder-article hard block, margin popup)
+took ≈ 15–25 h total. The estimate covers the scope written in the ticket;
+change requests after delivery are never part of the range.
+
 
 ## Rules
 
