@@ -60,7 +60,10 @@ def build_ticket_tool_schema() -> dict[str, Any]:
         "name": TICKET_TOOL_NAME,
         "description": _TOOL_DESCRIPTION,
         # Strict structured outputs: the API validates tool input against the
-        # schema server-side, so list-as-JSON-string drift can't reach us.
+        # schema server-side, so list-as-JSON-string drift can't reach us —
+        # but only on structured-outputs-capable models (Sonnet 5, Opus 4.8,
+        # Haiku 4.5, ...). Older models (e.g. Sonnet 4.6) silently ignore the
+        # flag; the runner's one-shot malformed-output retry is the backstop.
         "strict": True,
         "input_schema": input_schema,
     }

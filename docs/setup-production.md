@@ -414,7 +414,7 @@ In production the four secrets below are supplied as **files** under `secrets/`
 | `POSTGRES_PASSWORD` | yes | — | Password for the `review` DB user |
 | `REDIS_PASSWORD` | yes | — | Redis `requirepass` value; embedded in all `REDIS_URL` values |
 | `REVA_DEBOUNCE_SECONDS` | no | 600 | Seconds to wait before enqueuing a review after a webhook |
-| `REVA_DEFAULT_MODEL` | no | `claude-sonnet-4-6` | Model for diff/full reviews, ticket analysis, and comment replies |
+| `REVA_DEFAULT_MODEL` | no | `claude-sonnet-5` | Model for diff/full reviews, ticket analysis, and comment replies. Must be a structured-outputs-capable model (Sonnet 5, Opus 4.8, Haiku 4.5, …) — the ticket/issue tools rely on strict tool validation, which older models (e.g. Sonnet 4.6) silently ignore |
 | `REVA_DEEP_MODEL` | no | `claude-opus-4-8` | Model for `/deep-review` and all repo audits |
 | `REVA_CODEGRAPH_ENABLED` | no | `false` | When `true`, repo-aware reviews (full/deep) and audits get a pre-indexed CodeGraph exposed via MCP. Requires the `codegraph` binary in the worker image (already pinned in the Dockerfile) |
 | `REVA_CODEGRAPH_INDEX_TIMEOUT` | no | 180 | Seconds bounding the CodeGraph index step |
