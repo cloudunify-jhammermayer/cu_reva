@@ -756,11 +756,11 @@ git commit -m "docs: GitHub Projects board setup for ticket issues"
 
 ### Final verification (run before opening a PR / deploying)
 
-- [ ] `make test` — worker + api + scheduler all green (shared `reva/` touched).
-- [ ] `ruff check reva worker/worker api/app scheduler/scheduler`
-- [ ] `cd tui && go build ./... && go vet ./... && go test ./...`
-- [ ] `worker/.venv/bin/python -m reva.odoo_contracts generate --check` — contracts current.
-- [ ] State honestly: migration `034` and the GraphQL calls are unit-tested against SQLite/MockTransport only — validate on `make test-integration` / first staging boot.
+- [x] `make test` — worker + api + scheduler all green (shared `reva/` touched).
+- [x] `ruff check reva worker/worker api/app scheduler/scheduler`
+- [x] `cd tui && go build ./... && go vet ./... && go test ./...`
+- [x] `worker/.venv/bin/python -m reva.odoo_contracts generate --check` — contracts current.
+- [x] State honestly: migration `034` and the GraphQL calls are unit-tested against SQLite/MockTransport only — validate on `make test-integration` / first staging boot.
 - [ ] **Staging (after adding the App's org Projects permission and re-approving the installation):** one real create-issues run against a test board — items appear, Plan date/Status/Todo/Priority stamped; close an issue → the record's issue list in Odoo shows its Completed Date; break the permission on purpose once to see the fail-soft ops event.
 - [ ] **Follow-up (separate repo):** ast-odoo already implements the consumer side (`cu_reva_ticket_analysis` 19.0.11.2.0, on `dev`) — after this ships, run its `sync_contracts.sh`, bump the `CONTRACTS_VERSION` pin in `cu_reva_connector/tests/test_contracts.py`, and drop the "awaiting a contract regen" notes from its CLAUDE.md/README/testguide; branch from `dev` → PR to `dev`.
 
