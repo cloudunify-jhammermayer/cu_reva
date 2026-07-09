@@ -2,7 +2,9 @@
   "error": null,
   "issues": [
     {
+      "complete_date": null,
       "number": 42,
+      "plan_date": "2026-07-15",
       "state": "open",
       "title": "Implement login form",
       "url": "https://github.com/acme/widgets/issues/42"

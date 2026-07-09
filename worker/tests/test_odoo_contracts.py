@@ -55,6 +55,8 @@ def test_issues_created_wire_shape_and_extra_keys_stripped():
         "title": "t",
         "url": "https://github.com/o/r/issues/42",
         "state": "open",
+        "plan_date": None,
+        "complete_date": None,
     }]
 
 

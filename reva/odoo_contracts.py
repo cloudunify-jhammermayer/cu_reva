@@ -40,6 +40,11 @@ class IssueRefPayload(BaseModel):
     title: str = ""
     url: str | None = None
     state: str | None = None
+    # Per-issue dates (spec 2026-07-09), plain YYYY-MM-DD. plan_date echoes the
+    # create-issues request; complete_date is GitHub's closed_at (cleared on
+    # reopen). The Odoo addon .get()-reads and Date-truncates both.
+    plan_date: str | None = None
+    complete_date: str | None = None
 
 
 class IssuesCreatedPayload(BaseModel):
@@ -125,6 +130,8 @@ _ISSUE_SAMPLE = {
     "title": "Implement login form",
     "url": "https://github.com/acme/widgets/issues/42",
     "state": "open",
+    "plan_date": "2026-07-15",
+    "complete_date": None,
 }
 
 CONTRACTS: list[Contract] = [
@@ -187,7 +194,7 @@ CONTRACTS: list[Contract] = [
             "model_name": "helpdesk.ticket",
             "number": 42,
             "state": "closed",
-            "issues": [{**_ISSUE_SAMPLE, "state": "closed"}],
+            "issues": [{**_ISSUE_SAMPLE, "state": "closed", "complete_date": "2026-07-09"}],
         },
     ),
     Contract(
@@ -200,7 +207,7 @@ CONTRACTS: list[Contract] = [
         sample={
             "ticket_id": 123,
             "model_name": "helpdesk.ticket",
-            "issues": [{**_ISSUE_SAMPLE, "state": "closed"}],
+            "issues": [{**_ISSUE_SAMPLE, "state": "closed", "complete_date": "2026-07-09"}],
         },
     ),
     Contract(

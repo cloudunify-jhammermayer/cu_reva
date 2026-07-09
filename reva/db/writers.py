@@ -2061,12 +2061,16 @@ def reset_ticket_issue_run(db: Database, run_id: int) -> None:
 
 
 def update_ticket_issue_state(
-    db: Database, owner: str, repo: str, number: int, state: str
+    db: Database, owner: str, repo: str, number: int, state: str,
+    closed_at: str | None = None,
 ) -> list[dict]:
     """Set `state` on issue `number` of `owner/repo` across all runs that
     carry it (adopted/reconciled runs share issues), and return the affected
     Odoo records with the NEWEST run's full issue snapshot:
     [{"ticket_id", "model_name", "issues"}].
+
+    `complete_date` is stamped from `closed_at` (UTC date, YYYY-MM-DD) when the
+    issue closes and cleared to None on reopen — per-issue, alongside `state`.
 
     Matched on the normalized repo_full_name column (indexed) instead of a
     leading-wildcard github_url ILIKE that full-scanned the table; the big text
@@ -2096,9 +2100,11 @@ def update_ticket_issue_state(
             items = [dict(i) for i in (row.issues or [])]
             if not any(i.get("number") == number for i in items):
                 continue
+            complete_date = (closed_at or "")[:10] or None if state == "closed" else None
             for item in items:
                 if item.get("number") == number:
                     item["state"] = state
+                    item["complete_date"] = complete_date
             row.issues = items
             # rows are newest-first: the first hit per record is its snapshot
             affected.setdefault((row.ticket_id, row.model_name), {
@@ -2151,6 +2157,8 @@ def get_ticket_issue_union(
                     "title": item.get("title", ""),
                     "url": item.get("url"),
                     "state": item.get("state") or "open",
+                    "plan_date": item.get("plan_date"),
+                    "complete_date": item.get("complete_date"),
                 }
         return sorted(seen.values(), key=lambda i: i["number"])
 

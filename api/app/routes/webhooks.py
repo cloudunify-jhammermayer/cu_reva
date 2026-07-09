@@ -466,7 +466,9 @@ def _handle_issues(payload: dict, rq_queue) -> None:
 
     rq_queue.enqueue(
         "worker.ticket_issue_tasks.sync_ticket_issue_state",
-        {"owner": owner, "repo": repo, "number": number, "state": state},
+        {"owner": owner, "repo": repo, "number": number, "state": state,
+         # closed_at → per-issue complete_date; None on reopen (cleared).
+         "closed_at": issue.get("closed_at")},
         # The Odoo notify must survive a transient Odoo outage (same policy as
         # the issues-created callback); the sync is idempotent.
         retry=Retry(max=3, interval=[30, 120, 300]),

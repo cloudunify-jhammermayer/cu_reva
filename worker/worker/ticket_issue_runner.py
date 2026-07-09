@@ -385,10 +385,12 @@ def sync_ticket_issue_state(job_params: dict) -> dict:
         state = job_params["state"]
     except KeyError as exc:
         raise PermanentError(f"sync_ticket_issue_state: missing param {exc}") from exc
+    # Optional (added later): absent in jobs queued before the deploy → None.
+    closed_at = job_params.get("closed_at")
 
     log = logger.bind(owner=owner, repo=repo, number=number, state=state)
 
-    affected = writers.update_ticket_issue_state(ctx.db, owner, repo, number, state)
+    affected = writers.update_ticket_issue_state(ctx.db, owner, repo, number, state, closed_at)
     if not affected:
         # Labeled like ours but not in our DB (manually labeled, or a wiped DB).
         log.info("ticket_issue_state_no_match")
@@ -613,6 +615,8 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             "url": created["url"],
             "state": "open",
             "attached": False,
+            # Per-issue plan_date echo (spec decision 6); None when unset.
+            "plan_date": params.plan_date.isoformat() if params.plan_date else None,
         }
         writers.update_ticket_issue_progress(ctx.db, params.run_id, issues)
         log.info("ticket_issue_created", issue=created["number"], title=title)

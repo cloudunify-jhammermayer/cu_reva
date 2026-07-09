@@ -309,6 +309,40 @@ def test_issue_state_posts_snapshot_to_sibling_path(monkeypatch):
     }
 
 
+def test_issue_refs_carry_dates_and_strip_internal_keys(monkeypatch):
+    """Every ref sent to Odoo carries exactly the six documented keys; the
+    internal node_id/project_item_id never leak (spec decision 6)."""
+    captured: dict = {}
+
+    def post(url, *, json, **kwargs):
+        captured["body"] = json
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    snapshot = [{
+        "number": 42, "title": "Implement login form",
+        "url": "https://github.com/org/repo/issues/42", "state": "closed",
+        "plan_date": "2026-07-15", "complete_date": "2026-07-09",
+        "node_id": "I_1", "project_item_id": "PVTI_1", "id": 900, "attached": True,
+    }]
+    _client().issues_created(
+        ticket_id=1, model_name="project.task", request_id=9,
+        status="created", issues=snapshot, error=None,
+    )
+    assert captured["body"]["issues"] == [{
+        "number": 42, "title": "Implement login form",
+        "url": "https://github.com/org/repo/issues/42", "state": "closed",
+        "plan_date": "2026-07-15", "complete_date": "2026-07-09",
+    }]
+
+    _client().issue_state(
+        ticket_id=1, model_name="project.task", number=42, state="closed",
+        issues=snapshot,
+    )
+    assert set(captured["body"]["issues"][0]) == {
+        "number", "title", "url", "state", "plan_date", "complete_date"}
+
+
 def test_issue_state_409_is_permanent(monkeypatch):
     monkeypatch.setattr("reva.odoo_client.httpx.post", _mock_post(409, "conflict"))
     with pytest.raises(PermanentError):

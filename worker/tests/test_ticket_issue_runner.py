@@ -225,9 +225,11 @@ def test_happy_path_creates_issues_and_calls_back(ctx_and_fakes):
     # Titles carry the Odoo record id and the implementation order (n/total)
     assert cb["issues"] == [
         {"number": 102, "title": "[DEV] 123 - Issue 1 (1/2)",
-         "url": "https://github.com/acme/widgets/issues/102", "state": "open"},
+         "url": "https://github.com/acme/widgets/issues/102", "state": "open",
+         "plan_date": None, "complete_date": None},
         {"number": 103, "title": "[DEV] 123 - Issue 2 (2/2)",
-         "url": "https://github.com/acme/widgets/issues/103", "state": "open"},
+         "url": "https://github.com/acme/widgets/issues/103", "state": "open",
+         "plan_date": None, "complete_date": None},
     ]
 
 
@@ -474,8 +476,9 @@ def test_reconcile_existing_issues_skips_planning_and_creation(ctx_and_fakes):
     assert s["github"].created == []
     cb = s["odoo"].calls[0]
     assert cb["status"] == "created"
-    # union normalizes every item with a state (defaults "open")
-    assert cb["issues"] == [{**s["github"].existing_issues[0], "state": "open"}]
+    # union normalizes every item with a state (defaults "open") + per-issue dates
+    assert cb["issues"] == [{**s["github"].existing_issues[0], "state": "open",
+                             "plan_date": None, "complete_date": None}]
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
     assert row["status"] == "completed"
 
@@ -799,9 +802,11 @@ def test_issue_closed_updates_db_and_notifies_odoo(ctx_and_fakes):
     assert cb["number"] == 102 and cb["state"] == "closed"
     assert cb["issues"] == [
         {"number": 102, "title": "[DEV] 123 - Issue 1 (1/2)",
-         "url": "https://github.com/acme/widgets/issues/102", "state": "closed"},
+         "url": "https://github.com/acme/widgets/issues/102", "state": "closed",
+         "plan_date": None, "complete_date": None},
         {"number": 103, "title": "[DEV] 123 - Issue 2 (2/2)",
-         "url": "https://github.com/acme/widgets/issues/103", "state": "open"},
+         "url": "https://github.com/acme/widgets/issues/103", "state": "open",
+         "plan_date": None, "complete_date": None},
     ]
 
 
@@ -838,6 +843,50 @@ def test_issue_reopened_syncs_back_to_open(ctx_and_fakes):
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
     assert row["issues"][0]["state"] == "open"
     assert s["odoo"].calls[-1]["state"] == "open"
+
+
+def test_created_issues_carry_plan_date(ctx_and_fakes):
+    from datetime import date
+    s = ctx_and_fakes
+    params = _make_params(s["db"], plan_date=date(2026, 7, 15))
+    run_ticket_issues(params)
+
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert all(i["plan_date"] == "2026-07-15" for i in row["issues"])
+    cb = s["odoo"].calls[0]
+    assert all(i["plan_date"] == "2026-07-15" for i in cb["issues"])
+    assert all(i["complete_date"] is None for i in cb["issues"])
+
+
+def test_issue_closed_snapshot_carries_complete_date(ctx_and_fakes):
+    from worker.ticket_issue_runner import sync_ticket_issue_state
+
+    s = ctx_and_fakes
+    _seed_completed_run(s)
+    s["odoo"].calls.clear()
+
+    sync_ticket_issue_state({"owner": "acme", "repo": "widgets", "number": 102,
+                             "state": "closed", "closed_at": "2026-07-09T14:03:22Z"})
+    snap = {i["number"]: i for i in s["odoo"].calls[0]["issues"]}
+    assert snap[102]["complete_date"] == "2026-07-09"
+    assert snap[103]["complete_date"] is None
+
+    s["odoo"].calls.clear()
+    sync_ticket_issue_state({"owner": "acme", "repo": "widgets", "number": 102,
+                             "state": "open", "closed_at": None})
+    snap = {i["number"]: i for i in s["odoo"].calls[0]["issues"]}
+    assert snap[102]["complete_date"] is None
+
+
+def test_sync_without_closed_at_key_still_works(ctx_and_fakes):
+    from worker.ticket_issue_runner import sync_ticket_issue_state
+
+    s = ctx_and_fakes
+    _seed_completed_run(s)
+    # Legacy deploy-window job params dict without the closed_at key.
+    out = sync_ticket_issue_state({"owner": "acme", "repo": "widgets",
+                                   "number": 102, "state": "closed"})
+    assert out["status"] == "completed"
 
 
 def test_issue_state_no_match_is_noop(ctx_and_fakes):

@@ -58,7 +58,7 @@ from reva.errors import PermanentError, TransientError
 logger = structlog.get_logger()
 
 _TIMEOUT = 15.0
-_ISSUE_KEYS = ("number", "title", "url", "state")
+_ISSUE_KEYS = ("number", "title", "url", "state", "plan_date", "complete_date")
 _TIMESHEET_RESULT_KEYS = ("line_id", "status", "updated_desc", "reason")
 
 

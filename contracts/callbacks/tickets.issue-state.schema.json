@@ -3,6 +3,18 @@
     "IssueRefPayload": {
       "description": "Documented per-issue shape; internal planning keys are stripped.",
       "properties": {
+        "complete_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Complete Date"
+        },
         "number": {
           "anyOf": [
             {
@@ -14,6 +26,18 @@
           ],
           "default": null,
           "title": "Number"
+        },
+        "plan_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plan Date"
         },
         "state": {
           "anyOf": [

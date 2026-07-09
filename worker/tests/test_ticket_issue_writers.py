@@ -150,6 +150,33 @@ def test_ready_tickets_require_nonempty_all_closed_union(db):
     assert [(row["ticket_id"], row["issue_count"]) for row in ready] == [(92, 2)]
 
 
+def test_update_state_stamps_complete_date(db):
+    run_id = _complete_run(db, _typed_params(ticket_id=94), [
+        {"number": 20, "title": "A", "url": "https://gh/20", "state": "open"},
+    ])
+    writers.update_ticket_issue_state(db, "org", "repo", 20, "closed",
+                                      closed_at="2026-07-09T14:03:22Z")
+    item = writers.get_ticket_issue_run(db, run_id)["issues"][0]
+    assert item["complete_date"] == "2026-07-09"
+    # reopen clears it
+    writers.update_ticket_issue_state(db, "org", "repo", 20, "open", closed_at=None)
+    item = writers.get_ticket_issue_run(db, run_id)["issues"][0]
+    assert item["complete_date"] is None
+
+
+def test_union_carries_dates(db):
+    _complete_run(db, _typed_params(ticket_id=95), [
+        {"number": 30, "title": "A", "url": "https://gh/30", "state": "closed",
+         "plan_date": "2026-07-15", "complete_date": "2026-07-09"},
+        {"number": 31, "title": "B", "url": "https://gh/31", "state": "open"},
+    ])
+    union = writers.get_ticket_issue_union(db, 1, 95, "helpdesk.ticket")
+    assert union[0]["plan_date"] == "2026-07-15"
+    assert union[0]["complete_date"] == "2026-07-09"
+    assert union[1]["plan_date"] is None
+    assert union[1]["complete_date"] is None
+
+
 def test_latest_parent_scoped_and_excludes_self(db):
     p = _typed_params(ticket_id=91)
     r1 = _complete_run(db, p, [{"number": 5, "title": "t", "url": "https://gh/5", "state": "open"}])

@@ -301,7 +301,7 @@ per `reva.github.issue` and renders them as list columns — the dates are
 - Produces: `IssueRefPayload.plan_date: str | None = None`, `.complete_date: str | None = None` (`YYYY-MM-DD`); `_ISSUE_KEYS += ("plan_date", "complete_date")`; per-item JSON keys `plan_date`/`complete_date`; `update_ticket_issue_state(db, owner, repo, number, state, closed_at: str | None = None)`; sync job params gain optional key `"closed_at"`.
 - `complete_date` = `closed_at[:10]` (UTC date) when closing, `None` when reopening. `plan_date` = the creating run's `params.plan_date`, stamped at creation; adopted items keep their originating run's value, reconciled-from-GitHub items have none. Old queued jobs without `closed_at` must keep working (`.get`, not a required param).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `api/tests/test_webhooks.py` — extend the existing issues-webhook tests:
 
@@ -337,19 +337,19 @@ per `reva.github.issue` and renders them as list columns — the dates are
 
 `worker/tests/test_odoo_client.py` — posted `issues-created`/`issue-state` items carry exactly `("number", "title", "url", "state", "plan_date", "complete_date")`; extra keys like `node_id`/`project_item_id` are stripped.
 
-- [ ] **Step 2: Run to verify they fail** — api + worker suites.
+- [x] **Step 2: Run to verify they fail** — api + worker suites.
 
-- [ ] **Step 3a: Webhook** — in `_handle_issues`, add `"closed_at": issue.get("closed_at")` to the enqueued params dict.
+- [x] **Step 3a: Webhook** — in `_handle_issues`, add `"closed_at": issue.get("closed_at")` to the enqueued params dict.
 
-- [ ] **Step 3b: Writers** — `update_ticket_issue_state` gains `closed_at: str | None = None`; where it stamps `item["state"] = state`, also stamp `item["complete_date"] = (closed_at or "")[:10] or None` when `state == "closed"` else `None`. `get_ticket_issue_union` adds `"plan_date": item.get("plan_date")` and `"complete_date": item.get("complete_date")` to its projected dict.
+- [x] **Step 3b: Writers** — `update_ticket_issue_state` gains `closed_at: str | None = None`; where it stamps `item["state"] = state`, also stamp `item["complete_date"] = (closed_at or "")[:10] or None` when `state == "closed"` else `None`. `get_ticket_issue_union` adds `"plan_date": item.get("plan_date")` and `"complete_date": item.get("complete_date")` to its projected dict.
 
-- [ ] **Step 3c: Worker** — `sync_ticket_issue_state`: `closed_at = job_params.get("closed_at")` (NOT inside the required-key `try`), passed to `writers.update_ticket_issue_state(...)`. Child-creation loop: add `"plan_date": params.plan_date.isoformat() if params.plan_date else None` to the created-item dict (requires Task 2's params field).
+- [x] **Step 3c: Worker** — `sync_ticket_issue_state`: `closed_at = job_params.get("closed_at")` (NOT inside the required-key `try`), passed to `writers.update_ticket_issue_state(...)`. Child-creation loop: add `"plan_date": params.plan_date.isoformat() if params.plan_date else None` to the created-item dict (requires Task 2's params field).
 
-- [ ] **Step 3d: Contract + client** — `IssueRefPayload` gains both optional fields; `_ISSUE_KEYS` extended (the `_project_items` projection then carries them everywhere refs are sent). Update `_ISSUE_SAMPLE` with `"plan_date": "2026-07-15", "complete_date": None` and give the issue-state sample's closed item `"complete_date": "2026-07-09"`. Regenerate `contracts/`.
+- [x] **Step 3d: Contract + client** — `IssueRefPayload` gains both optional fields; `_ISSUE_KEYS` extended (the `_project_items` projection then carries them everywhere refs are sent). Update `_ISSUE_SAMPLE` with `"plan_date": "2026-07-15", "complete_date": None` and give the issue-state sample's closed item `"complete_date": "2026-07-09"`. Regenerate `contracts/`.
 
-- [ ] **Step 4: Verify** — `cd api && .venv/bin/python -m pytest tests/ -q && cd ../worker && .venv/bin/python -m pytest tests/ -q` — PASS.
+- [x] **Step 4: Verify** — `cd api && .venv/bin/python -m pytest tests/ -q && cd ../worker && .venv/bin/python -m pytest tests/ -q` — PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/app/routes/webhooks.py worker/worker/ticket_issue_runner.py reva/db/writers.py reva/odoo_contracts.py reva/odoo_client.py contracts/ api/tests/test_webhooks.py worker/tests/ worker/tests/test_odoo_client.py

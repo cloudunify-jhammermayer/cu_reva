@@ -972,6 +972,7 @@ def _issues_payload(action: str = "closed", labels: list[str] | None = None,
             "number": number,
             "title": "Implement login form",
             "state": "closed" if action == "closed" else "open",
+            "closed_at": "2026-07-09T14:03:22Z" if action == "closed" else None,
             "labels": [{"name": name} for name in (labels if labels is not None else ["reva-ticket"])],
         },
         "sender": {"login": "alice", "type": "User"},
@@ -989,6 +990,7 @@ def test_issue_closed_with_ticket_label_enqueues_state_sync(client_and_db):
         assert q.enqueued[0]["func"] == "worker.ticket_issue_tasks.sync_ticket_issue_state"
         assert q.enqueued[0]["args"][0] == {
             "owner": "acme", "repo": "widgets", "number": 42, "state": "closed",
+            "closed_at": "2026-07-09T14:03:22Z",
         }
     finally:
         app.state.rq_queue = None
@@ -1001,6 +1003,7 @@ def test_issue_reopened_enqueues_open_state(client_and_db):
     try:
         _post(client, _issues_payload("reopened"), event="issues", delivery="d-iss-2")
         assert q.enqueued[0]["args"][0]["state"] == "open"
+        assert q.enqueued[0]["args"][0]["closed_at"] is None
     finally:
         app.state.rq_queue = None
 
