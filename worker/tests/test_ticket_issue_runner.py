@@ -340,6 +340,8 @@ def test_two_issues_creates_parent_and_attaches_children(ctx_and_fakes):
     assert parent_create["title"] == "[DEV] 123 - Login page broken"   # _parent_title
     assert "<!-- revaticketparent" in parent_create["body"]              # parent-only tag
     assert "<!-- revaticket" in parent_create["body"]                    # shared marker too
+    assert "### Summary" in parent_create["body"]                        # ticket summary
+    assert "We need a login page." in parent_create["body"]
 
     # both children attached to the parent (number 101), by their database id
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
@@ -352,6 +354,28 @@ def test_two_issues_creates_parent_and_attaches_children(ctx_and_fakes):
     cb = s["odoo"].calls[0]
     assert [i["number"] for i in cb["issues"]] == [102, 103]
     assert all(i["number"] != pnum for i in cb["issues"])
+
+
+def test_parent_body_summary_falls_back_to_analysis():
+    """The epic body carries a ticket summary: description when present, else
+    the REVA analysis (HTML stripped); omitted entirely when neither exists."""
+    from worker.ticket_issue_runner import _format_parent_body
+
+    def body(**over):
+        p = TicketIssueJobParams(**{**dict(
+            run_id=1, odoo_instance_id=1, ticket_id=123, model_name="helpdesk.ticket",
+            github_url="https://github.com/acme/widgets", name="Login",
+            description="We need a login page.", analysis_html="<h2>Analysis</h2>",
+            priority="1", ticket_url="https://odoo.example.com/web#id=123",
+        ), **over})
+        return _format_parent_body(p, "revaticketX", "revaticketparentX")
+
+    assert "### Summary\n\nWe need a login page." in body()
+    # description empty → fall back to the analysis (HTML stripped to text)
+    assert "### Summary" in body(description="", analysis_html="<p>Root cause: X</p>")
+    assert "Root cause: X" in body(description="", analysis_html="<p>Root cause: X</p>")
+    # neither present → no Summary section
+    assert "### Summary" not in body(description="", analysis_html="")
 
 
 def test_single_issue_stays_flat(ctx_and_fakes):

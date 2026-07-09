@@ -275,12 +275,32 @@ def _parent_title(params: TicketIssueJobParams, dominant: str) -> str:
     return f"[{dominant}] {params.ticket_id} - {params.name[:_TLDR_MAX].rstrip()}"
 
 
+def _parent_summary(params: TicketIssueJobParams) -> str:
+    """A short ticket summary for the epic body so the parent conveys what the
+    ticket is about, not just a back-link. Prefers the ticket description
+    (Odoo sends it as plain text), falling back to the REVA analysis; compacted
+    to the same length cap as child bodies. Empty when neither is present."""
+    description = params.description.strip()
+    if description and not _is_placeholder(description):
+        return _compact_issue_body(description)
+    analysis = _plain_text(params.analysis_html)
+    if analysis:
+        return _compact_issue_body(analysis)
+    return ""
+
+
 def _format_parent_body(params: TicketIssueJobParams, marker: str, parent_marker: str) -> str:
-    """Synthesized locally (no Claude): a back-link + both hidden markers. GitHub
-    renders the sub-issue checklist itself, so we don't list children here."""
-    return "\n".join([
+    """Synthesized locally (no Claude): a ticket summary + back-link + both
+    hidden markers. GitHub renders the sub-issue checklist itself, so we don't
+    list children here."""
+    lines = [
         "Tracking issue for the linked Odoo ticket. "
         "Its work items are attached below as sub-issues.",
+    ]
+    summary = _parent_summary(params)
+    if summary:
+        lines += ["", "### Summary", "", summary]
+    lines += [
         "",
         "---",
         f"**Odoo ticket:** [{params.name}]({params.ticket_url})",
@@ -288,7 +308,8 @@ def _format_parent_body(params: TicketIssueJobParams, marker: str, parent_marker
         "<sub>🤖 Created by REVA from an Odoo ticket.</sub>",
         f"<!-- {marker} -->",
         f"<!-- {parent_marker} -->",
-    ])
+    ]
+    return "\n".join(lines)
 
 
 def _send_failed_callback(ctx, params: TicketIssueJobParams, error: str, log) -> None:
@@ -574,12 +595,12 @@ def _project_step(ctx, token, owner, repo, params, issues, parent, log) -> None:
                 issues[idx] = {**item, "project_item_id": item_id}
                 writers.update_ticket_issue_progress(ctx.db, params.run_id, issues)
                 log.info("ticket_issue_projected", issue=item["number"])
-    except Exception:
+    except Exception as exc:
         log.warning("ticket_issues_project_step_failed", exc_info=True)
         writers.record_ops_event(
             ctx.db, "github", "warning", "project_step_failed",
             {"run_id": params.run_id, "ticket_id": params.ticket_id,
-             "project_url": params.github_project_url})
+             "project_url": params.github_project_url, "error": str(exc)[:300]})
 
 
 def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
