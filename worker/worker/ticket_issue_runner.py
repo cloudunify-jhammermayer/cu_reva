@@ -164,6 +164,11 @@ def _dominant_type(params: TicketIssueJobParams, issues: list[dict]) -> str:
     return next(t for t in types if counts[t] == best)
 
 
+def _fmt_hours(hours: float) -> str:
+    """Compact hour label: '2 h' for integers, '1.5 h' otherwise."""
+    return f"{hours:g} h"
+
+
 def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str) -> str:
     """Render one planned issue as a GitHub issue body with the mandatory
     Odoo back-link (Contract 1: ticket_url) and the hidden dedup marker."""
@@ -173,6 +178,9 @@ def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str) ->
     if item.get("acceptance_criteria"):
         lines += ["", "### Acceptance criteria", ""]
         lines += [f"- [ ] {criterion}" for criterion in item["acceptance_criteria"]]
+    estimate = item.get("estimate_hours")
+    if estimate:
+        lines += ["", f"**Estimate:** ~{_fmt_hours(estimate)} (dev + developer testing, AI-assisted)."]
     lines += [
         "",
         "---",
@@ -252,6 +260,7 @@ def _normalize_planned_issue(item, params: TicketIssueJobParams) -> dict:
         "body": body,
         "acceptance_criteria": item.acceptance_criteria,
         "type": params.issue_type or item.type,
+        "estimate_hours": item.estimate_hours,
         "number": None,
         "url": None,
         "state": None,
@@ -295,10 +304,11 @@ def _parent_summary(params: TicketIssueJobParams) -> str:
     return ""
 
 
-def _format_parent_body(params: TicketIssueJobParams, marker: str, parent_marker: str) -> str:
-    """Synthesized locally (no Claude): a ticket summary + back-link + both
-    hidden markers. GitHub renders the sub-issue checklist itself, so we don't
-    list children here."""
+def _format_parent_body(params: TicketIssueJobParams, marker: str, parent_marker: str,
+                        issues: list[dict] | None = None) -> str:
+    """Synthesized locally (no Claude): a ticket summary + total estimate +
+    back-link + both hidden markers. GitHub renders the sub-issue checklist
+    itself, so we don't list children here."""
     lines = [
         "Tracking issue for the linked Odoo ticket. "
         "Its work items are attached below as sub-issues.",
@@ -306,6 +316,11 @@ def _format_parent_body(params: TicketIssueJobParams, marker: str, parent_marker
     summary = _parent_summary(params)
     if summary:
         lines += ["", "### Summary", "", summary]
+    total = sum(i.get("estimate_hours") or 0 for i in issues or [])
+    if total:
+        n = len(issues)
+        lines += ["", f"**Estimated effort:** ~{_fmt_hours(total)} across "
+                  f"{n} issue{'s' if n != 1 else ''} (dev + developer testing, AI-assisted)."]
     lines += [
         "",
         "---",
@@ -755,7 +770,7 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             ctx,
             token, owner, repo,
             title=parent_t,
-            body=_format_parent_body(params, marker, parent_marker),
+            body=_format_parent_body(params, marker, parent_marker, issues),
             labels=[_TICKET_ISSUE_LABEL, dominant],
             assignees=[params.github_username] if params.github_username else None,
         )
@@ -787,6 +802,7 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
         issues[idx] = {
             "title": title,
             "type": issue_type,
+            "estimate_hours": item.get("estimate_hours"),
             "number": created["number"],
             "id": created["id"],
             "url": created["url"],

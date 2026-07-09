@@ -32,6 +32,12 @@ The ticket may be written in German or English. **Every part of every issue — 
 - `type` — the work-item code, exactly one of: `BUG` (defect fix), `FEAT` (new functionality), `CR` (change request to existing behaviour), `CONF` (configuration/setup), `DEV` (internal development/refactoring), `MIG` (migration), `SUP` (support task), `DOC` (documentation). When several codes could fit, pick the issue's dominant purpose (behaviour that contradicts what was agreed is `BUG`; an agreed change to working behaviour is `CR`). When the request specifies a fixed type, set that type on every issue.
 - `body` — the requirement, in Markdown, self-contained but concise. Structure it as three short parts: **What** — the change and where in the system it lives (module, document, screen); **Why** — the business purpose, when the ticket gives one; **Expected behaviour** — how it works when done. If the ticket is genuinely ambiguous on a point a developer must decide, add an **Open questions** line naming it — never invent the answer. Keep the body under 900 characters and do not paste the full REVA analysis.
 - `acceptance_criteria` — verifiable pass/fail conditions for **this** issue, one sentence each, in English. **Never empty.** Carry over EVERY acceptance criterion from the ticket/analysis that belongs to this issue (translated where needed) — do not drop or summarize them away. Only when the ticket states none, derive them from the ticket text yourself.
+- `estimate_hours` — the development time for **this** issue in hours (a single number), covering **implementation + developer testing** by a **mid-level Odoo developer working AI-assisted**. **Exclude** deployment, project management, and customer communication. **Give the lower end** — the optimistic-but-realistic figure, not a padded one. Estimate each issue's **incremental** effort assuming shared scaffolding (module, base models, security) already exists — never price scaffolding more than once. Calibration bands (binding; AI-assisted is far faster than agency quoting):
+  - configuration / enabling a standard feature: **0.5–2 h**
+  - small customization (new field, view tweak, constraint, visual marking, hard-block on confirm, simple wizard): **1–4 h**
+  - medium customization (new model or copy mechanism + views + business logic): **3–8 h**
+  - large customization (cross-module workflow, real-time status overview, complex computed logic): **6–12 h**
+  Pick the band by the issue's nature and return a number at its **low end** (e.g. a small customization → `1.5`, not `4`).
 
 ---
 

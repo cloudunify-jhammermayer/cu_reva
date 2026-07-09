@@ -191,6 +191,7 @@ def _plan(n: int = 2) -> TicketIssuePlan:
                 title=f"Issue {i}",
                 body=f"Body {i}",
                 acceptance_criteria=[f"criterion {i}"],
+                estimate_hours=1.5,
             )
             for i in range(1, n + 1)
         ]
@@ -379,6 +380,20 @@ def test_parent_body_summary_falls_back_to_analysis():
     assert "Root cause: X" in body(description="", analysis_html="<p>Root cause: X</p>")
     # neither present → no Summary section
     assert "### Summary" not in body(description="", analysis_html="")
+
+
+def test_estimate_rendered_on_issue_and_epic(ctx_and_fakes):
+    """Each child issue body shows its low-end estimate; the epic shows the
+    total across issues (2 × 1.5 h = 3 h)."""
+    s = ctx_and_fakes
+    params = _make_params(s["db"])
+    run_ticket_issues(params)
+
+    created = {c["title"]: c for c in s["github"].created}
+    child = next(c for t, c in created.items() if "1/2" in t)
+    assert "**Estimate:** ~1.5 h" in child["body"]
+    parent = s["github"].created[0]                     # parent created first
+    assert "**Estimated effort:** ~3 h across 2 issues" in parent["body"]
 
 
 def test_single_issue_stays_flat(ctx_and_fakes):

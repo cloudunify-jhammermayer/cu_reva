@@ -347,6 +347,10 @@ class TicketIssueItem(BaseModel):
     # Defaults to DEV so plans persisted before the type rollout still
     # validate; the runner overrides it when the request fixes a type.
     type: IssueTypeCode = "DEV"
+    # Low-end development estimate in hours (implementation + developer testing,
+    # mid-level AI-assisted dev). None on plans persisted before the estimate
+    # rollout; the tool schema requires it for fresh plans.
+    estimate_hours: float | None = None
 
     @field_validator("title", mode="before")
     @classmethod
