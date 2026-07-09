@@ -73,6 +73,7 @@ class FakeGitHub:
     project_items: list[str] = field(default_factory=list)      # content node_ids added
     item_field_sets: list[tuple] = field(default_factory=list)  # (item_id, field_id, value)
     created_fields: list[dict] = field(default_factory=list)
+    renamed_fields: list[tuple] = field(default_factory=list)   # (field_id, new_name)
     issue_nodes: dict[int, str] = field(default_factory=dict)   # number → node_id (backfill)
 
     def get_repo_installation_id(self, owner: str, repo: str) -> int:
@@ -132,6 +133,9 @@ class FakeGitHub:
                          for o in options or []]}
         self.created_fields.append(f)
         return f
+
+    def rename_project_field(self, token, field_id, name):
+        self.renamed_fields.append((field_id, name))
 
     def add_issue_to_project(self, token, project_id, content_node_id):
         self.project_items.append(content_node_id)
@@ -1047,15 +1051,15 @@ def test_project_step_adds_all_items_and_sets_fields(ctx_and_fakes):
         assert "project_item_id" not in issue
 
 
-def test_project_step_reuses_existing_due_date_field(ctx_and_fakes):
-    """A pre-rename custom 'Plan date' DATE field is still reused (backward
-    compat); the built-in issue-backed 'Target date' is deliberately NOT
-    matched (it rejects the standard mutation), so no field is created."""
+def test_project_step_renames_legacy_plan_date_field(ctx_and_fakes):
+    """A pre-rename custom 'Plan date' DATE field is reused AND renamed in place
+    to 'Due date' (values preserved); the built-in issue-backed 'Target date' is
+    never matched (it rejects the standard mutation), so no field is created."""
     from datetime import date
     s = ctx_and_fakes
     s["github"].project_fields = s["github"].project_fields + [
         {"id": "F_target", "name": "Target date", "dataType": "DATE"},   # built-in, ignored
-        {"id": "F_plan", "name": "Plan date", "dataType": "DATE"},        # our custom field
+        {"id": "F_plan", "name": "Plan date", "dataType": "DATE"},        # legacy, renamed
         {"id": "F_est", "name": "Estimate", "dataType": "NUMBER"},        # reused, not created
         {"id": "F_prio", "name": "Priority", "dataType": "SINGLE_SELECT",
          "options": [{"id": "opt_low", "name": "Low"},
@@ -1068,9 +1072,25 @@ def test_project_step_reuses_existing_due_date_field(ctx_and_fakes):
     run_ticket_issues(params)
 
     assert s["github"].created_fields == []
+    assert ("F_plan", "Due date") in s["github"].renamed_fields   # legacy field renamed
     sets = s["github"].item_field_sets
-    assert ("PVTI_I_102", "F_plan", "2026-07-15") in sets           # our field set
-    assert not any(f == "F_target" for _, f, _ in sets)             # built-in never touched
+    assert ("PVTI_I_102", "F_plan", "2026-07-15") in sets         # same field id, new name
+    assert not any(f == "F_target" for _, f, _ in sets)           # built-in never touched
+
+
+def test_project_step_no_rename_when_due_date_field_exists(ctx_and_fakes):
+    """A board that already has a 'Due date' field is used as-is, no rename."""
+    from datetime import date
+    s = ctx_and_fakes
+    s["github"].project_fields = s["github"].project_fields + [
+        {"id": "F_due", "name": "Due date", "dataType": "DATE"},
+    ]
+    params = _make_params(s["db"], github_project_url=_PROJECT_URL,
+                          plan_date=date(2026, 7, 15))
+    run_ticket_issues(params)
+
+    assert s["github"].renamed_fields == []
+    assert not any(f["name"] == "Due date" for f in s["github"].created_fields)
 
 
 def test_project_step_creates_due_date_when_only_builtin_target_date(ctx_and_fakes):

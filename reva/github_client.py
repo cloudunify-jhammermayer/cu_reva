@@ -845,6 +845,20 @@ class GitHubClient:
         data = _graphql_data(response, "create_project_field")
         return data["createProjectV2Field"]["projectV2Field"]
 
+    def rename_project_field(self, token: str, field_id: str, name: str) -> None:
+        """Rename a project field in place (preserves its values)."""
+        mutation = """
+        mutation($fieldId: ID!, $name: String!) {
+          updateProjectV2Field(input: {fieldId: $fieldId, name: $name}) {
+            projectV2Field { ... on ProjectV2FieldCommon { id } }
+          }
+        }"""
+        response = self._post(
+            token, "/graphql",
+            {"query": mutation, "variables": {"fieldId": field_id, "name": name}},
+        )
+        _graphql_data(response, "rename_project_field")
+
     def add_issue_to_project(self, token: str, project_id: str, content_node_id: str) -> str:
         """Add an issue (by GraphQL node id) to a project; returns the project
         item id. Idempotent by API contract — re-adding returns the existing

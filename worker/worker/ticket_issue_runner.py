@@ -556,6 +556,16 @@ def _board_context(ctx, token: str, params: TicketIssueJobParams, log) -> dict |
     if date_field is None and params.plan_date is not None:
         date_field = ctx.github.create_project_field(
             token, project["id"], _DUE_DATE_FIELD, "DATE")
+    elif date_field is not None and date_field["name"] != _DUE_DATE_FIELD:
+        # Self-migrate a legacy "Plan date" field to "Due date" in place (keeps
+        # its values). Best-effort: if the rename fails we still use the field.
+        try:
+            ctx.github.rename_project_field(token, date_field["id"], _DUE_DATE_FIELD)
+            log.info("ticket_issues_due_date_field_renamed", field_id=date_field["id"])
+        except Exception:
+            log.warning("ticket_issues_due_date_field_rename_failed", exc_info=True)
+            writers.record_ops_event(ctx.db, "github", "warning", "project_field_rename_failed",
+                                     {"run_id": params.run_id, "field": date_field["name"]})
 
     estimate_field = _find(_ESTIMATE_LOOKUP, "NUMBER")
     if estimate_field is None:
