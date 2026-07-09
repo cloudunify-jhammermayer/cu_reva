@@ -12,9 +12,10 @@ request (children **and** the parent epic) must be added to that project with
 the plan date set as a project date field. When either field is absent, behavior
 is exactly as today.
 
-Additionally, when a ticket issue is **closed** on GitHub, the existing
-`tickets.issue-state` callback must carry a **`complete_date`** — always the
-timestamp the issue was closed. On reopen it is `null`.
+Additionally, Odoo renders per-issue **Planned Date** / **Completed Date**
+columns: every issue ref REVA sends back (`issues-created`, `issue-state`,
+`tickets-ready` snapshots) carries `plan_date` (echo of the request's plan
+date) and `complete_date` (the date the issue was closed; cleared on reopen).
 
 ## Context
 
@@ -64,10 +65,25 @@ Current flow (mapped against the code, 2026-07-09):
    the roadmap) and is added to the project like the children.
 3. **Auto-provision fields:** reuse an existing date field named `Plan date`,
    else `Target date` (the roadmap-standard name), else create `Plan date`.
-4. `complete_date` is always GitHub's `closed_at`; `null` on reopen.
+4. `complete_date` is always derived from GitHub's `closed_at`; `null` on
+   reopen. **Per-issue, not top-level** — see the alignment note below.
 5. **Fail-soft:** a Projects failure never fails the run or blocks the Odoo
    callback — issues are the product, the board is a bonus. Every degradation
    logs **and** `record_ops_event` (CLAUDE.md degradation invariant).
+6. **Wire alignment with the shipped Odoo addon (verified in ast-odoo
+   2026-07-09, `cu_reva_ticket_analysis` 19.0.11.2.0, uncommitted on `dev`):**
+   the addon already implements the consumer side. Board URL is sent as
+   `github_project_url` (renamed on the Odoo side from `github_project` to
+   match this spec; the internal setting stays `reva.github_project` and is
+   **global**, one board for all requests). Dates are **per-issue fields on
+   the issue refs** (`plan_date`, `complete_date`, `YYYY-MM-DD`) — Odoo
+   stores them as `issue_plan_date`/`issue_complete_date` on
+   `reva.github.issue` and shows them as list columns. Per-issue beats a
+   top-level `complete_date`: the callbacks send full union snapshots, so
+   every closed issue keeps its date and unions across runs with different
+   plan dates stay correct. The addon truncates incoming values to
+   `YYYY-MM-DD` defensively, but REVA sends plain dates (UTC date of
+   `closed_at`).
 
 ## Design
 
@@ -80,11 +96,16 @@ matching the existing `issue_type`/`github_username` validators):
   (invalid non-empty value → 422, same policy as `github_url`).
 - `plan_date: date | None` — ISO `YYYY-MM-DD`.
 
-Outbound `tickets.issue-state` (`IssueStatePayload`):
-
-- `complete_date: str | None` — ISO 8601 UTC datetime (GitHub `closed_at`
-  passthrough, e.g. `"2026-07-09T14:03:22Z"`); `null` when `state == "open"`.
-  Odoo truncates to a date if its field is `Date`.
+Outbound — **per-issue** (decision 6): `IssueRefPayload` gains
+`plan_date: str | None` and `complete_date: str | None` (both `YYYY-MM-DD`).
+Every callback that carries issue refs (`issues-created`, `issue-state`,
+`tickets-ready`) therefore includes them; `_ISSUE_KEYS` in `reva/odoo_client.py`
+is extended to exactly these two additional keys (`node_id`/`project_item_id`
+still never leak to Odoo). `plan_date` is stamped on each item at creation time
+from the request's plan date (so unions across runs with different plan dates
+stay per-issue correct); `complete_date` is stamped by the state sync when an
+issue closes (UTC date of GitHub's `closed_at`) and cleared to `null` on
+reopen. `IssueStatePayload` itself gains no top-level field.
 
 Both flow into `TicketIssueJobParams` (`run_id`-persisted, so requeues resume
 with them). Regenerate `contracts/` (`python -m reva.odoo_contracts generate`)
@@ -163,15 +184,22 @@ After the sub-issue attach loop, when `params.github_project_url` is set:
 different `plan_date` dates its *new* issues but does not re-date existing
 items (see out of scope).
 
-### `complete_date` pipeline
+### Per-issue date pipeline
 
-- `_handle_issues` (webhook): pass `closed_at = issue.get("closed_at")` into
-  the `sync_ticket_issue_state` job params (absent/None on reopen).
-- `sync_ticket_issue_state`: forward to `odoo.issue_state(...,
-  complete_date=closed_at if state == "closed" else None)`.
-- `OdooCallbackClient.issue_state` + `IssueStatePayload`: new optional field.
-- Older queued jobs without the key default to `None` (use `.get`, not a
-  required param — no PermanentError for in-flight jobs during deploy).
+- **`plan_date` echo:** the runner's creation loop stamps
+  `"plan_date": params.plan_date.isoformat()` (or `None`) on each created
+  item; adopted items keep their originating run's value, reconciled-from-
+  GitHub items have none.
+- **`complete_date`:** `_handle_issues` (webhook) passes
+  `closed_at = issue.get("closed_at")` into the `sync_ticket_issue_state` job
+  params (absent/None on reopen). `update_ticket_issue_state` stamps
+  `item["complete_date"] = closed_at[:10]` when closing / `None` when
+  reopening, alongside the existing `state` stamp across all runs carrying the
+  issue.
+- `get_ticket_issue_union` and the callback ref projection (`_ISSUE_KEYS`)
+  carry both keys through to Odoo.
+- Older queued jobs without the `closed_at` key default to `None` (use `.get`,
+  not a required param — no PermanentError for in-flight jobs during deploy).
 
 ### Persistence — `reva/db/`
 
@@ -248,8 +276,10 @@ Unit-tested on the existing harness (SQLite, httpx MockTransport, no network):
 6. Field policy: existing `Target date` reused; missing Priority created;
    unmatched `Todo` option skipped + ops event.
 7. Webhook: closed payload → job params carry `closed_at`; reopened → None;
-   `issue_state` posts `complete_date` accordingly; legacy job params without
-   the key still work.
+   the issue-state snapshot items carry per-issue `complete_date`
+   (`closed_at[:10]`, cleared on reopen) and the creation-time `plan_date`
+   echo; legacy job params without the key still work; `_ISSUE_KEYS` sends
+   exactly the six documented keys.
 8. No project URL → byte-identical behavior to today (regression suite).
 
 Definition of done: `make test` (shared `reva/` touched → worker + api +

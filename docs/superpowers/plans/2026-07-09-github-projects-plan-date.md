@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** When Odoo's `create-issues` request carries a `github_project_url` (+ optional `plan_date`), every issue REVA creates — children **and** the parent epic — is added to that GitHub Project with the plan date, Status=`Todo`, and Priority set as project fields. When a tracked issue closes, the `issue-state` callback additionally carries `complete_date` (GitHub's `closed_at`; `null` on reopen). Without the new fields, behavior is byte-identical to today.
+**Goal:** When Odoo's `create-issues` request carries a `github_project_url` (+ optional `plan_date`), every issue REVA creates — children **and** the parent epic — is added to that GitHub Project with the plan date, Status=`Todo`, and Priority set as project fields. Every issue ref sent back to Odoo carries per-issue `plan_date` (creation-time echo) and `complete_date` (`YYYY-MM-DD` from GitHub's `closed_at`; cleared on reopen) — the shipped Odoo addon (`cu_reva_ticket_analysis` 19.0.11.2.0) already consumes exactly these keys. Without the new fields, behavior is byte-identical to today.
 
-**Architecture:** Inbound contract gains two optional fields that flow `CreateIssuesRequest → TicketIssueJobParams → ticket_issue_runs` (two new columns). The worker gets a new **fail-soft** projection step after sub-issue attach: resolve the project via GraphQL (Projects v2 is GraphQL-only), ensure/locate the Plan date + Priority fields, `addProjectV2ItemById` each item (idempotent by API contract), set fields, persist `project_item_id` per item as the don't-touch-again guard. `complete_date` is a passthrough: webhook `issue.closed_at` → job params → `IssueStatePayload`. Board visibility rides existing rails (ops events → TUI Failures tab) plus two new summary fields on the Tickets tab.
+**Architecture:** Inbound contract gains two optional fields that flow `CreateIssuesRequest → TicketIssueJobParams → ticket_issue_runs` (two new columns). The worker gets a new **fail-soft** projection step after sub-issue attach: resolve the project via GraphQL (Projects v2 is GraphQL-only), ensure/locate the Plan date + Priority fields, `addProjectV2ItemById` each item (idempotent by API contract), set fields, persist `project_item_id` per item as the don't-touch-again guard. The per-issue dates ride the existing snapshot machinery: the creation loop stamps `plan_date` on each item, the state-sync writer stamps/clears `complete_date` (webhook `issue.closed_at` → job params → `update_ticket_issue_state`), and the union/ref projections carry both to every callback. Board visibility rides existing rails (ops events → TUI Failures tab) plus two new summary fields on the Tickets tab.
 
 **Tech Stack:** Python 3.14, SQLAlchemy (SQLite tests / Postgres prod), `httpx` + MockTransport, RQ, pytest; Go/Bubble Tea TUI. No new dependencies.
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - **Fail-soft everywhere for Projects** (spec decision 5): a Projects failure must never fail the run, block the `issues-created` callback, or change what Odoo receives. Every degradation logs AND `writers.record_ops_event(...)` (CLAUDE.md degradation invariant).
-- **Odoo payloads for issues are unchanged**: `_ISSUE_KEYS = ("number", "title", "url", "state")` in `reva/odoo_client.py` stays as-is — `node_id`/`project_item_id` must never leak to Odoo (the `_project_items` projection already guarantees this; don't touch it).
+- **Odoo issue refs are extended by exactly two keys**: `_ISSUE_KEYS` in `reva/odoo_client.py` becomes `("number", "title", "url", "state", "plan_date", "complete_date")` (the shipped addon's `IssueItem`/`IssueStateItem` accept both, `.get()`-read, Date-truncating). `node_id`/`project_item_id` must never leak to Odoo — the `_project_items` projection guarantees this; assert it in tests. Dates on the wire are plain `YYYY-MM-DD` strings.
 - **Never mutate existing project fields/options** — unmatched options are skipped with an ops event.
 - **The persisted `project_item_id` is the guard against resetting a developer-moved card** (spec §runner step 3). Fields are set only when an item has no persisted `project_item_id`.
 - **Contract changes are additive-optional** on both directions; regenerate `contracts/` (`python -m reva.odoo_contracts generate`) in the same commit as any payload-model change, or the drift tests fail. ast-odoo re-sync is a separate-repo follow-up (branch from `dev` → PR to `dev`).
@@ -282,19 +282,24 @@ git commit -m "feat(api): accept github_project_url + plan_date on create-issues
 
 ---
 
-### Task 4: `complete_date` on the issue-state callback
+### Task 4: Per-issue `plan_date` / `complete_date` on every callback ref
+
+The shipped Odoo addon stores these as `issue_plan_date`/`issue_complete_date`
+per `reva.github.issue` and renders them as list columns — the dates are
+**per-issue inside the snapshots**, not top-level fields.
 
 **Files:**
 - Modify: `api/app/routes/webhooks.py` (`_handle_issues` ~448)
-- Modify: `worker/worker/ticket_issue_runner.py` (`sync_ticket_issue_state` ~373)
-- Modify: `reva/odoo_contracts.py` (`IssueStatePayload` ~54, `tickets.issue-state` sample ~185)
-- Modify: `reva/odoo_client.py` (`issue_state` ~203)
+- Modify: `worker/worker/ticket_issue_runner.py` (`sync_ticket_issue_state` ~373; child-creation loop `issues[idx] = {...}` ~608)
+- Modify: `reva/db/writers.py` (`update_ticket_issue_state` ~2059, `get_ticket_issue_union` ~2115)
+- Modify: `reva/odoo_contracts.py` (`IssueRefPayload` ~34, `_ISSUE_SAMPLE` ~123 + the samples embedding it)
+- Modify: `reva/odoo_client.py` (`_ISSUE_KEYS` ~61)
 - Regenerate: `contracts/`
-- Test: `api/tests/test_webhooks.py`, `worker/tests/test_ticket_issue_runner.py` (sync tests + `FakeOdoo`), `worker/tests/test_odoo_client.py`
+- Test: `api/tests/test_webhooks.py`, `worker/tests/test_ticket_issue_runner.py`, `worker/tests/test_ticket_issue_writers.py`, `worker/tests/test_odoo_client.py`
 
 **Interfaces:**
-- Produces: `IssueStatePayload.complete_date: str | None = None`; `OdooCallbackClient.issue_state(..., complete_date: str | None = None)`; sync job params gain optional key `"closed_at"`.
-- `complete_date` = GitHub's `closed_at` ISO-8601 UTC string, passed through verbatim; `None` when `state == "open"`. Old queued jobs without the key must keep working (`.get`, not a required param).
+- Produces: `IssueRefPayload.plan_date: str | None = None`, `.complete_date: str | None = None` (`YYYY-MM-DD`); `_ISSUE_KEYS += ("plan_date", "complete_date")`; per-item JSON keys `plan_date`/`complete_date`; `update_ticket_issue_state(db, owner, repo, number, state, closed_at: str | None = None)`; sync job params gain optional key `"closed_at"`.
+- `complete_date` = `closed_at[:10]` (UTC date) when closing, `None` when reopening. `plan_date` = the creating run's `params.plan_date`, stamped at creation; adopted items keep their originating run's value, reconciled-from-GitHub items have none. Old queued jobs without `closed_at` must keep working (`.get`, not a required param).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -303,38 +308,52 @@ git commit -m "feat(api): accept github_project_url + plan_date on create-issues
 ```python
 # closed event: payload["issue"]["closed_at"] = "2026-07-09T14:03:22Z"
 #   → enqueue args include {"closed_at": "2026-07-09T14:03:22Z"}
-# reopened event (closed_at is None in real payloads)
-#   → enqueue args include {"closed_at": None}
+# reopened event → enqueue args include {"closed_at": None}
 ```
 
-`worker/tests/test_ticket_issue_runner.py` — extend `FakeOdoo.issue_state` with `complete_date=None` in the signature and record it; then:
+`worker/tests/test_ticket_issue_writers.py`:
 
 ```python
-# test_issue_closed_sends_complete_date: sync job with
-#   {"...", "state": "closed", "closed_at": "2026-07-09T14:03:22Z"}
-#   → FakeOdoo saw complete_date == "2026-07-09T14:03:22Z"
-# test_issue_reopened_sends_null_complete_date: state "open" → complete_date is None
-# test_sync_without_closed_at_key_still_works: legacy job params dict WITHOUT
-#   the key (deploy-window jobs) → no KeyError, complete_date is None
+# test_update_state_stamps_complete_date: seed a run with a created issue,
+#   update_ticket_issue_state(..., "closed", closed_at="2026-07-09T14:03:22Z")
+#   → item["complete_date"] == "2026-07-09"; then state "open", closed_at=None
+#   → item["complete_date"] is None.
+# test_union_carries_dates: seeded items with plan_date/complete_date →
+#   get_ticket_issue_union items include both keys (None when absent).
 ```
 
-`worker/tests/test_odoo_client.py` — the posted `/tickets/issue-state` JSON contains `"complete_date"` (value and `null` cases); `issues` items still carry ONLY `("number", "title", "url", "state")`.
+`worker/tests/test_ticket_issue_runner.py`:
 
-- [ ] **Step 2: Run to verify they fail** — both suites.
+```python
+# test_created_issues_carry_plan_date: params with plan_date=date(2026, 7, 15)
+#   → every created item in the run row has plan_date == "2026-07-15" and the
+#   issues_created callback items carry it (FakeOdoo captures the list).
+# test_issue_closed_snapshot_carries_complete_date: sync job with state
+#   "closed" + closed_at → the issue_state snapshot item for that number has
+#   complete_date == "2026-07-09"; reopened afterwards → None.
+# test_sync_without_closed_at_key_still_works: legacy job params dict WITHOUT
+#   the key (deploy-window jobs) → no KeyError.
+```
+
+`worker/tests/test_odoo_client.py` — posted `issues-created`/`issue-state` items carry exactly `("number", "title", "url", "state", "plan_date", "complete_date")`; extra keys like `node_id`/`project_item_id` are stripped.
+
+- [ ] **Step 2: Run to verify they fail** — api + worker suites.
 
 - [ ] **Step 3a: Webhook** — in `_handle_issues`, add `"closed_at": issue.get("closed_at")` to the enqueued params dict.
 
-- [ ] **Step 3b: Worker** — in `sync_ticket_issue_state`: `closed_at = job_params.get("closed_at")` next to the other reads (NOT inside the required-key `try`), and pass `complete_date=closed_at if state == "closed" else None` to `odoo.issue_state(...)`.
+- [ ] **Step 3b: Writers** — `update_ticket_issue_state` gains `closed_at: str | None = None`; where it stamps `item["state"] = state`, also stamp `item["complete_date"] = (closed_at or "")[:10] or None` when `state == "closed"` else `None`. `get_ticket_issue_union` adds `"plan_date": item.get("plan_date")` and `"complete_date": item.get("complete_date")` to its projected dict.
 
-- [ ] **Step 3c: Payload + client** — `IssueStatePayload` gains `complete_date: str | None = None`; `issue_state()` gains the kwarg and passes it into the payload (the existing `model_dump(exclude={"issues"})` then carries it). Update the `tickets.issue-state` contract sample: `"complete_date": "2026-07-09T14:03:22Z"`. Regenerate `contracts/`.
+- [ ] **Step 3c: Worker** — `sync_ticket_issue_state`: `closed_at = job_params.get("closed_at")` (NOT inside the required-key `try`), passed to `writers.update_ticket_issue_state(...)`. Child-creation loop: add `"plan_date": params.plan_date.isoformat() if params.plan_date else None` to the created-item dict (requires Task 2's params field).
+
+- [ ] **Step 3d: Contract + client** — `IssueRefPayload` gains both optional fields; `_ISSUE_KEYS` extended (the `_project_items` projection then carries them everywhere refs are sent). Update `_ISSUE_SAMPLE` with `"plan_date": "2026-07-15", "complete_date": None` and give the issue-state sample's closed item `"complete_date": "2026-07-09"`. Regenerate `contracts/`.
 
 - [ ] **Step 4: Verify** — `cd api && .venv/bin/python -m pytest tests/ -q && cd ../worker && .venv/bin/python -m pytest tests/ -q` — PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add api/app/routes/webhooks.py worker/worker/ticket_issue_runner.py reva/odoo_contracts.py reva/odoo_client.py contracts/ api/tests/test_webhooks.py worker/tests/test_ticket_issue_runner.py worker/tests/test_odoo_client.py
-git commit -m "feat(odoo): send complete_date on issue-state callbacks"
+git add api/app/routes/webhooks.py worker/worker/ticket_issue_runner.py reva/db/writers.py reva/odoo_contracts.py reva/odoo_client.py contracts/ api/tests/test_webhooks.py worker/tests/ worker/tests/test_odoo_client.py
+git commit -m "feat(odoo): per-issue plan_date + complete_date on callback refs"
 ```
 
 ---
@@ -742,8 +761,8 @@ git commit -m "docs: GitHub Projects board setup for ticket issues"
 - [ ] `cd tui && go build ./... && go vet ./... && go test ./...`
 - [ ] `worker/.venv/bin/python -m reva.odoo_contracts generate --check` — contracts current.
 - [ ] State honestly: migration `034` and the GraphQL calls are unit-tested against SQLite/MockTransport only — validate on `make test-integration` / first staging boot.
-- [ ] **Staging (after adding the App's org Projects permission and re-approving the installation):** one real create-issues run against a test board — items appear, Plan date/Status/Todo/Priority stamped; close an issue → Odoo receives `complete_date`; break the permission on purpose once to see the fail-soft ops event.
-- [ ] **Follow-up (separate repo):** ast-odoo consumes the regenerated `contracts/` (new inbound fields + `complete_date`) — branch from `dev` → PR to `dev`.
+- [ ] **Staging (after adding the App's org Projects permission and re-approving the installation):** one real create-issues run against a test board — items appear, Plan date/Status/Todo/Priority stamped; close an issue → the record's issue list in Odoo shows its Completed Date; break the permission on purpose once to see the fail-soft ops event.
+- [ ] **Follow-up (separate repo):** ast-odoo already implements the consumer side (`cu_reva_ticket_analysis` 19.0.11.2.0, on `dev`) — after this ships, run its `sync_contracts.sh`, bump the `CONTRACTS_VERSION` pin in `cu_reva_connector/tests/test_contracts.py`, and drop the "awaiting a contract regen" notes from its CLAUDE.md/README/testguide; branch from `dev` → PR to `dev`.
 
 ## Self-Review
 
@@ -753,11 +772,11 @@ git commit -m "docs: GitHub Projects board setup for ticket issues"
 - Field policy: reuse Plan date/Target date, create Plan date; Status=Todo; Priority Low/Medium/High/Urgent from Odoo 0–3; never mutate existing options → Tasks 5–6 (`_board_context`). ✓
 - Fail-soft + ops events (decision 5, CLAUDE.md invariant) → Task 6 wrapper; TUI Failures tab picks ops events up automatically. ✓
 - `project_item_id` guard against resetting moved cards; idempotent add; backfill via re-click (`get_issue` node fetch); projection-aware short-circuit → Task 6. ✓
-- `complete_date` = `closed_at`, `null` on reopen, legacy queued jobs safe → Task 4. ✓
+- Per-issue `plan_date` echo + `complete_date` (`closed_at[:10]`, cleared on reopen) on every callback ref, matching the shipped addon's `IssueItem`/`IssueStateItem`; legacy queued jobs safe → Task 4. ✓
 - Contracts regenerated in the same commits; Odoo issue payload keys frozen (`_ISSUE_KEYS` untouched, asserted in Task 4/6 tests). ✓
 - TUI surfacing (CLAUDE.md rule 5) → Task 7. Docs for config-only workflows 1/3/5 → Task 8. ✓
 - Out of scope respected: no status sync GitHub→Odoo, no re-dating projected items, no option rewrites.
 
 **Placeholder scan:** Task 3/4/7 test bodies are behavior specs referencing existing fixtures to reuse (grep-to-locate), not invented APIs; every new function/field name, signature, and JSON key is fully specified. No TBD/TODO in code steps.
 
-**Type consistency:** `plan_date` is `datetime.date` end-to-end (schema → params → ORM `Date` → `isoformat()` at the GraphQL boundary; RQ job args round-trip it via pickle, and `model_validate` re-coerces ISO strings). `node_id` (str, GraphQL) vs `id` (int, REST sub-issues) stay distinct keys — sub-issue attach keeps using `id`. `_place` signature consistent between runner and `FakeGitHub`. `complete_date` is a verbatim ISO string, never parsed by REVA.
+**Type consistency:** `plan_date` is `datetime.date` end-to-end (schema → params → ORM `Date` → `isoformat()` at the GraphQL boundary; RQ job args round-trip it via pickle, and `model_validate` re-coerces ISO strings). `node_id` (str, GraphQL) vs `id` (int, REST sub-issues) stay distinct keys — sub-issue attach keeps using `id`. `_place` signature consistent between runner and `FakeGitHub`. `complete_date` on the wire is a plain `YYYY-MM-DD` string (`closed_at[:10]`); the addon truncates defensively too, so a stray timestamp cannot break its Date fields.
