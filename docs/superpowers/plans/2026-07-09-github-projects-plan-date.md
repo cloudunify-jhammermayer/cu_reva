@@ -121,7 +121,7 @@ git commit -m "feat(github): parse Projects v2 board URLs"
   - `get_ticket_issue_run(...)` dict gains keys `"github_project_url"`, `"plan_date"`
 - Per-item JSON keys `node_id` / `project_item_id` need **no** schema or purge change: `purge_old_ticket_issue_text` strips only `body`/`acceptance_criteria` (verified 2026-07-09), so the new keys survive retention.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `worker/tests/test_ticket_issue_writers.py` (reuse its `_db()` / `_params()` helpers; extend `_params()` with a `**overrides` passthrough if it doesn't have one):
 
@@ -145,9 +145,9 @@ def test_project_fields_default_none_and_round_trip():
     assert row["plan_date"] == date(2026, 7, 15)
 ```
 
-- [ ] **Step 2: Run to verify it fails** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_writers.py -v`
+- [x] **Step 2: Run to verify it fails** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_writers.py -v`
 
-- [ ] **Step 3a: `reva/types.py`** — add to `TicketIssueJobParams` after `github_username` (import `date` from `datetime`):
+- [x] **Step 3a: `reva/types.py`** — add to `TicketIssueJobParams` after `github_username` (import `date` from `datetime`):
 
 ```python
     # Optional Projects v2 board every created issue (and the epic) is added
@@ -156,7 +156,7 @@ def test_project_fields_default_none_and_round_trip():
     plan_date: date | None = None
 ```
 
-- [ ] **Step 3b: Migration** `db/migrations/034_ticket_issue_project.sql`:
+- [x] **Step 3b: Migration** `db/migrations/034_ticket_issue_project.sql`:
 
 ```sql
 -- Optional GitHub Projects v2 board + planned date sent by Odoo with a
@@ -167,7 +167,7 @@ ALTER TABLE ticket_issue_runs ADD COLUMN IF NOT EXISTS github_project_url TEXT;
 ALTER TABLE ticket_issue_runs ADD COLUMN IF NOT EXISTS plan_date DATE;
 ```
 
-- [ ] **Step 3c: ORM** — in `reva/db/models.py` `TicketIssueRun`, after `ticket_url` (import `Date` from sqlalchemy alongside the existing imports):
+- [x] **Step 3c: ORM** — in `reva/db/models.py` `TicketIssueRun`, after `ticket_url` (import `Date` from sqlalchemy alongside the existing imports):
 
 ```python
     # Optional Projects v2 board + planned date (migration 034); NULL → no
@@ -178,12 +178,12 @@ ALTER TABLE ticket_issue_runs ADD COLUMN IF NOT EXISTS plan_date DATE;
 
 (`from datetime import date` — check the models file's existing datetime imports and extend.)
 
-- [ ] **Step 3d: Writers** — `record_ticket_issue_run_created`: add `github_project_url=params.github_project_url, plan_date=params.plan_date,` to the `TicketIssueRun(...)` constructor. `get_ticket_issue_run`: add both keys to the returned dict (next to `"ticket_url"`).
+- [x] **Step 3d: Writers** — `record_ticket_issue_run_created`: add `github_project_url=params.github_project_url, plan_date=params.plan_date,` to the `TicketIssueRun(...)` constructor. `get_ticket_issue_run`: add both keys to the returned dict (next to `"ticket_url"`).
 
-- [ ] **Step 4: Run to verify it passes**, then the full writer + type suites:
+- [x] **Step 4: Run to verify it passes**, then the full writer + type suites:
 `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_writers.py tests/ -q` — PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add db/migrations/034_ticket_issue_project.sql reva/db/models.py reva/db/writers.py reva/types.py worker/tests/test_ticket_issue_writers.py

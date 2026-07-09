@@ -1690,6 +1690,8 @@ def record_ticket_issue_run_created(db: Database, params: TicketIssueJobParams) 
             github_username=params.github_username,
             priority=params.priority,
             ticket_url=params.ticket_url,
+            github_project_url=params.github_project_url,
+            plan_date=params.plan_date,
             status="pending",
         )
         s.add(row)
@@ -1752,6 +1754,8 @@ def get_ticket_issue_run(db: Database, run_id: int) -> dict | None:
             "github_username": row.github_username,
             "priority": row.priority,
             "ticket_url": row.ticket_url,
+            "github_project_url": row.github_project_url,
+            "plan_date": row.plan_date,
             "status": row.status,
             "issues": row.issues,
             "parent_issue": row.parent_issue,

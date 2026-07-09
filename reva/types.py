@@ -7,7 +7,7 @@ from them in `review_tool.py`.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -423,6 +423,10 @@ class TicketIssueJobParams(BaseModel):
     issue_type: str | None = None
     # Optional GitHub login assigned to every created issue and parent epic.
     github_username: str | None = None
+    # Optional Projects v2 board every created issue (and the epic) is added
+    # to, and the planned date set on it. Absent → no Projects interaction.
+    github_project_url: str | None = None
+    plan_date: date | None = None
 
 
 # --- Timesheet wording review types -----------------------------------------

@@ -72,6 +72,25 @@ def test_purge_preserves_parent_issue():
     assert row["issues"][0]["attached"] is True          # resume metadata kept
 
 
+def test_project_fields_default_none_and_round_trip():
+    db = _db()
+    run_id = writers.record_ticket_issue_run_created(db, _params())
+    row = writers.get_ticket_issue_run(db, run_id)
+    assert row["github_project_url"] is None
+    assert row["plan_date"] is None
+
+    from datetime import date
+    p2 = _params().model_copy(update={
+        "ticket_id": 456,
+        "github_project_url": "https://github.com/orgs/acme/projects/5",
+        "plan_date": date(2026, 7, 15),
+    })
+    run_id = writers.record_ticket_issue_run_created(db, p2)
+    row = writers.get_ticket_issue_run(db, run_id)
+    assert row["github_project_url"] == "https://github.com/orgs/acme/projects/5"
+    assert row["plan_date"] == date(2026, 7, 15)
+
+
 def test_planning_basis_typed_prefix():
     untyped = writers.compute_planning_basis(_typed_params())
     typed = writers.compute_planning_basis(_typed_params(issue_type="CR"))

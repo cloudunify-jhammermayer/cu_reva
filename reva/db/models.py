@@ -7,12 +7,13 @@ JSONB -> JSON, TIMESTAMPTZ -> TIMESTAMP).
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -506,6 +507,10 @@ class TicketIssueRun(Base):
     github_username: Mapped[str | None] = mapped_column(Text)
     priority: Mapped[str] = mapped_column(Text, nullable=False)
     ticket_url: Mapped[str] = mapped_column(Text, nullable=False)
+    # Optional Projects v2 board + planned date (migration 034); NULL → no
+    # Projects interaction for this run.
+    github_project_url: Mapped[str | None] = mapped_column(Text)
+    plan_date: Mapped[date | None] = mapped_column(Date)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     # The issue plan and its creation progress:
     # [{"title", "body", "acceptance_criteria", "number", "url"}, ...]
