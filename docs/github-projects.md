@@ -32,7 +32,7 @@ fields or options** — a mismatch is skipped and recorded as
 
 | Field | Behavior |
 |---|---|
-| **Plan date** (date) | Reuses an existing DATE field named `Plan date`, else `Target date`; if neither exists **and** the request carried a plan date, REVA creates a `Plan date` field. Set on every added item (including the epic). Skipped entirely when the request sent no plan date. |
+| **Due date** (date) | Reuses an existing custom DATE field named `Due date` (or a legacy `Plan date`); if neither exists **and** the request carried a date, REVA creates a `Due date` field. The built-in roadmap `Start date`/`Target date` are issue-backed and deliberately not used. Set on every added item (including the epic). Skipped when the request sent no date. |
 | **Status** (single-select) | Sets the built-in `Status` to its `Todo` option **only when first adding an item**. If the board has no `Todo` option, Status is left unset (`project_field_unmatched`). |
 | **Priority** (single-select) | Reuses a `Priority` single-select, else creates one with options **Low / Medium / High / Urgent**. Mapped from the Odoo priority key: `0`→Low, `1`→Medium, `2`→High, `3`→Urgent (unknown → Medium). If a `Priority` field exists but lacks the mapped option name, it is skipped (`project_field_unmatched`). |
 
@@ -49,7 +49,7 @@ everything after that. Recommended one-time setup on the board:
 - **Built-in workflows** (project → ⚙ → Workflows): enable *Item closed →
   Status: Done* and *Pull request merged → Status: Done*. Combined with REVA's
   `Todo`-on-add, the board tracks reality with zero further API writes.
-- **Roadmap view:** set its date field to **Plan date** for a timeline of all
+- **Roadmap view:** set its date field to **Due date** for a timeline of all
   Odoo-planned work.
 - **Board/table view grouped by Parent issue:** one swimlane per Odoo ticket,
   each epic showing its sub-issue progress. Slice further by the **Priority**

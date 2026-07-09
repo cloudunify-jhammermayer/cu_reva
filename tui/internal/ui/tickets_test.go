@@ -386,7 +386,7 @@ func TestDetailViewShowsProjectAndPlanDate(t *testing.T) {
 	if !strings.Contains(out, "orgs/acme/projects/5") {
 		t.Errorf("detail view missing project board line:\n%s", out)
 	}
-	if !strings.Contains(out, "plan 2026-07-15") {
+	if !strings.Contains(out, "due 2026-07-15") {
 		t.Errorf("detail view missing plan date:\n%s", out)
 	}
 }

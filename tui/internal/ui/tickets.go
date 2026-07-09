@@ -723,7 +723,7 @@ func (t Tickets) detailView(w, h int) string {
 			line += " " + t.detailProject
 		}
 		if t.detailPlanDate != "" {
-			line += "  · plan " + t.detailPlanDate
+			line += "  · due " + t.detailPlanDate
 		}
 		parts = append(parts, styleSubtitle.Render(truncate(line, w-2)))
 	}

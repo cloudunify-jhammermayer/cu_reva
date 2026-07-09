@@ -1022,15 +1022,15 @@ def test_project_step_adds_all_items_and_sets_fields(ctx_and_fakes):
     g = s["github"]
     # parent + 2 children added (default fixture lacks date/estimate/priority → created)
     assert len(g.project_items) == 3
-    assert [f["name"] for f in g.created_fields] == ["Plan date", "Estimate", "Priority"]
+    assert [f["name"] for f in g.created_fields] == ["Due date", "Estimate", "Priority"]
     assert [f["dataType"] for f in g.created_fields] == ["DATE", "NUMBER", "SINGLE_SELECT"]
-    # per added item: Plan date, Status=Todo, Priority (priority "1" → Medium)
+    # per added item: Due date, Status=Todo, Priority (priority "1" → Medium)
     per_item = {}
     for item_id, field_id, value in g.item_field_sets:
         per_item.setdefault(item_id, []).append((field_id, value))
     assert len(per_item) == 3
     for sets in per_item.values():
-        assert ("F_Plan date", "2026-07-15") in sets
+        assert ("F_Due date", "2026-07-15") in sets
         assert ("F_status", "opt_todo") in sets
         assert ("F_Priority", "opt_medium") in sets
     # each child issue (estimate_hours=1.5) also gets the board Estimate set; the
@@ -1047,10 +1047,10 @@ def test_project_step_adds_all_items_and_sets_fields(ctx_and_fakes):
         assert "project_item_id" not in issue
 
 
-def test_project_step_reuses_existing_plan_date_field(ctx_and_fakes):
-    """A custom 'Plan date' DATE field is reused; the built-in issue-backed
-    'Target date' is deliberately NOT matched (it rejects the standard
-    mutation), so no field is created when our own 'Plan date' exists."""
+def test_project_step_reuses_existing_due_date_field(ctx_and_fakes):
+    """A pre-rename custom 'Plan date' DATE field is still reused (backward
+    compat); the built-in issue-backed 'Target date' is deliberately NOT
+    matched (it rejects the standard mutation), so no field is created."""
     from datetime import date
     s = ctx_and_fakes
     s["github"].project_fields = s["github"].project_fields + [
@@ -1073,9 +1073,9 @@ def test_project_step_reuses_existing_plan_date_field(ctx_and_fakes):
     assert not any(f == "F_target" for _, f, _ in sets)             # built-in never touched
 
 
-def test_project_step_creates_plan_date_when_only_builtin_target_date(ctx_and_fakes):
+def test_project_step_creates_due_date_when_only_builtin_target_date(ctx_and_fakes):
     """A board with only the built-in 'Target date' → REVA creates its own
-    'Plan date' custom field rather than targeting the issue-backed built-in."""
+    'Due date' custom field rather than targeting the issue-backed built-in."""
     from datetime import date
     s = ctx_and_fakes
     s["github"].project_fields = s["github"].project_fields + [
@@ -1085,7 +1085,7 @@ def test_project_step_creates_plan_date_when_only_builtin_target_date(ctx_and_fa
                           plan_date=date(2026, 7, 15))
     run_ticket_issues(params)
 
-    assert "Plan date" in [f["name"] for f in s["github"].created_fields]
+    assert "Due date" in [f["name"] for f in s["github"].created_fields]
 
 
 def test_project_field_set_failure_is_isolated(ctx_and_fakes):

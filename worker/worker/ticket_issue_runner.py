@@ -64,10 +64,11 @@ _FALLBACK_TYPE = "DEV"  # plans persisted before the type rollout carry no type
 # ("Start date"/"Target date") are issue-backed and REJECT
 # updateProjectV2ItemFieldValue ("must be updated using updateIssueFieldValue",
 # which needs a separate issue-field id space) — so we never target them; we
-# create/reuse a normal custom "Plan date" project field instead, which the
-# standard mutation accepts (like the Priority single-select).
-_PLAN_DATE_LOOKUP = ("plan date",)   # case-insensitive, DATE type
-_PLAN_DATE_FIELD = "Plan date"
+# create/reuse a normal custom "Due date" project field instead, which the
+# standard mutation accepts (like the Priority single-select). The Odoo-side
+# wire field is still `plan_date`; on the board it surfaces as the deadline.
+_DUE_DATE_LOOKUP = ("due date", "plan date")   # case-insensitive, DATE type; "plan date" = pre-rename boards
+_DUE_DATE_FIELD = "Due date"
 # Board NUMBER field for the per-issue estimate (hours). The built-in template
 # "Estimate" is a normal project field (accepts updateProjectV2ItemFieldValue,
 # unlike the issue-backed date fields), so we reuse it by name / create it.
@@ -551,10 +552,10 @@ def _board_context(ctx, token: str, params: TicketIssueJobParams, log) -> dict |
                                   "wanted": option_name, "purpose": purpose})
         return None
 
-    date_field = _find(_PLAN_DATE_LOOKUP, "DATE")
+    date_field = _find(_DUE_DATE_LOOKUP, "DATE")
     if date_field is None and params.plan_date is not None:
         date_field = ctx.github.create_project_field(
-            token, project["id"], _PLAN_DATE_FIELD, "DATE")
+            token, project["id"], _DUE_DATE_FIELD, "DATE")
 
     estimate_field = _find(_ESTIMATE_LOOKUP, "NUMBER")
     if estimate_field is None:
@@ -583,7 +584,7 @@ def _board_context(ctx, token: str, params: TicketIssueJobParams, log) -> dict |
 
 def _project_step(ctx, token, owner, repo, params, issues, parent, log) -> None:
     """Add the epic + children to the requested Projects v2 board and stamp
-    Plan date / Status=Todo / Priority. Fail-soft by spec decision 5: the board
+    Due date / Status=Todo / Priority. Fail-soft by spec decision 5: the board
     is a bonus — any failure logs + ops-events and the run completes. The
     persisted project_item_id is the only guard against re-setting fields on a
     card a developer already moved, so it is written after each item."""
