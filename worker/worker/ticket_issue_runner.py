@@ -68,6 +68,11 @@ _FALLBACK_TYPE = "DEV"  # plans persisted before the type rollout carry no type
 # standard mutation accepts (like the Priority single-select).
 _PLAN_DATE_LOOKUP = ("plan date",)   # case-insensitive, DATE type
 _PLAN_DATE_FIELD = "Plan date"
+# Board NUMBER field for the per-issue estimate (hours). The built-in template
+# "Estimate" is a normal project field (accepts updateProjectV2ItemFieldValue,
+# unlike the issue-backed date fields), so we reuse it by name / create it.
+_ESTIMATE_LOOKUP = ("estimate",)
+_ESTIMATE_FIELD = "Estimate"
 _PRIORITY_FIELD = "Priority"
 _PRIORITY_BY_ODOO = {"0": "Low", "1": "Medium", "2": "High", "3": "Urgent"}
 _PRIORITY_CREATE_OPTIONS = [
@@ -290,11 +295,14 @@ def _parent_title(params: TicketIssueJobParams, dominant: str) -> str:
     return f"[{dominant}] {params.ticket_id} - {params.name[:_TLDR_MAX].rstrip()}"
 
 
-def _parent_summary(params: TicketIssueJobParams) -> str:
+def _parent_summary(params: TicketIssueJobParams, plan_summary: str | None = None) -> str:
     """A short ticket summary for the epic body so the parent conveys what the
-    ticket is about, not just a back-link. Prefers the ticket description
-    (Odoo sends it as plain text), falling back to the REVA analysis; compacted
-    to the same length cap as child bodies. Empty when neither is present."""
+    ticket is about, not just a back-link. Prefers the planner's English
+    summary (always English regardless of the ticket's language); falls back to
+    the raw ticket description, then the REVA analysis, for pre-rollout/resumed
+    plans that carry no summary. Compacted to the child-body length cap."""
+    if plan_summary and not _is_placeholder(plan_summary):
+        return _compact_issue_body(plan_summary.strip())
     description = params.description.strip()
     if description and not _is_placeholder(description):
         return _compact_issue_body(description)
@@ -305,7 +313,8 @@ def _parent_summary(params: TicketIssueJobParams) -> str:
 
 
 def _format_parent_body(params: TicketIssueJobParams, marker: str, parent_marker: str,
-                        issues: list[dict] | None = None) -> str:
+                        issues: list[dict] | None = None,
+                        plan_summary: str | None = None) -> str:
     """Synthesized locally (no Claude): a ticket summary + total estimate +
     back-link + both hidden markers. GitHub renders the sub-issue checklist
     itself, so we don't list children here."""
@@ -313,7 +322,7 @@ def _format_parent_body(params: TicketIssueJobParams, marker: str, parent_marker
         "Tracking issue for the linked Odoo ticket. "
         "Its work items are attached below as sub-issues.",
     ]
-    summary = _parent_summary(params)
+    summary = _parent_summary(params, plan_summary)
     if summary:
         lines += ["", "### Summary", "", summary]
     total = sum(i.get("estimate_hours") or 0 for i in issues or [])
@@ -547,6 +556,11 @@ def _board_context(ctx, token: str, params: TicketIssueJobParams, log) -> dict |
         date_field = ctx.github.create_project_field(
             token, project["id"], _PLAN_DATE_FIELD, "DATE")
 
+    estimate_field = _find(_ESTIMATE_LOOKUP, "NUMBER")
+    if estimate_field is None:
+        estimate_field = ctx.github.create_project_field(
+            token, project["id"], _ESTIMATE_FIELD, "NUMBER")
+
     status_field = _find(("Status",), "SINGLE_SELECT")
     todo_id = _option_id(status_field, _STATUS_TODO, "status") if status_field else None
 
@@ -561,6 +575,7 @@ def _board_context(ctx, token: str, params: TicketIssueJobParams, log) -> dict |
     return {
         "project_id": project["id"],
         "date_field_id": date_field["id"] if date_field else None,
+        "estimate_field_id": estimate_field["id"] if estimate_field else None,
         "status": (status_field["id"], todo_id) if todo_id else None,
         "priority": (priority_field["id"], priority_id) if priority_id else None,
     }
@@ -608,6 +623,11 @@ def _project_step(ctx, token, owner, repo, params, issues, parent, log) -> None:
                 _set_field("plan_date", lambda: ctx.github.set_project_item_date(
                     token, board["project_id"], item_id, board["date_field_id"],
                     params.plan_date.isoformat()))
+            estimate = item.get("estimate_hours")
+            if board["estimate_field_id"] and estimate:
+                _set_field("estimate", lambda: ctx.github.set_project_item_number(
+                    token, board["project_id"], item_id, board["estimate_field_id"],
+                    float(estimate)))
             for name, pair in (("status", board["status"]), ("priority", board["priority"])):
                 if pair:
                     _set_field(name, lambda pair=pair: ctx.github.set_project_item_option(
@@ -651,6 +671,7 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
     basis = (row or {}).get("planning_basis") or "text:none"
     issues = (row or {}).get("issues") or None
     parent = (row or {}).get("parent_issue") or None
+    plan_summary = (row or {}).get("plan_summary")
 
     if issues is None:
         prior = writers.get_latest_ticket_issue_plan(
@@ -737,10 +758,12 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
                 raise PermanentError(error)
             response, plan = ctx.ticket_issue_planner.plan_with_response(params)
             issues = [_normalize_planned_issue(item, params) for item in plan.issues]
+            plan_summary = plan.summary
             # Plan + spend persist BEFORE any GitHub call: a partial failure must
             # resume from this plan, never re-plan (titles would drift and the
             # issue set would duplicate).
-            cost = writers.record_ticket_issue_plan(ctx.db, params.run_id, issues, response)
+            cost = writers.record_ticket_issue_plan(
+                ctx.db, params.run_id, issues, response, summary=plan.summary)
             writers.record_claude_spend(ctx.db, "ticket_issues", cost)
 
     # Every ticket gets an epic: whenever anything is still to create, adopt the
@@ -770,7 +793,7 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             ctx,
             token, owner, repo,
             title=parent_t,
-            body=_format_parent_body(params, marker, parent_marker, issues),
+            body=_format_parent_body(params, marker, parent_marker, issues, plan_summary),
             labels=[_TICKET_ISSUE_LABEL, dominant],
             assignees=[params.github_username] if params.github_username else None,
         )

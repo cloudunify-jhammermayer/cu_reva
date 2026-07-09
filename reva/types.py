@@ -369,6 +369,10 @@ class TicketIssueItem(BaseModel):
 class TicketIssuePlan(BaseModel):
     """Structured output from the submit_ticket_issues tool_use call."""
 
+    # 1–2 sentence plain-English summary of the whole ticket, for the parent
+    # epic body. Always English regardless of the ticket's language. Empty on
+    # plans persisted before the summary rollout.
+    summary: str = ""
     issues: list[TicketIssueItem] = Field(min_length=1, max_length=10)
 
     @field_validator("issues", mode="before")

@@ -173,7 +173,7 @@ def test_malformed_stringified_issue_list_is_transient():
 def test_tool_schema_shape():
     schema = build_ticket_issue_tool_schema()
     assert schema["name"] == TICKET_ISSUE_TOOL_NAME
-    assert schema["input_schema"]["required"] == ["issues"]
+    assert schema["input_schema"]["required"] == ["summary", "issues"]
     assert schema["input_schema"]["additionalProperties"] is False
     assert "$defs" in schema["input_schema"]  # TicketIssueItem definition
 

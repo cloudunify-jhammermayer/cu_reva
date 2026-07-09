@@ -516,6 +516,9 @@ class TicketIssueRun(Base):
     # [{"title", "body", "acceptance_criteria", "number", "url"}, ...]
     # number/url stay null until the issue exists on GitHub.
     issues: Mapped[Any | None] = mapped_column(JSON)
+    # Plain-English ticket summary for the parent epic body (migration 035);
+    # NULL on pre-rollout runs.
+    plan_summary: Mapped[str | None] = mapped_column(Text)
     # The parent ("epic") issue grouping this ticket's sub-issues, or NULL for
     # legacy and single-issue runs: {number, id, url, title, state}. Excluded
     # from every Odoo payload by design (it lives only on GitHub).

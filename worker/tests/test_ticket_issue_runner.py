@@ -145,6 +145,9 @@ class FakeGitHub:
     def set_project_item_option(self, token, project_id, item_id, field_id, option_id):
         self.item_field_sets.append((item_id, field_id, option_id))
 
+    def set_project_item_number(self, token, project_id, item_id, field_id, number):
+        self.item_field_sets.append((item_id, field_id, number))
+
     def get_issue(self, token, owner, repo, number):
         node = self.issue_nodes.get(number)
         return {"title": "t", "body": "b", "node_id": node} if node else None
@@ -360,26 +363,45 @@ def test_two_issues_creates_parent_and_attaches_children(ctx_and_fakes):
     assert all(i["number"] != pnum for i in cb["issues"])
 
 
-def test_parent_body_summary_falls_back_to_analysis():
-    """The epic body carries a ticket summary: description when present, else
-    the REVA analysis (HTML stripped); omitted entirely when neither exists."""
+def test_parent_body_summary_prefers_english_plan_summary():
+    """The epic summary prefers the planner's English summary; falls back to the
+    (possibly non-English) description, then the analysis, then omits."""
     from worker.ticket_issue_runner import _format_parent_body
 
-    def body(**over):
+    def body(plan_summary=None, **over):
         p = TicketIssueJobParams(**{**dict(
             run_id=1, odoo_instance_id=1, ticket_id=123, model_name="helpdesk.ticket",
             github_url="https://github.com/acme/widgets", name="Login",
-            description="We need a login page.", analysis_html="<h2>Analysis</h2>",
+            description="Wir brauchen eine Login-Seite.", analysis_html="<h2>Analyse</h2>",
             priority="1", ticket_url="https://odoo.example.com/web#id=123",
         ), **over})
-        return _format_parent_body(p, "revaticketX", "revaticketparentX")
+        return _format_parent_body(p, "revaticketX", "revaticketparentX",
+                                   plan_summary=plan_summary)
 
-    assert "### Summary\n\nWe need a login page." in body()
-    # description empty → fall back to the analysis (HTML stripped to text)
-    assert "### Summary" in body(description="", analysis_html="<p>Root cause: X</p>")
-    assert "Root cause: X" in body(description="", analysis_html="<p>Root cause: X</p>")
-    # neither present → no Summary section
+    # English plan summary wins over the German description
+    out = body(plan_summary="Add a login page so customers can authenticate.")
+    assert "### Summary\n\nAdd a login page so customers can authenticate." in out
+    assert "Wir brauchen" not in out
+    # no plan summary → fall back to the description
+    assert "Wir brauchen eine Login-Seite." in body()
+    # nothing at all → no Summary section
     assert "### Summary" not in body(description="", analysis_html="")
+
+
+def test_english_plan_summary_persisted_and_used(ctx_and_fakes):
+    """The planner's English summary is persisted and rendered in the epic."""
+    s = ctx_and_fakes
+    s["planner"].plan = TicketIssuePlan(
+        summary="Print payment terms on the customer invoice PDF.",
+        issues=_plan(2).issues,
+    )
+    params = _make_params(s["db"])
+    run_ticket_issues(params)
+
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["plan_summary"] == "Print payment terms on the customer invoice PDF."
+    parent = s["github"].created[0]
+    assert "Print payment terms on the customer invoice PDF." in parent["body"]
 
 
 def test_estimate_rendered_on_issue_and_epic(ctx_and_fakes):
@@ -998,11 +1020,10 @@ def test_project_step_adds_all_items_and_sets_fields(ctx_and_fakes):
     assert out["status"] == "completed"
 
     g = s["github"]
-    # parent + 2 children added (default fixture lacks date+priority → created)
+    # parent + 2 children added (default fixture lacks date/estimate/priority → created)
     assert len(g.project_items) == 3
-    assert [f["name"] for f in g.created_fields] == ["Plan date", "Priority"]
-    assert g.created_fields[0]["dataType"] == "DATE"
-    assert g.created_fields[1]["dataType"] == "SINGLE_SELECT"
+    assert [f["name"] for f in g.created_fields] == ["Plan date", "Estimate", "Priority"]
+    assert [f["dataType"] for f in g.created_fields] == ["DATE", "NUMBER", "SINGLE_SELECT"]
     # per added item: Plan date, Status=Todo, Priority (priority "1" → Medium)
     per_item = {}
     for item_id, field_id, value in g.item_field_sets:
@@ -1012,6 +1033,10 @@ def test_project_step_adds_all_items_and_sets_fields(ctx_and_fakes):
         assert ("F_Plan date", "2026-07-15") in sets
         assert ("F_status", "opt_todo") in sets
         assert ("F_Priority", "opt_medium") in sets
+    # each child issue (estimate_hours=1.5) also gets the board Estimate set; the
+    # parent epic carries no per-issue estimate, so it does not.
+    est_sets = [pid for pid, sets in per_item.items() if ("F_Estimate", 1.5) in sets]
+    assert len(est_sets) == 2
 
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
     assert row["parent_issue"]["project_item_id"]
@@ -1031,6 +1056,7 @@ def test_project_step_reuses_existing_plan_date_field(ctx_and_fakes):
     s["github"].project_fields = s["github"].project_fields + [
         {"id": "F_target", "name": "Target date", "dataType": "DATE"},   # built-in, ignored
         {"id": "F_plan", "name": "Plan date", "dataType": "DATE"},        # our custom field
+        {"id": "F_est", "name": "Estimate", "dataType": "NUMBER"},        # reused, not created
         {"id": "F_prio", "name": "Priority", "dataType": "SINGLE_SELECT",
          "options": [{"id": "opt_low", "name": "Low"},
                      {"id": "opt_medium", "name": "Medium"},
@@ -1168,7 +1194,7 @@ def test_unmatched_todo_option_skips_status(ctx_and_fakes):
     set_values = {v for _, _, v in s["github"].item_field_sets}
     assert "2026-07-15" in set_values                    # date set
     assert "opt_medium" in set_values                    # priority set
-    assert not any(v.startswith("opt_") and v not in ("opt_medium",)
+    assert not any(isinstance(v, str) and v.startswith("opt_") and v != "opt_medium"
                    for v in set_values)                  # no status option set
     events = _ops_events(s["db"])
     unmatched = [(c, e, d) for c, e, d in events if e == "project_field_unmatched"]

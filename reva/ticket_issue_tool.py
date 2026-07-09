@@ -25,12 +25,14 @@ def build_ticket_issue_tool_schema() -> dict[str, Any]:
     """
     schema = TicketIssuePlan.model_json_schema()
 
-    properties = {k: v for k, v in schema.get("properties", {}).items() if k == "issues"}
+    properties = {
+        k: v for k, v in schema.get("properties", {}).items() if k in ("issues", "summary")
+    }
 
     input_schema: dict[str, Any] = {
         "type": "object",
         "properties": properties,
-        "required": ["issues"],
+        "required": ["summary", "issues"],
         "additionalProperties": False,
     }
 

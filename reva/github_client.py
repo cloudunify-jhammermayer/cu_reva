@@ -899,6 +899,13 @@ class GitHubClient:
         self._set_project_item_value(
             token, project_id, item_id, field_id, {"singleSelectOptionId": option_id})
 
+    def set_project_item_number(
+        self, token: str, project_id: str, item_id: str, field_id: str, number: float
+    ) -> None:
+        """Set a NUMBER field on a project item to `number`."""
+        self._set_project_item_value(
+            token, project_id, item_id, field_id, {"number": number})
+
     # --- shared HTTP --------------------------------------------------------
 
     def _get(

@@ -54,6 +54,12 @@ One coherent change → **one issue**, even though the ticket lists three criter
 
 ---
 
+## The ticket summary
+
+- `summary` — a 1–2 sentence plain-English summary of the **whole ticket** (what the customer wants and why), for the tracking/epic issue. **Always write it in English**, even when the ticket text is in another language. No Odoo internals, no greetings.
+
+---
+
 ## Rules
 
 - You MUST call the `submit_ticket_issues` tool exactly once.

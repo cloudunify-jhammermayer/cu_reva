@@ -1758,6 +1758,7 @@ def get_ticket_issue_run(db: Database, run_id: int) -> dict | None:
             "plan_date": row.plan_date,
             "status": row.status,
             "issues": row.issues,
+            "plan_summary": row.plan_summary,
             "parent_issue": row.parent_issue,
             "error_message": row.error_message,
             "model": row.model,
@@ -1936,6 +1937,7 @@ def record_ticket_issue_plan(
     run_id: int,
     issues: list[dict],
     response: ClaudeResponse,
+    summary: str = "",
 ) -> float:
     """Persist the validated issue plan + Claude usage; returns the estimated cost.
 
@@ -1947,6 +1949,8 @@ def record_ticket_issue_plan(
         if row is None:
             return 0.0
         row.issues = issues
+        if summary:
+            row.plan_summary = summary
         row.model = response.model
         row.input_tokens = response.input_tokens
         row.output_tokens = response.output_tokens
