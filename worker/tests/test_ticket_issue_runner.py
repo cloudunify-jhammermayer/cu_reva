@@ -68,6 +68,7 @@ class FakeGitHub:
                      {"id": "opt_done", "name": "Done"}]},
     ])
     project_exc: Exception | None = None          # raised by get_project
+    set_date_exc: Exception | None = None         # raised by set_project_item_date
     get_project_calls: int = 0
     project_items: list[str] = field(default_factory=list)      # content node_ids added
     item_field_sets: list[tuple] = field(default_factory=list)  # (item_id, field_id, value)
@@ -137,6 +138,8 @@ class FakeGitHub:
         return f"PVTI_{content_node_id}"
 
     def set_project_item_date(self, token, project_id, item_id, field_id, date_value):
+        if self.set_date_exc:
+            raise self.set_date_exc
         self.item_field_sets.append((item_id, field_id, date_value))
 
     def set_project_item_option(self, token, project_id, item_id, field_id, option_id):
@@ -1004,11 +1007,15 @@ def test_project_step_adds_all_items_and_sets_fields(ctx_and_fakes):
         assert "project_item_id" not in issue
 
 
-def test_project_step_reuses_existing_target_date_field(ctx_and_fakes):
+def test_project_step_reuses_existing_plan_date_field(ctx_and_fakes):
+    """A custom 'Plan date' DATE field is reused; the built-in issue-backed
+    'Target date' is deliberately NOT matched (it rejects the standard
+    mutation), so no field is created when our own 'Plan date' exists."""
     from datetime import date
     s = ctx_and_fakes
     s["github"].project_fields = s["github"].project_fields + [
-        {"id": "F_target", "name": "Target date", "dataType": "DATE"},
+        {"id": "F_target", "name": "Target date", "dataType": "DATE"},   # built-in, ignored
+        {"id": "F_plan", "name": "Plan date", "dataType": "DATE"},        # our custom field
         {"id": "F_prio", "name": "Priority", "dataType": "SINGLE_SELECT",
          "options": [{"id": "opt_low", "name": "Low"},
                      {"id": "opt_medium", "name": "Medium"},
@@ -1020,7 +1027,43 @@ def test_project_step_reuses_existing_target_date_field(ctx_and_fakes):
     run_ticket_issues(params)
 
     assert s["github"].created_fields == []
-    assert ("PVTI_I_102", "F_target", "2026-07-15") in s["github"].item_field_sets
+    sets = s["github"].item_field_sets
+    assert ("PVTI_I_102", "F_plan", "2026-07-15") in sets           # our field set
+    assert not any(f == "F_target" for _, f, _ in sets)             # built-in never touched
+
+
+def test_project_step_creates_plan_date_when_only_builtin_target_date(ctx_and_fakes):
+    """A board with only the built-in 'Target date' → REVA creates its own
+    'Plan date' custom field rather than targeting the issue-backed built-in."""
+    from datetime import date
+    s = ctx_and_fakes
+    s["github"].project_fields = s["github"].project_fields + [
+        {"id": "F_target", "name": "Target date", "dataType": "DATE"},
+    ]
+    params = _make_params(s["db"], github_project_url=_PROJECT_URL,
+                          plan_date=date(2026, 7, 15))
+    run_ticket_issues(params)
+
+    assert "Plan date" in [f["name"] for f in s["github"].created_fields]
+
+
+def test_project_field_set_failure_is_isolated(ctx_and_fakes):
+    """A single field-set failure must not sink item membership or the other
+    fields: the item is still added, project_item_id persisted, and an ops
+    event records the field error."""
+    from datetime import date
+    s = ctx_and_fakes
+    s["github"].set_date_exc = PermanentError(
+        "Issue field values cannot be updated using the updateProjectV2ItemFieldValue mutation")
+    params = _make_params(s["db"], github_project_url=_PROJECT_URL,
+                          plan_date=date(2026, 7, 15))
+    out = run_ticket_issues(params)
+
+    assert out["status"] == "completed"
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert all(i.get("project_item_id") for i in row["issues"])       # membership survived
+    events = _ops_events(s["db"])
+    assert ("github", "project_field_set_failed") in [(c, e) for c, e, _ in events]
 
 
 @pytest.mark.parametrize("exc", [PermanentError("no permission"),

@@ -60,7 +60,13 @@ _FALLBACK_TYPE = "DEV"  # plans persisted before the type rollout carry no type
 
 # Board field policy (spec table): reuse-by-name, create only what's missing,
 # never rewrite existing options (destructive to customer boards).
-_PLAN_DATE_LOOKUP = ("plan date", "target date")   # case-insensitive, DATE type
+# Only match our OWN custom DATE field. GitHub's built-in roadmap date fields
+# ("Start date"/"Target date") are issue-backed and REJECT
+# updateProjectV2ItemFieldValue ("must be updated using updateIssueFieldValue",
+# which needs a separate issue-field id space) — so we never target them; we
+# create/reuse a normal custom "Plan date" project field instead, which the
+# standard mutation accepts (like the Priority single-select).
+_PLAN_DATE_LOOKUP = ("plan date",)   # case-insensitive, DATE type
 _PLAN_DATE_FIELD = "Plan date"
 _PRIORITY_FIELD = "Priority"
 _PRIORITY_BY_ODOO = {"0": "Low", "1": "Medium", "2": "High", "3": "Urgent"}
@@ -565,19 +571,32 @@ def _project_step(ctx, token, owner, repo, params, issues, parent, log) -> None:
             fetched = ctx.github.get_issue(token, owner, repo, item["number"])
             return (fetched or {}).get("node_id")  # None: deleted → skip
 
+        def _set_field(what: str, fn) -> None:
+            """Each field write is individually fail-soft: a single field error
+            (e.g. an issue-backed built-in that rejects the mutation) must not
+            sink the item's membership or its other fields, and the item still
+            gets its project_item_id persisted so it is never re-added."""
+            try:
+                fn()
+            except Exception as exc:
+                log.warning("ticket_issues_project_field_set_failed", field=what, exc_info=True)
+                writers.record_ops_event(
+                    ctx.db, "github", "warning", "project_field_set_failed",
+                    {"run_id": params.run_id, "field": what, "error": str(exc)[:200]})
+
         def _place(item: dict) -> str | None:
             node = _node_id(item)
             if node is None:
                 return None
             item_id = ctx.github.add_issue_to_project(token, board["project_id"], node)
             if board["date_field_id"] and params.plan_date is not None:
-                ctx.github.set_project_item_date(
+                _set_field("plan_date", lambda: ctx.github.set_project_item_date(
                     token, board["project_id"], item_id, board["date_field_id"],
-                    params.plan_date.isoformat())
-            for pair in (board["status"], board["priority"]):
+                    params.plan_date.isoformat()))
+            for name, pair in (("status", board["status"]), ("priority", board["priority"])):
                 if pair:
-                    ctx.github.set_project_item_option(
-                        token, board["project_id"], item_id, pair[0], pair[1])
+                    _set_field(name, lambda pair=pair: ctx.github.set_project_item_option(
+                        token, board["project_id"], item_id, pair[0], pair[1]))
             item["node_id"] = node
             return item_id
 
