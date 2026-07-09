@@ -26,3 +26,23 @@ def parse_github_repo_url(url: str) -> tuple[str, str] | None:
     if match is None:
         return None
     return match.group(1), match.group(2)
+
+
+_PROJECT_URL_RE = re.compile(
+    r"^https://github\.com/(orgs|users)/([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)"
+    r"/projects/(\d+)(?:/views/\d+)?/?$"
+)
+
+
+def parse_github_project_url(url: str) -> tuple[str, str, int] | None:
+    """Return ("orgs"|"users", owner, number) for a Projects v2 URL, else None.
+
+    Tolerates surrounding whitespace, a trailing slash, and a /views/{n} suffix
+    (what you get copying the address bar from an open board view); rejects
+    other hosts, schemes, and extra path segments. Shared by the api route
+    (reject at accept time with 422) and the worker (resolve the board).
+    """
+    match = _PROJECT_URL_RE.match(url.strip())
+    if match is None:
+        return None
+    return match.group(1), match.group(2), int(match.group(3))

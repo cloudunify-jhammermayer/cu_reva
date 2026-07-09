@@ -31,7 +31,7 @@
 **Interfaces:**
 - Produces: `parse_github_project_url(url: str) -> tuple[str, str, int] | None` — `("orgs"|"users", owner, project_number)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `worker/tests/test_github_urls.py` (match the file's existing parametrize style):
 
@@ -64,12 +64,12 @@ def test_parse_github_project_url_rejects(url):
     assert parse_github_project_url(url) is None
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_github_urls.py -v`
 Expected: FAIL — `parse_github_project_url` does not exist.
 
-- [ ] **Step 3: Implement** in `reva/github_urls.py` (below `parse_github_repo_url`, same doc tone):
+- [x] **Step 3: Implement** in `reva/github_urls.py` (below `parse_github_repo_url`, same doc tone):
 
 ```python
 _PROJECT_URL_RE = re.compile(
@@ -92,11 +92,11 @@ def parse_github_project_url(url: str) -> tuple[str, str, int] | None:
     return match.group(1), match.group(2), int(match.group(3))
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `cd worker && .venv/bin/python -m pytest tests/test_github_urls.py -v` — PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add reva/github_urls.py worker/tests/test_github_urls.py

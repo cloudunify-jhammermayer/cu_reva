@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from reva.github_urls import parse_github_repo_url
+from reva.github_urls import parse_github_project_url, parse_github_repo_url
 
 
 @pytest.mark.parametrize(
@@ -38,3 +38,32 @@ def test_valid_urls(url, expected):
 )
 def test_invalid_urls(url):
     assert parse_github_repo_url(url) is None
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("https://github.com/orgs/acme/projects/5", ("orgs", "acme", 5)),
+        ("https://github.com/users/jo/projects/12", ("users", "jo", 12)),
+        ("  https://github.com/orgs/acme/projects/5/  ", ("orgs", "acme", 5)),
+        ("https://github.com/orgs/acme/projects/5/views/3", ("orgs", "acme", 5)),
+    ],
+)
+def test_parse_github_project_url_accepts(url, expected):
+    assert parse_github_project_url(url) == expected
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/acme/widgets",                    # repo, not a project
+        "https://github.com/orgs/acme/projects/",             # no number
+        "https://github.com/orgs/acme/projects/abc",          # non-numeric
+        "http://github.com/orgs/acme/projects/5",             # not https
+        "https://gitlab.com/orgs/acme/projects/5",            # wrong host
+        "https://github.com/orgs/acme/projects/5/settings",   # extra segment
+        "",
+    ],
+)
+def test_parse_github_project_url_rejects(url):
+    assert parse_github_project_url(url) is None
