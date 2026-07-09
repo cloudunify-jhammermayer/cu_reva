@@ -736,16 +736,16 @@ git commit -m "feat(api,tui): surface project board + plan date on ticket-issue 
 - Create: `docs/github-projects.md`
 - Modify: `docs/github-issue-creation.md` (link the new page from its setup/flow section)
 
-- [ ] **Step 1: Write `docs/github-projects.md`** covering (spec "Documentation" section — workflows 1, 3, 5 are config-only):
+- [x] **Step 1: Write `docs/github-projects.md`** covering (spec "Documentation" section — workflows 1, 3, 5 are config-only):
   - **App permission:** add org-level **Projects: Read & write** to the GitHub App; every installation must re-approve. Until then REVA's board writes fail soft — issues still flow, failures land in ops events / the TUI Failures tab (`project_step_failed`).
   - **Fields REVA manages:** reuses a `Plan date` (or `Target date`) DATE field, else creates `Plan date`; reuses/creates a `Priority` single-select (Low/Medium/High/Urgent ← Odoo 0–3); sets Status to `Todo` only when first adding an item; never rewrites existing options (mismatches are skipped + ops-evented).
   - **Recommended built-in workflows** (project settings, zero API): *item closed → Status: Done*, *linked PR merged → Status: Done*.
   - **Recommended views:** Roadmap with its date field set to **Plan date**; board/table grouped by **Parent issue** (one swimlane per Odoo ticket, epic shows sub-issue progress); slice by `Priority` or the type labels (`BUG`/`FEAT`/…).
   - **Odoo side:** the project URL + plan date arrive per create-issues request; a re-click on an already-issued ticket backfills its existing issues onto the board.
 
-- [ ] **Step 2: Cross-link** from `docs/github-issue-creation.md` and sanity-check statements against the shipped behavior of Tasks 5–6 (docs are treated as possibly stale — write only what the code does).
+- [x] **Step 2: Cross-link** from `docs/github-issue-creation.md` and sanity-check statements against the shipped behavior of Tasks 5–6 (docs are treated as possibly stale — write only what the code does).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs/github-projects.md docs/github-issue-creation.md

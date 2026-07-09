@@ -4,6 +4,8 @@ REVA's side of the **github-issues handoff** (`ast-odoo/custom_addons/cu_reva_ti
 
 Implemented 2026-06-10. The Odoo side was already shipped and tested — REVA conforms to it, not the other way around.
 
+> Optionally, a request can also carry a **GitHub Project board URL** + **plan date**; REVA then adds the created issues (and the epic) to that Projects v2 board and echoes per-issue planned/completed dates back to Odoo. See [GitHub Projects board for ticket issues](github-projects.md).
+
 ## Flow
 
 ```
@@ -129,6 +131,7 @@ No new environment variables.
 - `ODOO_CALLBACK_URL` / `ODOO_CALLBACK_API_KEY` — already used by the write-field callback; the issues-created path is derived from the same base URL.
 - Deployment note: Odoo omits the `Authorization` header entirely when `reva.api_key` is unset on its side — a REVA deploy with `REVA_API_KEY` set will 401 such an Odoo. Set both or neither.
 - Odoo side (Settings → REVA): `reva.url`, `reva.api_key`, `reva.callback_api_key`, plus the GitHub Project URL on each project (Settings tab).
+- Optional GitHub Projects (v2) board integration requires the App's org-level **Projects: Read & write** permission — see [github-projects.md](github-projects.md).
 
 ## Known limitations
 
