@@ -477,7 +477,7 @@ _PRIORITY_CREATE_OPTIONS = [
 _STATUS_TODO = "todo"
 ```
 
-- [ ] **Step 1: Extend `FakeGitHub` and write the failing tests**
+- [x] **Step 1: Extend `FakeGitHub` and write the failing tests**
 
 `FakeGitHub` additions (defaults keep every existing test passing untouched):
 
@@ -559,9 +559,9 @@ New tests (`_make_params` gains project/plan-date overrides):
 
 Also assert in the existing happy-path test that nothing project-related fires (guards accidental coupling).
 
-- [ ] **Step 2: Run to verify they fail** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_runner.py -v`
+- [x] **Step 2: Run to verify they fail** — `cd worker && .venv/bin/python -m pytest tests/test_ticket_issue_runner.py -v`
 
-- [ ] **Step 3a: Board-context helper**
+- [x] **Step 3a: Board-context helper**
 
 ```python
 def _board_context(ctx, token: str, params: TicketIssueJobParams, log) -> dict | None:
@@ -618,7 +618,7 @@ def _board_context(ctx, token: str, params: TicketIssueJobParams, log) -> dict |
     }
 ```
 
-- [ ] **Step 3b: Projection step** (called from `_plan_and_create`; the whole step is the fail-soft unit, per-item persistence keeps partial progress):
+- [x] **Step 3b: Projection step** (called from `_plan_and_create`; the whole step is the fail-soft unit, per-item persistence keeps partial progress):
 
 ```python
 def _project_step(ctx, token, owner, repo, params, issues, parent, log) -> None:
@@ -678,7 +678,7 @@ def _project_step(ctx, token, owner, repo, params, issues, parent, log) -> None:
              "project_url": params.github_project_url})
 ```
 
-- [ ] **Step 3c: Wire into `_plan_and_create`.** After the attach loop (step "3) attach each child…"), before `return issues`:
+- [x] **Step 3c: Wire into `_plan_and_create`.** After the attach loop (step "3) attach each child…"), before `return issues`:
 
 ```python
     # 4) board projection (fail-soft; spec 2026-07-09)
@@ -696,9 +696,9 @@ And make the early short-circuit projection-aware — extend the `done` computat
 
 (A fail-soft miss therefore heals on the next requeue/re-click for the ticket: numbers exist so nothing is re-created; `addProjectV2ItemById` is idempotent. A DB-wipe reconcile loses `project_item_id`s and re-stamps `Todo` on re-add — accepted, same narrow window as the existing marker-search caveats.)
 
-- [ ] **Step 4: Run to verify they pass** — full `cd worker && .venv/bin/python -m pytest tests/ -q` — PASS (existing tests untouched by the default fixtures).
+- [x] **Step 4: Run to verify they pass** — full `cd worker && .venv/bin/python -m pytest tests/ -q` — PASS (existing tests untouched by the default fixtures).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add worker/worker/ticket_issue_runner.py worker/tests/test_ticket_issue_runner.py

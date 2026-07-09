@@ -61,6 +61,18 @@ class FakeGitHub:
     search_calls: int = 0
     _create_calls: int = 0
     next_number: int = 100
+    # --- Projects v2 fakes (defaults keep pre-feature tests untouched) -------
+    project_fields: list[dict] = field(default_factory=lambda: [
+        {"id": "F_status", "name": "Status", "dataType": "SINGLE_SELECT",
+         "options": [{"id": "opt_todo", "name": "Todo"},
+                     {"id": "opt_done", "name": "Done"}]},
+    ])
+    project_exc: Exception | None = None          # raised by get_project
+    get_project_calls: int = 0
+    project_items: list[str] = field(default_factory=list)      # content node_ids added
+    item_field_sets: list[tuple] = field(default_factory=list)  # (item_id, field_id, value)
+    created_fields: list[dict] = field(default_factory=list)
+    issue_nodes: dict[int, str] = field(default_factory=dict)   # number → node_id (backfill)
 
     def get_repo_installation_id(self, owner: str, repo: str) -> int:
         self.installation_calls += 1
@@ -99,10 +111,40 @@ class FakeGitHub:
             "number": self.next_number,
             "url": f"https://github.com/{owner}/{repo}/issues/{self.next_number}",
             "id": 900_000 + self.next_number,
+            "node_id": f"I_{self.next_number}",
         }
 
     def add_sub_issue(self, token, owner, repo, parent_number, sub_issue_id) -> None:
         self.sub_issues.append((parent_number, sub_issue_id))
+
+    # --- Projects v2 methods --------------------------------------------------
+
+    def get_project(self, token, owner_type, owner, number):
+        self.get_project_calls += 1
+        if self.project_exc:
+            raise self.project_exc
+        return {"id": "P_1", "fields": list(self.project_fields)}
+
+    def create_project_field(self, token, project_id, name, data_type, options=None):
+        f = {"id": f"F_{name}", "name": name, "dataType": data_type,
+             "options": [{"id": f"opt_{o['name'].lower()}", "name": o["name"]}
+                         for o in options or []]}
+        self.created_fields.append(f)
+        return f
+
+    def add_issue_to_project(self, token, project_id, content_node_id):
+        self.project_items.append(content_node_id)
+        return f"PVTI_{content_node_id}"
+
+    def set_project_item_date(self, token, project_id, item_id, field_id, date_value):
+        self.item_field_sets.append((item_id, field_id, date_value))
+
+    def set_project_item_option(self, token, project_id, item_id, field_id, option_id):
+        self.item_field_sets.append((item_id, field_id, option_id))
+
+    def get_issue(self, token, owner, repo, number):
+        node = self.issue_nodes.get(number)
+        return {"title": "t", "body": "b", "node_id": node} if node else None
 
 
 @dataclass
@@ -217,6 +259,10 @@ def test_happy_path_creates_issues_and_calls_back(ctx_and_fakes):
     assert [i["number"] for i in row["issues"]] == [102, 103]
     assert row["model"] == "claude-sonnet-4-6"
     assert row["estimated_cost_usd"] > 0
+
+    # No project URL → zero Projects interaction (guards accidental coupling)
+    assert s["github"].get_project_calls == 0
+    assert s["github"].project_items == []
 
     assert len(s["odoo"].calls) == 1
     cb = s["odoo"].calls[0]
@@ -887,6 +933,165 @@ def test_sync_without_closed_at_key_still_works(ctx_and_fakes):
     out = sync_ticket_issue_state({"owner": "acme", "repo": "widgets",
                                    "number": 102, "state": "closed"})
     assert out["status"] == "completed"
+
+
+# --- Projects v2 board projection (spec 2026-07-09) ---------------------------
+
+
+_PROJECT_URL = "https://github.com/orgs/acme/projects/5"
+
+
+def _ops_events(db):
+    from reva.db.models import OpsEvent
+    with db.session() as s:
+        return [(e.component, e.event, dict(e.detail or {})) for e in s.query(OpsEvent).all()]
+
+
+def test_project_step_adds_all_items_and_sets_fields(ctx_and_fakes):
+    from datetime import date
+    s = ctx_and_fakes
+    params = _make_params(s["db"], github_project_url=_PROJECT_URL,
+                          plan_date=date(2026, 7, 15))
+    out = run_ticket_issues(params)
+    assert out["status"] == "completed"
+
+    g = s["github"]
+    # parent + 2 children added (default fixture lacks date+priority → created)
+    assert len(g.project_items) == 3
+    assert [f["name"] for f in g.created_fields] == ["Plan date", "Priority"]
+    assert g.created_fields[0]["dataType"] == "DATE"
+    assert g.created_fields[1]["dataType"] == "SINGLE_SELECT"
+    # per added item: Plan date, Status=Todo, Priority (priority "1" → Medium)
+    per_item = {}
+    for item_id, field_id, value in g.item_field_sets:
+        per_item.setdefault(item_id, []).append((field_id, value))
+    assert len(per_item) == 3
+    for sets in per_item.values():
+        assert ("F_Plan date", "2026-07-15") in sets
+        assert ("F_status", "opt_todo") in sets
+        assert ("F_Priority", "opt_medium") in sets
+
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["parent_issue"]["project_item_id"]
+    assert all(i["project_item_id"] for i in row["issues"])
+    # Odoo payload never carries the internal projection keys
+    for issue in s["odoo"].calls[0]["issues"]:
+        assert "node_id" not in issue
+        assert "project_item_id" not in issue
+
+
+def test_project_step_reuses_existing_target_date_field(ctx_and_fakes):
+    from datetime import date
+    s = ctx_and_fakes
+    s["github"].project_fields = s["github"].project_fields + [
+        {"id": "F_target", "name": "Target date", "dataType": "DATE"},
+        {"id": "F_prio", "name": "Priority", "dataType": "SINGLE_SELECT",
+         "options": [{"id": "opt_low", "name": "Low"},
+                     {"id": "opt_medium", "name": "Medium"},
+                     {"id": "opt_high", "name": "High"},
+                     {"id": "opt_urgent", "name": "Urgent"}]},
+    ]
+    params = _make_params(s["db"], github_project_url=_PROJECT_URL,
+                          plan_date=date(2026, 7, 15))
+    run_ticket_issues(params)
+
+    assert s["github"].created_fields == []
+    assert ("PVTI_I_102", "F_target", "2026-07-15") in s["github"].item_field_sets
+
+
+@pytest.mark.parametrize("exc", [PermanentError("no permission"),
+                                 TransientError("rate limited")])
+def test_project_failure_is_fail_soft(ctx_and_fakes, exc):
+    from datetime import date
+    s = ctx_and_fakes
+    s["github"].project_exc = exc
+    params = _make_params(s["db"], github_project_url=_PROJECT_URL,
+                          plan_date=date(2026, 7, 15))
+    out = run_ticket_issues(params)
+
+    assert out["status"] == "completed"
+    assert s["odoo"].calls[0]["status"] == "created"     # callback unchanged
+    events = _ops_events(s["db"])
+    assert ("github", "project_step_failed") in [(c, e) for c, e, _ in events]
+
+
+def test_project_step_skips_already_projected_items(ctx_and_fakes):
+    from datetime import date
+    s = ctx_and_fakes
+    params = _make_params(s["db"], github_project_url=_PROJECT_URL,
+                          plan_date=date(2026, 7, 15))
+    run_ticket_issues(params)
+    adds_before = len(s["github"].project_items)
+    sets_before = len(s["github"].item_field_sets)
+
+    # requeue: everything created+attached+projected → full short-circuit
+    run_ticket_issues(params)
+    assert len(s["github"].project_items) == adds_before
+    assert len(s["github"].item_field_sets) == sets_before
+
+
+def test_project_backfill_fetches_node_ids(ctx_and_fakes):
+    s = ctx_and_fakes
+    # A prior fully-created run WITHOUT node_ids (pre-feature), same basis.
+    prior = _make_params(s["db"])
+    parent = {"number": 50, "id": 900050, "url": "https://github.com/acme/widgets/issues/50",
+              "title": "[DEV] 123 - Epic", "state": "open"}
+    issues = [
+        {"title": "[DEV] 123 - Issue 1 (1/2)", "type": "DEV", "number": 51, "id": 900051,
+         "url": "https://github.com/acme/widgets/issues/51", "state": "open", "attached": True},
+        {"title": "[DEV] 123 - Issue 2 (2/2)", "type": "DEV", "number": 52, "id": 900052,
+         "url": "https://github.com/acme/widgets/issues/52", "state": "open", "attached": True},
+    ]
+    writers.set_ticket_issue_parent(s["db"], prior["run_id"], parent)
+    writers.update_ticket_issue_progress(s["db"], prior["run_id"], issues)
+    writers.record_ticket_issue_run_completed(s["db"], prior["run_id"], issues)
+
+    # New request with a project URL adopts the plan and backfills the board.
+    s["github"].issue_nodes = {50: "N50", 51: "N51"}   # 52: get_issue → None → skip
+    params = _make_params(s["db"], github_project_url=_PROJECT_URL)
+    out = run_ticket_issues(params)
+
+    assert out["status"] == "completed"
+    assert s["github"].created == []                   # nothing re-created
+    assert s["github"].project_items == ["N50", "N51"]
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["parent_issue"]["project_item_id"] == "PVTI_N50"
+    by_number = {i["number"]: i for i in row["issues"]}
+    assert by_number[51]["project_item_id"] == "PVTI_N51"
+    assert not by_number[52].get("project_item_id")    # heals on a later click
+
+
+def test_no_project_url_no_project_calls(ctx_and_fakes):
+    s = ctx_and_fakes
+    run_ticket_issues(_make_params(s["db"]))
+    assert s["github"].get_project_calls == 0
+    assert s["github"].project_items == []
+    assert s["github"].item_field_sets == []
+
+
+def test_unmatched_todo_option_skips_status(ctx_and_fakes):
+    from datetime import date
+    s = ctx_and_fakes
+    s["github"].project_fields = [
+        {"id": "F_status", "name": "Status", "dataType": "SINGLE_SELECT",
+         "options": [{"id": "opt_backlog", "name": "Backlog"},
+                     {"id": "opt_done", "name": "Done"}]},
+    ]
+    params = _make_params(s["db"], github_project_url=_PROJECT_URL,
+                          plan_date=date(2026, 7, 15))
+    out = run_ticket_issues(params)
+
+    assert out["status"] == "completed"
+    assert len(s["github"].project_items) == 3          # items still added
+    set_values = {v for _, _, v in s["github"].item_field_sets}
+    assert "2026-07-15" in set_values                    # date set
+    assert "opt_medium" in set_values                    # priority set
+    assert not any(v.startswith("opt_") and v not in ("opt_medium",)
+                   for v in set_values)                  # no status option set
+    events = _ops_events(s["db"])
+    unmatched = [(c, e, d) for c, e, d in events if e == "project_field_unmatched"]
+    assert len(unmatched) == 1
+    assert unmatched[0][2]["field"] == "Status"
 
 
 def test_issue_state_no_match_is_noop(ctx_and_fakes):

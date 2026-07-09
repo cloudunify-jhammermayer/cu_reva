@@ -34,7 +34,7 @@ from rq import get_current_job
 
 from reva.db import writers
 from reva.errors import PermanentError, TransientError
-from reva.github_urls import parse_github_repo_url
+from reva.github_urls import parse_github_project_url, parse_github_repo_url
 from reva.types import TicketIssueJobParams
 from worker.runner import build_odoo_client, get_context, instance_budget_exceeded
 
@@ -57,6 +57,20 @@ _TYPE_LABELS = {
     "DOC": ("0e8a16", "Documentation"),
 }
 _FALLBACK_TYPE = "DEV"  # plans persisted before the type rollout carry no type
+
+# Board field policy (spec table): reuse-by-name, create only what's missing,
+# never rewrite existing options (destructive to customer boards).
+_PLAN_DATE_LOOKUP = ("plan date", "target date")   # case-insensitive, DATE type
+_PLAN_DATE_FIELD = "Plan date"
+_PRIORITY_FIELD = "Priority"
+_PRIORITY_BY_ODOO = {"0": "Low", "1": "Medium", "2": "High", "3": "Urgent"}
+_PRIORITY_CREATE_OPTIONS = [
+    {"name": "Low", "color": "GRAY", "description": ""},
+    {"name": "Medium", "color": "BLUE", "description": ""},
+    {"name": "High", "color": "YELLOW", "description": ""},
+    {"name": "Urgent", "color": "RED", "description": ""},
+]
+_STATUS_TODO = "Todo"
 _TLDR_MAX = 30
 _BODY_MAX_CHARS = 900
 _PLACEHOLDER_VALUES = {
@@ -452,6 +466,122 @@ def sync_ticket_issue_state(job_params: dict) -> dict:
     return {"status": "completed", "records": len(affected), "notified": notified}
 
 
+def _board_context(ctx, token: str, params: TicketIssueJobParams, log) -> dict | None:
+    """Resolve the target board once per run: project id + the field/option ids
+    the projection loop needs. Returns None (after an ops event) when the URL
+    doesn't parse — the route validates, so this guards requeued legacy rows.
+    Raises on GraphQL errors; the caller's fail-soft wrapper owns those."""
+    parsed = parse_github_project_url(params.github_project_url or "")
+    if parsed is None:
+        log.warning("ticket_issues_project_url_invalid", url=params.github_project_url)
+        writers.record_ops_event(ctx.db, "github", "warning", "project_url_invalid",
+                                 {"run_id": params.run_id})
+        return None
+    owner_type, owner, number = parsed
+    project = ctx.github.get_project(token, owner_type, owner, number)
+    fields = project["fields"]
+
+    def _find(names: tuple[str, ...], data_type: str) -> dict | None:
+        for name in names:
+            for f in fields:
+                if f["name"].lower() == name.lower() and f["dataType"] == data_type:
+                    return f
+        return None
+
+    def _option_id(fld: dict, option_name: str, purpose: str) -> str | None:
+        for opt in fld.get("options") or []:
+            if opt["name"].lower() == option_name.lower():
+                return opt["id"]
+        # Never mutate an existing field's options — skip, visibly.
+        log.warning("ticket_issues_project_field_unmatched",
+                    field=fld["name"], wanted=option_name)
+        writers.record_ops_event(ctx.db, "github", "warning", "project_field_unmatched",
+                                 {"run_id": params.run_id, "field": fld["name"],
+                                  "wanted": option_name, "purpose": purpose})
+        return None
+
+    date_field = _find(_PLAN_DATE_LOOKUP, "DATE")
+    if date_field is None and params.plan_date is not None:
+        date_field = ctx.github.create_project_field(
+            token, project["id"], _PLAN_DATE_FIELD, "DATE")
+
+    status_field = _find(("Status",), "SINGLE_SELECT")
+    todo_id = _option_id(status_field, _STATUS_TODO, "status") if status_field else None
+
+    priority_field = _find((_PRIORITY_FIELD,), "SINGLE_SELECT")
+    if priority_field is None:
+        priority_field = ctx.github.create_project_field(
+            token, project["id"], _PRIORITY_FIELD, "SINGLE_SELECT",
+            options=_PRIORITY_CREATE_OPTIONS)
+    wanted = _PRIORITY_BY_ODOO.get(params.priority, "Medium")
+    priority_id = _option_id(priority_field, wanted, "priority")
+
+    return {
+        "project_id": project["id"],
+        "date_field_id": date_field["id"] if date_field else None,
+        "status": (status_field["id"], todo_id) if todo_id else None,
+        "priority": (priority_field["id"], priority_id) if priority_id else None,
+    }
+
+
+def _project_step(ctx, token, owner, repo, params, issues, parent, log) -> None:
+    """Add the epic + children to the requested Projects v2 board and stamp
+    Plan date / Status=Todo / Priority. Fail-soft by spec decision 5: the board
+    is a bonus — any failure logs + ops-events and the run completes. The
+    persisted project_item_id is the only guard against re-setting fields on a
+    card a developer already moved, so it is written after each item."""
+    try:
+        board = _board_context(ctx, token, params, log)
+        if board is None:
+            return
+
+        def _node_id(item: dict) -> str | None:
+            if item.get("node_id"):
+                return item["node_id"]
+            if item.get("number") is None:
+                return None
+            # Pre-feature item: backfill the GraphQL id via REST.
+            fetched = ctx.github.get_issue(token, owner, repo, item["number"])
+            return (fetched or {}).get("node_id")  # None: deleted → skip
+
+        def _place(item: dict) -> str | None:
+            node = _node_id(item)
+            if node is None:
+                return None
+            item_id = ctx.github.add_issue_to_project(token, board["project_id"], node)
+            if board["date_field_id"] and params.plan_date is not None:
+                ctx.github.set_project_item_date(
+                    token, board["project_id"], item_id, board["date_field_id"],
+                    params.plan_date.isoformat())
+            for pair in (board["status"], board["priority"]):
+                if pair:
+                    ctx.github.set_project_item_option(
+                        token, board["project_id"], item_id, pair[0], pair[1])
+            item["node_id"] = node
+            return item_id
+
+        if parent is not None and not parent.get("project_item_id"):
+            item_id = _place(parent)
+            if item_id:
+                parent["project_item_id"] = item_id
+                writers.set_ticket_issue_parent(ctx.db, params.run_id, parent)
+                log.info("ticket_issue_projected", issue=parent.get("number"))
+        for idx, item in enumerate(issues):
+            if item.get("project_item_id"):
+                continue
+            item_id = _place(item)
+            if item_id:
+                issues[idx] = {**item, "project_item_id": item_id}
+                writers.update_ticket_issue_progress(ctx.db, params.run_id, issues)
+                log.info("ticket_issue_projected", issue=item["number"])
+    except Exception:
+        log.warning("ticket_issues_project_step_failed", exc_info=True)
+        writers.record_ops_event(
+            ctx.db, "github", "warning", "project_step_failed",
+            {"run_id": params.run_id, "ticket_id": params.ticket_id,
+             "project_url": params.github_project_url})
+
+
 def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
     """Resolve the issue list for this run (resume → adopt → reconcile → plan),
     then create whatever is missing. Returns the final issues state."""
@@ -503,6 +633,11 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
         done = all(i.get("number") is not None for i in issues)
         if need_parent:
             done = done and parent is not None and all(i.get("attached") for i in issues)
+        if done and params.github_project_url:
+            # Projection-aware: a fail-soft board miss (or a pre-feature run
+            # meeting its first project URL) must still reach the project step.
+            done = all(i.get("project_item_id") for i in issues) and (
+                parent is None or parent.get("project_item_id"))
         if done:
             # Nothing to create/attach (callback resend / fully-created adoption):
             # skip the GitHub round-trips entirely.
@@ -528,7 +663,8 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             if parent_hits and parent is None:
                 h = parent_hits[0]
                 parent = {"number": h["number"], "id": h["id"], "url": h["url"],
-                          "title": h["title"], "state": h.get("state", "open")}
+                          "title": h["title"], "state": h.get("state", "open"),
+                          "node_id": h.get("node_id")}
                 writers.set_ticket_issue_parent(ctx.db, params.run_id, parent)
             issues = [dict(c) for c in children]
             writers.update_ticket_issue_progress(ctx.db, params.run_id, issues)
@@ -584,7 +720,8 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             assignees=[params.github_username] if params.github_username else None,
         )
         parent = {"number": created["number"], "id": created["id"],
-                  "url": created["url"], "title": parent_t, "state": "open"}
+                  "url": created["url"], "title": parent_t, "state": "open",
+                  "node_id": created.get("node_id")}
         writers.set_ticket_issue_parent(ctx.db, params.run_id, parent)
         log.info("ticket_issue_parent_created", issue=created["number"])
 
@@ -617,6 +754,8 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             "attached": False,
             # Per-issue plan_date echo (spec decision 6); None when unset.
             "plan_date": params.plan_date.isoformat() if params.plan_date else None,
+            # GraphQL id for Projects v2; internal only (never sent to Odoo).
+            "node_id": created.get("node_id"),
         }
         writers.update_ticket_issue_progress(ctx.db, params.run_id, issues)
         log.info("ticket_issue_created", issue=created["number"], title=title)
@@ -630,6 +769,10 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             issues[idx] = {**item, "attached": True}
             writers.update_ticket_issue_progress(ctx.db, params.run_id, issues)
             log.info("ticket_issue_attached", issue=item["number"], parent=parent["number"])
+
+    # 4) board projection (fail-soft; spec 2026-07-09)
+    if params.github_project_url:
+        _project_step(ctx, token, owner, repo, params, issues, parent, log)
 
     return issues
 
