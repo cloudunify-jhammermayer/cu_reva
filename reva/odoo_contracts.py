@@ -274,6 +274,8 @@ CONTRACTS: list[Contract] = [
             "ticket_url": "https://odoo.example.com/web#id=42",
             "issue_type": None,
             "github_username": None,
+            "github_project_url": "https://github.com/orgs/acme/projects/5",
+            "plan_date": "2026-07-15",
         },
     ),
     Contract(

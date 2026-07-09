@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -40,6 +40,17 @@ class CreateIssuesRequest(BaseModel):
         default=None,
         description="Optional GitHub login assigned to created issues.",
     )
+    github_project_url: str | None = Field(
+        default=None,
+        description="Optional Projects v2 board URL "
+        "(https://github.com/orgs/{org}/projects/{n}); every created issue "
+        "and the parent epic are added to it.",
+    )
+    plan_date: date | None = Field(
+        default=None,
+        description="Optional planned date (YYYY-MM-DD) set as the board's "
+        "'Plan date' field on every added item.",
+    )
 
     @field_validator("issue_type", mode="before")
     @classmethod
@@ -47,9 +58,15 @@ class CreateIssuesRequest(BaseModel):
         # The Odoo wizard's empty Selection may serialize as "" — treat as unset.
         return None if v == "" else v
 
-    @field_validator("github_username", mode="before")
+    @field_validator("github_username", "github_project_url", mode="before")
     @classmethod
-    def _empty_username_is_none(cls, v: object) -> object:
+    def _empty_str_is_none(cls, v: object) -> object:
+        return None if v == "" else v
+
+    @field_validator("plan_date", mode="before")
+    @classmethod
+    def _empty_date_is_none(cls, v: object) -> object:
+        # Odoo may send "" for an unset Date; coerce before date parsing.
         return None if v == "" else v
 
 

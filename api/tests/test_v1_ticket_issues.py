@@ -133,6 +133,66 @@ def test_invalid_github_url_is_422_and_not_enqueued(client_db_queue, bad_url):
     assert queue.enqueued == []
 
 
+def test_create_issues_accepts_project_url_and_plan_date(client_db_queue):
+    from datetime import date
+    client, db, queue, headers = client_db_queue
+    payload = {**CONTRACT_PAYLOAD,
+               "github_project_url": "https://github.com/orgs/acme/projects/5",
+               "plan_date": "2026-07-15"}
+    r = client.post("/api/v1/create-issues", json=payload, headers=headers)
+    assert r.status_code == 202
+    _, params, _ = queue.enqueued[0]
+    assert params["github_project_url"] == "https://github.com/orgs/acme/projects/5"
+    assert params["plan_date"] == date(2026, 7, 15)
+    row = writers.get_ticket_issue_run(db, r.json()["request_id"])
+    assert row["github_project_url"] == "https://github.com/orgs/acme/projects/5"
+    assert row["plan_date"] == date(2026, 7, 15)
+
+
+def test_create_issues_empty_strings_are_none(client_db_queue):
+    client, _, queue, headers = client_db_queue
+    payload = {**CONTRACT_PAYLOAD, "github_project_url": "", "plan_date": ""}
+    r = client.post("/api/v1/create-issues", json=payload, headers=headers)
+    assert r.status_code == 202
+    _, params, _ = queue.enqueued[0]
+    assert params["github_project_url"] is None
+    assert params["plan_date"] is None
+
+
+def test_create_issues_invalid_project_url_is_422(client_db_queue):
+    client, db, queue, headers = client_db_queue
+    payload = {**CONTRACT_PAYLOAD, "github_project_url": "https://github.com/acme/widgets"}
+    r = client.post("/api/v1/create-issues", json=payload, headers=headers)
+    assert r.status_code == 422
+    assert "github_project_url" in r.json()["detail"]
+    assert queue.enqueued == []
+
+
+def test_requeue_carries_project_fields(client_db_queue):
+    from datetime import date
+    client, db, queue, headers = client_db_queue
+    created = client.post(
+        "/api/v1/create-issues",
+        json={**CONTRACT_PAYLOAD,
+              "github_project_url": "https://github.com/orgs/acme/projects/5",
+              "plan_date": "2026-07-15"},
+        headers=headers,
+    ).json()
+    run_id = created["request_id"]
+    plan = [{"title": "A", "body": "b", "acceptance_criteria": [],
+             "number": 42, "url": "https://github.com/org/repo/issues/42"}]
+    from reva.db.models import TicketIssueRun
+    with db.session() as s:
+        s.get(TicketIssueRun, run_id).issues = plan
+    writers.record_ticket_issue_run_failed(db, run_id, "boom")
+
+    r = client.post(f"/api/v1/create-issues/{run_id}/requeue")
+    assert r.status_code == 202
+    _, params, _ = queue.enqueued[1]
+    assert params["github_project_url"] == "https://github.com/orgs/acme/projects/5"
+    assert params["plan_date"] == date(2026, 7, 15)
+
+
 def test_missing_contract_field_is_422(client_db_queue):
     client, _, queue, headers = client_db_queue
     payload = {k: v for k, v in CONTRACT_PAYLOAD.items() if k != "ticket_url"}

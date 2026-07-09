@@ -205,7 +205,7 @@ git commit -m "feat(db): persist github_project_url + plan_date on ticket_issue_
 - Produces: `CreateIssuesRequest.github_project_url: str | None = None`, `.plan_date: date | None = None`. Both flow into `TicketIssueJobParams` automatically — the route builds params via `**body.model_dump()` (no per-field wiring).
 - Consumes: `parse_github_project_url` (Task 1), Task 2 columns (route persists via `record_ticket_issue_run_created`; requeue re-reads them).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `api/tests/test_v1_ticket_issues.py` (reuse the file's client/auth/payload fixtures — grep the existing `submit` happy-path test and extend its payload):
 
@@ -228,9 +228,9 @@ def test_requeue_carries_project_fields(...):
     # → re-enqueued job params include github_project_url + plan_date.
 ```
 
-- [ ] **Step 2: Run to verify they fail** — `cd api && .venv/bin/python -m pytest tests/test_v1_ticket_issues.py -v`
+- [x] **Step 2: Run to verify they fail** — `cd api && .venv/bin/python -m pytest tests/test_v1_ticket_issues.py -v`
 
-- [ ] **Step 3a: Schema** — in `CreateIssuesRequest` (import `date` from `datetime`):
+- [x] **Step 3a: Schema** — in `CreateIssuesRequest` (import `date` from `datetime`):
 
 ```python
     github_project_url: str | None = Field(
@@ -248,7 +248,7 @@ def test_requeue_carries_project_fields(...):
 
 Extend the existing empty-string validators (mirror `_empty_username_is_none`) to cover both new fields — `plan_date` needs `mode="before"` so `""` becomes `None` before date parsing.
 
-- [ ] **Step 3b: Route validation** — in `submit_create_issues`, after the `github_url` check:
+- [x] **Step 3b: Route validation** — in `submit_create_issues`, after the `github_url` check:
 
 ```python
     if body.github_project_url is not None and parse_github_project_url(body.github_project_url) is None:
@@ -260,9 +260,9 @@ Extend the existing empty-string validators (mirror `_empty_username_is_none`) t
 
 (Import `parse_github_project_url`. No reachability probe — a missing App permission is handled fail-soft by the worker, spec decision 5.)
 
-- [ ] **Step 3c: Requeue passthrough** — in `requeue_ticket_issue_run`'s `TicketIssueJobParams(...)`, add `github_project_url=row["github_project_url"], plan_date=row["plan_date"],`.
+- [x] **Step 3c: Requeue passthrough** — in `requeue_ticket_issue_run`'s `TicketIssueJobParams(...)`, add `github_project_url=row["github_project_url"], plan_date=row["plan_date"],`.
 
-- [ ] **Step 3d: Contract sample** — in `reva/odoo_contracts.py`, add to the `create-issues` sample dict:
+- [x] **Step 3d: Contract sample** — in `reva/odoo_contracts.py`, add to the `create-issues` sample dict:
 
 ```python
             "github_project_url": "https://github.com/orgs/acme/projects/5",
@@ -271,9 +271,9 @@ Extend the existing empty-string validators (mirror `_empty_username_is_none`) t
 
 Regenerate: `worker/.venv/bin/python -m reva.odoo_contracts generate` (from the repo root; the inbound JSONSchema updates automatically from the FastAPI model).
 
-- [ ] **Step 4: Verify** — `cd api && .venv/bin/python -m pytest tests/ -q` (includes the contract drift test) — PASS.
+- [x] **Step 4: Verify** — `cd api && .venv/bin/python -m pytest tests/ -q` (includes the contract drift test) — PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/app/schemas/ticket_issues.py api/app/routes/v1/ticket_issues.py reva/odoo_contracts.py contracts/ api/tests/test_v1_ticket_issues.py

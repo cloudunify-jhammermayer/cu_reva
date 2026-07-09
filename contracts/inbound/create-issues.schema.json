@@ -44,6 +44,19 @@
       "default": null,
       "description": "Consultant file (tasks only): .docx, .pdf, or .txt. When present it is THE basis for the issue split instead of description/analysis_html. (Field name fixed by the Odoo addon.)"
     },
+    "github_project_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional Projects v2 board URL (https://github.com/orgs/{org}/projects/{n}); every created issue and the parent epic are added to it.",
+      "title": "Github Project Url"
+    },
     "github_url": {
       "description": "Repository URL from the record's project",
       "title": "Github Url",
@@ -94,6 +107,20 @@
       "description": "Ticket/task title",
       "title": "Name",
       "type": "string"
+    },
+    "plan_date": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional planned date (YYYY-MM-DD) set as the board's 'Plan date' field on every added item.",
+      "title": "Plan Date"
     },
     "priority": {
       "description": "Odoo priority key, \"0\" (low) \u2026 \"3\" (urgent)",

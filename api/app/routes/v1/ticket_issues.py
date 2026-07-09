@@ -39,7 +39,7 @@ from reva.db import writers
 from reva.db.engine import Database
 from reva.errors import PermanentError, TransientError
 from reva.github_client import GitHubClient
-from reva.github_urls import parse_github_repo_url
+from reva.github_urls import parse_github_project_url, parse_github_repo_url
 from reva.types import TicketIssueJobParams
 
 router = APIRouter()
@@ -107,6 +107,13 @@ def submit_create_issues(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="github_url must be an https://github.com/{owner}/{repo} URL",
+        )
+    if body.github_project_url is not None and parse_github_project_url(body.github_project_url) is None:
+        # No reachability probe — a missing App permission is handled fail-soft
+        # by the worker (spec decision 5).
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="github_project_url must be an https://github.com/orgs/{org}/projects/{n} URL",
         )
     owner, repo = parsed
     # Reachability: the App must be able to reach the repo to create issues
@@ -286,6 +293,8 @@ def requeue_ticket_issue_run(
         ticket_url=row["ticket_url"],
         issue_type=row["issue_type"],
         github_username=row["github_username"],
+        github_project_url=row["github_project_url"],
+        plan_date=row["plan_date"],
     )
     writers.reset_ticket_issue_run(db, request_id)
     job_id = _enqueue(request, db, request_id, params)
