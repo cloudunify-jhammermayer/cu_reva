@@ -374,7 +374,7 @@ git commit -m "feat(odoo): per-issue plan_date + complete_date on callback refs"
 
 All GraphQL calls go through the existing `self._post(token, "/graphql", {...})` + `_graphql_data(response, action)` (M7: errors surface as Transient/Permanent, never silent success). The **runner** owns fail-soft, not the client.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Follow the existing GraphQL test pattern (`get_review_threads` / `resolve_review_thread` tests use `_make_client` + a handler switching on `req.url.path == "/graphql"`). Cover:
 
@@ -397,9 +397,9 @@ Follow the existing GraphQL test pattern (`get_review_threads` / `resolve_review
 #   TransientError (already the _graphql_data contract; one smoke assert).
 ```
 
-- [ ] **Step 2: Run to verify they fail** — `cd worker && .venv/bin/python -m pytest tests/test_github_client.py -v`
+- [x] **Step 2: Run to verify they fail** — `cd worker && .venv/bin/python -m pytest tests/test_github_client.py -v`
 
-- [ ] **Step 3: Implement.** Sketch (adapt names/docstrings to file conventions; one `# --- GitHub Projects v2 (GraphQL-only) ---` section):
+- [x] **Step 3: Implement.** Sketch (adapt names/docstrings to file conventions; one `# --- GitHub Projects v2 (GraphQL-only) ---` section):
 
 ```python
     _PROJECT_FIELDS_FRAGMENT = """
@@ -438,9 +438,9 @@ Follow the existing GraphQL test pattern (`get_review_threads` / `resolve_review
 
 REST additions: `"node_id": data["node_id"]` in `create_issue`'s return; `"node_id": item["node_id"]` in `find_issues_with_marker` items; `"node_id"` (and keep `title`/`body`) in `get_issue`'s return.
 
-- [ ] **Step 4: Run to verify they pass** — full `tests/test_github_client.py` (pre-existing tests included; the `get_issue` consumers in comment-reply paths only read `title`/`body`, so the additive key is safe — `grep -rn "get_issue(" worker/ reva/` to confirm).
+- [x] **Step 4: Run to verify they pass** — full `tests/test_github_client.py` (pre-existing tests included; the `get_issue` consumers in comment-reply paths only read `title`/`body`, so the additive key is safe — `grep -rn "get_issue(" worker/ reva/` to confirm).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add reva/github_client.py worker/tests/test_github_client.py

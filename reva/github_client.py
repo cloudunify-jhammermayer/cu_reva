@@ -256,9 +256,10 @@ class GitHubClient:
     def get_issue(
         self, token: str, owner: str, repo: str, issue_number: int
     ) -> dict | None:
-        """Return {title, body} for an issue, or None if it 404s (deleted /
-        wrong number / cross-repo #N). Same Issues:read scope as create_issue,
-        so no new GitHub App permission. Mirrors get_file_content's 404 handling."""
+        """Return {title, body, node_id} for an issue, or None if it 404s
+        (deleted / wrong number / cross-repo #N). Same Issues:read scope as
+        create_issue, so no new GitHub App permission. Mirrors get_file_content's
+        404 handling. node_id backfills pre-feature items into Projects v2."""
         try:
             response = self._get(
                 token,
@@ -268,7 +269,8 @@ class GitHubClient:
         except NotFound:
             return None
         data = response.json()
-        return {"title": data.get("title") or "", "body": data.get("body") or ""}
+        return {"title": data.get("title") or "", "body": data.get("body") or "",
+                "node_id": data.get("node_id")}
 
     # --- security alerts (scanner-feed spec) -------------------------------
 
@@ -525,9 +527,10 @@ class GitHubClient:
         labels: list[str] | None = None,
         assignees: list[str] | None = None,
     ) -> dict:
-        """Open a new issue. Returns {"number", "url", "id"} — url is GitHub's
-        canonical html_url, not reconstructed from the (possibly mis-cased)
-        owner/repo the caller was given."""
+        """Open a new issue. Returns {"number", "url", "id", "node_id"} — url is
+        GitHub's canonical html_url, not reconstructed from the (possibly
+        mis-cased) owner/repo the caller was given; node_id is the GraphQL id
+        Projects v2 mutations key on."""
         payload: dict = {"title": title, "body": body}
         if labels:
             payload["labels"] = labels
@@ -535,7 +538,8 @@ class GitHubClient:
             payload["assignees"] = assignees
         response = self._post(token, f"/repos/{owner}/{repo}/issues", payload)
         data = response.json()
-        return {"number": data["number"], "url": data["html_url"], "id": data["id"]}
+        return {"number": data["number"], "url": data["html_url"], "id": data["id"],
+                "node_id": data.get("node_id")}
 
     def add_sub_issue(
         self, token: str, owner: str, repo: str, parent_number: int, sub_issue_id: int
@@ -630,7 +634,7 @@ class GitHubClient:
         self, token: str, owner: str, repo: str, marker: str
     ) -> list[dict]:
         """Issues — open AND closed — whose body contains `marker`, as
-        [{"number", "title", "url"}].
+        [{"number", "title", "url", "state", "id", "node_id"}].
 
         Used to reconcile ticket issues across re-runs: a re-click or Odoo's
         10s-timeout race must re-link the existing issues, not duplicate them,
@@ -649,6 +653,7 @@ class GitHubClient:
                 "url": item["html_url"],
                 "state": item.get("state", "open"),
                 "id": item["id"],
+                "node_id": item.get("node_id"),
             }
             for item in response.json().get("items", [])
         ]
@@ -765,6 +770,134 @@ class GitHubClient:
         # M7: surface a GraphQL error instead of reporting success unconditionally
         # (a failed resolve must not be marked resolved_by_fix by the caller).
         _graphql_data(response, "resolve_review_thread")
+
+    # --- GitHub Projects v2 (GraphQL-only) ----------------------------------
+
+    # Shared field selection: plain fields expose id/name/dataType; single-
+    # selects additionally expose their options (id + name) for option lookup.
+    _PROJECT_FIELD_FRAGMENT = """
+              ... on ProjectV2FieldCommon { id name dataType }
+              ... on ProjectV2SingleSelectField { id name dataType options { id name } }"""
+
+    def get_project(self, token: str, owner_type: str, owner: str, number: int) -> dict:
+        """Resolve a Projects v2 board URL to {"id", "fields"} (first 50 fields,
+        each {"id", "name", "dataType"[, "options"]}).
+
+        Projects v2 has no REST API. A null projectV2 means the number is wrong
+        OR the App installation lacks the org-level Projects permission — the
+        caller (ticket_issue_runner) degrades fail-soft either way."""
+        entity = "organization" if owner_type == "orgs" else "user"
+        query = f"""
+        query($login: String!, $number: Int!) {{
+          {entity}(login: $login) {{
+            projectV2(number: $number) {{
+              id
+              fields(first: 50) {{ nodes {{{self._PROJECT_FIELD_FRAGMENT}
+              }} }}
+            }}
+          }}
+        }}"""
+        response = self._post(
+            token, "/graphql",
+            {"query": query, "variables": {"login": owner, "number": number}},
+        )
+        data = _graphql_data(response, "get_project")
+        project = (data.get(entity) or {}).get("projectV2")
+        if project is None:
+            raise PermanentError(
+                f"project {owner_type}/{owner}/projects/{number} not found "
+                "(or the GitHub App lacks the org Projects permission)"
+            )
+        return {
+            "id": project["id"],
+            "fields": [f for f in (project.get("fields") or {}).get("nodes", []) if f],
+        }
+
+    def create_project_field(
+        self,
+        token: str,
+        project_id: str,
+        name: str,
+        data_type: str,
+        options: list[dict] | None = None,
+    ) -> dict:
+        """Create a project field (DATE, or SINGLE_SELECT with options as
+        [{"name", "color", "description"}]) and return its field dict —
+        same shape as get_project's fields, incl. created option ids."""
+        mutation = f"""
+        mutation($projectId: ID!, $name: String!, $dataType: ProjectV2CustomFieldType!,
+                 $options: [ProjectV2SingleSelectFieldOptionInput!]) {{
+          createProjectV2Field(input: {{
+            projectId: $projectId, name: $name, dataType: $dataType,
+            singleSelectOptions: $options
+          }}) {{
+            projectV2Field {{{self._PROJECT_FIELD_FRAGMENT}
+            }}
+          }}
+        }}"""
+        response = self._post(
+            token, "/graphql",
+            {"query": mutation, "variables": {
+                "projectId": project_id, "name": name,
+                "dataType": data_type, "options": options,
+            }},
+        )
+        data = _graphql_data(response, "create_project_field")
+        return data["createProjectV2Field"]["projectV2Field"]
+
+    def add_issue_to_project(self, token: str, project_id: str, content_node_id: str) -> str:
+        """Add an issue (by GraphQL node id) to a project; returns the project
+        item id. Idempotent by API contract — re-adding returns the existing
+        item's id."""
+        mutation = """
+        mutation($projectId: ID!, $contentId: ID!) {
+          addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
+            item { id }
+          }
+        }"""
+        response = self._post(
+            token, "/graphql",
+            {"query": mutation, "variables": {
+                "projectId": project_id, "contentId": content_node_id,
+            }},
+        )
+        data = _graphql_data(response, "add_issue_to_project")
+        return data["addProjectV2ItemById"]["item"]["id"]
+
+    def _set_project_item_value(
+        self, token: str, project_id: str, item_id: str, field_id: str, value: dict
+    ) -> None:
+        mutation = """
+        mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+          updateProjectV2ItemFieldValue(input: {
+            projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: $value
+          }) {
+            projectV2Item { id }
+          }
+        }"""
+        response = self._post(
+            token, "/graphql",
+            {"query": mutation, "variables": {
+                "projectId": project_id, "itemId": item_id,
+                "fieldId": field_id, "value": value,
+            }},
+        )
+        # M7: surface a GraphQL error instead of reporting success unconditionally.
+        _graphql_data(response, "update_project_item_field")
+
+    def set_project_item_date(
+        self, token: str, project_id: str, item_id: str, field_id: str, date_value: str
+    ) -> None:
+        """Set a DATE field on a project item (date_value: YYYY-MM-DD)."""
+        self._set_project_item_value(
+            token, project_id, item_id, field_id, {"date": date_value})
+
+    def set_project_item_option(
+        self, token: str, project_id: str, item_id: str, field_id: str, option_id: str
+    ) -> None:
+        """Set a SINGLE_SELECT field on a project item to `option_id`."""
+        self._set_project_item_value(
+            token, project_id, item_id, field_id, {"singleSelectOptionId": option_id})
 
     # --- shared HTTP --------------------------------------------------------
 

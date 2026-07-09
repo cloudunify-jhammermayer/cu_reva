@@ -158,7 +158,7 @@ def test_get_issue_returns_title_and_body(rsa_key_pair):
     client = _make_client(handler, private_pem)
     issue = client.get_issue("tok", "acme", "widgets", 5)
 
-    assert issue == {"title": "Add export", "body": "needs CSV"}
+    assert issue == {"title": "Add export", "body": "needs CSV", "node_id": None}
     assert captured["path"] == "/repos/acme/widgets/issues/5"
 
 
@@ -179,7 +179,8 @@ def test_get_issue_coerces_null_body_to_empty(rsa_key_pair):
         return httpx.Response(200, json={"title": "t", "body": None})
 
     client = _make_client(handler, private_pem)
-    assert client.get_issue("tok", "acme", "widgets", 1) == {"title": "t", "body": ""}
+    assert client.get_issue("tok", "acme", "widgets", 1) == {
+        "title": "t", "body": "", "node_id": None}
 
 
 def test_get_pull_request_returns_json(rsa_key_pair):
@@ -573,7 +574,8 @@ def test_create_issue_opens_issue(rsa_key_pair):
         labels=["reva-audit"],
     )
     # url is GitHub's canonical html_url, not reconstructed from owner/repo
-    assert created == {"number": 77, "url": "https://github.com/acme/widgets/issues/77", "id": 7700}
+    assert created == {"number": 77, "url": "https://github.com/acme/widgets/issues/77",
+                       "id": 7700, "node_id": None}
     assert captured["method"] == "POST"
     assert captured["path"] == "/repos/acme/widgets/issues"
     assert captured["body"]["title"] == "[REVA audit] RCE"
@@ -1061,9 +1063,11 @@ def test_find_issues_with_marker_returns_items_any_state(rsa_key_pair):
     assert "state:open" not in captured["q"]
     assert issues == [
         {"number": 5, "title": "Open one",
-         "url": "https://github.com/acme/widgets/issues/5", "state": "open", "id": 500},
+         "url": "https://github.com/acme/widgets/issues/5", "state": "open", "id": 500,
+         "node_id": None},
         {"number": 3, "title": "Closed one",
-         "url": "https://github.com/acme/widgets/issues/3", "state": "closed", "id": 300},
+         "url": "https://github.com/acme/widgets/issues/3", "state": "closed", "id": 300,
+         "node_id": None},
     ]
 
 
@@ -1090,7 +1094,8 @@ def test_create_issue_returns_id(rsa_key_pair):
 
     client = _make_client(handler, private_pem)
     out = client.create_issue("tok", "acme", "widgets", title="t", body="b", labels=["reva-ticket"])
-    assert out == {"number": 42, "url": "https://github.com/acme/widgets/issues/42", "id": 9001}
+    assert out == {"number": 42, "url": "https://github.com/acme/widgets/issues/42", "id": 9001,
+                   "node_id": None}
 
 
 def test_add_sub_issue_posts_sub_issue_id(rsa_key_pair):
@@ -1150,4 +1155,202 @@ def test_find_issues_with_marker_returns_id(rsa_key_pair):
     client = _make_client(handler, private_pem)
     out = client.find_issues_with_marker("tok", "acme", "widgets", "revaticketabc")
     assert out == [{"number": 7, "title": "Old",
-                    "url": "https://github.com/acme/widgets/issues/7", "state": "open", "id": 700}]
+                    "url": "https://github.com/acme/widgets/issues/7", "state": "open", "id": 700,
+                    "node_id": None}]
+
+
+# --- node_id capture ---------------------------------------------------------
+
+
+def test_create_issue_returns_node_id(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(req):
+        return httpx.Response(201, json={
+            "number": 77, "html_url": "https://github.com/acme/widgets/issues/77",
+            "id": 7700, "node_id": "I_kwDO",
+        })
+
+    client = _make_client(handler, private_pem)
+    created = client.create_issue(
+        token="tok", owner="acme", repo="widgets", title="t", body="b")
+    assert created["node_id"] == "I_kwDO"
+
+
+def test_get_issue_returns_node_id(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(req):
+        return httpx.Response(200, json={"title": "t", "body": "b", "node_id": "I_1"})
+
+    client = _make_client(handler, private_pem)
+    assert client.get_issue("tok", "acme", "widgets", 5)["node_id"] == "I_1"
+
+
+def test_find_issues_with_marker_returns_node_id(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(req):
+        if req.url.path.endswith("/access_tokens"):
+            return httpx.Response(201, json={"token": "tok", "expires_at": "2099-01-01T00:00:00Z"})
+        return httpx.Response(200, json={"items": [
+            {"number": 7, "title": "Old", "html_url": "https://github.com/acme/widgets/issues/7",
+             "state": "open", "id": 700, "node_id": "I_7"},
+        ]})
+
+    client = _make_client(handler, private_pem)
+    assert client.find_issues_with_marker("tok", "acme", "widgets", "m")[0]["node_id"] == "I_7"
+
+
+# --- Projects v2 (GraphQL) ---------------------------------------------------
+
+
+def _project_query_handler(private_pem, captured):
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+        assert request.url.path == "/graphql"
+        body = json.loads(request.content)
+        captured["query"] = body["query"]
+        captured["variables"] = body["variables"]
+        return httpx.Response(200, json={"data": {"organization": {"projectV2": {
+            "id": "P_1",
+            "fields": {"nodes": [
+                {"id": "F_status", "name": "Status", "dataType": "SINGLE_SELECT",
+                 "options": [{"id": "opt_todo", "name": "Todo"}]},
+                {"id": "F_date", "name": "Target date", "dataType": "DATE"},
+            ]},
+        }}}})
+    return handler
+
+
+def test_get_project_resolves_org_project(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+    client = _make_client(_project_query_handler(private_pem, captured), private_pem)
+    project = client.get_project("tok", "orgs", "acme", 5)
+
+    assert "organization" in captured["query"]
+    assert captured["variables"] == {"login": "acme", "number": 5}
+    assert project["id"] == "P_1"
+    assert project["fields"] == [
+        {"id": "F_status", "name": "Status", "dataType": "SINGLE_SELECT",
+         "options": [{"id": "opt_todo", "name": "Todo"}]},
+        {"id": "F_date", "name": "Target date", "dataType": "DATE"},
+    ]
+
+
+def test_get_project_user_uses_user_entity(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+        body = json.loads(request.content)
+        assert "user(login:" in body["query"].replace(" ", "") or "user(" in body["query"]
+        return httpx.Response(200, json={"data": {"user": {"projectV2": {
+            "id": "P_2", "fields": {"nodes": []}}}}})
+
+    client = _make_client(handler, private_pem)
+    assert client.get_project("tok", "users", "jo", 12)["id"] == "P_2"
+
+
+def test_get_project_null_raises_permanent(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": {"organization": {"projectV2": None}}})
+
+    client = _make_client(handler, private_pem)
+    with pytest.raises(PermanentError):
+        client.get_project("tok", "orgs", "acme", 5)
+
+
+def test_add_issue_to_project_returns_item_id(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+        captured["variables"] = json.loads(request.content)["variables"]
+        return httpx.Response(200, json={"data": {"addProjectV2ItemById": {
+            "item": {"id": "PVTI_1"}}}})
+
+    client = _make_client(handler, private_pem)
+    item_id = client.add_issue_to_project("tok", "P_1", "I_1")
+    assert item_id == "PVTI_1"
+    assert captured["variables"] == {"projectId": "P_1", "contentId": "I_1"}
+
+
+def test_set_project_item_date_sends_date_value(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+        captured["variables"] = json.loads(request.content)["variables"]
+        return httpx.Response(200, json={"data": {"updateProjectV2ItemFieldValue": {
+            "projectV2Item": {"id": "PVTI_1"}}}})
+
+    client = _make_client(handler, private_pem)
+    client.set_project_item_date("tok", "P_1", "PVTI_1", "F_date", "2026-07-15")
+    assert captured["variables"]["value"] == {"date": "2026-07-15"}
+
+
+def test_set_project_item_option_sends_option_value(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+        captured["variables"] = json.loads(request.content)["variables"]
+        return httpx.Response(200, json={"data": {"updateProjectV2ItemFieldValue": {
+            "projectV2Item": {"id": "PVTI_1"}}}})
+
+    client = _make_client(handler, private_pem)
+    client.set_project_item_option("tok", "P_1", "PVTI_1", "F_status", "opt_todo")
+    assert captured["variables"]["value"] == {"singleSelectOptionId": "opt_todo"}
+
+
+def test_create_project_field_single_select(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+        body = json.loads(request.content)
+        captured["variables"] = body["variables"]
+        return httpx.Response(200, json={"data": {"createProjectV2Field": {
+            "projectV2Field": {
+                "id": "F_prio", "name": "Priority", "dataType": "SINGLE_SELECT",
+                "options": [{"id": "opt_low", "name": "Low"}]}}}})
+
+    client = _make_client(handler, private_pem)
+    field = client.create_project_field(
+        "tok", "P_1", "Priority", "SINGLE_SELECT",
+        options=[{"name": "Low", "color": "GRAY", "description": ""}])
+    assert field["id"] == "F_prio"
+    assert field["options"] == [{"id": "opt_low", "name": "Low"}]
+    assert captured["variables"]["dataType"] == "SINGLE_SELECT"
+
+
+def test_create_project_field_date(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": {"createProjectV2Field": {
+            "projectV2Field": {"id": "F_date", "name": "Plan date", "dataType": "DATE"}}}})
+
+    client = _make_client(handler, private_pem)
+    field = client.create_project_field("tok", "P_1", "Plan date", "DATE")
+    assert field == {"id": "F_date", "name": "Plan date", "dataType": "DATE"}
+
+
+def test_project_graphql_error_maps_to_transient(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": None, "errors": [
+            {"type": "RATE_LIMITED", "message": "API rate limit exceeded"}]})
+
+    client = _make_client(handler, private_pem)
+    with pytest.raises(TransientError):
+        client.get_project("tok", "orgs", "acme", 5)
