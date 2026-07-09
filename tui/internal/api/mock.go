@@ -573,7 +573,9 @@ func (m *MockClient) TicketIssueRuns(limit int) (*TicketIssueRunPage, error) {
 		{
 			ID: 3, TicketID: 456, ModelName: "helpdesk.ticket",
 			GithubURL: "https://github.com/acme/widgets", Status: "completed",
-			GithubUsername: strPtr("alice"),
+			GithubUsername:   strPtr("alice"),
+			GithubProjectURL: strPtr("https://github.com/orgs/acme/projects/5"),
+			PlanDate:         strPtr("2026-07-15"),
 			Issues: []TicketIssueRef{
 				{Number: intPtr(42), Title: "Implement login form",
 					URL:   strPtr("https://github.com/acme/widgets/issues/42"),

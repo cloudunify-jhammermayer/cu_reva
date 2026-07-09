@@ -392,6 +392,33 @@ def test_list_ticket_issue_runs_strips_plan_bodies(client_db_queue):
     assert "description" not in item
 
 
+def test_list_and_status_surface_project_fields(client_db_queue):
+    """A run created with a project URL + plan date surfaces both on the list
+    and status views (TUI Tickets tab); a legacy run yields nulls."""
+    client, db, _, headers = client_db_queue
+    with_project = client.post(
+        "/api/v1/create-issues",
+        json={**CONTRACT_PAYLOAD, "ticket_id": 501,
+              "github_project_url": "https://github.com/orgs/acme/projects/5",
+              "plan_date": "2026-07-15"},
+        headers=headers,
+    ).json()
+    client.post(
+        "/api/v1/create-issues", json={**CONTRACT_PAYLOAD, "ticket_id": 502}, headers=headers
+    )
+
+    items = client.get("/api/v1/ticket-issue-runs").json()["items"]
+    by_ticket = {i["ticket_id"]: i for i in items}
+    assert by_ticket[501]["github_project_url"] == "https://github.com/orgs/acme/projects/5"
+    assert by_ticket[501]["plan_date"] == "2026-07-15"
+    assert by_ticket[502]["github_project_url"] is None
+    assert by_ticket[502]["plan_date"] is None
+
+    status = client.get(f"/api/v1/create-issues/{with_project['request_id']}").json()
+    assert status["github_project_url"] == "https://github.com/orgs/acme/projects/5"
+    assert status["plan_date"] == "2026-07-15"
+
+
 def test_list_ticket_issue_runs_surfaces_parent_issue(client_db_queue):
     """A run with a synthesized "epic" parent surfaces it as parent_issue; a run
     without one (legacy / single-issue) serializes parent_issue: null."""

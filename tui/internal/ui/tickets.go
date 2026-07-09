@@ -46,6 +46,8 @@ type Tickets struct {
 	detailParent    *api.TicketIssueRef
 	detailIssueType string
 	detailAssignee  string
+	detailProject   string // Projects v2 board URL the run was sent with, if any
+	detailPlanDate  string // planned date (YYYY-MM-DD) the run carried, if any
 	detailCursor    int
 	detailOffset    int
 }
@@ -368,6 +370,14 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 				t.detailAssignee = ""
 				if cur.row.issueRun.GithubUsername != nil {
 					t.detailAssignee = *cur.row.issueRun.GithubUsername
+				}
+				t.detailProject = ""
+				if cur.row.issueRun.GithubProjectURL != nil {
+					t.detailProject = *cur.row.issueRun.GithubProjectURL
+				}
+				t.detailPlanDate = ""
+				if cur.row.issueRun.PlanDate != nil {
+					t.detailPlanDate = *cur.row.issueRun.PlanDate
 				}
 				t.detailCursor, t.detailOffset = 0, 0
 			} else {
@@ -705,6 +715,17 @@ func (t Tickets) detailView(w, h int) string {
 	if p := t.detailParent; p != nil && p.Number != nil {
 		parts = append(parts, styleSubtitle.Render(
 			truncate(fmt.Sprintf("  Epic: #%d %s", *p.Number, p.Title), w-2)))
+	}
+	// The Projects v2 board + planned date the request carried (when set).
+	if t.detailProject != "" || t.detailPlanDate != "" {
+		line := "  📋"
+		if t.detailProject != "" {
+			line += " " + t.detailProject
+		}
+		if t.detailPlanDate != "" {
+			line += "  · plan " + t.detailPlanDate
+		}
+		parts = append(parts, styleSubtitle.Render(truncate(line, w-2)))
 	}
 	parts = append(parts, body, "", pos)
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)

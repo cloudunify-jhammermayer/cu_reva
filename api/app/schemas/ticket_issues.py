@@ -100,6 +100,9 @@ class TicketIssueRunSummary(BaseModel):
     status: str
     issue_type: str | None = None
     github_username: str | None = None
+    # Projects v2 board + planned date the request carried (null for legacy runs).
+    github_project_url: str | None = None
+    plan_date: date | None = None
     issues: list[TicketIssueRef]
     parent_issue: TicketIssueRef | None = None
     error_message: str | None
@@ -126,6 +129,8 @@ class TicketIssueRunStatus(BaseModel):
     model_name: str
     github_url: str
     status: str
+    github_project_url: str | None = None
+    plan_date: date | None = None
     issues: list[TicketIssueRef] | None
     error_message: str | None
     model: str | None

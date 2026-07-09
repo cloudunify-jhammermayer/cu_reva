@@ -377,6 +377,28 @@ func TestDetailViewShowsAssignee(t *testing.T) {
 	}
 }
 
+func TestDetailViewShowsProjectAndPlanDate(t *testing.T) {
+	tt := Tickets{detail: true,
+		detailProject:  "https://github.com/orgs/acme/projects/5",
+		detailPlanDate: "2026-07-15",
+		detailIssues:   []api.TicketIssueRef{{Title: "x"}}}
+	out := tt.detailView(120, 20)
+	if !strings.Contains(out, "orgs/acme/projects/5") {
+		t.Errorf("detail view missing project board line:\n%s", out)
+	}
+	if !strings.Contains(out, "plan 2026-07-15") {
+		t.Errorf("detail view missing plan date:\n%s", out)
+	}
+}
+
+func TestDetailViewOmitsProjectLineWhenUnset(t *testing.T) {
+	tt := Tickets{detail: true,
+		detailIssues: []api.TicketIssueRef{{Title: "x"}}}
+	if strings.Contains(tt.detailView(120, 20), "📋") {
+		t.Fatal("detail view rendered a project line for a run without one")
+	}
+}
+
 func TestEnterWithoutIssuesShowsStatus(t *testing.T) {
 	tab := newTickets(&api.MockClient{}, "")
 	tab.width, tab.height = 120, 30

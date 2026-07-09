@@ -715,13 +715,13 @@ git commit -m "feat(worker): fail-soft Projects v2 board projection for ticket i
 - Modify: `tui/internal/api/types.go` (`TicketIssueRunSummary` ~196), `tui/internal/api/mock.go` (one mock run), `tui/internal/ui/tickets.go` (detail view)
 - Test: `api/tests/test_v1_ticket_issues.py` (list/status include the fields), `tui/internal/ui/tickets_test.go`
 
-- [ ] **Step 1: Python side.** Add `github_project_url: str | None = None` and `plan_date: date | None = None` to `TicketIssueRunSummary` **and** `TicketIssueRunStatus` (defaults so legacy dicts validate); include both in the `list_ticket_issue_runs` item dicts (`get_ticket_issue_run` already carries them after Task 2). Extend an existing list-endpoint test: a seeded run with both values surfaces them; a legacy run yields `null`s. Run `cd api && .venv/bin/python -m pytest tests/ -q`.
+- [x] **Step 1: Python side.** Add `github_project_url: str | None = None` and `plan_date: date | None = None` to `TicketIssueRunSummary` **and** `TicketIssueRunStatus` (defaults so legacy dicts validate); include both in the `list_ticket_issue_runs` item dicts (`get_ticket_issue_run` already carries them after Task 2). Extend an existing list-endpoint test: a seeded run with both values surfaces them; a legacy run yields `null`s. Run `cd api && .venv/bin/python -m pytest tests/ -q`.
 
-- [ ] **Step 2: Go side.** `types.go`: `GithubProjectURL *string \`json:"github_project_url"\`` and `PlanDate *string \`json:"plan_date"\`` on `TicketIssueRunSummary`. `tickets.go` detail view: one muted line when set, e.g. `📋 <project-url> · plan 2026-07-15` (match the existing detail-row styling helpers; truncate to width). `mock.go`: set both on one mock run so `--demo` shows it. Extend `tickets_test.go` with a render assertion.
+- [x] **Step 2: Go side.** `types.go`: `GithubProjectURL *string \`json:"github_project_url"\`` and `PlanDate *string \`json:"plan_date"\`` on `TicketIssueRunSummary`. `tickets.go` detail view: one muted line when set, e.g. `📋 <project-url> · plan 2026-07-15` (match the existing detail-row styling helpers; truncate to width). `mock.go`: set both on one mock run so `--demo` shows it. Extend `tickets_test.go` with a render assertion.
 
-- [ ] **Step 3: Verify** — `cd tui && go build ./... && go vet ./... && go test ./...` — PASS.
+- [x] **Step 3: Verify** — `cd tui && go build ./... && go vet ./... && go test ./...` — PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add api/app/schemas/ticket_issues.py api/app/queries/ticket_issues.py api/tests/test_v1_ticket_issues.py tui/
