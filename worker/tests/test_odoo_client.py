@@ -54,7 +54,7 @@ def test_disabled_client_write_field_raises_permanent():
 def test_disabled_client_reset_status_raises_permanent():
     client = OdooCallbackClient(callback_url="", api_key="")
     with pytest.raises(PermanentError):
-        client.reset_status(ticket_id=123, model_name="helpdesk.ticket")
+        client.reset_status(ticket_id=123, model_name="helpdesk.ticket", analysis_id=7)
 
 
 def test_rejects_cloud_metadata_callback_url():
@@ -158,7 +158,7 @@ def test_write_field_url_from_any_configured_form(monkeypatch, configured):
 
 def test_reset_status_uses_tickets_namespace(monkeypatch):
     captured = _capture_url(monkeypatch)
-    _client().reset_status(ticket_id=123, model_name="helpdesk.ticket")
+    _client().reset_status(ticket_id=123, model_name="helpdesk.ticket", analysis_id=7)
     assert captured["url"] == "https://odoo.example.com/api/reva/tickets/reset-status"
 
 

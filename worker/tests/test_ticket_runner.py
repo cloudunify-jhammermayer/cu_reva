@@ -70,6 +70,12 @@ class FakeOdoo:
     raise_exc: Exception | None = None
     call_count: int = 0
     calls: list[dict] = field(default_factory=list)
+    reset_calls: list[dict] = field(default_factory=list)
+
+    def reset_status(self, ticket_id, model_name, analysis_id):
+        self.reset_calls.append(
+            {"ticket_id": ticket_id, "model_name": model_name, "analysis_id": analysis_id}
+        )
 
     def write_field(self, ticket_id, model_name, field_name, html):
         self.call_count += 1
@@ -148,6 +154,11 @@ def test_happy_path(ctx_and_fakes):
     assert out["status"] == "completed"
     assert s["analyzer"].call_count == 1
     assert s["odoo"].call_count == 1
+    # The reset callback carries the correlation id for Odoo's staleness guard.
+    assert s["odoo"].reset_calls == [
+        {"ticket_id": 42, "model_name": "helpdesk.ticket",
+         "analysis_id": out["analysis_id"]}
+    ]
 
     row = writers.get_ticket_analysis(s["db"], out["analysis_id"])
     assert row is not None

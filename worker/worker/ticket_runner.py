@@ -39,7 +39,11 @@ def run_ticket_analysis(job_params: dict) -> dict:
 
     # Reset Odoo status to pending so the UI shows work-in-progress (handles requeues of completed jobs).
     try:
-        odoo.reset_status(ticket_id=params.ticket_id, model_name=params.model_name)
+        odoo.reset_status(
+            ticket_id=params.ticket_id,
+            model_name=params.model_name,
+            analysis_id=params.analysis_id,
+        )
     except Exception:
         log.warning("ticket_analysis_odoo_reset_failed", exc_info=True)
 

@@ -119,11 +119,13 @@ class OdooCallbackClient:
             raise PermanentError(f"Odoo {path} {resp.status_code} (permanent): {body}")
         raise TransientError(f"Odoo {path} {resp.status_code} (transient): {body}")
 
-    def reset_status(self, ticket_id: int, model_name: str) -> None:
+    def reset_status(self, ticket_id: int, model_name: str, analysis_id: int) -> None:
         """Set reva_status = pending in Odoo before re-running analysis."""
         self._post(
             "/tickets/reset-status",
-            ResetStatusPayload(ticket_id=ticket_id, model_name=model_name).model_dump(),
+            ResetStatusPayload(
+                ticket_id=ticket_id, model_name=model_name, analysis_id=analysis_id
+            ).model_dump(),
         )
 
     def write_field(

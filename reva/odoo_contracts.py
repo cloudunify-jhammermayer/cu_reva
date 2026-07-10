@@ -29,6 +29,10 @@ class WriteFieldPayload(BaseModel):
 class ResetStatusPayload(BaseModel):
     ticket_id: int
     model_name: str
+    # Correlation id for Odoo's staleness guard: a reset whose analysis_id no
+    # longer matches the record's stored one is a stale/replayed callback and
+    # is rejected there with 409 (older addons ignore the extra key).
+    analysis_id: int
 
 
 class IssueRefPayload(BaseModel):
@@ -163,7 +167,7 @@ CONTRACTS: list[Contract] = [
         path="/tickets/reset-status",
         auth="bearer:instance-outbound-key",
         model=ResetStatusPayload,
-        sample={"ticket_id": 123, "model_name": "helpdesk.ticket"},
+        sample={"ticket_id": 123, "model_name": "helpdesk.ticket", "analysis_id": 456},
     ),
     Contract(
         name="tickets.issues-created",

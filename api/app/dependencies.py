@@ -130,3 +130,43 @@ def require_api_key(request: Request, settings: Settings = Depends(get_settings)
     auth = request.headers.get("Authorization", "")
     if not hmac.compare_digest(auth, f"Bearer {settings.api_key}"):
         raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+def require_master_or_odoo_instance(
+    request: Request,
+    db: Database = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> ResolvedOdooInstance | None:
+    """Authenticate with the master key (returns None — unscoped) or an
+    instance key (returns the instance — the handler MUST scope rows to it).
+
+    For the poll/requeue routes: Odoo's self-heal calls them with its instance
+    key, the TUI/ops with the master key. Resolution order mirrors v1 /health —
+    instance first (the key IS the identity), then master; fail-closed and
+    dev-mode semantics mirror require_api_key.
+    """
+    from app.queries import odoo_instances as q  # local import: avoid a cycle
+
+    if not settings.api_key and settings.require_api_key:
+        raise HTTPException(status_code=503, detail="API authentication is required but not configured")
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth[len("Bearer "):]
+        resolved = q.resolve_odoo_instance_by_key(db, token)
+        if resolved is not None:
+            budget, rpm = q.instance_limits(db, resolved[0])
+            from app.ratelimit import enforce_instance_rate_limit  # local: avoid cycle
+
+            enforce_instance_rate_limit(resolved[0], rpm)
+            return ResolvedOdooInstance(
+                id=resolved[0],
+                name=resolved[1],
+                daily_budget_usd=budget,
+                rate_limit_per_minute=rpm,
+            )
+        if settings.api_key and hmac.compare_digest(auth, f"Bearer {settings.api_key}"):
+            return None
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    if not settings.api_key:
+        return None  # explicit dev mode (mirrors require_api_key)
+    raise HTTPException(status_code=401, detail="Missing API key")

@@ -1,8 +1,11 @@
 """Aggregate all /api/v1 sub-routers, split by auth gate.
 
 - master gate (require_api_key): every admin/read/management route, incl. the
-  ticket read/list/requeue handlers and the odoo-instances CRUD.
-- instance gate (require_odoo_instance): ONLY the two Odoo create routes.
+  ticket list handlers and the odoo-instances CRUD.
+- instance gate (require_odoo_instance): ONLY the Odoo create routes.
+- shared gate (require_master_or_odoo_instance): the per-run ticket GET/requeue
+  routes — Odoo's self-heal polls them with its instance key (scoped to its own
+  rows), ops/TUI with the master key (unscoped).
 - any-key (own check): GET /health — the credentialed connection test.
 """
 
@@ -60,6 +63,13 @@ _instance.include_router(timesheet_reviews.create_router)
 _any = APIRouter(dependencies=[Depends(rate_limit)])
 _any.include_router(health.router)
 
+# Auth lives in each handler's require_master_or_odoo_instance dependency (the
+# handlers need the resolved instance for row scoping); only rate limit here.
+_shared = APIRouter(dependencies=[Depends(rate_limit)])
+_shared.include_router(ticket_analyses.shared_router)
+_shared.include_router(ticket_issues.shared_router)
+
 router.include_router(_master)
 router.include_router(_instance)
+router.include_router(_shared)
 router.include_router(_any)

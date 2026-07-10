@@ -17,6 +17,7 @@ from app.dependencies import (
     ResolvedOdooInstance,
     assert_instance_within_budget,
     get_db,
+    require_master_or_odoo_instance,
     require_odoo_instance,
 )
 from app.pagination import clamp_limit, clamp_offset
@@ -35,6 +36,7 @@ from reva.types import TicketJobParams
 
 router = APIRouter()
 create_router = APIRouter()  # instance-key gated (see routes/v1/__init__.py)
+shared_router = APIRouter()  # master OR instance key; instance sees only its rows
 logger = structlog.get_logger()
 
 _JOB_TIMEOUT = 300  # seconds
@@ -179,22 +181,26 @@ def list_ticket_analyses(
     }
 
 
-@router.get(
+@shared_router.get(
     "/ticket-analysis/{analysis_id}",
     response_model=TicketAnalysisStatus,
 )
 def get_ticket_analysis(
     analysis_id: int,
     db: Database = Depends(get_db),
+    instance: ResolvedOdooInstance | None = Depends(require_master_or_odoo_instance),
 ) -> dict:
     """Return the current status and result of a ticket analysis job."""
     row = writers.get_ticket_analysis(db, analysis_id)
-    if row is None:
+    # An instance key sees only its own rows; cross-instance (and legacy
+    # NULL-instance) ids 404 — not 403 — so ids aren't probeable, and Odoo's
+    # self-heal already treats 404 as "unknown at REVA, use Resend".
+    if row is None or (instance is not None and row["odoo_instance_id"] != instance.id):
         raise HTTPException(status_code=404, detail="Ticket analysis not found")
     return row
 
 
-@router.post(
+@shared_router.post(
     "/ticket-analysis/{analysis_id}/requeue",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=TicketAnalysisCreated,
@@ -203,12 +209,13 @@ def requeue_ticket_analysis(
     analysis_id: int,
     request: Request,
     db: Database = Depends(get_db),
+    instance: ResolvedOdooInstance | None = Depends(require_master_or_odoo_instance),
 ) -> dict:
     """Re-enqueue a failed/completed analysis — or a stale pending one whose job
     died without running (e.g. a SIGKILLed worker or a lost Redis job); without
     this the pending dedup pins every future submit to a dead analysis_id."""
     row = writers.get_ticket_analysis(db, analysis_id)
-    if row is None:
+    if row is None or (instance is not None and row["odoo_instance_id"] != instance.id):
         raise HTTPException(status_code=404, detail="Ticket analysis not found")
     if row["status"] not in ("failed", "completed") and not _is_stale_pending(row):
         raise HTTPException(

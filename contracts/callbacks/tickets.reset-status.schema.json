@@ -1,5 +1,9 @@
 {
   "properties": {
+    "analysis_id": {
+      "title": "Analysis Id",
+      "type": "integer"
+    },
     "model_name": {
       "title": "Model Name",
       "type": "string"
@@ -11,7 +15,8 @@
   },
   "required": [
     "ticket_id",
-    "model_name"
+    "model_name",
+    "analysis_id"
   ],
   "title": "ResetStatusPayload",
   "type": "object"

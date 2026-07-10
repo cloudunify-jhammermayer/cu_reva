@@ -23,6 +23,7 @@ from app.dependencies import (
     assert_instance_within_budget,
     get_db,
     get_github_client,
+    require_master_or_odoo_instance,
     require_odoo_instance,
 )
 from app.pagination import clamp_limit, clamp_offset
@@ -44,6 +45,7 @@ from reva.types import TicketIssueJobParams
 
 router = APIRouter()
 create_router = APIRouter()  # instance-key gated (see routes/v1/__init__.py)
+shared_router = APIRouter()  # master OR instance key; instance sees only its rows
 logger = structlog.get_logger()
 
 _JOB_TIMEOUT = 300  # seconds
@@ -201,17 +203,21 @@ def list_ticket_issue_runs(
     }
 
 
-@router.get(
+@shared_router.get(
     "/create-issues/{request_id}",
     response_model=TicketIssueRunStatus,
 )
 def get_ticket_issue_run(
     request_id: int,
     db: Database = Depends(get_db),
+    instance: ResolvedOdooInstance | None = Depends(require_master_or_odoo_instance),
 ) -> dict:
     """Return the current status and result of a create-issues run."""
     row = writers.get_ticket_issue_run(db, request_id)
-    if row is None:
+    # An instance key sees only its own rows; cross-instance (and legacy
+    # NULL-instance) ids 404 — not 403 — so ids aren't probeable, and Odoo's
+    # self-heal already treats 404 as "unknown at REVA, use Resend".
+    if row is None or (instance is not None and row["odoo_instance_id"] != instance.id):
         raise HTTPException(status_code=404, detail="Ticket issue run not found")
     return row
 
@@ -223,7 +229,7 @@ def _is_stale_pending(row: dict) -> bool:
     return row["status"] == "pending" and created_at < datetime.now(timezone.utc) - _STALE_PENDING
 
 
-@router.post(
+@shared_router.post(
     "/create-issues/{request_id}/requeue",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=TicketIssuesAccepted,
@@ -232,6 +238,7 @@ def requeue_ticket_issue_run(
     request_id: int,
     request: Request,
     db: Database = Depends(get_db),
+    instance: ResolvedOdooInstance | None = Depends(require_master_or_odoo_instance),
 ) -> dict:
     """Re-enqueue a failed/completed run — or a stale pending one (its job died
     without running, e.g. a SIGKILLed worker; without this the pending dedup
@@ -243,7 +250,7 @@ def requeue_ticket_issue_run(
     user's re-click path re-links instead.
     """
     row = writers.get_ticket_issue_run(db, request_id)
-    if row is None:
+    if row is None or (instance is not None and row["odoo_instance_id"] != instance.id):
         raise HTTPException(status_code=404, detail="Ticket issue run not found")
     if row["status"] not in ("failed", "completed") and not _is_stale_pending(row):
         raise HTTPException(

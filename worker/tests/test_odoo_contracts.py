@@ -28,9 +28,14 @@ def test_write_field_wire_shape():
 
 
 def test_reset_status_wire_shape():
-    assert ResetStatusPayload(ticket_id=1, model_name="project.task").model_dump() == {
+    # analysis_id is required on the wire: Odoo's staleness guard needs the
+    # correlation id to reject stale/replayed resets (409 there).
+    assert ResetStatusPayload(
+        ticket_id=1, model_name="project.task", analysis_id=42
+    ).model_dump() == {
         "ticket_id": 1,
         "model_name": "project.task",
+        "analysis_id": 42,
     }
 
 
