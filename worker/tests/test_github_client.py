@@ -1354,3 +1354,47 @@ def test_project_graphql_error_maps_to_transient(rsa_key_pair):
     client = _make_client(handler, private_pem)
     with pytest.raises(TransientError):
         client.get_project("tok", "orgs", "acme", 5)
+
+
+def test_get_closing_issue_numbers_filters_cross_repo(rsa_key_pair):
+    """Sidebar/body-linked issues come back; cross-repo closing refs are dropped
+    (mirrors _parse_issue_refs, which ignores owner/repo#N)."""
+    private_pem, _ = rsa_key_pair
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/graphql"
+        variables = json.loads(request.content)["variables"]
+        assert variables == {"owner": "acme", "repo": "widgets", "prNumber": 42}
+        return httpx.Response(200, json={"data": {"repository": {"pullRequest": {
+            "closingIssuesReferences": {"nodes": [
+                {"number": 7, "repository": {"nameWithOwner": "acme/widgets"}},
+                {"number": 9, "repository": {"nameWithOwner": "acme/OTHER"}},
+                {"number": 12, "repository": {"nameWithOwner": "Acme/Widgets"}},
+            ]}}}}})
+
+    client = _make_client(handler, private_pem)
+    # Case-insensitive same-repo match: 7 and 12 kept, cross-repo 9 dropped.
+    assert client.get_closing_issue_numbers("tok", "acme", "widgets", 42) == [7, 12]
+
+
+def test_get_closing_issue_numbers_handles_null_pull_request(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": {"repository": {"pullRequest": None}}})
+
+    client = _make_client(handler, private_pem)
+    assert client.get_closing_issue_numbers("tok", "acme", "widgets", 42) == []
+
+
+def test_get_closing_issue_numbers_raises_on_graphql_errors(rsa_key_pair):
+    """Errors surface to the caller — the reviewer catches them and degrades
+    to body-regex refs with an ops event."""
+    private_pem, _ = rsa_key_pair
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"errors": [{"message": "boom"}]})
+
+    client = _make_client(handler, private_pem)
+    with pytest.raises(Exception):
+        client.get_closing_issue_numbers("tok", "acme", "widgets", 42)

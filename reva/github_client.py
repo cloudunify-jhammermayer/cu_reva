@@ -771,6 +771,49 @@ class GitHubClient:
         # (a failed resolve must not be marked resolved_by_fix by the caller).
         _graphql_data(response, "resolve_review_thread")
 
+    def get_closing_issue_numbers(
+        self, token: str, owner: str, repo: str, pr_number: int
+    ) -> list[int]:
+        """Issue numbers GitHub links to this PR as closing references — covers
+        body keywords AND the Development-sidebar links the body regex misses.
+
+        Same-repo issues only (cross-repo refs are out of scope, mirroring the
+        reviewer's `_parse_issue_refs`). First page only: the reviewer caps at 3
+        refs, so pagination would never be consumed. Raises on GraphQL errors —
+        the caller degrades to body refs (issue-conformance spec 2026-07-10)."""
+        query = """
+        query GetClosingIssues($owner: String!, $repo: String!, $prNumber: Int!) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $prNumber) {
+              closingIssuesReferences(first: 20) {
+                nodes { number repository { nameWithOwner } }
+              }
+            }
+          }
+        }
+        """
+        response = self._post(
+            token,
+            "/graphql",
+            {"query": query, "variables": {
+                "owner": owner, "repo": repo, "prNumber": pr_number,
+            }},
+        )
+        data = _graphql_data(response, "get_closing_issue_numbers")
+        # Null-safe like get_review_threads: nulled repository/pullRequest -> [].
+        refs = (
+            ((data.get("repository") or {}).get("pullRequest") or {})
+            .get("closingIssuesReferences") or {}
+        )
+        full_name = f"{owner}/{repo}".lower()
+        return [
+            node["number"]
+            for node in refs.get("nodes") or []
+            if node
+            and ((node.get("repository") or {}).get("nameWithOwner") or "").lower()
+            == full_name
+        ]
+
     # --- GitHub Projects v2 (GraphQL-only) ----------------------------------
 
     # Shared field selection: plain fields expose id/name/dataType; single-
