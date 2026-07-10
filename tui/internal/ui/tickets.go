@@ -695,7 +695,11 @@ func (t Tickets) detailView(w, h int) string {
 		case ref.State != nil:
 			state = *ref.State
 		}
-		line := fmt.Sprintf("  %-6s  %-12s  %s", num, state, ref.Title)
+		title := ref.Title
+		if ref.EstimateHours != nil {
+			title = fmt.Sprintf("%s  · %.1fh", title, *ref.EstimateHours)
+		}
+		line := fmt.Sprintf("  %-6s  %-12s  %s", num, state, title)
 		if i == t.detailCursor {
 			rows = append(rows, styleSelected.Width(w-2).Render(truncate(line, w-4)))
 		} else {

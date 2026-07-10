@@ -192,10 +192,11 @@ type TicketAnalysisPage struct {
 // Number/URL are nil until the issue exists on GitHub; State ("open"/"closed")
 // is synced from GitHub issue webhooks.
 type TicketIssueRef struct {
-	Number *int    `json:"number"`
-	Title  string  `json:"title"`
-	URL    *string `json:"url"`
-	State  *string `json:"state"`
+	Number        *int     `json:"number"`
+	Title         string   `json:"title"`
+	URL           *string  `json:"url"`
+	State         *string  `json:"state"`
+	EstimateHours *float64 `json:"estimate_hours"`
 }
 
 type TicketIssueRunSummary struct {
