@@ -39,7 +39,10 @@ Audits, Feedback); navigate lists with `j`/`k`, `g`/`G` (top/bottom),
 `Ctrl+D`/`Ctrl+U` (half-page) and PgUp/PgDn; `/` filters the Findings, Repos and
 Tickets lists; global keys `r` refresh, `q` quit. The **Tickets** tab groups by
 GitHub repo into foldable sections, collapsed by default — `enter`/`space`
-toggles the group at the cursor, `z` expands/collapses all. The **Feedback** tab (`9`)
+toggles the group at the cursor, `z` expands/collapses all. Opening a ticket's
+issue drill-down (`enter` on a row with issues) also loads a read-only
+**Journey** timeline — analyses, issues, reviews, change notes, and readiness —
+into the bottom of the detail pane, from `GET /ticket-journeys`. The **Feedback** tab (`9`)
 shows the Tier-3 learning signals — per (repo, category) findings / dismissals
 (`/dismiss`) / fixes from `GET /metrics/learning`, plus active `/mute`s from
 `GET /metrics/mutes`. The Repos tab adds `n` to register a

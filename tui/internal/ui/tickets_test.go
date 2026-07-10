@@ -611,6 +611,28 @@ func TestAppRoutesIssueRunsMsgToTicketsTab(t *testing.T) {
 	}
 }
 
+func TestAppRoutesTicketJourneyLoadedMsgToTicketsTab(t *testing.T) {
+	// Regression: app.Update switches on message types; a missing case for
+	// ticketJourneyLoadedMsg would silently drop the fetch response and the
+	// Tickets tab's detail pane would never populate the Journey block.
+	app := NewApp(&api.MockClient{}, "https://odoo.example.com")
+	key := issueRunKey("helpdesk.ticket", 456)
+	app.tickets.detailKey = key
+
+	model, _ := app.Update(ticketJourneyLoadedMsg{
+		key:  key,
+		data: &api.TicketJourney{Events: []api.JourneyEvent{{Kind: "ready", Summary: "routed via App.Update"}}},
+	})
+
+	got := model.(*App).tickets.journey
+	if len(got) == 0 {
+		t.Fatal("ticketJourneyLoadedMsg not routed to the Tickets tab")
+	}
+	if got[0].Summary != "routed via App.Update" {
+		t.Fatalf("expected the routed event's summary, got %+v", got)
+	}
+}
+
 func TestJourneyPopulatesAndRendersOnMatchingKey(t *testing.T) {
 	tab := ticketsWithData()
 	// ticket 456 has a completed run with issues; opening its detail must fire
@@ -702,6 +724,55 @@ func TestJourneyTruncatesToLast30WithEarlierCount(t *testing.T) {
 	}
 	if !strings.Contains(out, "event-34") {
 		t.Fatalf("view missing the most recent event:\n%s", out)
+	}
+}
+
+func TestJourneyHeightBudgetFoldsOverflowAndFitsBudget(t *testing.T) {
+	// Regression: detailView appended the (<=30-event) Journey block
+	// unconditionally, so App.View's MaxHeight clamp (which cuts the BOTTOM)
+	// silently clipped the newest events — including "ready" — instead of
+	// the oldest. The block must budget against whatever height is left
+	// after the issues list, folding overflow the same way the >30 cap does.
+	events := make([]api.JourneyEvent, 8)
+	for i := range events {
+		events[i] = api.JourneyEvent{Kind: "ready", Summary: fmt.Sprintf("event-%d", i)}
+	}
+	stub := &journeyStubClient{events: events}
+	tab := newTickets(stub, "")
+	tab.width, tab.height = 60, 12
+	tab, _ = tab.update(ticketIssueRunsLoadedMsg{data: &api.TicketIssueRunPage{
+		Items: []api.TicketIssueRunSummary{{
+			ID: 1, TicketID: 456, ModelName: "helpdesk.ticket", Status: "completed",
+			GithubURL: "https://github.com/acme/widgets",
+			Issues: []api.TicketIssueRef{
+				{Number: intPtr(1), Title: "a"},
+				{Number: intPtr(2), Title: "b"},
+				{Number: intPtr(3), Title: "c"},
+			},
+			CreatedAt: time.Now(),
+		}},
+		Total: 1,
+	}})
+	tab = onRow(tab, 456)
+	tab, cmd := tab.update(keyMsg("enter"))
+	if cmd == nil {
+		t.Fatal("enter did not return a journey fetch cmd")
+	}
+	tab, _ = tab.update(cmd().(ticketJourneyLoadedMsg))
+
+	const h = 12
+	out := tab.view(60, h)
+	if lines := strings.Count(out, "\n") + 1; lines > h {
+		t.Fatalf("output is %d lines, want <= %d (budget):\n%s", lines, h, out)
+	}
+	if !strings.Contains(out, "event-7") {
+		t.Fatalf("view missing the last (newest) event, got:\n%s", out)
+	}
+	if strings.Contains(out, "event-0") {
+		t.Fatalf("view rendered the earliest event, which should have been folded:\n%s", out)
+	}
+	if !strings.Contains(out, "(+6 earlier)") {
+		t.Fatalf("view missing the height-folded count, got:\n%s", out)
 	}
 }
 

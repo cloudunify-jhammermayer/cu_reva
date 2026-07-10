@@ -3,6 +3,11 @@
 Review linkage is the documented v1 gap: reviews enter via change-note rows
 (merged PRs) or persisted intent_check issue refs; open PRs without either
 signal are invisible here.
+
+The intent_check linkage (b) below matches issue numbers against the
+ticket's union globally across all of the ticket's repos, not per-repo — so a
+multi-repo ticket could in theory link a same-numbered but unrelated issue
+from one of its other repos; acceptable for a display-only ops view.
 """
 
 from __future__ import annotations

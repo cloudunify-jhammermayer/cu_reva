@@ -99,7 +99,7 @@ analysis-only tickets are served by the endpoint but have no TUI pane in v1.
 | Ticket unknown | 404 |
 | Partial data (e.g. analysis only) | Journey renders what exists — every source is independent |
 | Review linkage absent (open PR, no intent_check) | Review not shown (documented v1 gap) |
-| Cross-instance ticket id collision | Keyed by (odoo_instance_id, model_name, ticket_id) throughout — no fuzzy matching |
+| Cross-instance ticket id collision | Keyed by (odoo_instance_id, model_name, ticket_id) throughout — no fuzzy matching. The endpoint keying itself is strict, but the TUI's row identity is (model_name, ticket_id) only — a cross-instance id collision shows one row, and the latest run's instance keys the journey fetch |
 
 ## Testing
 

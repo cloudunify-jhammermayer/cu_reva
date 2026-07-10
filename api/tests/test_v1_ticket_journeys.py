@@ -324,6 +324,31 @@ def test_journey_instance_scoping(client_and_db):
     assert not any("field_two" in s for s in summaries)
 
 
+def test_journey_null_instance_scoping(client_and_db):
+    """odoo_instance_id is nullable (single-Odoo deployments never set it);
+    NULL must scope as its own bucket, never falling back to "any instance"
+    and never bleeding into an explicit instance's data (or vice versa)."""
+    client, db = client_and_db
+    _add_analysis(db, odoo_instance_id=None, ticket_id=4718, field_name="field_null")
+    _add_analysis(db, odoo_instance_id=1, ticket_id=4718, field_name="field_one")
+
+    resp = client.get("/api/v1/ticket-journeys?model_name=helpdesk.ticket&ticket_id=4718")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ticket"]["odoo_instance_id"] is None
+    summaries = [e["summary"] for e in data["events"]]
+    assert any("field_null" in s for s in summaries)
+    assert not any("field_one" in s for s in summaries)
+
+    resp = client.get("/api/v1/ticket-journeys?model_name=helpdesk.ticket&ticket_id=4718&odoo_instance_id=1")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ticket"]["odoo_instance_id"] == 1
+    summaries = [e["summary"] for e in data["events"]]
+    assert any("field_one" in s for s in summaries)
+    assert not any("field_null" in s for s in summaries)
+
+
 def test_journey_requires_master_key():
     engine = create_engine_from_url(
         "sqlite:///:memory:",

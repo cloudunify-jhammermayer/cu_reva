@@ -768,18 +768,51 @@ func (t Tickets) detailView(w, h int) string {
 	}
 	parts = append(parts, body, "", pos)
 
-	// Journey (read-only timeline; most recent 30), after the issues list.
+	// Journey (read-only timeline, most recent last), height-budgeted to
+	// what's left in the pane after the issues block above. App.View clamps
+	// the pane with MaxHeight(contentH), which cuts the BOTTOM — an unbounded
+	// journey block would silently clip the newest events (incl. "ready")
+	// instead of folding the oldest ones away, so the fold count below must
+	// account for both the >30 cap and any remaining height overflow.
+	usedLines := 0
+	for _, p := range parts {
+		usedLines += 1 + strings.Count(p, "\n")
+	}
+	budget := h - usedLines - 1 // -1 reserves the blank line ahead of the block
+
 	var journeyLines []string
-	if t.journeyErr != "" {
-		journeyLines = append(journeyLines, styleSubtitle.Render("Journey unavailable: "+t.journeyErr))
-	} else if len(t.journey) > 0 {
-		journeyLines = append(journeyLines, styleTitle.Render("Journey"))
-		events := t.journey
-		if len(events) > 30 {
-			journeyLines = append(journeyLines, styleSubtitle.Render(fmt.Sprintf("  (+%d earlier)", len(events)-30)))
-			events = events[len(events)-30:]
+	switch {
+	case t.journeyErr != "":
+		if budget >= 1 {
+			journeyLines = append(journeyLines, styleSubtitle.Render(
+				truncate("Journey unavailable: "+t.journeyErr, w-2)))
 		}
-		for _, e := range events {
+	case len(t.journey) > 0 && budget >= 2:
+		events := t.journey
+		total := len(events)
+		fitNoHead := budget - 1
+		if fitNoHead > 30 {
+			fitNoHead = 30
+		}
+		show, hasHead := total, false
+		if fitNoHead < total { // overflow — by the 30-cap, the height budget, or both
+			hasHead = true
+			show = budget - 2
+			if show > 30 {
+				show = 30
+			}
+			if show < 1 {
+				// No room for both a head line and an event — drop the head
+				// line rather than the one event we can still show.
+				show, hasHead = 1, false
+			}
+		}
+		folded := total - show
+		journeyLines = append(journeyLines, styleTitle.Render("Journey"))
+		if hasHead && folded > 0 {
+			journeyLines = append(journeyLines, styleSubtitle.Render(fmt.Sprintf("  (+%d earlier)", folded)))
+		}
+		for _, e := range events[total-show:] {
 			ts := "          "
 			if e.TS != nil {
 				ts = e.TS.Local().Format("2006-01-02")
