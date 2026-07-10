@@ -88,6 +88,9 @@ class RepoConfig(BaseModel):
     # false skips the GraphQL link lookup and drops any returned verdicts.
     # The plain stated_intent context injection is unaffected.
     intent_check: bool = True
+    # Kill switch for GitHub Projects board Status sync (linked-PR legs):
+    # false stops REVA moving cards to "In Progress"/"In review" for this repo.
+    board_status_sync: bool = True
     # Which /core version reviews consult, e.g. "19.0". None disables it.
     odoo_version: str | None = None
 

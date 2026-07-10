@@ -34,3 +34,8 @@ def test_intent_verdict_note_defaults_empty():
 def test_repo_config_intent_check_defaults_on():
     assert RepoConfig().intent_check is True
     assert RepoConfig.model_validate({"intent_check": False}).intent_check is False
+
+
+def test_repo_config_board_status_sync_defaults_on():
+    assert RepoConfig().board_status_sync is True
+    assert RepoConfig.model_validate({"board_status_sync": False}).board_status_sync is False

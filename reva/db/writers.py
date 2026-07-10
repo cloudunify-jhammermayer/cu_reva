@@ -2171,6 +2171,47 @@ def get_ticket_issue_union(
         return sorted(seen.values(), key=lambda i: i["number"])
 
 
+def get_board_items_for_issues(
+    db: Database, repo_full_name: str, issue_numbers: list[int]
+) -> list[dict]:
+    """Open REVA-created issues among `issue_numbers` that sit on a Projects
+    board: [{number, project_item_id, github_project_url}]. The newest run's
+    occurrence of a number decides (mirrors get_ticket_issue_union's
+    newest-wins dedup) — a closed newest occurrence is skipped even if an
+    older run still shows it open. Runs without a board URL and items without
+    a persisted project_item_id never match (board-status spec 2026-07-10)."""
+    if not issue_numbers:
+        return []
+    wanted = set(issue_numbers)
+    repo = repo_full_name.lower()
+    out: dict[int, dict] = {}
+    seen: set[int] = set()
+    with db.session() as s:
+        rows = s.execute(
+            select(TicketIssueRun)
+            .where(
+                TicketIssueRun.repo_full_name == repo,
+                TicketIssueRun.issues.is_not(None),
+                TicketIssueRun.github_project_url.is_not(None),
+            )
+            .order_by(TicketIssueRun.created_at.desc(), TicketIssueRun.id.desc())
+        ).scalars().all()
+        for row in rows:
+            for item in row.issues or []:
+                n = item.get("number")
+                if n is None or n not in wanted or n in seen:
+                    continue
+                seen.add(n)  # newest occurrence decides, even when skipped
+                if item.get("state") == "closed" or not item.get("project_item_id"):
+                    continue
+                out[n] = {
+                    "number": n,
+                    "project_item_id": item["project_item_id"],
+                    "github_project_url": row.github_project_url,
+                }
+    return sorted(out.values(), key=lambda i: i["number"])
+
+
 def _issues_all_closed(issues: list[dict]) -> bool:
     return bool(issues) and all(item.get("state") == "closed" for item in issues)
 

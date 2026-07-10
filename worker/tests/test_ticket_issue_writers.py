@@ -202,3 +202,53 @@ def test_latest_parent_scoped_and_excludes_self(db):
     assert writers.get_latest_ticket_issue_parent(db, 1, 91, "helpdesk.ticket", "org/repo", exclude_run_id=r1) is None
     assert writers.get_latest_ticket_issue_parent(db, 1, 91, "helpdesk.ticket", "org/other", exclude_run_id=999) is None
     assert writers.get_latest_ticket_issue_parent(db, 2, 91, "helpdesk.ticket", "org/repo", exclude_run_id=999) is None
+
+
+def test_board_items_matrix(db):
+    url = "https://github.com/orgs/acme/projects/7"
+    _complete_run(db, _typed_params(ticket_id=97), [
+        {"number": 50, "title": "open+board", "url": "https://gh/50", "state": "open",
+         "project_item_id": "PVTI_50"},
+        {"number": 51, "title": "closed", "url": "https://gh/51", "state": "closed",
+         "project_item_id": "PVTI_51"},
+        {"number": 52, "title": "no item id", "url": "https://gh/52", "state": "open"},
+    ])
+    # Stamp the board URL on the run (the helper may not set it).
+    with db.session() as s:
+        from reva.db.models import TicketIssueRun
+        row = s.query(TicketIssueRun).filter_by(ticket_id=97).one()
+        row.github_project_url = url
+
+    items = writers.get_board_items_for_issues(db, "org/repo", [50, 51, 52, 99])
+    assert items == [
+        {"number": 50, "project_item_id": "PVTI_50", "github_project_url": url}
+    ]
+
+
+def test_board_items_empty_for_no_refs_or_no_board(db):
+    assert writers.get_board_items_for_issues(db, "org/repo", []) == []
+    # Run without a github_project_url never yields items.
+    _complete_run(db, _typed_params(ticket_id=98), [
+        {"number": 60, "title": "boardless", "url": "https://gh/60", "state": "open",
+         "project_item_id": "PVTI_60"},
+    ])
+    assert writers.get_board_items_for_issues(db, "org/repo", [60]) == []
+
+
+def test_board_items_newest_run_occurrence_decides(db):
+    url = "https://github.com/orgs/acme/projects/7"
+    p = _typed_params(ticket_id=99)
+    _complete_run(db, p, [
+        {"number": 70, "title": "old open", "url": "https://gh/70", "state": "open",
+         "project_item_id": "PVTI_70"},
+    ])
+    _complete_run(db, p, [
+        {"number": 70, "title": "now closed", "url": "https://gh/70", "state": "closed",
+         "project_item_id": "PVTI_70"},
+    ])
+    with db.session() as s:
+        from reva.db.models import TicketIssueRun
+        for row in s.query(TicketIssueRun).filter_by(ticket_id=99).all():
+            row.github_project_url = url
+    # Newest occurrence says closed -> the older open duplicate must NOT resurface.
+    assert writers.get_board_items_for_issues(db, "org/repo", [70]) == []
