@@ -5,8 +5,7 @@
 `api/app/routes/v1/ticket_journeys.py` (+ query + schema), `tui/`
 (`internal/api/{types,client,iface,mock}.go`, `internal/ui/tickets.go`).
 No DB writes, no migrations, no Claude calls.
-**Status:** Design approved (brainstorm Q&A with Joseph, 2026-07-10 — TUI
-only, no docs-ui), pending implementation plan.
+**Status:** Approved (Joseph, 2026-07-10) — implemented; see plans/2026-07-10-ticket-journey-view.md.
 
 ## Problem
 
@@ -88,6 +87,10 @@ Tickets tab detail gains a **Journey** section: one line per event —
 fetch pattern (`internal/api/client.go` + `iface` + `mock` with demo events;
 `tickets_test.go` extended). Long journeys truncate to the most recent ~30
 events with a "(+N earlier)" head line.
+
+**As-built note (2026-07-10):** the journey pane rides the existing tickets
+detail view, which opens only for rows with a create-issues run —
+analysis-only tickets are served by the endpoint but have no TUI pane in v1.
 
 ## Error handling
 
