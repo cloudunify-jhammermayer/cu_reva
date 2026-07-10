@@ -320,3 +320,12 @@ def test_mismatch_verdict_never_changes_conclusion():
 def test_verdict_note_empty_renders_without_colon():
     out = format_check_run_output(_result(intent_check=[_iv(note="")]))["summary"]
     assert "#42 — matches\n" in out or out.rstrip().endswith("#42 — matches")
+
+
+def test_intent_note_markdown_injection_neutralized():
+    # A note with newlines + a fake heading + pipes must not break out of its
+    # bullet line via _md_cell (regression lock, no production change expected).
+    note = "line one\n### Fake heading\nline two | pipe"
+    out = format_check_run_output(_result(intent_check=[_iv(note=note)]))["summary"]
+    assert not any(line.strip().startswith("### Fake") for line in out.splitlines())
+    assert "\n### Fake heading\n" not in out

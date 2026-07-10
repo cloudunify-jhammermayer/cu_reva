@@ -1456,6 +1456,111 @@ def test_invalid_intent_entry_dropped_valid_kept():
     assert [v.verdict for v in result.intent_check] == ["matches"]
 
 
+# --- final-review fixes (F1-F3) -----------------------------------------------
+
+
+def test_intent_verdicts_deduped_keeps_first_by_issue_number():
+    # A misbehaving model could emit many duplicate entries for one issue; only
+    # the first-seen verdict per issue_number should survive (F1).
+    github = FakeGitHub(
+        pr_detail_body="Closes #5",
+        issues={5: {"title": "t", "body": "b"}},
+    )
+    runner = FakeRunner(response=_claude_response_with_intent([
+        {"issue_number": 5, "verdict": "matches", "note": "first"},
+        {"issue_number": 5, "verdict": "does_not_match", "note": "duplicate"},
+    ]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert len(result.intent_check) == 1
+    assert result.intent_check[0].note == "first"
+
+
+def test_malformed_intent_entry_records_ops_event_with_dropped_count():
+    github = FakeGitHub(
+        pr_detail_body="Closes #5",
+        issues={5: {"title": "t", "body": "b"}},
+    )
+    events: list[tuple] = []
+    runner = FakeRunner(response=_claude_response_with_intent([
+        {"issue_number": 5, "verdict": "matches", "note": "ok"},
+        {"issue_number": 5, "verdict": "not-a-verdict", "note": "bad enum"},
+    ]))
+    reviewer, *_ = _make_reviewer(
+        github=github, runner=runner,
+        ops_recorder=lambda *args: events.append(args),
+    )
+    result = reviewer.execute(_params())
+    assert result.status == "completed"
+    assert [v.verdict for v in result.intent_check] == ["matches"]
+    dropped_events = [e for e in events if e[:3] == ("intent_check", "warning", "verdicts_dropped")]
+    assert len(dropped_events) == 1
+    assert dropped_events[0][3]["dropped"] == 1
+
+
+def test_non_list_intent_check_records_ops_event():
+    # The non-list case (whole intent_check malformed) counts as one dropped entry.
+    github = FakeGitHub(
+        pr_detail_body="Closes #5",
+        issues={5: {"title": "t", "body": "b"}},
+    )
+    events: list[tuple] = []
+    runner = FakeRunner(response=_claude_response_with_intent("nonsense"))
+    reviewer, *_ = _make_reviewer(
+        github=github, runner=runner,
+        ops_recorder=lambda *args: events.append(args),
+    )
+    result = reviewer.execute(_params())
+    assert result.status == "completed"
+    dropped_events = [e for e in events if e[:3] == ("intent_check", "warning", "verdicts_dropped")]
+    assert len(dropped_events) == 1
+    assert dropped_events[0][3]["dropped"] == 1
+
+
+def test_well_formed_intent_check_no_drop_ops_event():
+    github = FakeGitHub(
+        pr_detail_body="Closes #5",
+        issues={5: {"title": "t", "body": "b"}},
+    )
+    events: list[tuple] = []
+    runner = FakeRunner(response=_claude_response_with_intent(
+        [{"issue_number": 5, "verdict": "matches", "note": "ok"}]
+    ))
+    reviewer, *_ = _make_reviewer(
+        github=github, runner=runner,
+        ops_recorder=lambda *args: events.append(args),
+    )
+    reviewer.execute(_params())
+    assert not any(e[:3] == ("intent_check", "warning", "verdicts_dropped") for e in events)
+
+
+def test_intent_verdict_for_404_ref_dropped_even_if_requested():
+    # #5 404s (model never saw it) and #7 resolves. A fabricated verdict for the
+    # 404'd ref must not pass the filter just because it was requested (F3).
+    github = FakeGitHub(
+        pr_detail_body="Closes #5 and fixes #7",
+        issues={7: {"title": "t", "body": "b"}},
+    )
+    runner = FakeRunner(response=_claude_response_with_intent([
+        {"issue_number": 5, "verdict": "matches", "note": "hallucinated"},
+        {"issue_number": 7, "verdict": "matches", "note": "ok"},
+    ]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert [v.issue_number for v in result.intent_check] == [7]
+
+
+def test_intent_verdicts_dropped_when_all_refs_404():
+    github = FakeGitHub(pr_detail_body="Closes #5", issues={})  # get_issue -> None
+    runner = FakeRunner(response=_claude_response_with_intent(
+        [{"issue_number": 5, "verdict": "matches", "note": "hallucinated"}]
+    ))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert "stated_intent" not in runner.last_params
+    assert result.intent_check is None
+
+
 class TicketGroundingRepos(FakeRepos):
     def __init__(self, *, raise_on_resolve: bool = False, **kwargs):
         super().__init__(**kwargs)
