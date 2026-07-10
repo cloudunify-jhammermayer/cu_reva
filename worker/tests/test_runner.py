@@ -7,7 +7,7 @@ touched here; that layer is covered by test_claude_client + test_reviewer.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -619,9 +619,7 @@ def test_review_declined_when_over_budget(ctx_and_fakes):
 
 
 def _set_queue(s, queue):
-    import dataclasses
-    from worker.runner import set_context
-    set_context(dataclasses.replace(s["ctx"], rq_queue=queue))
+    set_context(replace(s["ctx"], rq_queue=queue))
 
 
 def test_completed_review_enqueues_board_status(ctx_and_fakes):
@@ -639,16 +637,22 @@ def test_completed_review_enqueues_board_status(ctx_and_fakes):
 
 
 def test_declined_review_does_not_enqueue_board_status(ctx_and_fakes):
+    # A declined result flows through the full post path (issue comment +
+    # neutral check) and reaches the enqueue guard — its status check must
+    # keep non-completed reviews off the board-status queue.
     s = ctx_and_fakes
     queue = MagicMock()
-    # Reuse the file's existing over-budget decline setup, plus rq_queue.
-    import dataclasses
-    writers.record_claude_spend(s["db"], "review", 5.0)
-    set_context(dataclasses.replace(s["ctx"], daily_budget_usd=1.0, rq_queue=queue))
-    s["reviewer"].result = _completed_result()
+    _set_queue(s, queue)
+    s["reviewer"].result = ReviewResult(
+        status="declined",
+        summary="Diff too large.",
+        risk_level="low",
+        decline_reason="Diff too large (2000 lines > 1000 max).",
+    )
 
     run_review(_params(s))
 
+    assert len(s["github"].created_issue_comments) == 1  # decline WAS posted
     queue.enqueue.assert_not_called()
 
 
