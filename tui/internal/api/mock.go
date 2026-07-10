@@ -211,6 +211,10 @@ func (m *MockClient) ReviewDetail(id int) (*ReviewDetail, error) {
 					IsOdooSpecific: false, ThumbsUp: 0, ThumbsDown: 0,
 				},
 			},
+			IntentCheck: []IntentCheckItem{
+				{IssueNumber: 118, Verdict: "matches", Note: "valuation override implemented as requested"},
+				{IssueNumber: 119, Verdict: "partial", Note: "report export criterion not addressed"},
+			},
 		}, nil
 
 	case 98:

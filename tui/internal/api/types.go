@@ -103,6 +103,12 @@ type FindingDetail struct {
 	ThumbsDown     int      `json:"thumbs_down"`
 }
 
+type IntentCheckItem struct {
+	IssueNumber int    `json:"issue_number"`
+	Verdict     string `json:"verdict"`
+	Note        string `json:"note"`
+}
+
 type ReviewDetail struct {
 	ReviewSummary
 	Summary       *string         `json:"summary"`
@@ -112,6 +118,7 @@ type ReviewDetail struct {
 	InputTokens   *int            `json:"input_tokens"`
 	OutputTokens  *int            `json:"output_tokens"`
 	Findings      []FindingDetail `json:"findings"`
+	IntentCheck   []IntentCheckItem `json:"intent_check"`
 }
 
 type ReviewPage struct {

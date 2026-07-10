@@ -446,6 +446,19 @@ func (r Reviews) detailBody(w int) string {
 		b.WriteString(wordWrap(*d.Summary, w-4) + "\n")
 	}
 
+	// Requirements check (issue-conformance verdicts, advisory)
+	if len(d.IntentCheck) > 0 {
+		b.WriteString("\n")
+		b.WriteString(styleTitle.Render("Requirements check") + "\n")
+		for _, ic := range d.IntentCheck {
+			line := fmt.Sprintf("#%d %s", ic.IssueNumber, strings.ReplaceAll(ic.Verdict, "_", " "))
+			if ic.Note != "" {
+				line += " — " + ic.Note
+			}
+			b.WriteString(fmt.Sprintf("  %s %s\n", intentSymbol(ic.Verdict), truncate(line, w-6)))
+		}
+	}
+
 	// Error info
 	if d.ErrorMessage != nil {
 		b.WriteString("\n")

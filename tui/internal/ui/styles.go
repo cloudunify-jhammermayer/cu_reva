@@ -86,6 +86,19 @@ func statusSymbol(status string) string {
 	}
 }
 
+func intentSymbol(verdict string) string {
+	switch verdict {
+	case "matches":
+		return styleStatusCompleted.Render("+")
+	case "partial":
+		return styleStatusStale.Render("~")
+	case "does_not_match":
+		return styleStatusFailed.Render("x")
+	default: // unclear
+		return styleStatusOther.Render("?")
+	}
+}
+
 func riskStyle(risk string) lipgloss.Style {
 	switch risk {
 	case "low":
