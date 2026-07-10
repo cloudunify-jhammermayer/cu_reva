@@ -1,3 +1,11 @@
+## v2.8 — Issue-conformance verdicts
+
+- review_guidance.md: new `intent_check` output guidance — one conformance
+  verdict per linked GitHub issue (`matches`/`partial`/`does_not_match`/
+  `unclear`) when `stated_intent` is present on a full-PR-diff review; walks
+  `- [ ]` acceptance-criteria checklists; advisory only, omitted on delta
+  reviews.
+
 ## v2.7 — Odoo 19 silent-failure pitfalls + estimate calibration
 
 - odoo19.md: six production-verified silent-failure pitfalls from ast-odoo —

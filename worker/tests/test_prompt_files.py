@@ -44,7 +44,7 @@ def test_prompts_dir_exists():
 
 
 def test_get_version_returns_current_version(builder):
-    assert builder.get_version() == "v2.7"
+    assert builder.get_version() == "v2.8"
 
 
 def test_odoo_severity_rules_in_sync_with_odoo19_md():
@@ -113,6 +113,15 @@ def test_test_coverage_guidance_present():
 
 def test_stated_intent_guidance_present():
     assert "stated_intent" in (PROMPTS_DIR / "review_guidance.md").read_text()
+
+
+def test_intent_check_guidance_present():
+    guidance = (PROMPTS_DIR / "review_guidance.md").read_text()
+    assert "intent_check" in guidance
+    for verdict in ("matches", "partial", "does_not_match", "unclear"):
+        assert verdict in guidance, verdict
+    # Delta scoping must be stated: no verdicts on delta reviews.
+    assert "delta" in guidance
 
 
 def test_summary_contract_present():
