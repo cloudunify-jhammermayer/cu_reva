@@ -51,6 +51,7 @@ from reva.scanner_feed import (
 from reva.ticket_links import parse_closing_refs
 from reva.types import (
     Finding,
+    IntentIssueVerdict,
     JobParams,
     RepoConfig,
     ReviewResult,
@@ -203,6 +204,10 @@ class GitHubReader(Protocol):
     def get_issue(
         self, token: str, owner: str, repo: str, issue_number: int
     ) -> dict | None: ...
+
+    def get_closing_issue_numbers(
+        self, token: str, owner: str, repo: str, pr_number: int
+    ) -> list[int]: ...
 
     def list_code_scanning_alerts(
         self, token: str, owner: str, repo: str
@@ -578,10 +583,26 @@ class Reviewer:
         # duplicates (the fixed case is handled by _verify_and_resolve_findings).
         if prior_findings:
             skill_params["already_reported"] = _format_already_reported(prior_findings)
-        # Intent grounding: if the PR body references GitHub issues via a closing
-        # keyword (closes #N), fetch them so the model can check the diff against
-        # stated intent. GitHub-issue path only; advisory (ordinary findings).
+        # Intent grounding: issues the PR is linked to — closing keywords in the
+        # body (regex) unioned with GitHub's authoritative closingIssuesReferences
+        # (catches Development-sidebar links). Advisory (ordinary findings) plus,
+        # on full-PR-diff reviews, per-issue conformance verdicts (intent_check).
         intent_refs = _parse_issue_refs(skill_params["pr_body"])
+        if repo_config.intent_check:
+            try:
+                linked = self.github.get_closing_issue_numbers(
+                    token, owner, name, pr_number
+                )
+            except Exception as exc:  # noqa: BLE001 — degrade to body refs, visibly
+                log.warning("intent_link_resolution_failed", exc_info=True)
+                self._record_ops_event(
+                    "intent_check", "warning", "link_resolution_failed",
+                    {"repo": f"{owner}/{name}", "pr": pr_number, "error": str(exc)[:300]},
+                )
+                linked = []
+            for n in linked:
+                if n not in intent_refs and len(intent_refs) < _MAX_ISSUE_REFS:
+                    intent_refs.append(n)
         if intent_refs:
             intent = _build_stated_intent(self.github, token, owner, name, intent_refs)
             if intent:
@@ -724,7 +745,7 @@ class Reviewer:
 
         # 11. Validate and parse findings.
         try:
-            summary, findings = _parse_tool_use(response.tool_use_input)
+            summary, findings, intent_verdicts = _parse_tool_use(response.tool_use_input)
         except PermanentError as exc:
             # Surface the incurred cost so runner.record_review_failed ledgers it.
             exc.incurred_cost_usd = cli_cost  # type: ignore[attr-defined]
@@ -783,11 +804,22 @@ class Reviewer:
             logger.warning("prompt_version_unavailable", error=str(exc))
             prompt_version = None
 
+        intent_check = (
+            _filter_intent_check(
+                intent_verdicts,
+                intent_refs if "stated_intent" in skill_params else [],
+                delta_base_sha is not None,
+            )
+            if repo_config.intent_check
+            else None
+        )
+
         return ReviewResult(
             status="completed",
             summary=summary,
             risk_level=risk_level,
             findings=capped,
+            intent_check=intent_check,
             diff=diff,
             model=response.model or model,
             prompt_version=prompt_version,
@@ -1174,11 +1206,16 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatch(path, pattern) for pattern in patterns)
 
 
-def _parse_tool_use(tool_use_input: dict | None) -> tuple[str, list[Finding]]:
+def _parse_tool_use(
+    tool_use_input: dict | None,
+) -> tuple[str, list[Finding], list[IntentIssueVerdict]]:
     """Validate Claude's submit_review tool input strictly.
 
-    Returns (summary, findings). Raises PermanentError on any schema
-    violation per pr-review-requirements §5.
+    Returns (summary, findings, intent_verdicts). Raises PermanentError on any
+    summary/findings schema violation per pr-review-requirements §5. The
+    advisory intent_check field is parsed leniently instead: a malformed entry
+    is dropped with a warning, never a PermanentError — it must not fail a
+    paid review.
     """
     if not isinstance(tool_use_input, dict):
         raise PermanentError("Claude returned no tool_use input (expected an object)")
@@ -1192,7 +1229,32 @@ def _parse_tool_use(tool_use_input: dict | None) -> tuple[str, list[Finding]]:
         findings = [Finding.model_validate(f) for f in raw_findings]
     except ValidationError as exc:
         raise PermanentError(f"Claude finding failed schema validation: {exc}") from exc
-    return summary, findings
+    raw_intent = tool_use_input.get("intent_check")
+    intent_verdicts: list[IntentIssueVerdict] = []
+    if isinstance(raw_intent, list):
+        for item in raw_intent:
+            try:
+                intent_verdicts.append(IntentIssueVerdict.model_validate(item))
+            except ValidationError:
+                logger.warning("intent_verdict_invalid_dropped", item=str(item)[:200])
+    elif raw_intent is not None:
+        logger.warning("intent_check_not_a_list_dropped")
+    return summary, findings, intent_verdicts
+
+
+def _filter_intent_check(
+    verdicts: list[IntentIssueVerdict],
+    attached_refs: list[int],
+    has_delta: bool,
+) -> list[IntentIssueVerdict] | None:
+    """Keep verdicts only when they can be trusted: a stated_intent param was
+    attached (attached_refs non-empty), the model saw the full PR diff (not a
+    delta — a delta-scoped coverage verdict would be false precision), and the
+    verdict cites a referenced issue. None = nothing to render or persist."""
+    if not attached_refs or has_delta:
+        return None
+    kept = [v for v in verdicts if v.issue_number in attached_refs]
+    return kept or None
 
 
 def _ground_findings(findings: list[Finding], repo_path: str) -> list[Finding]:

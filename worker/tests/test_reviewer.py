@@ -22,7 +22,7 @@ from worker.reviewer import (
     _parse_issue_refs,
     _recompute_risk_level,
 )
-from reva.types import ClaudeResponse, Finding, JobParams
+from reva.types import ClaudeResponse, Finding, IntentIssueVerdict, JobParams
 
 
 # --- Fakes --------------------------------------------------------------------
@@ -58,6 +58,9 @@ class FakeGitHub:
     compare_status_calls: int = 0
     pr_detail_body: str = "PR body from GitHub"
     issues: dict[int, dict | None] = field(default_factory=dict)
+    closing_issue_numbers: list[int] = field(default_factory=list)
+    closing_calls: int = 0
+    raise_on_closing: bool = False
     code_scanning_alerts: list[dict] | None = field(default_factory=list)
     dependabot_alerts: list[dict] | None = field(default_factory=list)
     secret_scanning_alerts: list[dict] | None = field(default_factory=list)
@@ -71,6 +74,12 @@ class FakeGitHub:
 
     def get_issue(self, token, owner, repo, issue_number) -> dict | None:
         return self.issues.get(issue_number)
+
+    def get_closing_issue_numbers(self, token, owner, repo, pr_number) -> list[int]:
+        self.closing_calls += 1
+        if self.raise_on_closing:
+            raise RuntimeError("graphql down")
+        return self.closing_issue_numbers
 
     def list_code_scanning_alerts(self, token, owner, repo) -> list[dict] | None:
         return self.code_scanning_alerts
@@ -1280,6 +1289,171 @@ def test_stated_intent_passed_on_delta_review():
     reviewer.execute(params)
     assert runner.last_skill == "reva-delta-review"
     assert "stated_intent" in runner.last_params
+
+
+def _claude_response_with_intent(intent_check: object) -> ClaudeResponse:
+    return ClaudeResponse(
+        model="claude-sonnet-4-6",
+        stop_reason="tool_use",
+        tool_use_input={
+            "summary": "Looks fine overall.",
+            "risk_level": "low",
+            "findings": [],
+            "intent_check": intent_check,
+        },
+        input_tokens=100,
+        output_tokens=50,
+        cache_read_tokens=2000,
+        cache_creation_tokens=300,
+    )
+
+
+def test_sidebar_linked_issue_reaches_stated_intent():
+    # No closing keyword in the body — only the GraphQL sidebar link.
+    github = FakeGitHub(
+        pr_detail_body="Implements the export flow.",
+        closing_issue_numbers=[7],
+        issues={7: {"title": "Sidebar-linked issue", "body": "requirement text"}},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    reviewer.execute(_params())
+    assert github.closing_calls == 1
+    assert "Sidebar-linked issue" in runner.last_params["stated_intent"]
+
+
+def test_intent_refs_union_dedups_and_caps_at_three():
+    github = FakeGitHub(
+        pr_detail_body="Closes #1 and fixes #2",
+        closing_issue_numbers=[2, 3, 4],  # 2 duplicates a body ref; 4 exceeds the cap
+        issues={n: {"title": f"issue-{n}", "body": "b"} for n in (1, 2, 3, 4)},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    reviewer.execute(_params())
+    val = runner.last_params["stated_intent"]
+    assert "issue-1" in val and "issue-2" in val and "issue-3" in val
+    assert "issue-4" not in val
+
+
+def test_graphql_failure_degrades_to_body_refs_with_ops_event():
+    github = FakeGitHub(
+        pr_detail_body="Closes #5",
+        issues={5: {"title": "Body-linked", "body": "b"}},
+        raise_on_closing=True,
+    )
+    events: list[tuple] = []
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(
+        github=github, runner=runner,
+        ops_recorder=lambda *args: events.append(args),
+    )
+    result = reviewer.execute(_params())
+    assert result.status == "completed"
+    assert "Body-linked" in runner.last_params["stated_intent"]
+    assert any(e[:3] == ("intent_check", "warning", "link_resolution_failed") for e in events)
+
+
+def test_intent_check_false_skips_graphql_and_drops_verdicts():
+    github = FakeGitHub(
+        pr_detail_body="Closes #5",
+        issues={5: {"title": "t", "body": "b"}},
+        closing_issue_numbers=[5],
+        file_contents={".claude-review.yml": "intent_check: false\n"},
+    )
+    runner = FakeRunner(response=_claude_response_with_intent(
+        [{"issue_number": 5, "verdict": "matches", "note": "ok"}]
+    ))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert github.closing_calls == 0
+    assert result.intent_check is None
+    # Context injection is unaffected by the kill switch.
+    assert "stated_intent" in runner.last_params
+
+
+def test_intent_verdicts_pass_through_to_result():
+    github = FakeGitHub(
+        pr_detail_body="Closes #5",
+        issues={5: {"title": "t", "body": "b"}},
+    )
+    runner = FakeRunner(response=_claude_response_with_intent(
+        [{"issue_number": 5, "verdict": "partial", "note": "cron part missing"}]
+    ))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert result.intent_check == [
+        IntentIssueVerdict(issue_number=5, verdict="partial", note="cron part missing")
+    ]
+
+
+def test_intent_verdicts_dropped_on_delta_review():
+    github = FakeGitHub(
+        head_sha="newsha", compare_diff=_DEFAULT_DIFF, compare_status="ahead",
+        pr_detail_body="Closes #5",
+        issues={5: {"title": "t", "body": "b"}},
+    )
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 1, "head_sha": "prevsha"})
+    runner = FakeRunner(response=_claude_response_with_intent(
+        [{"issue_number": 5, "verdict": "matches", "note": "ok"}]
+    ))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(repository_id=1, pull_request_id=1, head_sha="newsha",
+                       installation_id=99, trigger_event="synchronize")
+    result = reviewer.execute(params)
+    assert runner.last_skill == "reva-delta-review"
+    assert result.intent_check is None
+
+
+def test_intent_verdicts_dropped_without_stated_intent():
+    github = FakeGitHub(pr_detail_body="Just a refactor, no issue.")
+    runner = FakeRunner(response=_claude_response_with_intent(
+        [{"issue_number": 99, "verdict": "matches", "note": "hallucinated"}]
+    ))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert result.intent_check is None
+
+
+def test_intent_verdict_for_unreferenced_issue_dropped():
+    github = FakeGitHub(
+        pr_detail_body="Closes #5",
+        issues={5: {"title": "t", "body": "b"}},
+    )
+    runner = FakeRunner(response=_claude_response_with_intent([
+        {"issue_number": 5, "verdict": "matches", "note": "ok"},
+        {"issue_number": 99, "verdict": "matches", "note": "not referenced"},
+    ]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert [v.issue_number for v in result.intent_check] == [5]
+
+
+def test_malformed_intent_check_never_fails_the_review():
+    github = FakeGitHub(
+        pr_detail_body="Closes #5",
+        issues={5: {"title": "t", "body": "b"}},
+    )
+    # Not a list at all — the paid review must still complete.
+    runner = FakeRunner(response=_claude_response_with_intent("nonsense"))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert result.status == "completed"
+    assert result.intent_check is None
+
+
+def test_invalid_intent_entry_dropped_valid_kept():
+    github = FakeGitHub(
+        pr_detail_body="Closes #5",
+        issues={5: {"title": "t", "body": "b"}},
+    )
+    runner = FakeRunner(response=_claude_response_with_intent([
+        {"issue_number": 5, "verdict": "matches", "note": "ok"},
+        {"issue_number": 5, "verdict": "not-a-verdict", "note": "bad enum"},
+    ]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params())
+    assert [v.verdict for v in result.intent_check] == ["matches"]
 
 
 class TicketGroundingRepos(FakeRepos):
