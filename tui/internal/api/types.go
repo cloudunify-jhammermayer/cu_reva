@@ -190,7 +190,8 @@ type TicketAnalysisPage struct {
 
 // TicketIssueRef is one planned/created GitHub issue of a create-issues run.
 // Number/URL are nil until the issue exists on GitHub; State ("open"/"closed")
-// is synced from GitHub issue webhooks.
+// is synced from GitHub issue webhooks. EstimateHours is nil until/unless the
+// issue carries an estimate.
 type TicketIssueRef struct {
 	Number        *int     `json:"number"`
 	Title         string   `json:"title"`

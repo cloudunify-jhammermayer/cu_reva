@@ -28,6 +28,11 @@ opening GitHub.
 - `_project_items(items, _ISSUE_KEYS)` filters keys and **preserves
   optional-key omission** — items lacking a key simply omit it, so pre-rollout
   runs degrade cleanly.
+- In production, snapshots flow through the union builder, which materializes
+  `estimate_hours: None` for pre-rollout items — so on the wire this is an
+  explicit `null`, not an omitted key; the omission semantics above apply
+  only to the `_project_items` mechanism itself, and null vs. omitted are
+  equivalent for the addon's `.get()` reads.
 - The runner already sums child estimates for the epic body annotation
   (`total = sum(i.get("estimate_hours") or 0 ...)`).
 - Precedent: `plan_date`/`complete_date` rode into the same snapshots as

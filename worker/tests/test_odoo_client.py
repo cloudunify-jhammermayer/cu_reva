@@ -351,7 +351,7 @@ def test_issue_state_posts_snapshot_to_sibling_path(monkeypatch):
 
 
 def test_issue_refs_carry_dates_and_strip_internal_keys(monkeypatch):
-    """Every ref sent to Odoo carries exactly the six documented keys; the
+    """Every ref sent to Odoo carries exactly the seven documented keys; the
     internal node_id/project_item_id never leak (spec decision 6)."""
     captured: dict = {}
 

@@ -608,6 +608,7 @@ def test_reconcile_existing_issues_skips_planning_and_creation(ctx_and_fakes):
     assert cb["issues"] == [{**s["github"].existing_issues[0], "state": "open",
                              "plan_date": None, "complete_date": None,
                              "estimate_hours": None}]
+    assert cb["total_estimate_hours"] is None
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
     assert row["status"] == "completed"
 

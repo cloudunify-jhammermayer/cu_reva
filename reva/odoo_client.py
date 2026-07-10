@@ -178,13 +178,13 @@ class OdooCallbackClient:
         """POST the created GitHub issues (or a failure) to the Odoo callback.
 
         Contract 2 of the github-issues handoff: status is exactly "created"
-        or "failed"; issues items are {"number", "title", "url", "state"} and
-        are the UNION of issues across ALL of the record's runs (deduped by
-        number), so Odoo's replace-handler keeps issues earlier requests
-        created. request_id must echo the id REVA returned from POST
-        /api/v1/create-issues. Odoo responds 409 (permanent) when the record is
-        no longer pending or the request_id is stale — the expected outcome of
-        its 10s-timeout race.
+        or "failed"; issues items carry the documented issue-ref keys
+        (_ISSUE_KEYS) and are the UNION of issues across ALL of the
+        record's runs (deduped by number), so Odoo's replace-handler keeps
+        issues earlier requests created. request_id must echo the id REVA
+        returned from POST /api/v1/create-issues. Odoo responds 409
+        (permanent) when the record is no longer pending or the request_id
+        is stale — the expected outcome of its 10s-timeout race.
         """
         payload = IssuesCreatedPayload(
             ticket_id=ticket_id,

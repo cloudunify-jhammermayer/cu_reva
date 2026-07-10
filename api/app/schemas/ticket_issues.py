@@ -92,7 +92,8 @@ class TicketIssueRef(BaseModel):
 
 class TicketIssueRunSummary(BaseModel):
     """List view of a run (TUI Tickets tab). Strips plan bodies (customer
-    text) and the raw inputs — only the {number, title, url} refs go out."""
+    text) and the raw inputs — only the {number, title, url, state,
+    estimate_hours} refs go out."""
 
     id: int
     ticket_id: int
