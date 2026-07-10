@@ -28,4 +28,5 @@ type ClientIface interface {
 	RotateOdooInstanceKey(id int) (*OdooInstanceCreated, error)
 	SetOdooInstanceActive(id int, active bool) error
 	DeleteOdooInstance(id int) error
+	TicketJourney(odooInstanceID *int, modelName string, ticketID int) (*TicketJourney, error)
 }

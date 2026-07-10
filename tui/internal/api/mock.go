@@ -526,7 +526,7 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 
 	items := []TicketAnalysisSummary{
 		{
-			ID: 3, TicketID: 456, ModelName: "helpdesk.ticket", FieldName: "description",
+			ID: 3, OdooInstanceID: intPtr(1), TicketID: 456, ModelName: "helpdesk.ticket", FieldName: "description",
 			Status: "completed", Model: strPtr("claude-sonnet-4-6"),
 			InputTokens: intPtr(1840), OutputTokens: intPtr(712),
 			EstimatedCostUSD: f64Ptr(0.0032), CreatedAt: now.Add(-2 * time.Minute), CompletedAt: &t1,
@@ -534,14 +534,14 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 			EstimateHoursMin: f64Ptr(12), EstimateHoursMax: f64Ptr(20),
 		},
 		{
-			ID: 2, TicketID: 123, ModelName: "project.task", FieldName: "description",
+			ID: 2, OdooInstanceID: intPtr(1), TicketID: 123, ModelName: "project.task", FieldName: "description",
 			Status: "failed", Model: nil,
 			InputTokens: nil, OutputTokens: nil,
 			EstimatedCostUSD: nil, CreatedAt: now.Add(-10 * time.Minute), CompletedAt: nil,
 			ErrorMessage: strPtr("Odoo callback timed out: timed out"),
 		},
 		{
-			ID: 1, TicketID: 99, ModelName: "helpdesk.ticket", FieldName: "description",
+			ID: 1, OdooInstanceID: intPtr(1), TicketID: 99, ModelName: "helpdesk.ticket", FieldName: "description",
 			Status: "pending", Model: nil,
 			InputTokens: nil, OutputTokens: nil,
 			EstimatedCostUSD: nil, CreatedAt: now.Add(-30 * time.Second), CompletedAt: nil,
@@ -550,7 +550,7 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 			// Analysis-only ticket (no create-issues run) — groups under
 			// "(no repo yet)" in the Tickets tab. Completed but the Odoo callback
 			// failed, so it reads "completed ⚠ not in Odoo".
-			ID: 4, TicketID: 777, ModelName: "helpdesk.ticket", FieldName: "description",
+			ID: 4, OdooInstanceID: intPtr(2), TicketID: 777, ModelName: "helpdesk.ticket", FieldName: "description",
 			Status: "completed", Model: strPtr("claude-sonnet-4-6"),
 			InputTokens: intPtr(920), OutputTokens: intPtr(204),
 			EstimatedCostUSD: f64Ptr(0.0011), CreatedAt: now.Add(-45 * time.Minute),
@@ -575,7 +575,7 @@ func (m *MockClient) TicketIssueRuns(limit int) (*TicketIssueRunPage, error) {
 
 	items := []TicketIssueRunSummary{
 		{
-			ID: 3, TicketID: 456, ModelName: "helpdesk.ticket",
+			ID: 3, OdooInstanceID: intPtr(1), TicketID: 456, ModelName: "helpdesk.ticket",
 			GithubURL: "https://github.com/acme/widgets", Status: "completed",
 			GithubUsername:   strPtr("alice"),
 			GithubProjectURL: strPtr("https://github.com/orgs/acme/projects/5"),
@@ -599,7 +599,7 @@ func (m *MockClient) TicketIssueRuns(limit int) (*TicketIssueRunPage, error) {
 			CreatedAt:        now.Add(-4 * time.Minute), CompletedAt: &t1,
 		},
 		{
-			ID: 2, TicketID: 123, ModelName: "project.task",
+			ID: 2, OdooInstanceID: intPtr(1), TicketID: 123, ModelName: "project.task",
 			GithubURL: "https://github.com/acme/odoo-modules", Status: "failed",
 			Issues: []TicketIssueRef{
 				{Number: intPtr(40), Title: "Create export wizard",
@@ -610,7 +610,7 @@ func (m *MockClient) TicketIssueRuns(limit int) (*TicketIssueRunPage, error) {
 			CreatedAt:    now.Add(-12 * time.Minute),
 		},
 		{
-			ID: 1, TicketID: 99, ModelName: "helpdesk.ticket",
+			ID: 1, OdooInstanceID: intPtr(2), TicketID: 99, ModelName: "helpdesk.ticket",
 			GithubURL: "https://github.com/acme/api", Status: "pending",
 			CreatedAt: now.Add(-20 * time.Second),
 		},
@@ -736,6 +736,53 @@ func (m *MockClient) RotateOdooInstanceKey(id int) (*OdooInstanceCreated, error)
 func (m *MockClient) SetOdooInstanceActive(id int, active bool) error { return nil }
 
 func (m *MockClient) DeleteOdooInstance(id int) error { return nil }
+
+func (m *MockClient) TicketJourney(odooInstanceID *int, modelName string, ticketID int) (*TicketJourney, error) {
+	now := time.Now()
+	timePtr := func(t time.Time) *time.Time { return &t }
+
+	// Return a plausible 6-event journey
+	return &TicketJourney{
+		Ticket: JourneyTicket{
+			OdooInstanceID: odooInstanceID,
+			ModelName:      modelName,
+			TicketID:       ticketID,
+			Ready:          true,
+		},
+		Events: []JourneyEvent{
+			{
+				TS:      timePtr(now.Add(-4 * time.Hour)),
+				Kind:    "analysis_requested",
+				Summary: "Ticket analysis requested for estimate",
+			},
+			{
+				TS:      timePtr(now.Add(-3*time.Hour - 45*time.Minute)),
+				Kind:    "analysis_completed",
+				Summary: "Analysis completed: estimated 12-20 hours",
+			},
+			{
+				TS:      timePtr(now.Add(-3*time.Hour - 30*time.Minute)),
+				Kind:    "issues_created",
+				Summary: "2 GitHub issues created from analysis",
+			},
+			{
+				TS:      timePtr(now.Add(-2*time.Hour - 15*time.Minute)),
+				Kind:    "review_completed",
+				Summary: "GitHub review posted on linked PR",
+			},
+			{
+				TS:      timePtr(now.Add(-30 * time.Minute)),
+				Kind:    "issue_closed",
+				Summary: "Main issue closed; estimate ready for deployment",
+			},
+			{
+				TS:      timePtr(now.Add(-5 * time.Minute)),
+				Kind:    "ready",
+				Summary: "Ticket marked ready; can proceed to implementation",
+			},
+		},
+	}, nil
+}
 
 func min(a, b int) int {
 	if a < b {

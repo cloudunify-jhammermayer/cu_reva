@@ -1,6 +1,61 @@
 package api
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
+
+type JourneyEvent struct {
+	TS      *time.Time `json:"ts"`
+	Kind    string     `json:"kind"`
+	Summary string     `json:"summary"`
+}
+
+// UnmarshalJSON handles both naive (2026-07-10T12:00:00) and offset-aware
+// (2026-07-10T12:00:00+00:00) RFC3339 timestamps. Naive timestamps are
+// treated as UTC.
+func (je *JourneyEvent) UnmarshalJSON(b []byte) error {
+	type alias JourneyEvent
+	raw := struct {
+		TS *string `json:"ts"`
+		*alias
+	}{
+		alias: (*alias)(je),
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	if raw.TS == nil {
+		je.TS = nil
+		return nil
+	}
+	s := *raw.TS
+	// Try naive format first (2026-07-10T12:00:00), treating as UTC
+	t, err := time.Parse("2006-01-02T15:04:05", s)
+	if err == nil {
+		je.TS = &t
+		return nil
+	}
+	// Fall back to RFC3339 (handles offset-aware like 2026-07-10T12:00:00+00:00)
+	t, err = time.Parse(time.RFC3339, s)
+	if err != nil {
+		return err
+	}
+	je.TS = &t
+	return nil
+}
+
+type JourneyTicket struct {
+	OdooInstanceID *int   `json:"odoo_instance_id"`
+	ModelName      string `json:"model_name"`
+	TicketID       int    `json:"ticket_id"`
+	Ready          bool   `json:"ready"`
+}
+
+type TicketJourney struct {
+	Ticket JourneyTicket  `json:"ticket"`
+	Events []JourneyEvent `json:"events"`
+}
 
 type FindingSummary struct {
 	ID           int      `json:"id"`
@@ -164,6 +219,7 @@ type PendingPage struct {
 
 type TicketAnalysisSummary struct {
 	ID               int        `json:"id"`
+	OdooInstanceID   *int       `json:"odoo_instance_id"`
 	TicketID         int        `json:"ticket_id"`
 	ModelName        string     `json:"model_name"`
 	FieldName        string     `json:"field_name"`
@@ -202,6 +258,7 @@ type TicketIssueRef struct {
 
 type TicketIssueRunSummary struct {
 	ID               int              `json:"id"`
+	OdooInstanceID   *int             `json:"odoo_instance_id"`
 	TicketID         int              `json:"ticket_id"`
 	ModelName        string           `json:"model_name"`
 	GithubURL        string           `json:"github_url"`

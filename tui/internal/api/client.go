@@ -287,3 +287,13 @@ func (c *Client) SetOdooInstanceActive(id int, active bool) error {
 		map[string]bool{"active": active}, nil, http.StatusOK,
 	)
 }
+
+func (c *Client) TicketJourney(odooInstanceID *int, modelName string, ticketID int) (*TicketJourney, error) {
+	path := fmt.Sprintf("/ticket-journeys?ticket_id=%d", ticketID)
+	if odooInstanceID != nil {
+		path += fmt.Sprintf("&odoo_instance_id=%d", *odooInstanceID)
+	}
+	path += "&model_name=" + url.QueryEscape(modelName)
+	var j TicketJourney
+	return &j, c.get(path, &j)
+}
