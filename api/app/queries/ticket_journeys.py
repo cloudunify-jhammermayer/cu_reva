@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from reva.db import writers
 from reva.db.engine import Database
@@ -69,10 +69,10 @@ def get_ticket_journey(
                 events.append({"ts": a.completed_at or a.created_at, "kind": "analysis_failed",
                                "summary": f"Analysis failed: {(a.error_message or 'unknown error')[:120]}"})
 
-        repos: set[str] = set()
+        repos: set[str] = set()  # lowercased, matching how the columns are stored
         for r in runs:
             if r.repo_full_name:
-                repos.add(r.repo_full_name)
+                repos.add(r.repo_full_name.lower())
             if r.status == "completed" and r.issues:
                 n = len(r.issues)
                 total = sum(i.get("estimate_hours") or 0 for i in r.issues)
@@ -100,38 +100,62 @@ def get_ticket_journey(
                 _instance(ChangeNote.odoo_instance_id),
             )
         ).scalars().all()
-        note_pairs = set()
+        note_pairs: set[tuple[str, int]] = set()  # lowercased repo names
         for cn in notes:
-            note_pairs.add((cn.repo_full_name, cn.pr_number))
+            note_pairs.add((cn.repo_full_name.lower(), cn.pr_number))
             events.append({"ts": cn.completed_at or cn.created_at, "kind": "change_note_posted",
                            "summary": f"{cn.repo_full_name}#{cn.pr_number} → internal note ({cn.status})"})
 
+        # Review linkage. repos/note_pairs carry LOWERCASED names (that's how
+        # ticket_issue_runs.repo_full_name / change_notes.repo_full_name are
+        # stored) while Repository.full_name preserves GitHub's original case —
+        # so match on lower(full_name) but keep the original case for display.
         seen_reviews: set[int] = set()
-        if repos or note_pairs:
+        _review_select = (
+            select(ReviewRun, Repository.full_name, PullRequest.pr_number)
+            .join(Repository, ReviewRun.repository_id == Repository.id)
+            .join(PullRequest, ReviewRun.pull_request_id == PullRequest.id)
+            .where(ReviewRun.status == "completed")
+        )
+
+        def _emit_review(rr: ReviewRun, repo_name: str, pr_number: int) -> None:
+            if rr.id in seen_reviews:
+                return
+            seen_reviews.add(rr.id)
+            events.append({
+                "ts": rr.completed_at or rr.created_at, "kind": "review_completed",
+                "summary": f"{repo_name}#{pr_number} {rr.review_mode} review — "
+                           f"risk {rr.risk_level or '?'}, {rr.finding_count} finding"
+                           f"{'s' if rr.finding_count != 1 else ''}",
+            })
+
+        # (a) Change-note-linked reviews. The per-column IN-lists admit cross
+        # products (repo A × PR-number-of-repo-B), so re-check the exact pair.
+        if note_pairs:
             review_rows = s.execute(
-                select(ReviewRun, Repository.full_name, PullRequest.pr_number)
-                .join(Repository, ReviewRun.repository_id == Repository.id)
-                .join(PullRequest, ReviewRun.pull_request_id == PullRequest.id)
-                .where(
-                    Repository.full_name.in_(repos | {p[0] for p in note_pairs}),
-                    ReviewRun.status == "completed",
+                _review_select.where(
+                    func.lower(Repository.full_name).in_({p[0] for p in note_pairs}),
+                    PullRequest.pr_number.in_({p[1] for p in note_pairs}),
                 )
             ).all()
             for rr, repo_name, pr_number in review_rows:
-                linked = (repo_name, pr_number) in note_pairs
-                if not linked and rr.intent_check:
-                    linked = any(
-                        v.get("issue_number") in union_numbers for v in rr.intent_check
-                    )
-                if not linked or rr.id in seen_reviews:
-                    continue
-                seen_reviews.add(rr.id)
-                events.append({
-                    "ts": rr.completed_at or rr.created_at, "kind": "review_completed",
-                    "summary": f"{repo_name}#{pr_number} {rr.review_mode} review — "
-                               f"risk {rr.risk_level or '?'}, {rr.finding_count} finding"
-                               f"{'s' if rr.finding_count != 1 else ''}",
-                })
+                if (repo_name.lower(), pr_number) in note_pairs:
+                    _emit_review(rr, repo_name, pr_number)
+
+        # (b) Intent-check candidates: JSON matching stays in Python (portable
+        # ORM — SQLite tests), the SQL side only narrows to non-null intent_check.
+        if repos and union_numbers:
+            review_rows = s.execute(
+                _review_select.where(
+                    func.lower(Repository.full_name).in_(repos),
+                    ReviewRun.intent_check.is_not(None),
+                )
+            ).all()
+            for rr, repo_name, pr_number in review_rows:
+                if any(
+                    v.get("issue_number") in union_numbers for v in rr.intent_check or []
+                ):
+                    _emit_review(rr, repo_name, pr_number)
 
     ready = bool(union) and all(i.get("state") == "closed" for i in union)
     if ready:

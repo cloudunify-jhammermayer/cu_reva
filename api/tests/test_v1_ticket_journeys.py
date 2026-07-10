@@ -82,9 +82,11 @@ def _add_issue_run(
         return row.id
 
 
-def _seed_repo_and_pr(db, *, repo_num=1001, pr_num=42) -> tuple[int, int]:
+def _seed_repo_and_pr(
+    db, *, repo_num=1001, pr_num=42, owner="acme", name="widgets"
+) -> tuple[int, int]:
     repo_id = writers.upsert_repository(
-        db, github_repository_id=repo_num, owner="acme", name="widgets",
+        db, github_repository_id=repo_num, owner=owner, name=name,
         default_branch="main", installation_id=99,
     )
     pr_id = writers.upsert_pull_request(
@@ -203,6 +205,52 @@ def test_journey_change_note_links_review(client_and_db):
     assert "change_note_posted" in kinds
     review_event = next(e for e in data["events"] if e["kind"] == "review_completed")
     assert "acme/widgets#88" in review_event["summary"]
+
+
+def test_journey_change_note_links_review_mixed_case_repo(client_and_db):
+    """repos/note_pairs store LOWERCASED repo names while Repository.full_name
+    preserves GitHub's original case — linkage must match case-insensitively,
+    and the review summary keeps the original-case name for display."""
+    client, db = client_and_db
+    _add_issue_run(db, odoo_instance_id=1, ticket_id=4724, repo_full_name="acme/widgets")
+    note_id, _ = writers.get_or_create_change_note(
+        db, repo_full_name="acme/widgets", pr_number=88, ticket_id=4724,
+        odoo_instance_id=1, model_name="helpdesk.ticket",
+    )
+    writers.record_change_note_completed(db, note_id, "<p>note</p>", 0.01)
+
+    repo_id, pr_id = _seed_repo_and_pr(
+        db, repo_num=2011, pr_num=88, owner="Acme", name="Widgets"
+    )
+    _seed_review(db, repo_id=repo_id, pr_id=pr_id)
+
+    resp = client.get("/api/v1/ticket-journeys?model_name=helpdesk.ticket&ticket_id=4724&odoo_instance_id=1")
+    assert resp.status_code == 200
+    data = resp.json()
+    kinds = [e["kind"] for e in data["events"]]
+    assert "review_completed" in kinds
+    review_event = next(e for e in data["events"] if e["kind"] == "review_completed")
+    assert "Acme/Widgets#88" in review_event["summary"]
+
+
+def test_journey_intent_check_links_review_mixed_case_repo(client_and_db):
+    client, db = client_and_db
+    _add_issue_run(
+        db, odoo_instance_id=1, ticket_id=4725, repo_full_name="acme/widgets",
+        status="completed",
+        issues=[{"number": 42, "title": "Issue #42",
+                 "url": "https://github.com/acme/widgets/issues/42", "state": "open"}],
+    )
+    repo_id, pr_id = _seed_repo_and_pr(
+        db, repo_num=2012, pr_num=90, owner="Acme", name="Widgets"
+    )
+    _seed_review(db, repo_id=repo_id, pr_id=pr_id,
+                 intent_check=[{"issue_number": 42, "verdict": "matches", "note": "ok"}])
+
+    resp = client.get("/api/v1/ticket-journeys?model_name=helpdesk.ticket&ticket_id=4725&odoo_instance_id=1")
+    assert resp.status_code == 200
+    kinds = [e["kind"] for e in resp.json()["events"]]
+    assert kinds.count("review_completed") == 1
 
 
 def test_journey_intent_check_links_review(client_and_db):
