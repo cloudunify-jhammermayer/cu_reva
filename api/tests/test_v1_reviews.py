@@ -13,7 +13,7 @@ from app.main import app
 from app.settings import Settings
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.db.models import ReviewFinding, ReviewRun
-from reva.types import Finding, JobParams, ReviewResult
+from reva.types import Finding, IntentIssueVerdict, JobParams, ReviewResult
 
 
 # --- fixture ------------------------------------------------------------------
@@ -282,3 +282,33 @@ def test_reviews_negative_pagination_is_floored(client_and_db, monkeypatch):
     client.get("/api/v1/reviews?offset=-5&limit=0")
     assert captured["offset"] == 0
     assert captured["limit"] == 1
+
+
+def test_review_detail_includes_intent_check(client_and_db):
+    client, db = client_and_db
+    repo_id, pr_id = _seed_repo_and_pr(db)
+    params = JobParams(
+        repository_id=repo_id, pull_request_id=pr_id,
+        head_sha="deadbeef", installation_id=99,
+        review_mode="diff", trigger_event="opened",
+    )
+    rr_id = writers.record_review_started(db, params)
+    result = ReviewResult(
+        status="completed", summary="ok", risk_level="low", findings=[],
+        intent_check=[IntentIssueVerdict(issue_number=7, verdict="partial", note="cron missing")],
+    )
+    writers.record_review_completed(db, params, result)
+    resp = client.get(f"/api/v1/reviews/{rr_id}")
+    assert resp.status_code == 200
+    assert resp.json()["intent_check"] == [
+        {"issue_number": 7, "verdict": "partial", "note": "cron missing"}
+    ]
+
+
+def test_review_detail_intent_check_null_when_absent(client_and_db):
+    client, db = client_and_db
+    repo_id, pr_id = _seed_repo_and_pr(db)
+    rr_id = _seed_review(db, repo_id=repo_id, pr_id=pr_id)
+    resp = client.get(f"/api/v1/reviews/{rr_id}")
+    assert resp.status_code == 200
+    assert resp.json()["intent_check"] is None

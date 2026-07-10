@@ -31,6 +31,12 @@ class FindingDetail(FindingSummary):
     thumbs_down: int
 
 
+class IntentCheckItem(BaseModel):
+    issue_number: int
+    verdict: str
+    note: str = ""
+
+
 class ReviewSummary(BaseModel):
     model_config = {"from_attributes": True}
 
@@ -58,6 +64,7 @@ class ReviewDetail(ReviewSummary):
     input_tokens: int | None
     output_tokens: int | None
     findings: list[FindingDetail]
+    intent_check: list[IntentCheckItem] | None = None
 
 
 class ReviewPage(BaseModel):

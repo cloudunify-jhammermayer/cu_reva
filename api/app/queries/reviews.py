@@ -158,6 +158,7 @@ def get_review_detail(db: Database, review_run_id: int) -> dict | None:
         "input_tokens": rr.input_tokens,
         "output_tokens": rr.output_tokens,
         "findings": findings,
+        "intent_check": rr.intent_check,
     }
 
 
