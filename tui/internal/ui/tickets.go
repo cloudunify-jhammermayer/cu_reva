@@ -50,6 +50,10 @@ type Tickets struct {
 	detailPlanDate  string // planned date (YYYY-MM-DD) the run carried, if any
 	detailCursor    int
 	detailOffset    int
+	// Journey timeline for the ticket behind the open detail pane (read-only).
+	journey    []api.JourneyEvent
+	journeyErr string
+	detailKey  string // issueRunKey of the ticket the detail/journey is for — staleness guard
 }
 
 func newTickets(client api.ClientIface, odooURL string) Tickets {
@@ -244,6 +248,18 @@ func (t Tickets) requeueCmd(id int) tea.Cmd {
 	}
 }
 
+// loadJourneyCmd fetches the ticket's cross-system timeline for the drill-down
+// detail pane. key guards ticketJourneyLoadedMsg against a response for a
+// ticket the user has since navigated away from (mirrors reviews.go's
+// reviewDetailLoadedMsg staleness guard).
+func (t Tickets) loadJourneyCmd(odooInstanceID *int, modelName string, ticketID int) tea.Cmd {
+	key := issueRunKey(modelName, ticketID)
+	return func() tea.Msg {
+		data, err := t.client.TicketJourney(odooInstanceID, modelName, ticketID)
+		return ticketJourneyLoadedMsg{key: key, data: data, err: err}
+	}
+}
+
 func (t Tickets) requeueIssueRunCmd(id int) tea.Cmd {
 	return func() tea.Msg {
 		err := t.client.RequeueIssueRun(id)
@@ -290,6 +306,19 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 			t.statusMsg = fmt.Sprintf("requeue failed: %s", m.err)
 		} else {
 			t.statusMsg = fmt.Sprintf("%s #%d requeued", m.kind, m.id)
+		}
+
+	case ticketJourneyLoadedMsg:
+		// Holding j/k over rows can fire multiple detail-opens; ignore a response
+		// for a ticket we've since navigated away from.
+		if m.key != t.detailKey {
+			return t, nil
+		}
+		t.journeyErr = ""
+		if m.err != nil {
+			t.journeyErr = m.err.Error()
+		} else if m.data != nil {
+			t.journey = m.data.Events
 		}
 
 	case tea.KeyMsg:
@@ -356,6 +385,7 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 		case "/":
 			t.filtering = true
 		case "enter":
+			var journeyCmd tea.Cmd
 			if cur.header {
 				t.expanded[cur.key] = !t.expanded[cur.key]
 				park(cur.key)
@@ -380,9 +410,14 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 					t.detailPlanDate = *cur.row.issueRun.PlanDate
 				}
 				t.detailCursor, t.detailOffset = 0, 0
+				t.journey = nil
+				t.journeyErr = ""
+				t.detailKey = issueRunKey(cur.row.issueRun.ModelName, cur.row.issueRun.TicketID)
+				journeyCmd = t.loadJourneyCmd(cur.row.issueRun.OdooInstanceID, cur.row.issueRun.ModelName, cur.row.issueRun.TicketID)
 			} else {
 				t.statusMsg = "no GitHub issues for this ticket"
 			}
+			return t, journeyCmd
 		case " ":
 			t.expanded[cur.key] = !t.expanded[cur.key]
 			park(cur.key)
@@ -732,6 +767,31 @@ func (t Tickets) detailView(w, h int) string {
 		parts = append(parts, styleSubtitle.Render(truncate(line, w-2)))
 	}
 	parts = append(parts, body, "", pos)
+
+	// Journey (read-only timeline; most recent 30), after the issues list.
+	var journeyLines []string
+	if t.journeyErr != "" {
+		journeyLines = append(journeyLines, styleSubtitle.Render("Journey unavailable: "+t.journeyErr))
+	} else if len(t.journey) > 0 {
+		journeyLines = append(journeyLines, styleTitle.Render("Journey"))
+		events := t.journey
+		if len(events) > 30 {
+			journeyLines = append(journeyLines, styleSubtitle.Render(fmt.Sprintf("  (+%d earlier)", len(events)-30)))
+			events = events[len(events)-30:]
+		}
+		for _, e := range events {
+			ts := "          "
+			if e.TS != nil {
+				ts = e.TS.Local().Format("2006-01-02")
+			}
+			journeyLines = append(journeyLines, fmt.Sprintf("  %s  %s %s",
+				styleSubtitle.Render(ts), journeySymbol(e.Kind), truncate(e.Summary, w-18)))
+		}
+	}
+	if len(journeyLines) > 0 {
+		parts = append(parts, "", strings.Join(journeyLines, "\n"))
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 

@@ -99,6 +99,19 @@ func intentSymbol(verdict string) string {
 	}
 }
 
+func journeySymbol(kind string) string {
+	switch kind {
+	case "analysis_completed", "issues_created", "review_completed", "change_note_posted":
+		return styleStatusCompleted.Render("+")
+	case "issue_closed", "ready":
+		return styleStatusCompleted.Render("✓")
+	case "analysis_failed":
+		return styleStatusFailed.Render("x")
+	default: // analysis_requested and future kinds
+		return styleStatusOther.Render("·")
+	}
+}
+
 func riskStyle(risk string) lipgloss.Style {
 	switch risk {
 	case "low":

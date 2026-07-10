@@ -295,6 +295,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ticketRequeuedMsg:
 		a.tickets, _ = a.tickets.update(msg)
 
+	case ticketJourneyLoadedMsg:
+		a.tickets, _ = a.tickets.update(msg)
+
 	case odooLoadedMsg:
 		a.odoo, _ = a.odoo.update(msg)
 

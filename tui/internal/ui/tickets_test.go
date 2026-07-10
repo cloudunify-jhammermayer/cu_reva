@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +50,22 @@ func onRow(tab Tickets, ticketID int) Tickets {
 	}
 	tab.cursor = rowOf(tab, ticketID)
 	return tab
+}
+
+// journeyStubClient overrides MockClient.TicketJourney to return a caller-set
+// event list or error, for tests that need control over the journey response
+// (e.g. truncation past 30 events) beyond MockClient's fixed 6-event fixture.
+type journeyStubClient struct {
+	api.MockClient
+	events []api.JourneyEvent
+	err    error
+}
+
+func (c *journeyStubClient) TicketJourney(odooInstanceID *int, modelName string, ticketID int) (*api.TicketJourney, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	return &api.TicketJourney{Events: c.events}, nil
 }
 
 func ticketsWithData() Tickets {
@@ -591,5 +608,117 @@ func TestAppRoutesIssueRunsMsgToTicketsTab(t *testing.T) {
 	}
 	if _, ok := got[issueRunKey("helpdesk.ticket", 456)]; !ok {
 		t.Fatalf("expected run for helpdesk.ticket#456 in map, got %v", got)
+	}
+}
+
+func TestJourneyPopulatesAndRendersOnMatchingKey(t *testing.T) {
+	tab := ticketsWithData()
+	// ticket 456 has a completed run with issues; opening its detail must fire
+	// a journey fetch keyed to that ticket.
+	tab = onRow(tab, 456)
+	tab, cmd := tab.update(keyMsg("enter"))
+	if !tab.detail {
+		t.Fatal("enter did not open the issue drill-down")
+	}
+	if cmd == nil {
+		t.Fatal("enter did not return a journey fetch cmd")
+	}
+	msg, ok := cmd().(ticketJourneyLoadedMsg)
+	if !ok {
+		t.Fatalf("expected ticketJourneyLoadedMsg, got %T", cmd())
+	}
+	if msg.key != issueRunKey("helpdesk.ticket", 456) {
+		t.Fatalf("journey fetch key = %q, want helpdesk.ticket#456", msg.key)
+	}
+
+	tab, _ = tab.update(msg)
+	if len(tab.journey) == 0 {
+		t.Fatal("journey not populated from a matching-key response")
+	}
+	out := tab.view(120, 30)
+	if !strings.Contains(out, "Journey") {
+		t.Fatalf("view missing the Journey title:\n%s", out)
+	}
+	if !strings.Contains(out, "Ticket marked ready") {
+		t.Fatalf("view missing a journey event summary:\n%s", out)
+	}
+}
+
+func TestJourneyStaleKeyIgnored(t *testing.T) {
+	tab := ticketsWithData()
+	tab = onRow(tab, 456)
+	tab, _ = tab.update(keyMsg("enter"))
+	if tab.detailKey != issueRunKey("helpdesk.ticket", 456) {
+		t.Fatalf("detailKey = %q, want helpdesk.ticket#456", tab.detailKey)
+	}
+
+	// A response for a ticket the user has since navigated away from must be
+	// dropped rather than overwriting the pane.
+	tab, _ = tab.update(ticketJourneyLoadedMsg{
+		key:  issueRunKey("project.task", 999),
+		data: &api.TicketJourney{Events: []api.JourneyEvent{{Kind: "ready", Summary: "stale, must not apply"}}},
+	})
+	if len(tab.journey) != 0 {
+		t.Fatalf("stale-key journey response was applied: %+v", tab.journey)
+	}
+	if strings.Contains(tab.view(120, 30), "stale, must not apply") {
+		t.Fatal("view rendered a stale-key journey event")
+	}
+}
+
+func TestJourneyTruncatesToLast30WithEarlierCount(t *testing.T) {
+	events := make([]api.JourneyEvent, 35)
+	for i := range events {
+		events[i] = api.JourneyEvent{Kind: "ready", Summary: fmt.Sprintf("event-%d", i)}
+	}
+	stub := &journeyStubClient{events: events}
+	tab := newTickets(stub, "")
+	tab.width, tab.height = 120, 40
+	tab, _ = tab.update(ticketIssueRunsLoadedMsg{data: &api.TicketIssueRunPage{
+		Items: []api.TicketIssueRunSummary{{
+			ID: 1, TicketID: 456, ModelName: "helpdesk.ticket", Status: "completed",
+			GithubURL: "https://github.com/acme/widgets",
+			Issues:    []api.TicketIssueRef{{Number: intPtr(1), Title: "x"}},
+			CreatedAt: time.Now(),
+		}},
+		Total: 1,
+	}})
+	tab = onRow(tab, 456)
+	tab, cmd := tab.update(keyMsg("enter"))
+	if cmd == nil {
+		t.Fatal("enter did not return a journey fetch cmd")
+	}
+	tab, _ = tab.update(cmd().(ticketJourneyLoadedMsg))
+
+	out := tab.view(120, 40)
+	if !strings.Contains(out, "(+5 earlier)") {
+		t.Fatalf("view missing the truncation head line, got:\n%s", out)
+	}
+	if strings.Contains(out, "event-4\n") || strings.Contains(out, "event-4 ") {
+		t.Fatalf("view rendered a truncated (earlier-than-last-30) event:\n%s", out)
+	}
+	if !strings.Contains(out, "event-5") {
+		t.Fatalf("view missing the oldest of the last 30 events:\n%s", out)
+	}
+	if !strings.Contains(out, "event-34") {
+		t.Fatalf("view missing the most recent event:\n%s", out)
+	}
+}
+
+func TestJourneyErrorRendersUnavailableLine(t *testing.T) {
+	tab := ticketsWithData()
+	tab = onRow(tab, 456)
+	tab, _ = tab.update(keyMsg("enter"))
+
+	tab, _ = tab.update(ticketJourneyLoadedMsg{key: tab.detailKey, err: errFake})
+	if tab.journeyErr == "" {
+		t.Fatal("journeyErr not set from an error response")
+	}
+	out := tab.view(120, 30)
+	if !strings.Contains(out, "Journey unavailable: boom") {
+		t.Fatalf("view missing the journey-unavailable line, got:\n%s", out)
+	}
+	if strings.Contains(out, "Journey\n") {
+		t.Fatal("view rendered the Journey title alongside an error")
 	}
 }

@@ -73,6 +73,11 @@ type ticketRequeuedMsg struct {
 	kind string // "analysis" or "issues run" — which requeue endpoint was hit
 	err  error
 }
+type ticketJourneyLoadedMsg struct {
+	key  string // issueRunKey(model, ticket) — guards against stale responses
+	data *api.TicketJourney
+	err  error
+}
 type feedbackLoadedMsg struct {
 	stats  []api.LearningStat
 	mutes  []api.MuteEntry
