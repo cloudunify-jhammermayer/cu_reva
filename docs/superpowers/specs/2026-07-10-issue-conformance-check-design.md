@@ -6,8 +6,7 @@
 `reva/github_client.py` (one GraphQL query), `reva/review_formatter.py` (rendering),
 `prompts/review_guidance.md` (+CHANGELOG), DB (1 column, migration 036), `api/`
 (review detail field), `tui/` (review detail lines).
-**Status:** Draft — written in an autonomous session; every decision below is a
-recommendation for Joseph to confirm, not a locked decision.
+**Status:** Approved (Joseph, 2026-07-10) — implemented; see plans/2026-07-10-issue-conformance-check.md.
 
 ## Problem
 
