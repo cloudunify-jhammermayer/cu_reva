@@ -30,6 +30,10 @@ _REVIEWABLE_ACTIONS = frozenset({"opened", "synchronize", "reopened", "ready_for
 # excludes 'synchronize' (fires on every push) so active PRs don't get spammed;
 # the debounced review coalesces those pushes into one run anyway.
 _ACK_PR_ACTIONS = frozenset({"opened", "reopened", "ready_for_review"})
+# Actions that mean "someone is actively working this PR" — the board-status
+# job moves linked REVA cards to In Progress. synchronize excluded: pushes
+# don't change in-progress-ness (and the review path covers review state).
+_BOARD_SYNC_ACTIONS = frozenset({"opened", "reopened", "ready_for_review"})
 
 
 def _is_bot_sender(payload: dict) -> bool:
@@ -247,6 +251,19 @@ def _handle_pull_request(db: Database, payload: dict, settings: Settings, github
         sha=pr_data["head"]["sha"][:8],
         scheduled_in_s=settings.debounce_seconds,
     )
+
+    # Enqueue board-status sync on actions that mean active development.
+    if rq_queue is not None and action in _BOARD_SYNC_ACTIONS:
+        rq_queue.enqueue(
+            "worker.board_status_tasks.run_board_status_update",
+            {
+                "repo_full_name": repo_data["full_name"].lower(),
+                "pr_number": pr_data["number"],
+                "installation_id": installation_id,
+                "trigger": "pr_active",
+            },
+            retry=Retry(max=3, interval=[30, 120, 300]),
+        )
 
     # Immediate acknowledgement when a PR newly enters review (not on every push).
     if action in _ACK_PR_ACTIONS:

@@ -759,6 +759,99 @@ def test_draft_pr_opened_does_not_post_ack(client_and_db):
     assert fake.comments == []
 
 
+# --- board status sync (Tier 4 feature: board state sync) ----------------------
+
+
+def test_pr_opened_enqueues_board_status(client_and_db):
+    """opened action → one board-status enqueue with trigger=pr_active"""
+    client, _ = client_and_db
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    try:
+        resp = _post(client, _pr_payload("opened"), delivery="board-open-1")
+    finally:
+        app.state.rq_queue = None
+
+    assert resp.status_code == 202
+    calls = [c for c in q.enqueued
+             if c["func"] == "worker.board_status_tasks.run_board_status_update"]
+    assert len(calls) == 1
+    assert calls[0]["args"][0] == {
+        "repo_full_name": "acme/widgets",
+        "pr_number": 42,
+        "installation_id": 99,
+        "trigger": "pr_active",
+    }
+
+
+def test_pr_synchronize_does_not_enqueue_board_status(client_and_db):
+    """synchronize action → no board-status enqueue"""
+    client, _ = client_and_db
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    try:
+        resp = _post(client, _pr_payload("synchronize"), delivery="board-sync-1")
+    finally:
+        app.state.rq_queue = None
+
+    assert resp.status_code == 202
+    calls = [c for c in q.enqueued
+             if c["func"] == "worker.board_status_tasks.run_board_status_update"]
+    assert not calls
+
+
+def test_pr_reopened_enqueues_board_status(client_and_db):
+    """reopened action → one board-status enqueue with trigger=pr_active"""
+    client, _ = client_and_db
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    try:
+        resp = _post(client, _pr_payload("reopened"), delivery="board-reopen-1")
+    finally:
+        app.state.rq_queue = None
+
+    assert resp.status_code == 202
+    calls = [c for c in q.enqueued
+             if c["func"] == "worker.board_status_tasks.run_board_status_update"]
+    assert len(calls) == 1
+    assert calls[0]["args"][0]["trigger"] == "pr_active"
+
+
+def test_pr_ready_for_review_enqueues_board_status(client_and_db):
+    """ready_for_review action → one board-status enqueue with trigger=pr_active"""
+    client, _ = client_and_db
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    try:
+        payload = _pr_payload("ready_for_review", draft=False)
+        payload["pull_request"]["draft"] = False
+        resp = _post(client, payload, delivery="board-ready-1")
+    finally:
+        app.state.rq_queue = None
+
+    assert resp.status_code == 202
+    calls = [c for c in q.enqueued
+             if c["func"] == "worker.board_status_tasks.run_board_status_update"]
+    assert len(calls) == 1
+    assert calls[0]["args"][0]["trigger"] == "pr_active"
+
+
+def test_draft_pr_opened_does_not_enqueue_board_status(client_and_db):
+    """draft opened → no board-status enqueue (draft gate returns first)"""
+    client, _ = client_and_db
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    try:
+        resp = _post(client, _pr_payload("opened", draft=True), delivery="board-draft-1")
+    finally:
+        app.state.rq_queue = None
+
+    assert resp.status_code == 202
+    calls = [c for c in q.enqueued
+             if c["func"] == "worker.board_status_tasks.run_board_status_update"]
+    assert not calls
+
+
 # --- health -------------------------------------------------------------------
 
 
