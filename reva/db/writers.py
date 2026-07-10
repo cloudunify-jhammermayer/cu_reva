@@ -2296,12 +2296,13 @@ def purge_old_ticket_issue_text(db: Database, older_than_days: int) -> int:
     """Scrub raw ticket inputs on ticket_issue_runs past retention (F1/SECU-8).
 
     description and analysis_html carry customer-authored content (the
-    consultant DOCX is never stored server-side). The issue links in `issues`
-    (number/title/url/state/dates/estimate) are derived data and kept —
-    but un-created plan items on failed runs still hold full Claude-rendered
-    bodies derived from that content, so those keys are stripped too
-    (which also means such runs can no longer resume; the purge already
-    accepts that trade-off for description). Idempotent. Returns the
+    consultant DOCX is never stored server-side); plan_summary is a
+    Claude-rendered summary of that same ticket text, so it is nulled too.
+    The issue links in `issues` (number/title/url/state/dates/estimate) are
+    derived data and kept — but un-created plan items on failed runs still hold
+    full Claude-rendered bodies derived from that content, so those keys are
+    stripped too (which also means such runs can no longer resume; the purge
+    already accepts that trade-off for description). Idempotent. Returns the
     number of rows whose raw text was scrubbed."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
     with db.session() as s:
@@ -2334,6 +2335,7 @@ def purge_old_ticket_issue_text(db: Database, older_than_days: int) -> int:
             .values(
                 description=PURGED_TICKET_TEXT,
                 analysis_html=PURGED_TICKET_TEXT,
+                plan_summary=None,
             )
             .execution_options(synchronize_session=False),
         )

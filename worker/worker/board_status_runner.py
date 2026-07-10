@@ -120,8 +120,12 @@ def _sync_enabled(ctx, token: str, owner: str, name: str, pr: dict, log) -> bool
             return True
         parsed = yaml.safe_load(raw) or {}
         return RepoConfig.model_validate(parsed).board_status_sync
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         log.warning("board_status_config_failed", exc_info=True)
+        writers.record_ops_event(
+            ctx.db, "board_status", "warning", "config_fetch_failed",
+            {"repo": f"{owner}/{name}", "error": str(exc)[:300]},
+        )
         return True
 
 

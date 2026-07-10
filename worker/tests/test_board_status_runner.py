@@ -129,11 +129,17 @@ def test_kill_switch_disables(db):
     ctx.github.set_project_item_option.assert_not_called()
 
 
-def test_config_parse_error_fails_open(db):
+def test_config_fetch_failure_fails_open_with_ops_event(db):
     _seed_board_issue(db)
-    ctx = _ctx(db, config_yaml=":: not yaml ::[")
+    ctx = _ctx(db)
+    ctx.github.get_file_content.side_effect = RuntimeError("config unreadable")
     out = run_board_status_update(_params())
+    # fail-open: a config hiccup must not freeze the board...
     assert out["moved"] == 1
+    # ...but it is a visible degradation (CLAUDE.md invariant), not silent.
+    events = _ops_events(db, limit=10)
+    assert any(e["event"] == "config_fetch_failed" and e["component"] == "board_status"
+               for e in events)
 
 
 def test_missing_option_is_silent_skip_no_ops_event(db):

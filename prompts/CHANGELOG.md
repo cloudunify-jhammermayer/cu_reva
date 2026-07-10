@@ -5,6 +5,12 @@
   `unclear`) when `stated_intent` is present on a full-PR-diff review; walks
   `- [ ]` acceptance-criteria checklists; advisory only, omitted on delta
   reviews.
+- reva-diff-review.md / reva-full-review.md / reva-xml-review.md /
+  reva-migration-review.md: the "Output format" JSON contract now carries the
+  optional `intent_check` array, so the live headless-CLI skill (the actual
+  output contract) matches the guidance instead of showing only
+  `summary`/`findings`. Excludes reva-delta-review.md by design (delta verdicts
+  are dropped at parse).
 
 ## v2.7 — Odoo 19 silent-failure pitfalls + estimate calibration
 

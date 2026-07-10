@@ -964,6 +964,10 @@ def test_purge_old_ticket_issue_text_scrubs_inputs_keeps_issues(db):
         old = s.get(TicketIssueRun, old_id)
         old.created_at = datetime.now(timezone.utc) - timedelta(days=40)
         old.issues = issues
+        # plan_summary is a Claude-rendered summary of the customer ticket text
+        old.plan_summary = "Customer wants a login page."
+        recent = s.get(TicketIssueRun, recent_id)
+        recent.plan_summary = "Customer wants a login page."
 
     n = writers.purge_old_ticket_issue_text(db, older_than_days=30)
 
@@ -972,12 +976,16 @@ def test_purge_old_ticket_issue_text_scrubs_inputs_keeps_issues(db):
         old = s.get(TicketIssueRun, old_id)
         assert old.description == writers.PURGED_TICKET_TEXT
         assert old.analysis_html == writers.PURGED_TICKET_TEXT
+        # Claude-rendered summary of the ticket text is nulled with the rest
+        assert old.plan_summary is None
         # derived link refs retained; the Claude-rendered plan body
         # (customer-derived text) is scrubbed with the rest
         assert old.issues == [{"title": "A", "number": 42,
                                "url": "https://github.com/acme/widgets/issues/42"}]
         recent = s.get(TicketIssueRun, recent_id)
         assert recent.description == "We need a login page."
+        # untouched before the cutoff
+        assert recent.plan_summary == "Customer wants a login page."
     # idempotent
     assert writers.purge_old_ticket_issue_text(db, older_than_days=30) == 0
 

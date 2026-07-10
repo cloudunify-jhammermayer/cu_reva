@@ -63,8 +63,13 @@ Current flow (mapped against the code, 2026-07-09):
    sync is explicitly out of scope** — company-wide stages are not defined yet.
 2. **The parent epic gets the plan date too** (an undated epic looks broken on
    the roadmap) and is added to the project like the children.
-3. **Auto-provision fields:** reuse an existing date field named `Plan date`,
-   else `Target date` (the roadmap-standard name), else create `Plan date`.
+3. **Auto-provision fields:** REVA uses a custom `Due date` DATE project field —
+   reuse an existing `Due date`, else rename a legacy `Plan date` (or a case
+   variant `due date`) field to `Due date` in place (values preserved), else
+   create `Due date` when the request carried a date. GitHub's built-in roadmap
+   `Start date`/`Target date` are issue-backed and **reject**
+   `updateProjectV2ItemFieldValue` (discovered empirically), so REVA never
+   targets them.
 4. `complete_date` is always derived from GitHub's `closed_at`; `null` on
    reopen. **Per-issue, not top-level** — see the alignment note below.
 5. **Fail-soft:** a Projects failure never fails the run or blocks the Odoo
@@ -141,7 +146,7 @@ All raise through the existing `_graphql_data` Transient/Permanent split; the
 
 | Purpose | Lookup (case-insensitive) | If missing |
 |---|---|---|
-| Plan date | `Plan date`, then `Target date` (any `DATE` field) | create `Plan date` (DATE) |
+| Due date | `Due date`, then a legacy `Plan date`/`due date` (`DATE` field) — a legacy match is renamed to `Due date` in place, values preserved | create `Due date` (DATE) when the request carried a date |
 | Status → `Todo` | built-in `Status`, option named `Todo` | option missing → skip + ops event (never mutate existing options) |
 | Priority | single-select `Priority`, options matched by name `Low/Medium/High/Urgent` | field missing → create with those four options; field exists but option name unmatched → skip + ops event |
 
@@ -149,10 +154,11 @@ Odoo `priority` mapping (already in every request, Contract 1): `"0"`→Low,
 `"1"`→Medium, `"2"`→High, `"3"`→Urgent. The parent epic gets the same priority
 (priority is per-request, not per-item).
 
-Existing fields are **never modified** (no option rewrites via
+Existing single-select **options** are never modified (no option rewrites via
 `updateProjectV2Field` — replacing options is destructive to the customer's
-board). Skips are visible: `record_ops_event("github", "warning",
-"project_field_unmatched", {...})`, once per run per field.
+board); the sole exception is renaming a legacy date field to `Due date` in
+place, which preserves its values. Skips are visible: `record_ops_event("github",
+"warning", "project_field_unmatched", {...})`, once per run per field.
 
 ### `worker/worker/ticket_issue_runner.py` — step 4 of `_plan_and_create`
 
@@ -227,7 +233,7 @@ token.
 - `api/app/schemas/ticket_issues.py::TicketIssueRunSummary` (+ status view):
   add `github_project_url: str | None` and `plan_date: date | None`.
 - `tui/internal/api/types.go` + `mock.go`: matching fields; `tui/internal/ui/tickets.go`
-  detail view shows the project link and plan date (compact "📋 project · plan
+  detail view shows the project link and plan date (compact "📋 project · due
   2026-07-15" line, matching existing detail rows).
 - Projects degradations surface automatically via the existing ops-events →
   Failures tab path.

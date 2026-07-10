@@ -58,6 +58,9 @@ structure (do **not** include a `risk_level` — the system computes it):
       "confidence": 0.9,
       "is_odoo_specific": true
     }
+  ],
+  "intent_check": [
+    {"issue_number": 42, "verdict": "matches", "note": "one-sentence justification (≤300 chars)"}
   ]
 }
 ```
@@ -65,3 +68,8 @@ structure (do **not** include a `risk_level` — the system computes it):
 - `file`, `line_start`, `line_end`, `suggestion` may be `null`.
 - `line_start`/`line_end` are line numbers on the new (post-change) side.
 - If the views look clean, return an empty `findings` array with an informative summary.
+- `intent_check` is **optional**: include it only when a `stated_intent` block is
+  present and this is a full-PR-diff review (never a delta). One entry per
+  referenced issue — `{issue_number, verdict, note}`, `verdict` ∈
+  `matches`/`partial`/`does_not_match`/`unclear`, `note` ≤ 300 chars — per the
+  guidance "Requirements verdict". Omit the field entirely otherwise.

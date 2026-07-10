@@ -124,6 +124,19 @@ def test_intent_check_guidance_present():
     assert "delta" in guidance
 
 
+def test_intent_check_in_skill_output_contracts():
+    # The live headless-CLI output contract is each skill's "Output format", not
+    # review_guidance.md — so the four full-diff skills must carry intent_check
+    # there or the model may follow the template and never emit verdicts. The
+    # delta skill deliberately omits it (delta verdicts are dropped at parse).
+    for skill in (
+        "reva-diff-review.md", "reva-full-review.md",
+        "reva-xml-review.md", "reva-migration-review.md",
+    ):
+        assert "intent_check" in (SKILLS_DIR / skill).read_text(), skill
+    assert "intent_check" not in (SKILLS_DIR / "reva-delta-review.md").read_text()
+
+
 def test_summary_contract_present():
     guidance = (PROMPTS_DIR / "review_guidance.md").read_text()
     assert "Summary contract" in guidance

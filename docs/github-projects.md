@@ -27,12 +27,16 @@ a gate — nothing about issue creation breaks while the permission is pending.
 ## Fields REVA manages
 
 Resolved once per run against the target board. REVA **never rewrites existing
-fields or options** — a mismatch is skipped and recorded as
-`project_field_unmatched` (source `github`), not "fixed".
+single-select options** — a mismatch is skipped and recorded as
+`project_field_unmatched` (source `github`), not "fixed". The one field it
+renames is the date field: a matched legacy `Plan date` (or `due date`) is
+renamed to `Due date` in place, which **preserves its existing values** (a
+best-effort rename — if it fails REVA still uses the field under its old name).
 
 | Field | Behavior |
 |---|---|
-| **Due date** (date) | Reuses an existing custom DATE field named `Due date` (or a legacy `Plan date`); if neither exists **and** the request carried a date, REVA creates a `Due date` field. The built-in roadmap `Start date`/`Target date` are issue-backed and deliberately not used. Set on every added item (including the epic). Skipped when the request sent no date. |
+| **Due date** (date) | Reuses an existing custom DATE field named `Due date`; a legacy `Plan date`/`due date` field is renamed to `Due date` in place (values preserved). If neither exists **and** the request carried a date, REVA creates a `Due date` field. The built-in roadmap `Start date`/`Target date` are issue-backed and deliberately not used. Set on every added item (including the epic). Skipped when the request sent no date. |
+| **Estimate** (number) | Reuses an existing `Estimate` NUMBER field, else creates one. Set to the planned hours on each added item that carries an estimate; skipped for items without one. |
 | **Status** (single-select) | Sets the built-in `Status` to its `Todo` option **only when first adding an item**. If the board has no `Todo` option, Status is left unset (`project_field_unmatched`). |
 | **Priority** (single-select) | Reuses a `Priority` single-select, else creates one with options **Low / Medium / High / Urgent**. Mapped from the Odoo priority key: `0`→Low, `1`→Medium, `2`→High, `3`→Urgent (unknown → Medium). If a `Priority` field exists but lacks the mapped option name, it is skipped (`project_field_unmatched`). |
 
