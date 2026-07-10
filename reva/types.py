@@ -84,6 +84,10 @@ class RepoConfig(BaseModel):
     scanner_feed: bool = True
     ticket_grounding: bool = True
     change_notes: bool = True
+    # Kill switch for the issue-conformance verdict (Requirements check):
+    # false skips the GraphQL link lookup and drops any returned verdicts.
+    # The plain stated_intent context injection is unaffected.
+    intent_check: bool = True
     # Which /core version reviews consult, e.g. "19.0". None disables it.
     odoo_version: str | None = None
 
@@ -139,6 +143,31 @@ class Finding(BaseModel):
         return self
 
 
+# --- Intent issue verdict -----------------------------------------------------
+
+IntentVerdict = Literal["matches", "partial", "does_not_match", "unclear"]
+
+
+class IntentIssueVerdict(BaseModel):
+    """Per-linked-issue conformance verdict (issue-conformance spec 2026-07-10).
+
+    Advisory only: rendered as a "Requirements check" section and persisted,
+    but never feeds compute_check_conclusion — the verdict derives from
+    UNTRUSTED issue text.
+    """
+
+    issue_number: int
+    verdict: IntentVerdict
+    note: str = ""
+
+    @field_validator("note", mode="before")
+    @classmethod
+    def _truncate_note(cls, v: object) -> object:
+        if isinstance(v, str) and len(v) > 300:
+            return v[:297] + "..."
+        return v
+
+
 # --- Review result ------------------------------------------------------------
 
 
@@ -160,6 +189,9 @@ class ReviewResult(BaseModel):
     summary: str = ""
     risk_level: RiskLevel = "low"
     findings: list[Finding] = Field(default_factory=list)
+    # Per-linked-issue conformance verdicts (None = no linked issues, delta
+    # review, repo opted out, or the model omitted them). Persisted as JSON.
+    intent_check: list[IntentIssueVerdict] | None = None
 
     # Transient: the reviewed diff, carried from Reviewer.execute to runner._post_completed
     # for hunk parsing. Not written to the database.

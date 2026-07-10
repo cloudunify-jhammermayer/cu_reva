@@ -30,7 +30,7 @@ def build_review_tool_schema() -> dict[str, Any]:
     schema = ReviewResult.model_json_schema()
 
     # Restrict Claude's contract to the content fields it must produce.
-    allowed = {"summary", "risk_level", "findings"}
+    allowed = {"summary", "risk_level", "findings", "intent_check"}
     properties = {k: v for k, v in schema.get("properties", {}).items() if k in allowed}
 
     input_schema: dict[str, Any] = {
