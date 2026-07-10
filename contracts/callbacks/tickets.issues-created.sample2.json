@@ -4,5 +4,6 @@
   "model_name": "helpdesk.ticket",
   "request_id": 7,
   "status": "failed",
-  "ticket_id": 123
+  "ticket_id": 123,
+  "total_estimate_hours": null
 }

@@ -15,6 +15,18 @@
           "default": null,
           "title": "Complete Date"
         },
+        "estimate_hours": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimate Hours"
+        },
         "number": {
           "anyOf": [
             {

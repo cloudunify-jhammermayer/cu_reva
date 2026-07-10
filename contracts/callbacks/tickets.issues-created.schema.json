@@ -15,6 +15,18 @@
           "default": null,
           "title": "Complete Date"
         },
+        "estimate_hours": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimate Hours"
+        },
         "number": {
           "anyOf": [
             {
@@ -108,6 +120,18 @@
     "ticket_id": {
       "title": "Ticket Id",
       "type": "integer"
+    },
+    "total_estimate_hours": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Total Estimate Hours"
     }
   },
   "required": [

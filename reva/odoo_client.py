@@ -58,7 +58,10 @@ from reva.errors import PermanentError, TransientError
 logger = structlog.get_logger()
 
 _TIMEOUT = 15.0
-_ISSUE_KEYS = ("number", "title", "url", "state", "plan_date", "complete_date")
+_ISSUE_KEYS = (
+    "number", "title", "url", "state", "plan_date", "complete_date",
+    "estimate_hours",
+)
 _TIMESHEET_RESULT_KEYS = ("line_id", "status", "updated_desc", "reason")
 
 
@@ -170,6 +173,7 @@ class OdooCallbackClient:
         status: str,
         issues: list[dict],
         error: str | None = None,
+        total_estimate_hours: float | None = None,
     ) -> None:
         """POST the created GitHub issues (or a failure) to the Odoo callback.
 
@@ -189,6 +193,7 @@ class OdooCallbackClient:
             status=status,
             issues=issues,
             error=error,
+            total_estimate_hours=total_estimate_hours,
         )
         body = payload.model_dump(exclude={"issues"})
         body["issues"] = _project_items(issues, _ISSUE_KEYS)

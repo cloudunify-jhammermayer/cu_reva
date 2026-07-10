@@ -240,7 +240,8 @@ def test_issues_created_posts_contract_payload_to_sibling_path(monkeypatch):
     # base URL is derived from the configured callback URL — no new config
     assert captured["url"] == "https://odoo.example.com/api/reva/tickets/issues-created"
     assert captured["auth"] == f"Bearer {_KEY}"
-    assert captured["body"] == _issues_kwargs()
+    expected = {**_issues_kwargs(), "total_estimate_hours": None}
+    assert captured["body"] == expected
 
 
 def test_issues_created_failed_status(monkeypatch):
@@ -277,6 +278,46 @@ def test_disabled_client_issues_created_raises_permanent():
     client = OdooCallbackClient(callback_url="", api_key="")
     with pytest.raises(PermanentError):
         client.issues_created(**_issues_kwargs())
+
+
+def test_issues_created_includes_estimates_and_total(monkeypatch):
+    captured: dict = {}
+
+    def post(url, *, json, **kwargs):
+        captured["body"] = json
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    kwargs = _issues_kwargs()
+    kwargs["issues"] = [
+        {"number": 42, "title": "Implement login form",
+         "url": "https://github.com/org/repo/issues/42", "estimate_hours": 2.5},
+        {"number": 43, "title": "No estimate",
+         "url": "https://github.com/org/repo/issues/43"},
+    ]
+    _client().issues_created(**kwargs, total_estimate_hours=2.5)
+    items = captured["body"]["issues"]
+    assert items[0]["estimate_hours"] == 2.5
+    # Pre-rollout items simply omit the key (optional-key omission).
+    assert "estimate_hours" not in items[1]
+    assert captured["body"]["total_estimate_hours"] == 2.5
+
+
+def test_issue_state_and_ready_snapshots_carry_estimate(monkeypatch):
+    captured: list[dict] = []
+
+    def post(url, *, json, **kwargs):
+        captured.append(json)
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    snapshot = [{"number": 42, "title": "t", "url": "https://gh/42",
+                 "state": "closed", "estimate_hours": 3.0}]
+    _client().issue_state(ticket_id=1, model_name="helpdesk.ticket",
+                          number=42, state="closed", issues=snapshot)
+    _client().tickets_ready(ticket_id=1, model_name="helpdesk.ticket",
+                            issues=snapshot)
+    assert all(body["issues"][0]["estimate_hours"] == 3.0 for body in captured)
 
 
 # --- issue_state (per-issue done/reopen sync) -----------------------------------

@@ -2,6 +2,7 @@
   "issues": [
     {
       "complete_date": "2026-07-09",
+      "estimate_hours": 3.5,
       "number": 42,
       "plan_date": "2026-07-15",
       "state": "closed",

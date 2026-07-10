@@ -45,6 +45,9 @@ class IssueRefPayload(BaseModel):
     # reopen). The Odoo addon .get()-reads and Date-truncates both.
     plan_date: str | None = None
     complete_date: str | None = None
+    # Low-end AI-assisted dev estimate in hours (spec 2026-07-10). Omitted on
+    # pre-rollout items; the Odoo addon .get()-reads it.
+    estimate_hours: float | None = None
 
 
 class IssuesCreatedPayload(BaseModel):
@@ -54,6 +57,9 @@ class IssuesCreatedPayload(BaseModel):
     status: str
     issues: list[IssueRefPayload]
     error: str | None = None
+    # Sum over union items carrying an estimate (children only — the epic is
+    # parent_issue, never in the union). None when no item has an estimate.
+    total_estimate_hours: float | None = None
 
 
 class IssueStatePayload(BaseModel):
@@ -132,6 +138,7 @@ _ISSUE_SAMPLE = {
     "state": "open",
     "plan_date": "2026-07-15",
     "complete_date": None,
+    "estimate_hours": 3.5,
 }
 
 CONTRACTS: list[Contract] = [
@@ -172,6 +179,7 @@ CONTRACTS: list[Contract] = [
             "status": "created",
             "issues": [_ISSUE_SAMPLE],
             "error": None,
+            "total_estimate_hours": 3.5,
         },
         extra_samples=[{
             "ticket_id": 123,
@@ -180,6 +188,7 @@ CONTRACTS: list[Contract] = [
             "status": "failed",
             "issues": [],
             "error": "GitHub authentication failed",
+            "total_estimate_hours": None,
         }],
     ),
     Contract(

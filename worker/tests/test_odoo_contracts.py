@@ -57,6 +57,7 @@ def test_issues_created_wire_shape_and_extra_keys_stripped():
         "state": "open",
         "plan_date": None,
         "complete_date": None,
+        "estimate_hours": None,
     }]
 
 

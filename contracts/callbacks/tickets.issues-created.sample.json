@@ -3,6 +3,7 @@
   "issues": [
     {
       "complete_date": null,
+      "estimate_hours": 3.5,
       "number": 42,
       "plan_date": "2026-07-15",
       "state": "open",
@@ -13,5 +14,6 @@
   "model_name": "helpdesk.ticket",
   "request_id": 7,
   "status": "created",
-  "ticket_id": 123
+  "ticket_id": 123,
+  "total_estimate_hours": 3.5
 }
