@@ -29,7 +29,7 @@ from reva.db.models import (
     ReviewRun,
     TicketAnalysis,
 )
-from reva.types import Finding, JobParams, ReviewResult, TicketJobParams
+from reva.types import Finding, IntentIssueVerdict, JobParams, ReviewResult, TicketJobParams
 
 
 # --- fixtures ----------------------------------------------------------------
@@ -1428,3 +1428,24 @@ def test_ticket_analyses_has_created_at_index():
 
     names = {idx.name for idx in TicketAnalysis.__table__.indexes}
     assert "idx_ticket_analyses_created_at" in names
+
+
+def test_record_review_completed_persists_intent_check(db, seeded):
+    result = ReviewResult(
+        status="completed",
+        summary="Matches the linked issue.",
+        risk_level="low",
+        findings=[],
+        intent_check=[IntentIssueVerdict(issue_number=5, verdict="matches", note="ok")],
+    )
+    rid = writers.record_review_completed(db, _params(seeded), result)
+    with db.session() as s:
+        run = s.get(ReviewRun, rid)
+        assert run.intent_check == [{"issue_number": 5, "verdict": "matches", "note": "ok"}]
+
+
+def test_record_review_completed_intent_check_null_when_absent(db, seeded):
+    result = ReviewResult(status="completed", summary="s", risk_level="low", findings=[])
+    rid = writers.record_review_completed(db, _params(seeded), result)
+    with db.session() as s:
+        assert s.get(ReviewRun, rid).intent_check is None

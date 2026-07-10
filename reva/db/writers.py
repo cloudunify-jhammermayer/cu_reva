@@ -205,6 +205,9 @@ def record_review_completed(db: Database, params: JobParams, result: ReviewResul
         run.summary = result.summary
         run.triage_escalation = result.triage_escalation
         run.finding_count = len(result.findings)
+        run.intent_check = (
+            [v.model_dump() for v in result.intent_check] if result.intent_check else None
+        )
         run.decline_reason = None
         run.error_message = None
         run.error_class = None

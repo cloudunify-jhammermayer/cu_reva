@@ -178,6 +178,9 @@ class ReviewRun(Base):
     learned_memory_version: Mapped[int | None] = mapped_column(Integer)
     # Triage pre-pass escalation ("full"/"deep"), NULL = none/off.
     triage_escalation: Mapped[str | None] = mapped_column(Text)
+    # Per-linked-issue conformance verdicts (migration 036): JSON list of
+    # {issue_number, verdict, note}, NULL when the run produced none.
+    intent_check: Mapped[Any | None] = mapped_column(JSON)
     # Set when an explicit re-review clears the row's posted state; scopes crash
     # recovery to the current attempt (H3). NULL until first re-review.
     reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
