@@ -253,17 +253,26 @@ def _handle_pull_request(db: Database, payload: dict, settings: Settings, github
     )
 
     # Enqueue board-status sync on actions that mean active development.
+    # Best-effort: a Redis hiccup here must not 500 the delivery or skip the
+    # ack comment below.
     if rq_queue is not None and action in _BOARD_SYNC_ACTIONS:
-        rq_queue.enqueue(
-            "worker.board_status_tasks.run_board_status_update",
-            {
-                "repo_full_name": repo_data["full_name"].lower(),
-                "pr_number": pr_data["number"],
-                "installation_id": installation_id,
-                "trigger": "pr_active",
-            },
-            retry=Retry(max=3, interval=[30, 120, 300]),
-        )
+        try:
+            rq_queue.enqueue(
+                "worker.board_status_tasks.run_board_status_update",
+                {
+                    "repo_full_name": repo_data["full_name"].lower(),
+                    "pr_number": pr_data["number"],
+                    "installation_id": installation_id,
+                    "trigger": "pr_active",
+                },
+                retry=Retry(max=3, interval=[30, 120, 300]),
+            )
+        except Exception as exc:  # noqa: BLE001 — degrade, stay visible
+            logger.warning("board_status_enqueue_failed", exc_info=True)
+            writers.record_ops_event(
+                db, "board_status", "warning", "enqueue_failed",
+                {"repo": repo_data["full_name"], "pr": pr_data["number"], "error": str(exc)[:300]},
+            )
 
     # Immediate acknowledgement when a PR newly enters review (not on every push).
     if action in _ACK_PR_ACTIONS:

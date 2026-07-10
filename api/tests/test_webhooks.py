@@ -17,7 +17,7 @@ from app.dependencies import get_db, get_settings
 from app.main import app
 from app.settings import Settings
 from reva.db import Base, Database, create_engine_from_url, writers
-from reva.db.models import GithubEvent, PendingReview, PullRequest, Repository, ReviewFinding
+from reva.db.models import GithubEvent, OpsEvent, PendingReview, PullRequest, Repository, ReviewFinding
 from reva.types import Finding, JobParams, ReviewResult
 
 
@@ -850,6 +850,31 @@ def test_draft_pr_opened_does_not_enqueue_board_status(client_and_db):
     calls = [c for c in q.enqueued
              if c["func"] == "worker.board_status_tasks.run_board_status_update"]
     assert not calls
+
+
+class _RaisingQueue(_FakeQueue):
+    """A queue whose enqueue always fails — simulates a Redis outage."""
+
+    def enqueue(self, func_name, *args, **kwargs):
+        raise ConnectionError("redis down")
+
+
+def test_board_status_enqueue_failure_does_not_500(client_and_db):
+    """A Redis hiccup enqueuing board-status sync must not 500 the delivery
+    or kill the pending-review upsert / ack comment (best-effort enqueue)."""
+    client, db = client_and_db
+    q = _RaisingQueue()
+    app.state.rq_queue = q
+    try:
+        resp = _post(client, _pr_payload("opened"), delivery="board-enqueue-fail-1")
+    finally:
+        app.state.rq_queue = None
+
+    assert resp.status_code == 202
+    with db.session() as s:
+        assert s.query(PendingReview).count() == 1
+        events = s.query(OpsEvent).all()
+    assert any(e.component == "board_status" and e.event == "enqueue_failed" for e in events)
 
 
 # --- health -------------------------------------------------------------------

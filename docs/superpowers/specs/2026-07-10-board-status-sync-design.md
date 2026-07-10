@@ -64,12 +64,14 @@ from webhook latency and from the review job's success).
 ### Job flow
 
 1. Fetch the PR body; parse closing refs with the reviewer's `_ISSUE_REF_RE`
-   idiom. When the issue-conformance feature's
-   `get_closing_issue_numbers` (GraphQL union, spec 2026-07-10) has shipped,
-   union it in — same degrade posture; do not block on that feature.
-2. Resolve refs → `ticket_issue_runs` rows for this repo (the
-   `resolve_pr_tickets` substrate). No rows → done (optional by
-   construction: not a REVA-managed issue, not our board).
+   idiom, then unconditionally union in `get_closing_issue_numbers`
+   (GraphQL) — sidebar-linked issues have no body keyword, and can coexist
+   with body refs. Degrades to body refs alone + ops event
+   (`link_resolution_failed`) on GraphQL failure.
+2. Resolve refs → `writers.get_board_items_for_issues`: open, board-placed
+   REVA issues (a persisted `project_item_id`) among those refs, for this
+   repo. No items → done (optional by construction: not a REVA-managed
+   issue, not our board).
 3. Fetch repo config; `board_status_sync: false` → done (kill switch below).
    As built, this runs after refs are resolved and board items are found —
    not first — so an unrelated PR with no board items never pays for a

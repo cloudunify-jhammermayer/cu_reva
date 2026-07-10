@@ -183,3 +183,36 @@ def test_one_get_project_per_board_for_multiple_items(db):
     out = run_board_status_update(_params())
     assert out["moved"] == 2
     assert ctx.github.get_project.call_count == 1
+
+
+def test_pr_fetch_permanent_failure_swallowed_with_ops_event(db):
+    _seed_board_issue(db)
+    ctx = _ctx(db)
+    ctx.github.get_pull_request.side_effect = PermanentError("404")
+    out = run_board_status_update(_params())
+    assert out == {"status": "failed"}
+    events = _ops_events(db, limit=10)
+    assert any(e["event"] == "pr_fetch_failed" for e in events)
+    ctx.github.get_project.assert_not_called()
+    ctx.github.set_project_item_option.assert_not_called()
+
+
+def test_pr_fetch_transient_failure_reraises_for_rq_retry(db):
+    _seed_board_issue(db)
+    ctx = _ctx(db)
+    ctx.github.get_pull_request.side_effect = TransientError("503")
+    with pytest.raises(TransientError):
+        run_board_status_update(_params())
+
+
+def test_review_done_on_merged_pr_is_pr_closed_noop(db):
+    _seed_board_issue(db)
+    ctx = _ctx(db)
+    ctx.github.get_pull_request.return_value = {
+        "body": "Closes #50", "state": "closed", "merged": True,
+        "head": {"sha": "abc"},
+    }
+    out = run_board_status_update(_params("review_done"))
+    assert out == {"status": "pr_closed"}
+    ctx.github.get_project.assert_not_called()
+    ctx.github.set_project_item_option.assert_not_called()

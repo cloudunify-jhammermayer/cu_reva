@@ -37,8 +37,25 @@ def run_board_status_update(job_params: dict) -> dict:
     owner, name = repo.split("/", 1)
     log = logger.bind(repo=repo, pr=pr_number, trigger=trigger)
 
-    token = ctx.github.get_installation_token(job_params["installation_id"])
-    pr = ctx.github.get_pull_request(token, owner, name, pr_number)
+    try:
+        token = ctx.github.get_installation_token(job_params["installation_id"])
+        pr = ctx.github.get_pull_request(token, owner, name, pr_number)
+    except TransientError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — this job persists nothing; ops events are its only observability surface
+        log.warning("board_status_pr_fetch_failed", exc_info=True)
+        writers.record_ops_event(
+            ctx.db, "board_status", "warning", "pr_fetch_failed",
+            {"repo": repo, "pr": pr_number, "error": str(exc)[:300]},
+        )
+        return {"status": "failed"}
+
+    if trigger == "review_done" and (pr.get("merged") or pr.get("state") == "closed"):
+        # A merge/close landed mid-review: don't drag a Done card back to
+        # "In review". Normal lifecycle, not degradation — no ops event.
+        log.debug("board_status_pr_closed")
+        return {"status": "pr_closed"}
+
     refs = parse_closing_refs(pr.get("body"))
     # Full union with GitHub's authoritative link set (sidebar links have no
     # body keyword — and they can coexist with body refs, so this is not a

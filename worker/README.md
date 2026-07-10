@@ -32,6 +32,7 @@ directory holds only worker-specific orchestration glue.
 | `worker.ticket_tasks.run_ticket_analysis` | Odoo / ticket trigger | Messages API |
 | `worker.timesheet_tasks.run_timesheet_review` | Odoo `/api/v1/timesheet-review` | Messages API |
 | `worker.audit_tasks.run_audit` | api `POST /repos/{id}/audit`, TUI | headless Claude Code CLI |
+| `worker.board_status_tasks.run_board_status_update` | api `pull_request` webhook (PR activity), `worker/runner.py` (completed review) | no Claude — GitHub Projects card moves for linked REVA issues, fail-soft |
 
 ## Models
 
