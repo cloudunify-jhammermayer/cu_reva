@@ -26,6 +26,7 @@ from app.routes.v1 import (
     reviews,
     ticket_analyses,
     ticket_issues,
+    ticket_journeys,
     timesheet_reviews,
     value_reports,
 )
@@ -42,6 +43,7 @@ _master.include_router(pending.router)
 _master.include_router(admin.router)
 _master.include_router(ticket_analyses.router)
 _master.include_router(ticket_issues.router)
+_master.include_router(ticket_journeys.router)
 _master.include_router(timesheet_reviews.router)
 _master.include_router(value_reports.router)
 _master.include_router(audits.router)
