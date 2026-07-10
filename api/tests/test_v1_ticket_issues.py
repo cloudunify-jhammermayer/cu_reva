@@ -385,11 +385,43 @@ def test_list_ticket_issue_runs_strips_plan_bodies(client_db_queue):
     assert item["github_username"] == "alice"
     assert item["issues"] == [
         {"number": 42, "title": "Implement login form",
-         "url": "https://github.com/org/repo/issues/42", "state": "closed"},
-        {"number": None, "title": "Add session handling", "url": None, "state": None},
+         "url": "https://github.com/org/repo/issues/42", "state": "closed", "estimate_hours": None},
+        {"number": None, "title": "Add session handling", "url": None, "state": None, "estimate_hours": None},
     ]
     assert "body" not in r.text
     assert "description" not in item
+
+
+def test_ticket_issue_items_include_estimate_hours(client_db_queue):
+    """Per-issue estimate_hours surfaces on the list endpoint — new issues carry
+    the field, legacy (pre-rollout) issues lack it and serialize as null."""
+    client, db, _, headers = client_db_queue
+    created = client.post(
+        "/api/v1/create-issues",
+        json={**CONTRACT_PAYLOAD, "github_username": "alice"},
+        headers=headers,
+    ).json()
+    run_id = created["request_id"]
+
+    from reva.db.models import TicketIssueRun
+    with db.session() as s:
+        s.get(TicketIssueRun, run_id).issues = [
+            {"title": "Implement login form", "body": "secret customer text",
+             "acceptance_criteria": ["c1"], "number": 42,
+             "url": "https://github.com/org/repo/issues/42", "state": "closed",
+             "estimate_hours": 1.5},
+            {"title": "Add session handling", "body": "more customer text",
+             "acceptance_criteria": [], "number": None, "url": None},
+        ]
+    writers.record_ticket_issue_run_completed(
+        db, run_id, writers.get_ticket_issue_run(db, run_id)["issues"]
+    )
+
+    r = client.get("/api/v1/ticket-issue-runs")
+    assert r.status_code == 200
+    items = r.json()["items"][0]["issues"]
+    assert items[0]["estimate_hours"] == 1.5
+    assert items[1]["estimate_hours"] is None
 
 
 def test_list_and_status_surface_project_fields(client_db_queue):
@@ -452,6 +484,7 @@ def test_list_ticket_issue_runs_surfaces_parent_issue(client_db_queue):
         "title": "[Ticket 222] Build the thing",
         "url": "https://github.com/org/repo/issues/900",
         "state": "open",
+        "estimate_hours": None,
     }
     # The parent stays OUT of the issues list (separate field).
     assert by_id[with_parent["request_id"]]["issues"] == []

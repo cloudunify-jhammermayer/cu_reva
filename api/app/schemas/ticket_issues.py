@@ -87,6 +87,7 @@ class TicketIssueRef(BaseModel):
     title: str
     url: str | None
     state: str | None = None
+    estimate_hours: float | None = None
 
 
 class TicketIssueRunSummary(BaseModel):

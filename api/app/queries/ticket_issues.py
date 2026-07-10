@@ -16,7 +16,7 @@ def list_ticket_issue_runs(
 ) -> tuple[list[dict], int]:
     """Return (items, total) for the ticket_issue_runs list view.
 
-    Issue items are stripped to {number, title, url} — the stored plan also
+    Issue items are stripped to {number, title, url, state, estimate_hours} — the stored plan also
     carries un-created bodies (customer-derived text) that list consumers
     (the TUI) must not receive.
     """
@@ -51,6 +51,7 @@ def list_ticket_issue_runs(
                         "title": i.get("title", ""),
                         "url": i.get("url"),
                         "state": i.get("state"),
+                        "estimate_hours": i.get("estimate_hours"),
                     }
                     for i in (r.issues or [])
                 ],
