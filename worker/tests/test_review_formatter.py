@@ -14,7 +14,7 @@ from reva.review_formatter import (
     format_pr_review_body,
     split_findings,
 )
-from reva.types import Finding, ReviewResult
+from reva.types import Finding, IntentIssueVerdict, ReviewResult
 
 
 def _f(severity, *, file=None, line_start=None, suggestion=None, confidence=0.8, title="t") -> Finding:
@@ -44,6 +44,7 @@ def _result(status="completed", findings=None, **kwargs):
         estimated_cost_usd=kwargs.get("estimated_cost_usd", 0.042),
         decline_reason=kwargs.get("decline_reason"),
         block_on_severity=kwargs.get("block_on_severity", "major"),
+        intent_check=kwargs.get("intent_check"),
     )
 
 
@@ -274,3 +275,48 @@ def test_finding_body_and_suggestion_are_bounded():
     assert len(f.body) <= 8000
     assert f.body.endswith("...")
     assert len(f.suggestion) <= 4000
+
+
+# --- Requirements check (issue-conformance verdicts) -------------------------
+
+
+def _iv(n=42, verdict="matches", note="does what the issue asked"):
+    return IntentIssueVerdict(issue_number=n, verdict=verdict, note=note)
+
+
+def test_check_run_renders_requirements_check():
+    out = format_check_run_output(_result(intent_check=[_iv()]))
+    assert "### Requirements check" in out["summary"]
+    assert "#42" in out["summary"]
+    assert "matches" in out["summary"]
+    assert "does what the issue asked" in out["summary"]
+
+
+def test_requirements_check_absent_without_verdicts():
+    assert "Requirements check" not in format_check_run_output(_result())["summary"]
+
+
+def test_requirements_check_symbols_per_verdict():
+    out = format_check_run_output(_result(intent_check=[
+        _iv(1, "matches"), _iv(2, "partial"),
+        _iv(3, "does_not_match"), _iv(4, "unclear"),
+    ]))["summary"]
+    assert "✅ #1" in out and "⚠️ #2" in out and "❌ #3" in out and "❓ #4" in out
+    # Enum values render human-readable.
+    assert "does not match" in out and "does_not_match" not in out
+
+
+def test_pr_review_body_renders_requirements_check():
+    body = format_pr_review_body(_result(intent_check=[_iv(verdict="partial")]), unmapped=[])
+    assert "### Requirements check" in body
+
+
+def test_mismatch_verdict_never_changes_conclusion():
+    # Advisory only (SECU-6 posture): a does_not_match with no findings stays success.
+    r = _result(intent_check=[_iv(verdict="does_not_match")])
+    assert compute_check_conclusion(r) == "success"
+
+
+def test_verdict_note_empty_renders_without_colon():
+    out = format_check_run_output(_result(intent_check=[_iv(note="")]))["summary"]
+    assert "#42 — matches\n" in out or out.rstrip().endswith("#42 — matches")

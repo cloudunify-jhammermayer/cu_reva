@@ -13,7 +13,7 @@ import re
 from typing import Literal
 
 from reva.diff_utils import DiffHunk, find_line_in_hunks
-from reva.types import Finding, ReviewResult, Severity
+from reva.types import Finding, IntentIssueVerdict, ReviewResult, Severity
 
 # Internal filesystem roots that must not leak into PR-facing error text (SECU-21):
 # the repo cache, temp dir, worker home, container app dir, core worktree.
@@ -150,6 +150,8 @@ def format_check_run_output(result: ReviewResult, run_id: int | None = None) -> 
         if result.summary:
             parts.append(f"## Review Summary\n\n{result.summary}")
         parts.append(_findings_tldr(result.findings))
+        if result.intent_check:
+            parts.append(_format_intent_check(result.intent_check))
         parts.append(f"**RISK** `{result.risk_level}`")
     elif result.status == "declined":
         parts.append(f"## Declined\n\n{result.decline_reason or result.summary or 'Declined.'}")
@@ -188,6 +190,27 @@ def _counts_table(counts: dict[Severity, int]) -> str:
         for sev in ("critical", "major", "minor", "info")
     ]
     return "| Severity | Count |\n|---|---|\n" + "\n".join(rows)
+
+
+_INTENT_SYMBOL = {
+    "matches": "✅",
+    "partial": "⚠️",
+    "does_not_match": "❌",
+    "unclear": "❓",
+}
+
+
+def _format_intent_check(verdicts: list[IntentIssueVerdict]) -> str:
+    """Advisory per-linked-issue conformance section. Never feeds the check
+    conclusion — verdicts derive from UNTRUSTED issue text (SECU-6 posture)."""
+    lines = ["### Requirements check", ""]
+    for v in verdicts:
+        symbol = _INTENT_SYMBOL.get(v.verdict, "❓")
+        entry = f"- {symbol} #{v.issue_number} — {v.verdict.replace('_', ' ')}"
+        if v.note:
+            entry += f": {_md_cell(v.note)}"
+        lines.append(entry)
+    return "\n".join(lines)
 
 
 def _findings_tldr(findings: list[Finding]) -> str:
@@ -257,6 +280,8 @@ def format_pr_review_body(
     if result.summary:
         parts.append(result.summary)
     parts.append(_findings_tldr(result.findings))
+    if result.intent_check:
+        parts.append(_format_intent_check(result.intent_check))
     parts.append(f"**RISK** `{result.risk_level}`")
     if unmapped:
         parts.append(_format_unmapped_section(unmapped))
