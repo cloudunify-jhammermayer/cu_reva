@@ -2166,6 +2166,7 @@ def get_ticket_issue_union(
                     "state": item.get("state") or "open",
                     "plan_date": item.get("plan_date"),
                     "complete_date": item.get("complete_date"),
+                    "estimate_hours": item.get("estimate_hours"),
                 }
         return sorted(seen.values(), key=lambda i: i["number"])
 

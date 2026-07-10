@@ -177,6 +177,18 @@ def test_union_carries_dates(db):
     assert union[1]["complete_date"] is None
 
 
+def test_union_carries_estimate_hours(db):
+    _complete_run(db, _typed_params(ticket_id=96), [
+        {"number": 40, "title": "A", "url": "https://gh/40", "state": "open",
+         "estimate_hours": 2.5},
+        {"number": 41, "title": "B (pre-rollout run)", "url": "https://gh/41",
+         "state": "open"},
+    ])
+    union = writers.get_ticket_issue_union(db, 1, 96, "helpdesk.ticket")
+    assert union[0]["estimate_hours"] == 2.5
+    assert union[1]["estimate_hours"] is None
+
+
 def test_latest_parent_scoped_and_excludes_self(db):
     p = _typed_params(ticket_id=91)
     r1 = _complete_run(db, p, [{"number": 5, "title": "t", "url": "https://gh/5", "state": "open"}])

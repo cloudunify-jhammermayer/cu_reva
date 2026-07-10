@@ -163,10 +163,12 @@ class FakeOdoo:
     ready_raise_exc: Exception | None = None
     calls: list[dict] = field(default_factory=list)
 
-    def issues_created(self, ticket_id, model_name, request_id, status, issues, error=None):
+    def issues_created(self, ticket_id, model_name, request_id, status, issues, error=None,
+                        total_estimate_hours=None):
         self.calls.append(
             {"ticket_id": ticket_id, "model_name": model_name, "request_id": request_id,
-             "status": status, "issues": issues, "error": error}
+             "status": status, "issues": issues, "error": error,
+             "total_estimate_hours": total_estimate_hours}
         )
         if self.raise_exc:
             raise self.raise_exc
@@ -283,11 +285,23 @@ def test_happy_path_creates_issues_and_calls_back(ctx_and_fakes):
     assert cb["issues"] == [
         {"number": 102, "title": "[DEV] 123 - Issue 1 (1/2)",
          "url": "https://github.com/acme/widgets/issues/102", "state": "open",
-         "plan_date": None, "complete_date": None},
+         "plan_date": None, "complete_date": None, "estimate_hours": 1.5},
         {"number": 103, "title": "[DEV] 123 - Issue 2 (2/2)",
          "url": "https://github.com/acme/widgets/issues/103", "state": "open",
-         "plan_date": None, "complete_date": None},
+         "plan_date": None, "complete_date": None, "estimate_hours": 1.5},
     ]
+
+
+def test_created_callback_carries_estimates_and_total(ctx_and_fakes):
+    s = ctx_and_fakes
+    params = _make_params(s["db"])
+
+    run_ticket_issues(params)
+
+    call = s["odoo"].calls[-1]
+    assert call["status"] == "created"
+    assert all(i.get("estimate_hours") == 1.5 for i in call["issues"])
+    assert call["total_estimate_hours"] == round(1.5 * len(call["issues"]), 2)
 
 
 def test_placeholder_plan_copies_ticket_into_issue_body(ctx_and_fakes):
@@ -592,7 +606,8 @@ def test_reconcile_existing_issues_skips_planning_and_creation(ctx_and_fakes):
     assert cb["status"] == "created"
     # union normalizes every item with a state (defaults "open") + per-issue dates
     assert cb["issues"] == [{**s["github"].existing_issues[0], "state": "open",
-                             "plan_date": None, "complete_date": None}]
+                             "plan_date": None, "complete_date": None,
+                             "estimate_hours": None}]
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
     assert row["status"] == "completed"
 
@@ -917,10 +932,10 @@ def test_issue_closed_updates_db_and_notifies_odoo(ctx_and_fakes):
     assert cb["issues"] == [
         {"number": 102, "title": "[DEV] 123 - Issue 1 (1/2)",
          "url": "https://github.com/acme/widgets/issues/102", "state": "closed",
-         "plan_date": None, "complete_date": None},
+         "plan_date": None, "complete_date": None, "estimate_hours": 1.5},
         {"number": 103, "title": "[DEV] 123 - Issue 2 (2/2)",
          "url": "https://github.com/acme/widgets/issues/103", "state": "open",
-         "plan_date": None, "complete_date": None},
+         "plan_date": None, "complete_date": None, "estimate_hours": 1.5},
     ]
 
 

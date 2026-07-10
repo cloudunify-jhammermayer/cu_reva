@@ -411,6 +411,7 @@ def run_ticket_issues(job_params: dict) -> dict:
     union = writers.get_ticket_issue_union(
         ctx.db, params.odoo_instance_id, params.ticket_id, params.model_name
     )
+    total = round(sum(i.get("estimate_hours") or 0 for i in union), 2)
     try:
         odoo.issues_created(
             ticket_id=params.ticket_id,
@@ -418,6 +419,7 @@ def run_ticket_issues(job_params: dict) -> dict:
             request_id=params.run_id,
             status="created",
             issues=union,
+            total_estimate_hours=total or None,
         )
     except TransientError:
         # Contract 2: 5xx/network on the callback must be retried. Re-raise so
