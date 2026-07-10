@@ -116,7 +116,7 @@ One deliberate divergence from the ticket-analysis runner: **no `reset_status` c
 
 ### Ops endpoints
 
-- `GET /api/v1/ticket-issue-runs` — paginated runs feed (newest first, `status` filter). Issue items are stripped to `{number, title, url, state, plan_date, complete_date, estimate_hours}` — plan bodies (customer-derived text) never leave through the list. Feeds the TUI.
+- `GET /api/v1/ticket-issue-runs` — paginated runs feed (newest first, `status` filter). Issue items are stripped to `{number, title, url, state, estimate_hours}` — plan bodies (customer-derived text) never leave through the list. Feeds the TUI.
 - `GET /api/v1/create-issues/{request_id}` — status/result. Omits `description`/`analysis_html` (PII), mirroring how ticket-analysis status omits `input_text`.
 - `POST /api/v1/create-issues/{request_id}/requeue` — re-run a `failed`/`completed` run, or a **stale pending** one (> 30 min — its job died without running). Refuses (`409`) when the inputs were purged and no plan exists (it would plan from the purge sentinel), and when a different run is already pending for the same record (the unique pending-per-record index would reject it). Note the callback of a requeued run only lands while Odoo still waits on the same `request_id` — otherwise it gets a 409, which is logged and leaves the run `completed`.
 
