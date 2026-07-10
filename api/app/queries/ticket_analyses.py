@@ -50,6 +50,7 @@ def list_ticket_analyses(
                     "callback_error": r.callback_error,
                     "estimate_hours_min": est_min,
                     "estimate_hours_max": est_max,
+                    "odoo_instance_id": r.odoo_instance_id,
                 }
             )
     return items, total

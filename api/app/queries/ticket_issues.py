@@ -71,6 +71,7 @@ def list_ticket_issue_runs(
                 ),
                 "created_at": r.created_at,
                 "completed_at": r.completed_at,
+                "odoo_instance_id": r.odoo_instance_id,
             }
             for r in rows
         ]

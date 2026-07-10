@@ -68,6 +68,7 @@ class TicketAnalysisSummary(BaseModel):
     # Dev-time estimate summed over result_structured.estimates (null when absent).
     estimate_hours_min: float | None = None
     estimate_hours_max: float | None = None
+    odoo_instance_id: int | None = None
 
 
 class TicketAnalysisPage(BaseModel):

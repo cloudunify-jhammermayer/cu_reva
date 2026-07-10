@@ -112,6 +112,7 @@ class TicketIssueRunSummary(BaseModel):
     estimated_cost_usd: float | None
     created_at: datetime
     completed_at: datetime | None
+    odoo_instance_id: int | None = None
 
 
 class TicketIssueRunPage(BaseModel):

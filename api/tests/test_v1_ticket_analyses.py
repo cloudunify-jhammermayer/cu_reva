@@ -242,3 +242,20 @@ def test_stale_pending_can_be_requeued(client_db_queue):
     r = client.post(f"/api/v1/ticket-analysis/{aid}/requeue")
     assert r.status_code == 202
     assert len(queue.enqueued) == 2  # original + requeue
+
+
+def test_list_items_include_odoo_instance_id(client_db_queue):
+    """The ticket analysis list endpoint exposes odoo_instance_id so the TUI
+    can key journey fetches by instance."""
+    from reva.db.models import TicketAnalysis
+
+    client, db, _, headers = client_db_queue
+    with db.session() as s:
+        s.add(TicketAnalysis(
+            odoo_instance_id=1, ticket_id=42, model_name="helpdesk.ticket",
+            field_name="x_reva_analysis", input_text="t", status="completed",
+        ))
+
+    resp = client.get("/api/v1/ticket-analyses")
+    assert resp.status_code == 200
+    assert resp.json()["items"][0]["odoo_instance_id"] == 1

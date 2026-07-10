@@ -774,3 +774,16 @@ def test_run_list_exposes_issue_type(client_db_queue):
     tc.post("/api/v1/create-issues", json={**CONTRACT_PAYLOAD, "issue_type": "CR"}, headers=headers)
     items = tc.get("/api/v1/ticket-issue-runs").json()["items"]
     assert items[0]["issue_type"] == "CR"
+
+
+def test_list_items_include_odoo_instance_id(client_db_queue):
+    """The ticket issue runs list endpoint exposes odoo_instance_id so the TUI
+    can key journey fetches by instance."""
+    tc, db, _, headers = client_db_queue
+    # Create a run via the contract endpoint (sets instance from headers).
+    payload = {**CONTRACT_PAYLOAD, "ticket_id": 599}
+    tc.post("/api/v1/create-issues", json=payload, headers=headers)
+
+    resp = tc.get("/api/v1/ticket-issue-runs")
+    assert resp.status_code == 200
+    assert resp.json()["items"][0]["odoo_instance_id"] == 1
