@@ -20,6 +20,7 @@ from __future__ import annotations
 import socket
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import structlog
 from rq import get_current_job
@@ -99,6 +100,9 @@ class WorkerContext:
     repo_cache_ttl_days: int = 30
     prompts_dir: str = "/app/prompts"
     value_report_chat_enabled: bool = False
+    # RQ queue handle so worker-side code can enqueue follow-up jobs
+    # (board-status sync). None in tests/fixtures that don't need it.
+    rq_queue: Any | None = None
 
 
 # Module-level singleton so RQ task functions (which can't take extra args)
@@ -128,7 +132,7 @@ def build_odoo_client(ctx: "WorkerContext", odoo_instance_id: int) -> OdooCallba
     return OdooCallbackClient(callback_url=inst["callback_url"], api_key=api_key)
 
 
-def build_worker_context(settings: Settings) -> WorkerContext:
+def build_worker_context(settings: Settings, rq_queue: Any | None = None) -> WorkerContext:
     """Construct the singletons, register them as the process context, and run migrations."""
     engine = create_engine_from_url(settings.database_url)
     db = Database(engine)
@@ -200,6 +204,7 @@ def build_worker_context(settings: Settings) -> WorkerContext:
         repo_cache_ttl_days=settings.repo_cache_ttl_days,
         prompts_dir=settings.prompts_dir,
         value_report_chat_enabled=settings.value_report_chat_enabled,
+        rq_queue=rq_queue,
     )
     set_context(context)
     return context
@@ -317,6 +322,29 @@ def run_review(job_params: dict) -> dict:
 
     result = _execute_and_persist(ctx, params, run_id, owner, name, pr_number, log)
     _post_result_to_github(ctx, params, result, run_id, owner, name, pr_number, log)
+
+    if result.status == "completed" and ctx.rq_queue is not None:
+        # Board-status sync (review_done leg). Fail-soft: a queue hiccup must
+        # never fail a finished review — log + ops event and move on.
+        try:
+            from rq import Retry
+
+            ctx.rq_queue.enqueue(
+                "worker.board_status_tasks.run_board_status_update",
+                {
+                    "repo_full_name": f"{owner}/{name}".lower(),
+                    "pr_number": pr_number,
+                    "installation_id": params.installation_id,
+                    "trigger": "review_done",
+                },
+                retry=Retry(max=3, interval=[30, 120, 300]),
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("board_status_enqueue_failed", exc_info=True)
+            writers.record_ops_event(
+                ctx.db, "board_status", "warning", "enqueue_failed",
+                {"repo": f"{owner}/{name}", "pr": pr_number, "error": str(exc)[:300]},
+            )
 
     log.info("review_job_done", status=result.status)
     return result.model_dump(mode="json")

@@ -618,6 +618,57 @@ def test_review_declined_when_over_budget(ctx_and_fakes):
     assert len(s["github"].created_issue_comments) == 1  # decline posted
 
 
+def _set_queue(s, queue):
+    import dataclasses
+    from worker.runner import set_context
+    set_context(dataclasses.replace(s["ctx"], rq_queue=queue))
+
+
+def test_completed_review_enqueues_board_status(ctx_and_fakes):
+    s = ctx_and_fakes
+    queue = MagicMock()
+    _set_queue(s, queue)
+    s["reviewer"].result = _completed_result()
+
+    run_review(_params(s))
+
+    call = queue.enqueue.call_args
+    assert call.args[0] == "worker.board_status_tasks.run_board_status_update"
+    assert call.args[1]["trigger"] == "review_done"
+    assert call.args[1]["pr_number"] == 42
+
+
+def test_declined_review_does_not_enqueue_board_status(ctx_and_fakes):
+    s = ctx_and_fakes
+    queue = MagicMock()
+    # Reuse the file's existing over-budget decline setup, plus rq_queue.
+    import dataclasses
+    writers.record_claude_spend(s["db"], "review", 5.0)
+    set_context(dataclasses.replace(s["ctx"], daily_budget_usd=1.0, rq_queue=queue))
+    s["reviewer"].result = _completed_result()
+
+    run_review(_params(s))
+
+    queue.enqueue.assert_not_called()
+
+
+def test_board_status_enqueue_failure_never_fails_the_review(ctx_and_fakes):
+    s = ctx_and_fakes
+    queue = MagicMock()
+    queue.enqueue.side_effect = RuntimeError("redis down")
+    _set_queue(s, queue)
+    s["reviewer"].result = _completed_result()
+
+    out = run_review(_params(s))
+
+    assert out["status"] == "completed"
+    from reva.db.models import OpsEvent
+    from sqlalchemy import select
+    with s["db"].session() as session:
+        events = session.execute(select(OpsEvent)).scalars().all()
+    assert any(e.component == "board_status" and e.event == "enqueue_failed" for e in events)
+
+
 def test_review_skipped_when_another_job_holds_the_claim(ctx_and_fakes):
     """CONC-1: if another worker job already holds this (repo,pr,sha,mode) in
     'running', run_review must skip — not run a second paid review."""

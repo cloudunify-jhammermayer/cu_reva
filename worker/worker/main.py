@@ -25,10 +25,11 @@ def main() -> None:
     configure_logging()
     settings = Settings.from_env()
 
-    build_worker_context(settings)
-
     connection = Redis.from_url(settings.redis_url)
     queue = Queue(settings.queue_name, connection=connection)
+
+    build_worker_context(settings, rq_queue=queue)
+
     worker = Worker([queue], connection=connection, name=socket.gethostname())
 
     logger.info(
