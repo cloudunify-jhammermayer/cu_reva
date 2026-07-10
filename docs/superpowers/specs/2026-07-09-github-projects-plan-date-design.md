@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-09
 **Component:** `cu_reva` (api create-issues route, worker ticket-issue job, GitHub client, DB, TUI) **+ Odoo contract change** (inbound `create-issues`, outbound `tickets.issue-state`) → contracts regen + ast-odoo re-sync required.
-**Status:** Design approved — implementation plan: `docs/superpowers/plans/2026-07-09-github-projects-plan-date.md`
+**Status:** Approved — implemented 2026-07-09 (see plans/2026-07-09-github-projects-plan-date.md; staging gate + ast-odoo contract re-sync still open).
 
 ## Problem
 
