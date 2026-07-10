@@ -6,8 +6,8 @@
 CONTRACTS samples, `contracts/` regen), `worker/worker/ticket_issue_runner.py`
 (total on the created callback), TUI (verify estimates visible on tickets detail).
 Coordinated (separate work): ast-odoo `cu_reva_ticket_analysis` consumer.
-**Status:** Design approved (brainstorm Q&A with Joseph, 2026-07-10), pending
-implementation plan.
+**Status:** Approved (Joseph, 2026-07-10) — implemented; see
+plans/2026-07-10-issue-estimates-to-odoo.md.
 
 ## Problem
 
@@ -22,7 +22,9 @@ opening GitHub.
 
 - Persisted issue refs in `ticket_issue_runs.issues` JSON already carry
   `estimate_hours` (`ticket_issue_runner.py` persists it per item); the union
-  snapshot builder passes them through.
+  snapshot builder (`get_ticket_issue_union`, `reva/db/writers.py`) rebuilds
+  union items with a fixed key set, so it dropped `estimate_hours` until this
+  plan's Task 2 added the key explicitly.
 - `_project_items(items, _ISSUE_KEYS)` filters keys and **preserves
   optional-key omission** — items lacking a key simply omit it, so pre-rollout
   runs degrade cleanly.
