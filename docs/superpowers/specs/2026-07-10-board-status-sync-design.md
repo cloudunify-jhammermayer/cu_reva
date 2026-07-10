@@ -4,11 +4,12 @@
 **Component:** `cu_reva` — GitHub Projects board automation. Touches:
 `api/app/routes/webhooks.py` (`_handle_pull_request` enqueue), new
 `worker/worker/board_status_tasks.py` job, `worker/worker/runner.py`
-(post-review enqueue), `reva/types.py` (`RepoConfig.board_status_sync`),
-shared board-context resolution (extracted from
-`worker/worker/ticket_issue_runner.py`). No DB changes, no Claude calls.
-**Status:** Design approved (brainstorm Q&A with Joseph, 2026-07-10), pending
-implementation plan.
+(post-review enqueue), `reva/types.py` (`RepoConfig.board_status_sync`).
+As built: `worker/worker/board_status_runner.py` has its own read-only
+Status resolver, not a module extracted from
+`worker/worker/ticket_issue_runner.py` (see Design/Job flow). No DB
+changes, no Claude calls.
+**Status:** Approved (Joseph, 2026-07-10) — implemented; see plans/2026-07-10-board-status-sync.md.
 
 ## Problem
 
@@ -62,17 +63,22 @@ from webhook latency and from the review job's success).
 
 ### Job flow
 
-1. Fetch repo config; `board_status_sync: false` → done (kill switch below).
-2. Fetch the PR body; parse closing refs with the reviewer's `_ISSUE_REF_RE`
+1. Fetch the PR body; parse closing refs with the reviewer's `_ISSUE_REF_RE`
    idiom. When the issue-conformance feature's
    `get_closing_issue_numbers` (GraphQL union, spec 2026-07-10) has shipped,
    union it in — same degrade posture; do not block on that feature.
-3. Resolve refs → `ticket_issue_runs` rows for this repo (the
+2. Resolve refs → `ticket_issue_runs` rows for this repo (the
    `resolve_pr_tickets` substrate). No rows → done (optional by
    construction: not a REVA-managed issue, not our board).
+3. Fetch repo config; `board_status_sync: false` → done (kill switch below).
+   As built, this runs after refs are resolved and board items are found —
+   not first — so an unrelated PR with no board items never pays for a
+   config fetch.
 4. For each run with a `github_project_url`: resolve the board context once
-   per job (project + Status field + options via `get_project` — extract the
-   existing runner helper into a shared module rather than duplicating it).
+   per job (project + Status field + options via `get_project`). As built,
+   the job uses its own read-only Status resolver rather than extracting the
+   runner's board-context helper — that helper creates/renames project
+   fields, which this feature must never do.
 5. For each matched issue item that has a `project_item_id` and is **open**:
    set the Status option — `pr_active` → option named `In Progress`,
    `review_done` → option named `In review` (case-insensitive name match,
