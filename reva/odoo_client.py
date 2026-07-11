@@ -14,7 +14,10 @@ change, 2026-07-05; the un-namespaced /write-field etc. were removed):
     POST {base}/tickets/issues-created   — created GitHub issues (or failure)
     POST {base}/tickets/issue-state      — per-issue state change
     POST {base}/tickets/ready            — all linked issues closed
-    POST {base}/tickets/change-note      — merged-PR internal note
+    POST {base}/tickets/change-note      — merged-PR internal note (retired; kept
+                                           one release — delivery moved to change-summary)
+    POST {base}/tickets/issue-work-status — per-issue in_progress/in_review hint
+    POST {base}/tickets/change-summary   — consolidated merge summary on ready
     POST {base}/hr/timesheet-results     — timesheet wording review results
 
     Authorization: Bearer {api_key}
@@ -44,8 +47,10 @@ import httpx
 
 from reva.odoo_contracts import (
     ChangeNotePayload,
+    ChangeSummaryPayload,
     IssuesCreatedPayload,
     IssueStatePayload,
+    IssueWorkStatusPayload,
     ResetStatusPayload,
     TicketsReadyPayload,
     TimesheetResultsPayload,
@@ -276,4 +281,43 @@ class OdooCallbackClient:
         self._post("/tickets/change-note", payload.model_dump())
         logger.bind(ticket_id=ticket_id, model_name=model_name).info(
             "odoo_change_note_ok"
+        )
+
+    def issue_work_status(
+        self,
+        ticket_id: int,
+        model_name: str,
+        issues: list[dict],
+    ) -> None:
+        """Post per-issue work-status hints ({number, work_status}) to Odoo.
+
+        Only the issues linked by the triggering PR are sent; Odoo upserts by
+        number against existing records. A last-signal-wins display flag, not a
+        state machine."""
+        payload = IssueWorkStatusPayload(
+            ticket_id=ticket_id,
+            model_name=model_name,
+            issues=issues,
+        )
+        self._post("/tickets/issue-work-status", payload.model_dump())
+        logger.bind(ticket_id=ticket_id, model_name=model_name).info(
+            "odoo_issue_work_status_ok"
+        )
+
+    def change_summary(
+        self,
+        ticket_id: int,
+        model_name: str,
+        notes: list[dict],
+    ) -> None:
+        """Post the consolidated merge summary (one note per PR) to the Odoo
+        record. Sent once the ticket is ready and every note is terminal."""
+        payload = ChangeSummaryPayload(
+            ticket_id=ticket_id,
+            model_name=model_name,
+            notes=notes,
+        )
+        self._post("/tickets/change-summary", payload.model_dump())
+        logger.bind(ticket_id=ticket_id, model_name=model_name).info(
+            "odoo_change_summary_ok"
         )

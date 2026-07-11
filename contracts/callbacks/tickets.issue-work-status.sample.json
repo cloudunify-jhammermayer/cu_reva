@@ -1,0 +1,10 @@
+{
+  "issues": [
+    {
+      "number": 42,
+      "work_status": "in_progress"
+    }
+  ],
+  "model_name": "helpdesk.ticket",
+  "ticket_id": 123
+}

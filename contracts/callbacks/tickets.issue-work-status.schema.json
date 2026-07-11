@@ -1,0 +1,51 @@
+{
+  "$defs": {
+    "IssueWorkStatusItem": {
+      "description": "Per-issue work-status hint. Odoo upserts by number (existing records\nonly); `work_status` is a last-signal-wins display flag, not a state.",
+      "properties": {
+        "number": {
+          "title": "Number",
+          "type": "integer"
+        },
+        "work_status": {
+          "enum": [
+            "in_progress",
+            "in_review"
+          ],
+          "title": "Work Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "work_status"
+      ],
+      "title": "IssueWorkStatusItem",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/IssueWorkStatusItem"
+      },
+      "title": "Issues",
+      "type": "array"
+    },
+    "model_name": {
+      "title": "Model Name",
+      "type": "string"
+    },
+    "ticket_id": {
+      "title": "Ticket Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "ticket_id",
+    "model_name",
+    "issues"
+  ],
+  "title": "IssueWorkStatusPayload",
+  "type": "object"
+}

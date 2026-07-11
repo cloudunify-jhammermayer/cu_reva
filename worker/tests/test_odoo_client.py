@@ -389,3 +389,68 @@ def test_issue_state_409_is_permanent(monkeypatch):
     with pytest.raises(PermanentError):
         _client().issue_state(ticket_id=1, model_name="project.task",
                               number=1, state="closed", issues=[])
+
+
+# --- issue_work_status / change_summary (spec 2026-07-11) ----------------------
+
+
+def test_issue_work_status_posts_contract(monkeypatch):
+    captured: dict = {}
+
+    def post(url, *, json, headers, **kwargs):
+        captured["url"] = url
+        captured["body"] = json
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    _client().issue_work_status(
+        ticket_id=123, model_name="helpdesk.ticket",
+        issues=[{"number": 42, "work_status": "in_progress"}],
+    )
+    assert captured["url"] == "https://odoo.example.com/api/reva/tickets/issue-work-status"
+    assert captured["body"] == {
+        "ticket_id": 123, "model_name": "helpdesk.ticket",
+        "issues": [{"number": 42, "work_status": "in_progress"}],
+    }
+
+
+def test_issue_work_status_disabled_client_permanent():
+    with pytest.raises(PermanentError):
+        OdooCallbackClient(callback_url="", api_key="").issue_work_status(
+            ticket_id=1, model_name="project.task",
+            issues=[{"number": 1, "work_status": "in_review"}],
+        )
+
+
+def test_change_summary_posts_contract(monkeypatch):
+    captured: dict = {}
+
+    def post(url, *, json, headers, **kwargs):
+        captured["url"] = url
+        captured["body"] = json
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    notes = [{
+        "pr": {"number": 7, "title": "Login rework",
+               "url": "https://github.com/acme/widgets/pull/7", "repo": "acme/widgets"},
+        "note_html": "<p>merged</p>",
+    }]
+    _client().change_summary(ticket_id=123, model_name="helpdesk.ticket", notes=notes)
+    assert captured["url"] == "https://odoo.example.com/api/reva/tickets/change-summary"
+    assert captured["body"] == {
+        "ticket_id": 123, "model_name": "helpdesk.ticket", "notes": notes,
+    }
+
+
+def test_change_summary_5xx_is_transient(monkeypatch):
+    monkeypatch.setattr("reva.odoo_client.httpx.post", _mock_post(503, "down"))
+    with pytest.raises(TransientError):
+        _client().change_summary(ticket_id=1, model_name="project.task", notes=[])
+
+
+def test_change_summary_disabled_client_permanent():
+    with pytest.raises(PermanentError):
+        OdooCallbackClient(callback_url="", api_key="").change_summary(
+            ticket_id=1, model_name="project.task", notes=[],
+        )

@@ -39,3 +39,8 @@ def test_repo_config_intent_check_defaults_on():
 def test_repo_config_board_status_sync_defaults_on():
     assert RepoConfig().board_status_sync is True
     assert RepoConfig.model_validate({"board_status_sync": False}).board_status_sync is False
+
+
+def test_repo_config_work_status_defaults_on():
+    assert RepoConfig().work_status is True
+    assert RepoConfig.model_validate({"work_status": False}).work_status is False

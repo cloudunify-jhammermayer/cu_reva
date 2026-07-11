@@ -58,6 +58,24 @@
       "auth": "bearer:instance-outbound-key",
       "direction": "reva->odoo",
       "method": "POST",
+      "name": "tickets.issue-work-status",
+      "path": "/tickets/issue-work-status",
+      "sample": "callbacks/tickets.issue-work-status.sample.json",
+      "schema": "callbacks/tickets.issue-work-status.schema.json"
+    },
+    {
+      "auth": "bearer:instance-outbound-key",
+      "direction": "reva->odoo",
+      "method": "POST",
+      "name": "tickets.change-summary",
+      "path": "/tickets/change-summary",
+      "sample": "callbacks/tickets.change-summary.sample.json",
+      "schema": "callbacks/tickets.change-summary.schema.json"
+    },
+    {
+      "auth": "bearer:instance-outbound-key",
+      "direction": "reva->odoo",
+      "method": "POST",
       "name": "hr.timesheet-results",
       "path": "/hr/timesheet-results",
       "sample": "callbacks/hr.timesheet-results.sample.json",
@@ -109,6 +127,6 @@
       "schema": "inbound/error.schema.json"
     }
   ],
-  "contracts_version": "76ffe38ce6107ced174cdba791a80c2698ab0191cea5b04e616c741f639a01aa",
+  "contracts_version": "ee9dbf91d230b63543cb827aef6235d9c4465f5c7f871ce262e6b60e10a0235f",
   "generated_from": "reva/odoo_contracts.py"
 }

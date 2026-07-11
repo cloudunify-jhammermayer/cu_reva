@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,6 +13,31 @@ from reva.db.models import Base, OpsEvent, TicketIssueRun
 from reva.errors import PermanentError, TransientError
 from worker.board_status_runner import run_board_status_update
 from worker.runner import WorkerContext, set_context
+
+
+@dataclass
+class FakeOdoo:
+    """Records issue_work_status callbacks (the Odoo leg). Board tests reach it
+    via the autouse build_odoo_client patch; instance rows are never seeded."""
+
+    raise_exc: Exception | None = None
+    calls: list[dict] = field(default_factory=list)
+
+    def issue_work_status(self, ticket_id, model_name, issues):
+        self.calls.append(
+            {"ticket_id": ticket_id, "model_name": model_name, "issues": issues}
+        )
+        if self.raise_exc:
+            raise self.raise_exc
+
+
+@pytest.fixture(autouse=True)
+def odoo(monkeypatch):
+    fake = FakeOdoo()
+    monkeypatch.setattr(
+        "worker.board_status_runner.build_odoo_client", lambda ctx, _id: fake
+    )
+    return fake
 
 _URL = "https://github.com/orgs/acme/projects/7"
 _PROJECT = {
@@ -112,21 +138,27 @@ def test_sidebar_only_link_found_via_graphql_fallback(db):
     ctx.github.get_closing_issue_numbers.assert_called_once()
 
 
-def test_no_refs_anywhere_is_noop_without_board_calls(db):
+def test_no_refs_anywhere_is_noop_without_board_calls(db, odoo):
     _seed_board_issue(db)
     ctx = _ctx(db, pr_body="plain refactor", closing_numbers=[])
     out = run_board_status_update(_params())
-    assert out == {"status": "no_board_items"}
+    # No linked issues → neither leg does anything, and config is never fetched.
+    assert out == {"status": "no_refs"}
     ctx.github.get_project.assert_not_called()
-    ctx.github.get_file_content.assert_not_called()  # config only fetched when items exist
+    ctx.github.get_file_content.assert_not_called()
+    assert odoo.calls == []
 
 
-def test_kill_switch_disables(db):
+def test_board_kill_switch_disables_board_not_work_status(db, odoo):
+    # The two switches are independent: board_status_sync: false stops the board
+    # leg but the Odoo work-status leg still fires (work_status defaults on).
     _seed_board_issue(db)
     ctx = _ctx(db, config_yaml="board_status_sync: false\n")
     out = run_board_status_update(_params())
     assert out == {"status": "disabled"}
     ctx.github.set_project_item_option.assert_not_called()
+    assert [c["ticket_id"] for c in odoo.calls] == [97]
+    assert odoo.calls[0]["issues"] == [{"number": 50, "work_status": "in_progress"}]
 
 
 def test_config_fetch_failure_fails_open_with_ops_event(db):
@@ -177,7 +209,7 @@ def test_graphql_link_lookup_failure_degrades_with_ops_event(db):
     ctx = _ctx(db, pr_body="no refs")
     ctx.github.get_closing_issue_numbers.side_effect = PermanentError("boom")
     out = run_board_status_update(_params())
-    assert out == {"status": "no_board_items"}
+    assert out == {"status": "no_refs"}
     events = _ops_events(db, limit=10)
     assert any(e["event"] == "link_resolution_failed" for e in events)
 
@@ -222,3 +254,88 @@ def test_review_done_on_merged_pr_is_pr_closed_noop(db):
     assert out == {"status": "pr_closed"}
     ctx.github.get_project.assert_not_called()
     ctx.github.set_project_item_option.assert_not_called()
+
+
+# --- Odoo work-status leg (spec 2026-07-11) -----------------------------------
+
+
+def test_pr_active_sends_in_progress_work_status(db, odoo):
+    _seed_board_issue(db)
+    _ctx(db)
+    run_board_status_update(_params("pr_active"))
+    assert odoo.calls == [{
+        "ticket_id": 97, "model_name": "helpdesk.ticket",
+        "issues": [{"number": 50, "work_status": "in_progress"}],
+    }]
+
+
+def test_review_done_sends_in_review_work_status(db, odoo):
+    _seed_board_issue(db)
+    _ctx(db)
+    run_board_status_update(_params("review_done"))
+    assert odoo.calls[0]["issues"] == [{"number": 50, "work_status": "in_review"}]
+
+
+def test_board_less_ticket_still_gets_work_status(db, odoo):
+    # No board URL on the run → no board items, but the Odoo leg still fires.
+    _seed_board_issue(db, url=None)
+    ctx = _ctx(db)
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "no_board_items"}
+    assert odoo.calls[0]["issues"] == [{"number": 50, "work_status": "in_progress"}]
+    ctx.github.set_project_item_option.assert_not_called()
+
+
+def test_work_status_kill_switch_off_no_callback_board_unaffected(db, odoo):
+    _seed_board_issue(db)
+    ctx = _ctx(db, config_yaml="work_status: false\n")
+    out = run_board_status_update(_params("pr_active"))
+    # Board leg unaffected (moves the card); Odoo leg silenced.
+    assert out == {"status": "completed", "moved": 1}
+    ctx.github.set_project_item_option.assert_called_once()
+    assert odoo.calls == []
+
+
+def test_work_status_permanent_error_records_ops_event_and_continues(db, odoo):
+    _seed_board_issue(db)
+    ctx = _ctx(db)
+    odoo.raise_exc = PermanentError("Odoo /issue-work-status 409")
+    out = run_board_status_update(_params("pr_active"))
+    # Board leg still moves the card; the Odoo rejection is visible, not fatal.
+    assert out == {"status": "completed", "moved": 1}
+    ctx.github.set_project_item_option.assert_called_once()
+    events = _ops_events(db, limit=10)
+    assert any(e["event"] == "work_status_rejected" and e["component"] == "odoo_callback"
+               for e in events)
+
+
+def test_work_status_transient_error_reraises_for_rq_retry(db, odoo):
+    _seed_board_issue(db)
+    _ctx(db)
+    odoo.raise_exc = TransientError("Odoo 503")
+    with pytest.raises(TransientError):
+        run_board_status_update(_params("pr_active"))
+
+
+def test_pr_active_on_merged_pr_is_pr_closed_noop(db, odoo):
+    _seed_board_issue(db)
+    ctx = _ctx(db)
+    ctx.github.get_pull_request.return_value = {
+        "body": "Closes #50", "state": "closed", "merged": True,
+        "head": {"sha": "abc"},
+    }
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "pr_closed"}
+    assert odoo.calls == []
+    ctx.github.get_project.assert_not_called()
+
+
+def test_single_config_fetch_serves_both_flags(db, odoo):
+    _seed_board_issue(db)
+    ctx = _ctx(db)
+    run_board_status_update(_params("pr_active"))
+    # Both the work-status leg and the board leg run, but the repo config is
+    # fetched exactly once.
+    assert ctx.github.get_file_content.call_count == 1
+    assert odoo.calls  # work leg ran
+    ctx.github.set_project_item_option.assert_called_once()  # board leg ran

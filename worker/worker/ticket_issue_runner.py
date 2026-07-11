@@ -36,6 +36,7 @@ from reva.db import writers
 from reva.errors import PermanentError, TransientError
 from reva.github_urls import parse_github_project_url, parse_github_repo_url
 from reva.types import TicketIssueJobParams
+from worker.change_note_delivery import maybe_deliver_change_notes
 from worker.runner import build_odoo_client, get_context, instance_budget_exceeded
 
 logger = structlog.get_logger()
@@ -489,6 +490,13 @@ def sync_ticket_issue_state(job_params: dict) -> dict:
                         issues=snapshot,
                     )
                     log.info("ticket_ready_sent", ticket_id=record["ticket_id"])
+                    # Ticket just flipped ready — ship any change notes that are
+                    # done generating. A late note still in flight delivers from
+                    # its own job's tail; ready is never held for a Claude call.
+                    maybe_deliver_change_notes(
+                        ctx, odoo, record["odoo_instance_id"],
+                        record["ticket_id"], record["model_name"], log,
+                    )
                 except TransientError:
                     raise
                 except PermanentError:

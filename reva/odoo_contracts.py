@@ -14,7 +14,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -92,6 +92,34 @@ class ChangeNotePayload(BaseModel):
     model_name: str
     pr: PrRefPayload
     note_html: str
+
+
+class IssueWorkStatusItem(BaseModel):
+    """Per-issue work-status hint. Odoo upserts by number (existing records
+    only); `work_status` is a last-signal-wins display flag, not a state."""
+
+    number: int
+    work_status: Literal["in_progress", "in_review"]
+
+
+class IssueWorkStatusPayload(BaseModel):
+    ticket_id: int
+    model_name: str
+    issues: list[IssueWorkStatusItem]
+
+
+class ChangeSummaryNote(BaseModel):
+    pr: PrRefPayload
+    note_html: str
+
+
+class ChangeSummaryPayload(BaseModel):
+    """One consolidated merge summary delivered when the ticket flips ready —
+    every undelivered per-PR change note batched into a single chatter post."""
+
+    ticket_id: int
+    model_name: str
+    notes: list[ChangeSummaryNote]
 
 
 class TimesheetResultPayload(BaseModel):
@@ -240,6 +268,40 @@ CONTRACTS: list[Contract] = [
                 "repo": "acme/widgets",
             },
             "note_html": "<p>Die Änderung wurde gemerged.</p>",
+        },
+    ),
+    Contract(
+        name="tickets.issue-work-status",
+        direction="reva->odoo",
+        method="POST",
+        path="/tickets/issue-work-status",
+        auth="bearer:instance-outbound-key",
+        model=IssueWorkStatusPayload,
+        sample={
+            "ticket_id": 123,
+            "model_name": "helpdesk.ticket",
+            "issues": [{"number": 42, "work_status": "in_progress"}],
+        },
+    ),
+    Contract(
+        name="tickets.change-summary",
+        direction="reva->odoo",
+        method="POST",
+        path="/tickets/change-summary",
+        auth="bearer:instance-outbound-key",
+        model=ChangeSummaryPayload,
+        sample={
+            "ticket_id": 123,
+            "model_name": "helpdesk.ticket",
+            "notes": [{
+                "pr": {
+                    "number": 7,
+                    "title": "Login rework",
+                    "url": "https://github.com/acme/widgets/pull/7",
+                    "repo": "acme/widgets",
+                },
+                "note_html": "<p>Die Änderung wurde gemerged.</p>",
+            }],
         },
     ),
     Contract(

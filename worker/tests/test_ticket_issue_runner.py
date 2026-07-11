@@ -161,7 +161,16 @@ class FakeGitHub:
 class FakeOdoo:
     raise_exc: Exception | None = None
     ready_raise_exc: Exception | None = None
+    summary_raise_exc: Exception | None = None
     calls: list[dict] = field(default_factory=list)
+
+    def change_summary(self, ticket_id, model_name, notes):
+        self.calls.append(
+            {"summary": True, "ticket_id": ticket_id, "model_name": model_name,
+             "notes": notes}
+        )
+        if self.summary_raise_exc:
+            raise self.summary_raise_exc
 
     def issues_created(self, ticket_id, model_name, request_id, status, issues, error=None,
                         total_estimate_hours=None):
@@ -960,6 +969,32 @@ def test_all_issues_closed_notifies_odoo_ticket_ready(ctx_and_fakes):
         "closed",
         "closed",
     ]
+
+
+def test_ready_transition_delivers_batched_change_notes(ctx_and_fakes):
+    """note-first then ready → the ready path ships the consolidated summary."""
+    from reva.db.models import ChangeNote
+    from worker.ticket_issue_runner import sync_ticket_issue_state
+
+    s = ctx_and_fakes
+    _seed_completed_run(s)  # ticket 123 with issues 102, 103
+    with s["db"].session() as sess:
+        sess.add(ChangeNote(
+            repo_full_name="acme/widgets", pr_number=7, ticket_id=123,
+            odoo_instance_id=1, model_name="helpdesk.ticket", status="completed",
+            note_html="<p>merged</p>", pr_title="Login rework",
+            pr_url="https://github.com/acme/widgets/pull/7",
+        ))
+    s["odoo"].calls.clear()
+
+    sync_ticket_issue_state({"owner": "acme", "repo": "widgets", "number": 102, "state": "closed"})
+    # First close: ticket not yet ready → no summary.
+    assert not any(c.get("summary") for c in s["odoo"].calls)
+    sync_ticket_issue_state({"owner": "acme", "repo": "widgets", "number": 103, "state": "closed"})
+
+    summaries = [c for c in s["odoo"].calls if c.get("summary")]
+    assert len(summaries) == 1
+    assert summaries[0]["notes"][0]["pr"]["number"] == 7
 
 
 def test_issue_reopened_syncs_back_to_open(ctx_and_fakes):

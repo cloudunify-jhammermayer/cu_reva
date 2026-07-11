@@ -581,12 +581,18 @@ class ChangeNote(Base):
     model_name: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     note_html: Mapped[str | None] = mapped_column(Text)
+    # PR title/url captured at generation time so the batched change-summary
+    # (assembled later from the DB) renders each PR ref without a GitHub call.
+    pr_title: Mapped[str | None] = mapped_column(Text)
+    pr_url: Mapped[str | None] = mapped_column(Text)
     error_message: Mapped[str | None] = mapped_column(Text)
     estimated_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Stamped when the row was shipped in a change-summary batch; NULL until then.
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (
         Index(

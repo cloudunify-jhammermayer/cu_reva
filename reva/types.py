@@ -91,6 +91,10 @@ class RepoConfig(BaseModel):
     # Kill switch for GitHub Projects board Status sync (linked-PR legs):
     # false stops REVA moving cards to "In Progress"/"In review" for this repo.
     board_status_sync: bool = True
+    # Kill switch for per-issue work-status callbacks to Odoo (in_progress /
+    # in_review), independent of board_status_sync: false stops REVA sending
+    # work-status hints for this repo while the board keeps moving (or vice versa).
+    work_status: bool = True
     # Which /core version reviews consult, e.g. "19.0". None disables it.
     odoo_version: str | None = None
 

@@ -1,11 +1,21 @@
-"""GitHub Projects board Status sync — the linked-PR legs native workflows
-can't express (board-status spec 2026-07-10).
+"""GitHub Projects board Status sync + Odoo work-status callbacks — the
+linked-PR signals native workflows can't express (board-status spec 2026-07-10,
+work-status spec 2026-07-11).
 
-Native project workflows own added->Todo and closed/merged->Done; this job
-owns only: linked PR active -> "In Progress", REVA review completed ->
-"In review". Existing options only — never creates fields or options, never
-touches Todo/Done. Fail-soft by design: the board is a bonus; every
-degradation logs AND records an ops event (component="board_status")."""
+Two independent legs fire on the same two triggers (pr_active from the api
+webhook, review_done from the reviewer):
+
+  - Board leg: moves cards to "In Progress"/"In review" (existing options only —
+    never creates fields/options, never touches Todo/Done; native workflows own
+    added->Todo and closed/merged->Done). Gated on RepoConfig.board_status_sync.
+  - Odoo leg: sends per-issue work-status hints (in_progress/in_review) for every
+    REVA-created issue linked by the PR, board or no board. Gated on
+    RepoConfig.work_status.
+
+Both switches read from ONE .claude-review.yml fetch. Fail-soft by design: the
+board and the callbacks are a bonus; every degradation logs AND records an ops
+event (component="board_status" for the board leg, "odoo_callback" for the
+Odoo leg)."""
 
 from __future__ import annotations
 
@@ -15,15 +25,18 @@ import structlog
 import yaml
 
 from reva.db import writers
-from reva.errors import TransientError
+from reva.errors import PermanentError, TransientError
 from reva.github_urls import parse_github_project_url
-from reva.ticket_links import parse_closing_refs
+from reva.ticket_links import parse_closing_refs, resolve_pr_tickets
 from reva.types import RepoConfig
-from worker.runner import get_context
+from worker.runner import build_odoo_client, get_context
 
 logger = structlog.get_logger()
 
 _OPTION_BY_TRIGGER = {"pr_active": "In Progress", "review_done": "In review"}
+# Odoo work-status leg (spec 2026-07-11): the same two triggers map to Odoo's
+# per-issue display hints, independent of the board leg.
+_WORK_STATUS_BY_TRIGGER = {"pr_active": "in_progress", "review_done": "in_review"}
 
 
 def run_board_status_update(job_params: dict) -> dict:
@@ -32,6 +45,7 @@ def run_board_status_update(job_params: dict) -> dict:
     pr_number = job_params["pr_number"]
     trigger = job_params["trigger"]
     option_name = _OPTION_BY_TRIGGER.get(trigger)
+    work_status = _WORK_STATUS_BY_TRIGGER.get(trigger)
     if option_name is None:
         return {"status": "unknown_trigger"}
     owner, name = repo.split("/", 1)
@@ -50,9 +64,11 @@ def run_board_status_update(job_params: dict) -> dict:
         )
         return {"status": "failed"}
 
-    if trigger == "review_done" and (pr.get("merged") or pr.get("state") == "closed"):
-        # A merge/close landed mid-review: don't drag a Done card back to
-        # "In review". Normal lifecycle, not degradation — no ops event.
+    if pr.get("merged") or pr.get("state") == "closed":
+        # A merge/close landed before/mid-signal: don't drag a Done card back
+        # to "In Progress"/"In review", nor emit a work status for a dead PR
+        # (guard extended to pr_active per the 2026-07-10 review). Normal
+        # lifecycle, not degradation — no ops event.
         log.debug("board_status_pr_closed")
         return {"status": "pr_closed"}
 
@@ -72,12 +88,26 @@ def run_board_status_update(job_params: dict) -> dict:
             ctx.db, "board_status", "warning", "link_resolution_failed",
             {"repo": repo, "pr": pr_number, "error": str(exc)[:300]},
         )
+    if not refs:
+        # No linked issues → neither leg has anything to do; skip the config
+        # fetch entirely.
+        return {"status": "no_refs"}
+
+    # ONE config fetch serves both kill switches (spec 2026-07-11).
+    board_enabled, work_enabled = _repo_flags(ctx, token, owner, name, pr, log)
+
+    # --- Odoo work-status leg (board-independent) ---
+    if work_enabled and work_status is not None:
+        _update_work_status(ctx, repo, refs, work_status, log)
+
+    # --- Board leg ---
+    if not board_enabled:
+        log.debug("board_status_disabled")
+        return {"status": "disabled"}
+
     items = writers.get_board_items_for_issues(ctx.db, repo, refs)
     if not items:
         return {"status": "no_board_items"}
-
-    if not _sync_enabled(ctx, token, owner, name, pr, log):
-        return {"status": "disabled"}
 
     by_board: dict[str, list[dict]] = defaultdict(list)
     for item in items:
@@ -108,25 +138,58 @@ def run_board_status_update(job_params: dict) -> dict:
     return {"status": "completed", "moved": moved}
 
 
-def _sync_enabled(ctx, token: str, owner: str, name: str, pr: dict, log) -> bool:
-    """Per-repo kill switch from .claude-review.yml at the PR head. Fail-open:
-    a config hiccup must not silently freeze boards (mirror of the webhook's
+def _repo_flags(ctx, token: str, owner: str, name: str, pr: dict, log) -> tuple[bool, bool]:
+    """Both per-repo kill switches from ONE .claude-review.yml fetch at the PR
+    head: (board_status_sync, work_status). Fail-open: a config hiccup must not
+    silently freeze the board or the Odoo callbacks (mirror of the webhook's
     _change_notes_enabled semantics)."""
     try:
         raw = ctx.github.get_file_content(
             token, owner, name, ".claude-review.yml", pr["head"]["sha"]
         )
         if not raw:
-            return True
-        parsed = yaml.safe_load(raw) or {}
-        return RepoConfig.model_validate(parsed).board_status_sync
+            return True, True
+        cfg = RepoConfig.model_validate(yaml.safe_load(raw) or {})
+        return cfg.board_status_sync, cfg.work_status
     except Exception as exc:  # noqa: BLE001
         log.warning("board_status_config_failed", exc_info=True)
         writers.record_ops_event(
             ctx.db, "board_status", "warning", "config_fetch_failed",
             {"repo": f"{owner}/{name}", "error": str(exc)[:300]},
         )
-        return True
+        return True, True
+
+
+def _update_work_status(ctx, repo: str, refs: list[int], work_status: str, log) -> None:
+    """Send per-issue work-status hints to Odoo for the REVA-created issues this
+    PR links, one callback per resolved ticket. Board-independent: resolves
+    tickets the way change_note_runner does (resolve_pr_tickets), never via
+    get_board_items_for_issues, so board-less tickets are included. Only the
+    issues linked by THIS PR are sent (intersection with the ticket's union) —
+    Odoo upserts by number against existing records."""
+    for ref in resolve_pr_tickets(ctx.db, repo, refs):
+        union = writers.get_ticket_issue_union(
+            ctx.db, ref.odoo_instance_id, ref.ticket_id, ref.model_name
+        )
+        union_numbers = {item["number"] for item in union}
+        matched = sorted(n for n in refs if n in union_numbers)
+        if not matched:
+            continue
+        try:
+            odoo = build_odoo_client(ctx, ref.odoo_instance_id)
+            odoo.issue_work_status(
+                ticket_id=ref.ticket_id,
+                model_name=ref.model_name,
+                issues=[{"number": n, "work_status": work_status} for n in matched],
+            )
+        except TransientError:
+            raise  # idempotent no-op upsert in Odoo — RQ retries the whole job
+        except PermanentError:
+            log.warning("work_status_rejected", ticket_id=ref.ticket_id, exc_info=True)
+            writers.record_ops_event(
+                ctx.db, "odoo_callback", "warning", "work_status_rejected",
+                {"ticket_id": ref.ticket_id},
+            )
 
 
 def _resolve_status_option(

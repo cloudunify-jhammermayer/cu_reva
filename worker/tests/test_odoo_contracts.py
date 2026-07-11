@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from reva.odoo_contracts import (
     CONTRACTS,
-    IssueStatePayload,
+    ChangeSummaryPayload,
     IssuesCreatedPayload,
+    IssueStatePayload,
+    IssueWorkStatusPayload,
     ResetStatusPayload,
     TimesheetResultsPayload,
     WriteFieldPayload,
@@ -95,6 +99,48 @@ def test_timesheet_results_wire_shape():
     }
 
 
+def test_issue_work_status_wire_shape():
+    payload = IssueWorkStatusPayload(
+        ticket_id=123,
+        model_name="helpdesk.ticket",
+        issues=[{"number": 42, "work_status": "in_progress"}],
+    )
+    assert payload.model_dump() == {
+        "ticket_id": 123,
+        "model_name": "helpdesk.ticket",
+        "issues": [{"number": 42, "work_status": "in_progress"}],
+    }
+
+
+def test_issue_work_status_rejects_unknown_status():
+    with pytest.raises(ValueError):
+        IssueWorkStatusPayload(
+            ticket_id=1, model_name="project.task",
+            issues=[{"number": 1, "work_status": "done"}],
+        )
+
+
+def test_change_summary_wire_shape():
+    payload = ChangeSummaryPayload(
+        ticket_id=123,
+        model_name="helpdesk.ticket",
+        notes=[{
+            "pr": {"number": 7, "title": "Login rework",
+                   "url": "https://github.com/acme/widgets/pull/7", "repo": "acme/widgets"},
+            "note_html": "<p>x</p>",
+        }],
+    )
+    assert payload.model_dump() == {
+        "ticket_id": 123,
+        "model_name": "helpdesk.ticket",
+        "notes": [{
+            "pr": {"number": 7, "title": "Login rework",
+                   "url": "https://github.com/acme/widgets/pull/7", "repo": "acme/widgets"},
+            "note_html": "<p>x</p>",
+        }],
+    }
+
+
 def test_contracts_table_complete_and_sane():
     names = {contract.name for contract in CONTRACTS}
     assert {
@@ -102,6 +148,8 @@ def test_contracts_table_complete_and_sane():
         "tickets.reset-status",
         "tickets.issues-created",
         "tickets.issue-state",
+        "tickets.issue-work-status",
+        "tickets.change-summary",
         "hr.timesheet-results",
         "ticket-analysis",
         "create-issues",

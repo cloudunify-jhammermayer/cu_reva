@@ -1805,8 +1805,14 @@ def get_or_create_change_note(
     ticket_id: int,
     odoo_instance_id: int,
     model_name: str,
+    pr_title: str = "",
+    pr_url: str = "",
 ) -> tuple[int, dict]:
-    """Return the deduped change-note row for a PR/ticket, creating it if absent."""
+    """Return the deduped change-note row for a PR/ticket, creating it if absent.
+
+    pr_title/pr_url are stored on creation so the batched change-summary can
+    render the PR ref later without a GitHub round-trip.
+    """
     repo_full_name = repo_full_name.lower()
     with db.session() as s:
         row = s.execute(
@@ -1824,6 +1830,8 @@ def get_or_create_change_note(
                 odoo_instance_id=odoo_instance_id,
                 model_name=model_name,
                 status="pending",
+                pr_title=pr_title,
+                pr_url=pr_url,
             )
             s.add(row)
             s.flush()
@@ -1840,12 +1848,15 @@ def _change_note_dict(row: ChangeNote) -> dict:
         "model_name": row.model_name,
         "status": row.status,
         "note_html": row.note_html,
+        "pr_title": row.pr_title,
+        "pr_url": row.pr_url,
         "error_message": row.error_message,
         "estimated_cost_usd": (
             float(row.estimated_cost_usd) if row.estimated_cost_usd is not None else None
         ),
         "created_at": row.created_at,
         "completed_at": row.completed_at,
+        "delivered_at": row.delivered_at,
     }
 
 
@@ -1875,6 +1886,66 @@ def record_change_note_failed(
         row.status = status
         row.error_message = error
         row.completed_at = datetime.now(timezone.utc)
+
+
+def has_pending_change_notes(
+    db: Database, odoo_instance_id: int, ticket_id: int, model_name: str
+) -> bool:
+    """True while any note for the ticket is still generating (status 'pending').
+    'pending' is the only non-terminal status; completed/failed/skipped_budget
+    all count as done. Blocks change-summary delivery until every note lands."""
+    with db.session() as s:
+        row = s.execute(
+            select(ChangeNote.id).where(
+                ChangeNote.odoo_instance_id == odoo_instance_id,
+                ChangeNote.ticket_id == ticket_id,
+                ChangeNote.model_name == model_name,
+                ChangeNote.status == "pending",
+            ).limit(1)
+        ).first()
+        return row is not None
+
+
+def get_undelivered_change_notes(
+    db: Database, odoo_instance_id: int, ticket_id: int, model_name: str
+) -> list[dict]:
+    """Completed, not-yet-delivered notes for the ticket, oldest PR first.
+    Failed / budget-skipped rows (no note_html) are excluded from the batch."""
+    with db.session() as s:
+        rows = s.execute(
+            select(ChangeNote).where(
+                ChangeNote.odoo_instance_id == odoo_instance_id,
+                ChangeNote.ticket_id == ticket_id,
+                ChangeNote.model_name == model_name,
+                ChangeNote.status == "completed",
+                ChangeNote.note_html.is_not(None),
+                ChangeNote.delivered_at.is_(None),
+            ).order_by(ChangeNote.pr_number.asc())
+        ).scalars().all()
+        return [
+            {
+                "id": row.id,
+                "repo_full_name": row.repo_full_name,
+                "pr_number": row.pr_number,
+                "pr_title": row.pr_title,
+                "pr_url": row.pr_url,
+                "note_html": row.note_html,
+            }
+            for row in rows
+        ]
+
+
+def mark_change_notes_delivered(db: Database, note_ids: list[int]) -> None:
+    """Stamp delivered_at on the shipped rows in one update (idempotent: a
+    re-run over already-stamped ids is a no-op via the undelivered filter)."""
+    if not note_ids:
+        return
+    with db.session() as s:
+        s.execute(
+            update(ChangeNote)
+            .where(ChangeNote.id.in_(note_ids))
+            .values(delivered_at=datetime.now(timezone.utc))
+        )
 
 
 def upsert_value_report(
