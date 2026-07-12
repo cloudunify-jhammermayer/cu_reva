@@ -44,7 +44,14 @@ def test_prompts_dir_exists():
 
 
 def test_get_version_returns_current_version(builder):
-    assert builder.get_version() == "v2.8"
+    assert builder.get_version() == "v2.9"
+
+
+def test_ticket_issue_type_is_ticket_level():
+    # v2.9: the work-item type is classified once from the ticket's overall
+    # nature and inherited by every issue (not per-issue dominant purpose).
+    text = (PROMPTS_DIR / "ticket_issues.md").read_text()
+    assert "Classify the ticket once" in text
 
 
 def test_odoo_severity_rules_in_sync_with_odoo19_md():

@@ -56,6 +56,8 @@ class FakeGitHub:
     labels_ensured: list[str] = field(default_factory=list)
     installation_exc: Exception | None = None
     create_exc_on_call: int | None = None  # 1-based index of create_issue call that raises
+    update_issue_exc: Exception | None = None
+    updated_bodies: list[tuple[int, str]] = field(default_factory=list)
     reject_assignees: bool = False
     installation_calls: int = 0
     search_calls: int = 0
@@ -118,6 +120,11 @@ class FakeGitHub:
 
     def add_sub_issue(self, token, owner, repo, parent_number, sub_issue_id) -> None:
         self.sub_issues.append((parent_number, sub_issue_id))
+
+    def update_issue(self, token, owner, repo, number, body) -> None:
+        if self.update_issue_exc:
+            raise self.update_issue_exc
+        self.updated_bodies.append((number, body))
 
     # --- Projects v2 methods --------------------------------------------------
 
@@ -443,6 +450,40 @@ def test_estimate_rendered_on_issue_and_epic(ctx_and_fakes):
     assert "**Estimate:** ~1.5 h" in child["body"]
     parent = s["github"].created[0]                     # parent created first
     assert "**Estimated effort:** ~3 h across 2 issues" in parent["body"]
+
+
+def test_branch_lines_on_epic_and_children(ctx_and_fakes):
+    """The epic body carries the <type>/<ticket-id> branch convention; each
+    child is PATCHed after creation with its issue/<n> line (the number is
+    unknown at create time)."""
+    s = ctx_and_fakes
+    params = _make_params(s["db"])
+    run_ticket_issues(params)
+
+    parent = s["github"].created[0]
+    assert "**Branch:** `dev/123`" in parent["body"]
+    assert [(n, f"**Branch:** `issue/{n}`" in b)
+            for n, b in s["github"].updated_bodies] == [(102, True), (103, True)]
+    # the re-rendered body keeps the back-link and the dedup marker
+    body = s["github"].updated_bodies[0][1]
+    assert params["ticket_url"] in body
+    assert "<!-- revaticket" in body
+
+
+def test_branch_line_failure_is_fail_soft(ctx_and_fakes):
+    """A failed branch-line PATCH never fails the run: warning + ops event,
+    creation and callback complete normally."""
+    s = ctx_and_fakes
+    s["github"].update_issue_exc = PermanentError("GitHub 502")
+    params = _make_params(s["db"])
+
+    out = run_ticket_issues(params)
+
+    assert out["status"] == "completed"
+    assert s["odoo"].calls[0]["status"] == "created"
+    events = _ops_events(s["db"])
+    assert any(c == "github" and e == "issue_branch_line_failed"
+               and d.get("issue") == 102 for c, e, d in events)
 
 
 def test_single_issue_stays_flat(ctx_and_fakes):

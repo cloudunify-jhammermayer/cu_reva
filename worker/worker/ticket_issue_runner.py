@@ -176,9 +176,14 @@ def _fmt_hours(hours: float) -> str:
     return f"{hours:g} h"
 
 
-def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str) -> str:
+def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str,
+                       branch: str | None = None) -> str:
     """Render one planned issue as a GitHub issue body with the mandatory
-    Odoo back-link (Contract 1: ticket_url) and the hidden dedup marker."""
+    Odoo back-link (Contract 1: ticket_url) and the hidden dedup marker.
+
+    `branch` (e.g. "issue/42") is only known after creation — the caller
+    re-renders the body with it and PATCHes the issue (branch-name convention
+    for developers picking up the issue)."""
     # .get: the retention purge strips bodies from old plans; a requeued
     # post-purge item still renders its criteria + back-link.
     lines = [_compact_issue_body(item.get("body", ""))]
@@ -188,6 +193,8 @@ def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str) ->
     estimate = item.get("estimate_hours")
     if estimate:
         lines += ["", f"**Estimate:** ~{_fmt_hours(estimate)} (dev + developer testing, AI-assisted)."]
+    if branch:
+        lines += ["", f"**Branch:** `{branch}`"]
     lines += [
         "",
         "---",
@@ -332,6 +339,10 @@ def _format_parent_body(params: TicketIssueJobParams, marker: str, parent_marker
         n = len(issues)
         lines += ["", f"**Estimated effort:** ~{_fmt_hours(total)} across "
                   f"{n} issue{'s' if n != 1 else ''} (dev + developer testing, AI-assisted)."]
+    if issues:
+        # Feature-branch convention: the epic's branch is <type>/<ticket-id>;
+        # each sub-issue body carries its own issue/<n> line.
+        lines += ["", f"**Branch:** `{_dominant_type(params, issues).lower()}/{params.ticket_id}`"]
     lines += [
         "",
         "---",
@@ -840,6 +851,23 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             labels=[_TICKET_ISSUE_LABEL, issue_type],
             assignees=[params.github_username] if params.github_username else None,
         )
+        # Branch-name hint (issue/<n>) needs the number, so the body is
+        # re-rendered and PATCHed after creation. Cosmetic — a failure must
+        # never fail or retry the run (resume skips created issues, so a
+        # retry could not repair it anyway).
+        try:
+            ctx.github.update_issue(
+                token, owner, repo, created["number"],
+                body=_format_issue_body(item, params, marker,
+                                        branch=f"issue/{created['number']}"),
+            )
+        except Exception:  # noqa: BLE001
+            log.warning("ticket_issue_branch_line_failed",
+                        issue=created["number"], exc_info=True)
+            writers.record_ops_event(
+                ctx.db, "github", "warning", "issue_branch_line_failed",
+                {"run_id": params.run_id, "issue": created["number"]},
+            )
         # Keep only what resume, Contract 2, and state tracking need; the body
         # lives on GitHub now, and dropping it keeps Claude-rendered customer
         # text out of the retained JSON (the retention purge keeps `issues`).

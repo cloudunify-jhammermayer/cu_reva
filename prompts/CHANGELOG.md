@@ -1,3 +1,11 @@
+## v2.9 — Ticket-level issue typing
+
+- ticket_issues.md: the work-item `type` is classified once from the ticket's
+  overall nature and inherited by every issue — sub-tasks of a new-capability
+  ticket are `FEAT` even when they touch existing screens; `CR` only when the
+  ticket itself requests changing existing agreed behaviour (was: per-issue
+  dominant purpose, which typed feature sub-tasks as `CR`).
+
 ## v2.8 — Issue-conformance verdicts
 
 - review_guidance.md: new `intent_check` output guidance — one conformance

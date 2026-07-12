@@ -541,6 +541,11 @@ class GitHubClient:
         return {"number": data["number"], "url": data["html_url"], "id": data["id"],
                 "node_id": data.get("node_id")}
 
+    def update_issue(self, token: str, owner: str, repo: str, number: int, body: str) -> None:
+        """Replace an issue's body (post-creation edits, e.g. the branch-name
+        hint that needs the issue number)."""
+        self._patch(token, f"/repos/{owner}/{repo}/issues/{number}", {"body": body})
+
     def add_sub_issue(
         self, token: str, owner: str, repo: str, parent_number: int, sub_issue_id: int
     ) -> None:

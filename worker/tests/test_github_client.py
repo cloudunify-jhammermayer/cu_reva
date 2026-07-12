@@ -582,6 +582,25 @@ def test_create_issue_opens_issue(rsa_key_pair):
     assert captured["body"]["labels"] == ["reva-audit"]
 
 
+def test_update_issue_patches_body(rsa_key_pair):
+    private_pem, _ = rsa_key_pair
+    captured: dict = {}
+
+    def handler(req):
+        import json
+        captured["method"] = req.method
+        captured["path"] = req.url.path
+        captured["body"] = json.loads(req.content)
+        return httpx.Response(200, json={"number": 77})
+
+    client = _make_client(handler, private_pem)
+    client.update_issue(token="tok", owner="acme", repo="widgets",
+                        number=77, body="updated\n**Branch:** `issue/77`")
+    assert captured["method"] == "PATCH"
+    assert captured["path"] == "/repos/acme/widgets/issues/77"
+    assert captured["body"] == {"body": "updated\n**Branch:** `issue/77`"}
+
+
 def test_ensure_label_creates_when_missing(rsa_key_pair):
     private_pem, _ = rsa_key_pair
     captured: dict = {}
