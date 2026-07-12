@@ -336,6 +336,7 @@ CONTRACTS: list[Contract] = [
             "field_name": "x_reva_analysis",
             "text": "The login page is broken.",
             "attachment": None,
+            "github_url": "https://github.com/acme/widgets",
         },
     ),
     Contract(

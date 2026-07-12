@@ -429,6 +429,9 @@ class TicketAnalysis(Base):
     odoo_instance_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("odoo_instances.id")
     )
+    # Optional repo URL from the record's Odoo project (migration 038), stamped
+    # at create time for dashboard repo grouping. NULL for legacy/analysis-only.
+    github_url: Mapped[str | None] = mapped_column(Text)
     input_text: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     result_html: Mapped[str | None] = mapped_column(Text)

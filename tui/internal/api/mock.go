@@ -558,6 +558,19 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 			CallbackError:    strPtr("Odoo write_field timed out"),
 			EstimateHoursMin: f64Ptr(3), EstimateHoursMax: f64Ptr(6),
 		},
+		{
+			// Analysis-only ticket that carries its project repo (github_url set
+			// at analysis time) — groups under "acme/portal" from the first step,
+			// before any create-issues run exists.
+			ID: 5, OdooInstanceID: intPtr(1), TicketID: 888, ModelName: "project.task", FieldName: "description",
+			GithubURL: "https://github.com/acme/portal",
+			Status:    "completed", Model: strPtr("claude-sonnet-4-6"),
+			InputTokens: intPtr(1120), OutputTokens: intPtr(288),
+			EstimatedCostUSD: f64Ptr(0.0015), CreatedAt: now.Add(-8 * time.Minute),
+			CompletedAt:      &t1,
+			CallbackSentAt:   &t1,
+			EstimateHoursMin: f64Ptr(2), EstimateHoursMax: f64Ptr(5),
+		},
 	}
 	n := limit
 	if n > len(items) {

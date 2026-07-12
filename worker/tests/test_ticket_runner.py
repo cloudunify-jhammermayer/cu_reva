@@ -168,6 +168,33 @@ def test_happy_path(ctx_and_fakes):
     assert row["estimated_cost_usd"] is not None and row["estimated_cost_usd"] > 0
 
 
+def test_github_url_persisted_and_runner_unaffected(ctx_and_fakes):
+    """github_url rides TicketJobParams (spec 2026-07-12): it's stamped on the
+    row at create time, round-trips through model_dump/validate, and the
+    analysis runner (repo-agnostic) still completes untouched."""
+    s = ctx_and_fakes
+    created = writers.record_ticket_analysis_created(
+        s["db"],
+        TicketJobParams(
+            analysis_id=0, odoo_instance_id=1, ticket_id=42,
+            model_name="helpdesk.ticket", field_name="description",
+            text="Add a button.", github_url="https://github.com/acme/widgets",
+        ),
+    )
+    params = TicketJobParams(
+        analysis_id=created, odoo_instance_id=1, ticket_id=42,
+        model_name="helpdesk.ticket", field_name="description",
+        text="Add a button.", github_url="https://github.com/acme/widgets",
+    ).model_dump()
+    assert params["github_url"] == "https://github.com/acme/widgets"
+
+    out = run_ticket_analysis(params)
+
+    assert out["status"] == "completed"
+    row = writers.get_ticket_analysis(s["db"], out["analysis_id"])
+    assert row["github_url"] == "https://github.com/acme/widgets"
+
+
 def test_html_stored_before_odoo_call(ctx_and_fakes):
     s = ctx_and_fakes
     s["odoo"].raise_exc = PermanentError("Odoo 404")

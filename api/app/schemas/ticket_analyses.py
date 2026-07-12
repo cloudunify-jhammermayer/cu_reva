@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from reva.types import Attachment
 
@@ -23,6 +23,19 @@ class TicketAnalysisRequest(BaseModel):
         description="Optional .docx/.pdf/.txt file; its text is extracted and "
         "folded into the analysis prompt alongside `text`",
     )
+    github_url: str | None = Field(
+        default=None,
+        description="Optional repository URL from the record's project "
+        "(https://github.com/{owner}/{repo}). Persisted for dashboard repo "
+        "grouping (TUI Tickets tab); format-validated at accept time, no "
+        "reachability check.",
+    )
+
+    @field_validator("github_url", mode="before")
+    @classmethod
+    def _empty_str_is_none(cls, v: object) -> object:
+        # Odoo sends "" for an unset Char field; treat it as unset.
+        return None if v == "" else v
 
 
 class TicketAnalysisCreated(BaseModel):
@@ -37,6 +50,7 @@ class TicketAnalysisStatus(BaseModel):
     ticket_id: int
     model_name: str
     field_name: str
+    github_url: str | None = None
     status: str
     result_html: str | None
     error_message: str | None
@@ -53,6 +67,7 @@ class TicketAnalysisSummary(BaseModel):
     ticket_id: int
     model_name: str
     field_name: str
+    github_url: str | None = None
     status: str
     model: str | None
     input_tokens: int | None

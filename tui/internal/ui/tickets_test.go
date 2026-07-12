@@ -551,6 +551,41 @@ func TestTicketsGroupedByRepo(t *testing.T) {
 	}
 }
 
+func TestRepoKeyFallsBackToAnalysisURL(t *testing.T) {
+	// spec 2026-07-12: an analysis-only ticket groups under the repo its
+	// analysis carries; the issue-run URL still wins when both are present.
+	tab := newTickets(&api.MockClient{}, "")
+	cases := []struct {
+		name string
+		row  ticketRow
+		want string
+	}{
+		{
+			name: "analysis-only with URL groups under its repo",
+			row:  ticketRow{analysis: &api.TicketAnalysisSummary{GithubURL: "https://github.com/acme/portal"}},
+			want: "acme/portal",
+		},
+		{
+			name: "analysis-only without URL stays in (no repo yet)",
+			row:  ticketRow{analysis: &api.TicketAnalysisSummary{}},
+			want: "",
+		},
+		{
+			name: "issue-run URL wins over a differing analysis URL",
+			row: ticketRow{
+				analysis: &api.TicketAnalysisSummary{GithubURL: "https://github.com/acme/portal"},
+				issueRun: &api.TicketIssueRunSummary{GithubURL: "https://github.com/acme/widgets"},
+			},
+			want: "acme/widgets",
+		},
+	}
+	for _, c := range cases {
+		if got := tab.repoKey(c.row); got != c.want {
+			t.Errorf("%s: repoKey = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 func TestTicketsFoldGroup(t *testing.T) {
 	tab := ticketsWithData()
 	// All groups start collapsed; land on a repo header and expand it. Its rows

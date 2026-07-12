@@ -218,11 +218,14 @@ type PendingPage struct {
 }
 
 type TicketAnalysisSummary struct {
-	ID               int        `json:"id"`
-	OdooInstanceID   *int       `json:"odoo_instance_id"`
-	TicketID         int        `json:"ticket_id"`
-	ModelName        string     `json:"model_name"`
-	FieldName        string     `json:"field_name"`
+	ID             int    `json:"id"`
+	OdooInstanceID *int   `json:"odoo_instance_id"`
+	TicketID       int    `json:"ticket_id"`
+	ModelName      string `json:"model_name"`
+	FieldName      string `json:"field_name"`
+	// GithubURL is the record's project repo, stamped at analysis time; ""
+	// (JSON null) for legacy/analysis-only rows. Feeds Tickets-tab grouping.
+	GithubURL        string     `json:"github_url"`
 	Status           string     `json:"status"`
 	Model            *string    `json:"model"`
 	InputTokens      *int       `json:"input_tokens"`

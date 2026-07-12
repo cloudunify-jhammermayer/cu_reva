@@ -1,7 +1,7 @@
 # github_url on ticket analyses — early repo grouping — Design
 
 - **Date:** 2026-07-12
-- **Status:** approved (design), dispatched for implementation same day
+- **Status:** implemented 2026-07-12 (REVA side: migration 038, contracts regenerated). ast-odoo sender + pin bump owed (orchestrator).
 - **Context:** requested by Joseph 2026-07-12. TUI Tickets tab groups rows by the
   create-issues run's `github_url` (`tui/internal/ui/tickets.go::repoKey`); tickets
   that only have an analysis sit in "(no repo yet)" until issues are created. The

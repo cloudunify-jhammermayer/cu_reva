@@ -32,6 +32,7 @@ from app.schemas.ticket_analyses import (
 from reva.attachment_text import classify_attachment
 from reva.db import writers
 from reva.db.engine import Database
+from reva.github_urls import parse_github_repo_url
 from reva.types import TicketJobParams
 
 router = APIRouter()
@@ -109,6 +110,14 @@ def submit_ticket_analysis(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"attachment: {exc}",
             ) from exc
+    if body.github_url is not None and parse_github_repo_url(body.github_url) is None:
+        # Format-only check, matching create-issues: reject garbage at accept
+        # time (Odoo shows the error) but no reachability probe — a well-formed
+        # but uninstalled/typo'd repo must not block a paid analysis.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="github_url must be an https://github.com/{owner}/{repo} URL",
+        )
     # Dedup: if a pending analysis already exists for this record, return it.
     existing = writers.get_pending_ticket_analysis(
         db, body.ticket_id, body.model_name, body.field_name, instance.id
@@ -130,6 +139,7 @@ def submit_ticket_analysis(
         field_name=body.field_name,
         text=body.text,
         attachment=body.attachment,
+        github_url=body.github_url,
     )
     try:
         analysis_id = writers.record_ticket_analysis_created(db, stub_params)
@@ -154,6 +164,7 @@ def submit_ticket_analysis(
         field_name=body.field_name,
         text=body.text,
         attachment=body.attachment,
+        github_url=body.github_url,
     )
     job_id = _enqueue(request, db, analysis_id, params)
 

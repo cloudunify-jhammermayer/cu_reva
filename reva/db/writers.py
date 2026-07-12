@@ -1219,6 +1219,7 @@ def record_ticket_analysis_created(db: Database, params: TicketJobParams) -> int
             ticket_id=params.ticket_id,
             model_name=params.model_name,
             field_name=params.field_name,
+            github_url=params.github_url,
             input_text=params.text,
             status="pending",
         )
@@ -1441,6 +1442,7 @@ def get_ticket_analysis(db: Database, analysis_id: int) -> dict | None:
             "ticket_id": row.ticket_id,
             "model_name": row.model_name,
             "field_name": row.field_name,
+            "github_url": row.github_url,
             "input_text": row.input_text,
             "status": row.status,
             "result_html": row.result_html,

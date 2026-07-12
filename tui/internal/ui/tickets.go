@@ -147,13 +147,21 @@ func (t Tickets) filteredRows() []ticketRow {
 }
 
 // repoKey is the grouping key for a row: "owner/repo" parsed from its
-// create-issues run's github_url, or "" when the ticket has no run yet
-// (analysis-only — it carries no repo).
+// create-issues run's github_url, falling back to the analysis's github_url
+// (stamped at analysis time) when there is no run yet. "" when neither carries
+// a repo — the "(no repo yet)" bucket. The issue-run URL wins when present: it
+// is the operative repo issues were created against.
 func (t Tickets) repoKey(r ticketRow) string {
-	if r.issueRun == nil || r.issueRun.GithubURL == "" {
+	url := ""
+	if r.issueRun != nil && r.issueRun.GithubURL != "" {
+		url = r.issueRun.GithubURL
+	} else if r.analysis != nil {
+		url = r.analysis.GithubURL
+	}
+	if url == "" {
 		return ""
 	}
-	owner, name, ok := parseOwnerName(r.issueRun.GithubURL)
+	owner, name, ok := parseOwnerName(url)
 	if !ok {
 		return ""
 	}

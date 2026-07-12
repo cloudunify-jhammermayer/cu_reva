@@ -367,6 +367,10 @@ class TicketJobParams(BaseModel):
     field_name: str
     text: str
     attachment: Attachment | None = None  # optional .docx/.pdf/.txt, folded into the prompt
+    # Optional repo URL from the record's Odoo project, stamped at create time
+    # for dashboard repo grouping. Not used by the worker (analysis is repo-
+    # agnostic); default None keeps every worker path untouched.
+    github_url: str | None = None
 
 
 # --- Ticket issue creation types -----------------------------------------------

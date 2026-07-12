@@ -57,11 +57,14 @@ Content-Type: application/json
   "model_name": "helpdesk.ticket",
   "field_name": "description",
   "text":       "Als Benutzer möchte ich...",
-  "attachment": {"filename": "spec.pdf", "content_base64": "..."}
+  "attachment": {"filename": "spec.pdf", "content_base64": "..."},
+  "github_url":  "https://github.com/acme/widgets"
 }
 ```
 
 `attachment` is optional (`null`/omitted for text-only tickets). When present it must be a `.docx`, `.pdf`, or `.txt` file; its text is extracted and folded into the prompt alongside `text`. An unsupported extension, bad base64, or content/extension mismatch is rejected with `422` at accept time (`reva/attachment_text.py`).
+
+`github_url` is optional (`null`/`""`/omitted): the record's project repo, persisted for dashboard repo grouping (TUI Tickets tab). Format-validated at accept time (`422` on a non-`https://github.com/{owner}/{repo}` URL), with no reachability check.
 
 **Response `202 Accepted`:**
 
@@ -80,6 +83,7 @@ Content-Type: application/json
 | `field_name` | Field on the record where REVA writes the result |
 | `text` | Full ticket description text. German and English are supported. |
 | `attachment` | Optional `{filename, content_base64}` — a `.docx`/`.pdf`/`.txt` file folded into the analysis. Omit or `null` for text-only. |
+| `github_url` | Optional repository URL from the record's project, for dashboard repo grouping. Format-validated, no reachability check. Omit, `null`, or `""` when unknown. |
 
 ---
 

@@ -259,3 +259,74 @@ def test_list_items_include_odoo_instance_id(client_db_queue):
     resp = client.get("/api/v1/ticket-analyses")
     assert resp.status_code == 200
     assert resp.json()["items"][0]["odoo_instance_id"] == 1
+
+
+# --- github_url (spec 2026-07-12): optional repo for dashboard grouping -------
+
+GITHUB_URL = "https://github.com/acme/widgets"
+
+
+def test_github_url_accepted_persisted_and_returned(client_db_queue):
+    """A well-formed github_url rides the job params and comes back on GET."""
+    client, _, queue, headers = client_db_queue
+    payload = {**BASE_PAYLOAD, "github_url": GITHUB_URL}
+    r = client.post("/api/v1/ticket-analysis", json=payload, headers=headers)
+    assert r.status_code == 202
+    _, params, _ = queue.enqueued[0]
+    assert params["github_url"] == GITHUB_URL
+
+    aid = r.json()["analysis_id"]
+    got = client.get(f"/api/v1/ticket-analysis/{aid}", headers=headers).json()
+    assert got["github_url"] == GITHUB_URL
+
+
+def test_github_url_empty_string_stored_null(client_db_queue):
+    """Odoo sends "" for an unset field — coerced to None (NULL) before persist."""
+    client, _, queue, headers = client_db_queue
+    payload = {**BASE_PAYLOAD, "github_url": ""}
+    r = client.post("/api/v1/ticket-analysis", json=payload, headers=headers)
+    assert r.status_code == 202
+    _, params, _ = queue.enqueued[0]
+    assert params["github_url"] is None
+
+    aid = r.json()["analysis_id"]
+    got = client.get(f"/api/v1/ticket-analysis/{aid}", headers=headers).json()
+    assert got["github_url"] is None
+
+
+def test_github_url_malformed_is_422(client_db_queue):
+    """Garbage is rejected at accept time with the shared parser's message."""
+    client, _, _, headers = client_db_queue
+    payload = {**BASE_PAYLOAD, "github_url": "https://gitlab.com/acme/widgets"}
+    r = client.post("/api/v1/ticket-analysis", json=payload, headers=headers)
+    assert r.status_code == 422
+    assert r.json()["detail"] == "github_url must be an https://github.com/{owner}/{repo} URL"
+
+
+def test_github_url_absent_is_none(client_db_queue):
+    """Backward compat: omitting github_url stores/returns None."""
+    client, _, queue, headers = client_db_queue
+    r = client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers)
+    assert r.status_code == 202
+    _, params, _ = queue.enqueued[0]
+    assert params["github_url"] is None
+
+    aid = r.json()["analysis_id"]
+    got = client.get(f"/api/v1/ticket-analysis/{aid}", headers=headers).json()
+    assert got["github_url"] is None
+
+
+def test_list_exposes_github_url(client_db_queue):
+    """The list/summary view carries github_url for TUI repo grouping."""
+    from reva.db.models import TicketAnalysis
+
+    client, db, _, headers = client_db_queue
+    with db.session() as s:
+        s.add(TicketAnalysis(
+            odoo_instance_id=None, ticket_id=8, model_name="project.task",
+            field_name="x", input_text="t", status="completed",
+            github_url="https://github.com/acme/portal",
+        ))
+
+    item = client.get("/api/v1/ticket-analyses").json()["items"][0]
+    assert item["github_url"] == "https://github.com/acme/portal"

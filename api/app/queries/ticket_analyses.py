@@ -36,6 +36,7 @@ def list_ticket_analyses(
                     "ticket_id": r.ticket_id,
                     "model_name": r.model_name,
                     "field_name": r.field_name,
+                    "github_url": r.github_url,
                     "status": r.status,
                     "model": r.model,
                     "input_tokens": r.input_tokens,

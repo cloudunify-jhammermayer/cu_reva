@@ -38,6 +38,19 @@
       "title": "Field Name",
       "type": "string"
     },
+    "github_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional repository URL from the record's project (https://github.com/{owner}/{repo}). Persisted for dashboard repo grouping (TUI Tickets tab); format-validated at accept time, no reachability check.",
+      "title": "Github Url"
+    },
     "model_name": {
       "description": "Odoo model name, e.g. \"helpdesk.ticket\" or \"project.task\"",
       "title": "Model Name",
