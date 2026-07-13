@@ -164,9 +164,13 @@ def doc_branches(
     except TransientError:
         raise HTTPException(status_code=502, detail="Upstream GitHub error")
     default = meta["default_branch"]
+    # Only surface the long-lived branches in the picker; the default branch is
+    # always kept so the doc view can't be left without its truth ref.
+    allowed = {"main", "dev", "test", default}
     items = [
         {"name": b["name"], "sha": b["sha"], "is_default": b["name"] == default}
         for b in branches
+        if b["name"] in allowed
     ]
     items.sort(key=lambda b: (not b["is_default"], b["name"].lower()))
     result = {"repository_id": repository_id, "default_branch": default, "items": items}

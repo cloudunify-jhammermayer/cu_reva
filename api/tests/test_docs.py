@@ -104,8 +104,23 @@ def test_branches_default_first_then_alpha(env):
     ]))
     body = client.get(f"/repo-docs/repos/{rid}/branches").json()
     assert body["default_branch"] == "develop"
+    # develop is the default (always kept); feature/x is filtered out.
     assert body["items"][0] == {"name": "develop", "sha": "s2", "is_default": True}
-    assert [b["name"] for b in body["items"]] == ["develop", "feature/x", "main"]
+    assert [b["name"] for b in body["items"]] == ["develop", "main"]
+
+
+def test_branches_filtered_to_allowlist(env):
+    client, db, _ = env
+    rid = _seed_repo(db, branch="main")
+    _use_github(_FakeGitHub(branches=[
+        {"name": "main", "sha": "s1"},
+        {"name": "dev", "sha": "s2"},
+        {"name": "test", "sha": "s3"},
+        {"name": "feature/x", "sha": "s4"},
+        {"name": "release/1.0", "sha": "s5"},
+    ]))
+    body = client.get(f"/repo-docs/repos/{rid}/branches").json()
+    assert [b["name"] for b in body["items"]] == ["main", "dev", "test"]
 
 
 def test_branches_unknown_repo_404(env):
