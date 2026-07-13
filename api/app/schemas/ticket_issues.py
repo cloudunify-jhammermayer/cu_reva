@@ -78,6 +78,27 @@ class TicketIssuesAccepted(BaseModel):
     status: str
 
 
+class UpdateIssueEstimateRequest(BaseModel):
+    """Estimate edited on Odoo's issue table → mirror it to the board's
+    Estimate field. Fire-and-forget from Odoo's side: no callback echoes it
+    (Odoo already holds the new value)."""
+
+    ticket_id: int
+    model_name: str = Field(
+        description='Odoo model name, e.g. "helpdesk.ticket" or "project.task"'
+    )
+    number: int = Field(description="GitHub issue number the estimate belongs to")
+    estimate_hours: float | None = Field(
+        description="New estimate in hours; 0/null clears it to 0 on the board"
+    )
+
+
+class IssueEstimateAccepted(BaseModel):
+    """202 body for update-issue-estimate."""
+
+    status: str
+
+
 class TicketIssueRef(BaseModel):
     """One planned/created issue in a list view. number/url are null until the
     issue exists on GitHub (a partially-created plan shows both states);

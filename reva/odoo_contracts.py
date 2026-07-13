@@ -153,12 +153,13 @@ def _inbound_models() -> dict[str, type[BaseModel]]:
     if api_dir not in sys.path:
         sys.path.insert(0, api_dir)
     from app.schemas.ticket_analyses import TicketAnalysisRequest
-    from app.schemas.ticket_issues import CreateIssuesRequest
+    from app.schemas.ticket_issues import CreateIssuesRequest, UpdateIssueEstimateRequest
     from app.schemas.timesheet_reviews import TimesheetReviewRequest
 
     return {
         "ticket-analysis": TicketAnalysisRequest,
         "create-issues": CreateIssuesRequest,
+        "update-issue-estimate": UpdateIssueEstimateRequest,
         "timesheet-review": TimesheetReviewRequest,
     }
 
@@ -359,6 +360,19 @@ CONTRACTS: list[Contract] = [
             "github_username": None,
             "github_project_url": "https://github.com/orgs/acme/projects/5",
             "plan_date": "2026-07-15",
+        },
+    ),
+    Contract(
+        name="update-issue-estimate",
+        direction="odoo->reva",
+        method="POST",
+        path="/api/v1/update-issue-estimate",
+        auth="bearer:instance-inbound-key",
+        sample={
+            "ticket_id": 42,
+            "model_name": "project.task",
+            "number": 42,
+            "estimate_hours": 5.0,
         },
     ),
     Contract(

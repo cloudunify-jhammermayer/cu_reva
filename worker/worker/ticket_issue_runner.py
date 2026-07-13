@@ -171,11 +171,6 @@ def _dominant_type(params: TicketIssueJobParams, issues: list[dict]) -> str:
     return next(t for t in types if counts[t] == best)
 
 
-def _fmt_hours(hours: float) -> str:
-    """Compact hour label: '2 h' for integers, '1.5 h' otherwise."""
-    return f"{hours:g} h"
-
-
 def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str,
                        branch: str | None = None) -> str:
     """Render one planned issue as a GitHub issue body with the mandatory
@@ -190,9 +185,6 @@ def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str,
     if item.get("acceptance_criteria"):
         lines += ["", "### Acceptance criteria", ""]
         lines += [f"- [ ] {criterion}" for criterion in item["acceptance_criteria"]]
-    estimate = item.get("estimate_hours")
-    if estimate:
-        lines += ["", f"**Estimate:** ~{_fmt_hours(estimate)} (dev + developer testing, AI-assisted)."]
     if branch:
         lines += ["", f"**Branch:** `{branch}`"]
     lines += [
@@ -334,11 +326,6 @@ def _format_parent_body(params: TicketIssueJobParams, marker: str, parent_marker
     summary = _parent_summary(params, plan_summary)
     if summary:
         lines += ["", "### Summary", "", summary]
-    total = sum(i.get("estimate_hours") or 0 for i in issues or [])
-    if total:
-        n = len(issues)
-        lines += ["", f"**Estimated effort:** ~{_fmt_hours(total)} across "
-                  f"{n} issue{'s' if n != 1 else ''} (dev + developer testing, AI-assisted)."]
     if issues:
         # Feature-branch convention: the epic's branch is <type>/<ticket-id>;
         # each sub-issue body carries its own issue/<n> line.
@@ -537,6 +524,76 @@ def sync_ticket_issue_state(job_params: dict) -> dict:
 
     log.info("ticket_issue_state_done", records=len(affected), notified=notified)
     return {"status": "completed", "records": len(affected), "notified": notified}
+
+
+def update_issue_estimate(job_params: dict) -> dict:
+    """RQ task: a user changed an issue's estimate in Odoo's issue table.
+    Update the persisted plan rows (so unions/callbacks and the TUI carry the
+    new value) and mirror it to the board's Estimate NUMBER field. The board
+    is the only GitHub surface for estimates — issue bodies never render them.
+
+    params keys: odoo_instance_id, ticket_id, model_name, number, estimate_hours.
+    """
+    ctx = get_context()
+    try:
+        odoo_instance_id = job_params["odoo_instance_id"]
+        ticket_id = job_params["ticket_id"]
+        model_name = job_params["model_name"]
+        number = job_params["number"]
+        estimate_hours = job_params["estimate_hours"]
+    except KeyError as exc:
+        raise PermanentError(f"update_issue_estimate: missing param {exc}") from exc
+
+    log = logger.bind(
+        ticket_id=ticket_id, model_name=model_name,
+        number=number, estimate_hours=estimate_hours,
+    )
+
+    target = writers.update_ticket_issue_estimate(
+        ctx.db, odoo_instance_id, ticket_id, model_name, number, estimate_hours
+    )
+    if target is None:
+        # The route checks before enqueueing; a wiped DB between accept and run
+        # can still land here.
+        log.info("ticket_issue_estimate_no_match")
+        return {"status": "no_match"}
+    if not (target["github_project_url"] and target["project_item_id"]):
+        # Never placed on a board (no project URL on the request, or the
+        # fail-soft projection skipped it) — the DB update is all there is.
+        log.info("ticket_issue_estimate_no_board")
+        return {"status": "no_board", "db_updated": True}
+
+    parsed_repo = parse_github_repo_url(target["github_url"])
+    parsed_project = parse_github_project_url(target["github_project_url"])
+    if parsed_repo is None or parsed_project is None:
+        raise PermanentError(
+            f"update_issue_estimate: unparseable stored URL "
+            f"(repo={target['github_url']!r}, project={target['github_project_url']!r})"
+        )
+    owner, repo = parsed_repo
+    installation_id = ctx.github.get_repo_installation_id(owner, repo)
+    token = ctx.github.get_installation_token(installation_id)
+    project = ctx.github.get_project(token, *parsed_project)
+    field = next(
+        (f for f in project["fields"]
+         if f["name"].lower() in _ESTIMATE_LOOKUP and f["dataType"] == "NUMBER"),
+        None,
+    )
+    if field is None:
+        # The field existed when the item was placed; someone deleted it since.
+        # DB already holds the truth — degrade visibly, don't fail the job.
+        log.warning("ticket_issue_estimate_field_missing")
+        writers.record_ops_event(
+            ctx.db, "github", "warning", "estimate_field_missing",
+            {"ticket_id": ticket_id, "number": number,
+             "project_url": target["github_project_url"]})
+        return {"status": "no_field", "db_updated": True}
+    ctx.github.set_project_item_number(
+        token, project["id"], target["project_item_id"], field["id"],
+        float(estimate_hours or 0),
+    )
+    log.info("ticket_issue_estimate_updated")
+    return {"status": "updated"}
 
 
 def _board_context(ctx, token: str, params: TicketIssueJobParams, log) -> dict | None:

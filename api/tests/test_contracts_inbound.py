@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from app.schemas.ticket_analyses import TicketAnalysisRequest
-from app.schemas.ticket_issues import CreateIssuesRequest
+from app.schemas.ticket_issues import CreateIssuesRequest, UpdateIssueEstimateRequest
 from app.schemas.timesheet_reviews import TimesheetReviewRequest
 from reva.odoo_contracts import CONTRACTS
 
 _MODELS = {
     "ticket-analysis": TicketAnalysisRequest,
     "create-issues": CreateIssuesRequest,
+    "update-issue-estimate": UpdateIssueEstimateRequest,
     "timesheet-review": TimesheetReviewRequest,
 }
 

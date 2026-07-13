@@ -2202,6 +2202,66 @@ def _instance_filter(odoo_instance_id: int | None):
     return TicketIssueRun.odoo_instance_id == odoo_instance_id
 
 
+def update_ticket_issue_estimate(
+    db: Database, odoo_instance_id: int | None, ticket_id: int, model_name: str,
+    number: int, estimate_hours: float | None,
+) -> dict | None:
+    """Set `estimate_hours` on issue `number` across all of the record's runs
+    (adopted/reconciled runs share issues, and the union feeds later
+    issues-created callbacks — a single-row update would resurrect the old
+    value).
+
+    Returns the board target from the newest run that placed the issue on a
+    Projects board — {"github_url", "github_project_url", "project_item_id"} —
+    or the same dict with a None project_item_id/github_project_url when the
+    issue was never placed, or None when no run carries the issue at all."""
+    from sqlalchemy.orm import load_only
+
+    target: dict | None = None
+    with db.session() as s:
+        rows = s.execute(
+            select(TicketIssueRun)
+            .where(
+                TicketIssueRun.ticket_id == ticket_id,
+                TicketIssueRun.model_name == model_name,
+                _instance_filter(odoo_instance_id),
+                TicketIssueRun.issues.is_not(None),
+            )
+            .options(load_only(
+                TicketIssueRun.github_url,
+                TicketIssueRun.github_project_url,
+                TicketIssueRun.issues,
+                TicketIssueRun.created_at,
+            ))
+            .order_by(TicketIssueRun.created_at.desc(), TicketIssueRun.id.desc())
+        ).scalars().all()
+        for row in rows:
+            items = [dict(i) for i in (row.issues or [])]
+            hit = next((i for i in items if i.get("number") == number), None)
+            if hit is None:
+                continue
+            for item in items:
+                if item.get("number") == number:
+                    item["estimate_hours"] = estimate_hours
+            row.issues = items
+            if target is None:
+                target = {
+                    "github_url": row.github_url,
+                    "github_project_url": None,
+                    "project_item_id": None,
+                }
+            # A project_item_id is only meaningful with the board it was
+            # created on — take both from the same (newest such) run.
+            if (
+                target["project_item_id"] is None
+                and row.github_project_url
+                and hit.get("project_item_id")
+            ):
+                target["github_project_url"] = row.github_project_url
+                target["project_item_id"] = hit["project_item_id"]
+    return target
+
+
 def get_ticket_issue_union(
     db: Database, odoo_instance_id: int | None, ticket_id: int, model_name: str
 ) -> list[dict]:

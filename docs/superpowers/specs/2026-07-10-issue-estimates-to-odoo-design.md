@@ -8,6 +8,10 @@ CONTRACTS samples, `contracts/` regen), `worker/worker/ticket_issue_runner.py`
 Coordinated (separate work): ast-odoo `cu_reva_ticket_analysis` consumer.
 **Status:** Approved (Joseph, 2026-07-10) — implemented; see
 plans/2026-07-10-issue-estimates-to-odoo.md.
+**Superseded in part (2026-07-13):** estimates are no longer rendered in issue/epic
+bodies — the board's Estimate field (kept in sync with Odoo edits via
+`POST /api/v1/update-issue-estimate`) is the only GitHub surface; see
+`docs/github-issue-creation.md` → "Estimate sync (Odoo → board)".
 
 ## Problem
 

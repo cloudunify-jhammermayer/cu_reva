@@ -30,10 +30,12 @@ from app.pagination import clamp_limit, clamp_offset
 from app.queries import ticket_issues as q
 from app.schemas.ticket_issues import (
     CreateIssuesRequest,
+    IssueEstimateAccepted,
     TicketIssueRunPage,
     TicketIssueRunStatus,
     TicketIssueRunSummary,
     TicketIssuesAccepted,
+    UpdateIssueEstimateRequest,
 )
 from reva.attachment_text import classify_attachment
 from reva.db import writers
@@ -181,6 +183,64 @@ def submit_create_issues(
 
     logger.info("ticket_issues_enqueued", request_id=run_id, job_id=job_id)
     return {"request_id": run_id, "job_id": job_id, "status": "pending"}
+
+
+@create_router.post(
+    "/update-issue-estimate",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=IssueEstimateAccepted,
+)
+def update_issue_estimate(
+    body: UpdateIssueEstimateRequest,
+    request: Request,
+    db: Database = Depends(get_db),
+    instance: ResolvedOdooInstance = Depends(require_odoo_instance),
+) -> dict:
+    """Accept an estimate change from Odoo's issue table, enqueue the board
+    update, return immediately.
+
+    Odoo blocks the user's edit on any non-202 (its write rolls back), so an
+    unknown issue must be rejected here — a silent 202 no-op would let Odoo
+    and GitHub drift invisibly. No budget check: the job makes GitHub API
+    calls only, never a paid Claude call.
+    """
+    union = writers.get_ticket_issue_union(db, instance.id, body.ticket_id, body.model_name)
+    if not any(item.get("number") == body.number for item in union):
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No REVA-created issue #{body.number} known for "
+                f"{body.model_name} {body.ticket_id}"
+            ),
+        )
+    try:
+        job = request.app.state.rq_queue.enqueue(
+            "worker.ticket_issue_tasks.update_issue_estimate",
+            {
+                "odoo_instance_id": instance.id,
+                "ticket_id": body.ticket_id,
+                "model_name": body.model_name,
+                "number": body.number,
+                "estimate_hours": body.estimate_hours,
+            },
+            job_timeout=_JOB_TIMEOUT,
+            retry=_RETRY,
+            failure_ttl=_FAILURE_TTL,
+        )
+    except Exception as exc:
+        logger.error("issue_estimate_enqueue_failed", ticket_id=body.ticket_id, error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Job queue unavailable; try again",
+        ) from exc
+    logger.info(
+        "issue_estimate_enqueued",
+        ticket_id=body.ticket_id,
+        number=body.number,
+        estimate_hours=body.estimate_hours,
+        job_id=job.id,
+    )
+    return {"status": "queued"}
 
 
 @router.get(

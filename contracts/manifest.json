@@ -103,6 +103,15 @@
       "auth": "bearer:instance-inbound-key",
       "direction": "odoo->reva",
       "method": "POST",
+      "name": "update-issue-estimate",
+      "path": "/api/v1/update-issue-estimate",
+      "sample": "inbound/update-issue-estimate.sample.json",
+      "schema": "inbound/update-issue-estimate.schema.json"
+    },
+    {
+      "auth": "bearer:instance-inbound-key",
+      "direction": "odoo->reva",
+      "method": "POST",
       "name": "timesheet-review",
       "path": "/api/v1/timesheet-review",
       "sample": "inbound/timesheet-review.sample.json",
@@ -127,6 +136,6 @@
       "schema": "inbound/error.schema.json"
     }
   ],
-  "contracts_version": "b7568daa795b20a25569b811e5b035c5782856c828f1fda8ab9791d2f21ed1df",
+  "contracts_version": "1577ce290f5462c346a56218faf9e01311d7888ed2f03f45a44643f58fb08a1e",
   "generated_from": "reva/odoo_contracts.py"
 }

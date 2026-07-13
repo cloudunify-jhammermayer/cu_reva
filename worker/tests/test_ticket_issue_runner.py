@@ -438,18 +438,16 @@ def test_english_plan_summary_persisted_and_used(ctx_and_fakes):
     assert "Print payment terms on the customer invoice PDF." in parent["body"]
 
 
-def test_estimate_rendered_on_issue_and_epic(ctx_and_fakes):
-    """Each child issue body shows its low-end estimate; the epic shows the
-    total across issues (2 × 1.5 h = 3 h)."""
+def test_estimate_never_rendered_in_bodies(ctx_and_fakes):
+    """Estimates live only in the board's Estimate field (and Odoo) — never in
+    issue text: neither the child bodies nor the epic total mention hours."""
     s = ctx_and_fakes
     params = _make_params(s["db"])
     run_ticket_issues(params)
 
-    created = {c["title"]: c for c in s["github"].created}
-    child = next(c for t, c in created.items() if "1/2" in t)
-    assert "**Estimate:** ~1.5 h" in child["body"]
-    parent = s["github"].created[0]                     # parent created first
-    assert "**Estimated effort:** ~3 h across 2 issues" in parent["body"]
+    for c in s["github"].created:
+        assert "Estimate" not in c["body"]
+        assert "Estimated effort" not in c["body"]
 
 
 def test_branch_lines_on_epic_and_children(ctx_and_fakes):
@@ -1419,3 +1417,76 @@ def test_instance_budget_gate_declines_planning(ctx_and_fakes, monkeypatch):
     assert s["planner"].call_count == 0
     assert s["odoo"].calls
     assert s["odoo"].calls[0]["status"] == "failed"
+
+
+# --- update_issue_estimate (Odoo estimate edit → board Estimate field) --------
+
+
+def _estimate_job(number=102, estimate=5.0, **overrides):
+    return {**{
+        "odoo_instance_id": 1, "ticket_id": 123, "model_name": "helpdesk.ticket",
+        "number": number, "estimate_hours": estimate,
+    }, **overrides}
+
+
+def test_update_issue_estimate_sets_board_field_and_db(ctx_and_fakes):
+    """An Odoo estimate edit updates the persisted plan AND the board's
+    Estimate NUMBER field on the stored project item."""
+    from worker.ticket_issue_runner import update_issue_estimate
+    s = ctx_and_fakes
+    s["github"].project_fields = s["github"].project_fields + [
+        {"id": "F_est", "name": "Estimate", "dataType": "NUMBER"},
+    ]
+    params = _make_params(s["db"], github_project_url=_PROJECT_URL)
+    run_ticket_issues(params)
+    s["github"].item_field_sets.clear()
+
+    out = update_issue_estimate(_estimate_job(number=102, estimate=5.0))
+
+    assert out == {"status": "updated"}
+    assert ("PVTI_I_102", "F_est", 5.0) in s["github"].item_field_sets
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    by_number = {i["number"]: i for i in row["issues"]}
+    assert by_number[102]["estimate_hours"] == 5.0
+    assert by_number[103]["estimate_hours"] == 1.5      # sibling untouched
+
+
+def test_update_issue_estimate_without_board_updates_db_only(ctx_and_fakes):
+    """No project URL on any run: the DB is the only surface — no GitHub calls."""
+    from worker.ticket_issue_runner import update_issue_estimate
+    s = ctx_and_fakes
+    params = _make_params(s["db"])
+    run_ticket_issues(params)
+    calls_before = s["github"].get_project_calls
+
+    out = update_issue_estimate(_estimate_job(number=102, estimate=4.0))
+
+    assert out == {"status": "no_board", "db_updated": True}
+    assert s["github"].get_project_calls == calls_before
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert {i["number"]: i["estimate_hours"] for i in row["issues"]} == {102: 4.0, 103: 1.5}
+
+
+def test_update_issue_estimate_unknown_issue_is_noop(ctx_and_fakes):
+    from worker.ticket_issue_runner import update_issue_estimate
+    out = update_issue_estimate(_estimate_job(number=999))
+    assert out == {"status": "no_match"}
+
+
+def test_update_issue_estimate_deleted_field_degrades_visibly(ctx_and_fakes):
+    """The Estimate field existed at placement but was deleted since: DB keeps
+    the truth, the job succeeds, and an ops event records the degradation.
+    (The default fixture's get_project never returns the created field, which
+    models exactly this.)"""
+    from worker.ticket_issue_runner import update_issue_estimate
+    s = ctx_and_fakes
+    params = _make_params(s["db"], github_project_url=_PROJECT_URL)
+    run_ticket_issues(params)
+
+    out = update_issue_estimate(_estimate_job(number=102, estimate=2.0))
+
+    assert out == {"status": "no_field", "db_updated": True}
+    assert ("github", "estimate_field_missing",
+            {"ticket_id": 123, "number": 102, "project_url": _PROJECT_URL}) in _ops_events(s["db"])
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert {i["number"]: i["estimate_hours"] for i in row["issues"]} == {102: 2.0, 103: 1.5}

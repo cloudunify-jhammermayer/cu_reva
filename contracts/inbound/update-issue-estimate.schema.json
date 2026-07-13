@@ -1,0 +1,39 @@
+{
+  "description": "Estimate edited on Odoo's issue table \u2192 mirror it to the board's\nEstimate field. Fire-and-forget from Odoo's side: no callback echoes it\n(Odoo already holds the new value).",
+  "properties": {
+    "estimate_hours": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "New estimate in hours; 0/null clears it to 0 on the board",
+      "title": "Estimate Hours"
+    },
+    "model_name": {
+      "description": "Odoo model name, e.g. \"helpdesk.ticket\" or \"project.task\"",
+      "title": "Model Name",
+      "type": "string"
+    },
+    "number": {
+      "description": "GitHub issue number the estimate belongs to",
+      "title": "Number",
+      "type": "integer"
+    },
+    "ticket_id": {
+      "title": "Ticket Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "ticket_id",
+    "model_name",
+    "number",
+    "estimate_hours"
+  ],
+  "title": "UpdateIssueEstimateRequest",
+  "type": "object"
+}

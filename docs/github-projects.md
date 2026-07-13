@@ -36,7 +36,7 @@ best-effort rename — if it fails REVA still uses the field under its old name)
 | Field | Behavior |
 |---|---|
 | **Due date** (date) | Reuses an existing custom DATE field named `Due date`; a legacy `Plan date`/`due date` field is renamed to `Due date` in place (values preserved). If neither exists **and** the request carried a date, REVA creates a `Due date` field. The built-in roadmap `Start date`/`Target date` are issue-backed and deliberately not used. Set on every added item (including the epic). Skipped when the request sent no date. |
-| **Estimate** (number) | Reuses an existing `Estimate` NUMBER field, else creates one. Set to the planned hours on each added item that carries an estimate; skipped for items without one. |
+| **Estimate** (number) | Reuses an existing `Estimate` NUMBER field, else creates one. Set to the planned hours on each added item that carries an estimate; skipped for items without one. Updated later when the estimate is edited in Odoo's issue table (`POST /api/v1/update-issue-estimate` → `update_issue_estimate` job) — the board is the only GitHub surface for estimates; issue bodies never render them. |
 | **Status** (single-select) | Sets the built-in `Status` to its `Todo` option **only when first adding an item**. If the board has no `Todo` option, Status is left unset (`project_field_unmatched`). |
 | **Priority** (single-select) | Reuses a `Priority` single-select, else creates one with options **Low / Medium / High / Urgent**. Mapped from the Odoo priority key: `0`→Low, `1`→Medium, `2`→High, `3`→Urgent (unknown → Medium). If a `Priority` field exists but lacks the mapped option name, it is skipped (`project_field_unmatched`). |
 

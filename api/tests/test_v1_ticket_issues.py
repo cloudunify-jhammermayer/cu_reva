@@ -787,3 +787,65 @@ def test_list_items_include_odoo_instance_id(client_db_queue):
     resp = tc.get("/api/v1/ticket-issue-runs")
     assert resp.status_code == 200
     assert resp.json()["items"][0]["odoo_instance_id"] == 1
+
+
+# --- POST /api/v1/update-issue-estimate ---------------------------------------
+
+
+def _seed_issue_run(db, instance_id=1, ticket_id=123, number=42):
+    from reva.types import TicketIssueJobParams
+    run_id = writers.record_ticket_issue_run_created(db, TicketIssueJobParams(
+        run_id=0, odoo_instance_id=instance_id, ticket_id=ticket_id,
+        model_name="helpdesk.ticket",
+        github_url="https://github.com/org/repo", name="n", description="d",
+        analysis_html="", priority="1", ticket_url="https://odoo.example.com/#42",
+    ))
+    writers.update_ticket_issue_progress(db, run_id, [
+        {"title": "A", "number": number, "url": "u", "state": "open",
+         "estimate_hours": 1.5},
+    ])
+    return run_id
+
+
+def test_update_issue_estimate_accepted_and_enqueued(client_db_queue):
+    client, db, queue, headers = client_db_queue
+    _seed_issue_run(db)
+
+    r = client.post("/api/v1/update-issue-estimate", json={
+        "ticket_id": 123, "model_name": "helpdesk.ticket",
+        "number": 42, "estimate_hours": 5.0,
+    }, headers=headers)
+
+    assert r.status_code == 202
+    assert r.json() == {"status": "queued"}
+    func_path, params, _ = queue.enqueued[0]
+    assert func_path == "worker.ticket_issue_tasks.update_issue_estimate"
+    assert params == {
+        "odoo_instance_id": 1, "ticket_id": 123,
+        "model_name": "helpdesk.ticket", "number": 42, "estimate_hours": 5.0,
+    }
+
+
+def test_update_issue_estimate_unknown_issue_404(client_db_queue):
+    """Odoo blocks the user's edit on non-202: an issue REVA doesn't know must
+    be rejected loudly, never silently accepted into drift."""
+    client, db, queue, headers = client_db_queue
+    _seed_issue_run(db)
+
+    r = client.post("/api/v1/update-issue-estimate", json={
+        "ticket_id": 123, "model_name": "helpdesk.ticket",
+        "number": 999, "estimate_hours": 5.0,
+    }, headers=headers)
+
+    assert r.status_code == 404
+    assert queue.enqueued == []
+
+
+def test_update_issue_estimate_requires_instance_key(client_db_queue):
+    client, db, _, _ = client_db_queue
+    _seed_issue_run(db)
+    r = client.post("/api/v1/update-issue-estimate", json={
+        "ticket_id": 123, "model_name": "helpdesk.ticket",
+        "number": 42, "estimate_hours": 5.0,
+    })
+    assert r.status_code in (401, 403)

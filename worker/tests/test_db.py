@@ -833,6 +833,7 @@ def test_migration_runner_rejects_unnamed_files(tmp_path):
 def _issue_params(
     ticket_id: int = 7, run_id: int = 0,
     github_url: str = "https://github.com/acme/widgets",
+    github_project_url: str | None = None,
 ) -> "TicketIssueJobParams":
     from reva.types import TicketIssueJobParams
     return TicketIssueJobParams(
@@ -846,6 +847,7 @@ def _issue_params(
         analysis_html="<h2>Summary</h2>",
         priority="1",
         ticket_url="https://odoo.example.com/web#id=7&model=helpdesk.ticket&view_type=form",
+        github_project_url=github_project_url,
     )
 
 
@@ -1073,6 +1075,60 @@ def test_update_ticket_issue_state_matches_repo_and_number(db):
     assert writers.get_ticket_issue_run(db, old_run)["issues"][0]["state"] == "closed"
     assert writers.get_ticket_issue_run(db, new_run)["issues"][0]["state"] == "closed"
     assert writers.get_ticket_issue_run(db, other)["issues"][0]["state"] == "open"
+
+
+def test_update_ticket_issue_estimate_updates_all_runs_and_returns_target(db):
+    """The new estimate lands on issue 42 in EVERY run of the record (the
+    union feeds later callbacks); the returned board target pairs the
+    project_item_id with the run that placed it."""
+    project = "https://github.com/orgs/acme/projects/5"
+    items = [
+        {"title": "A", "number": 42, "url": "u", "state": "open", "estimate_hours": 1.5},
+        {"title": "B", "number": 43, "url": "u2", "state": "open", "estimate_hours": 2.0},
+    ]
+    old_run = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=7))
+    writers.update_ticket_issue_progress(db, old_run, [dict(i) for i in items])
+    writers.record_ticket_issue_run_failed(db, old_run, "boom")  # one pending per record
+    new_run = writers.record_ticket_issue_run_created(
+        db, _issue_params(ticket_id=7, github_project_url=project)
+    )
+    writers.update_ticket_issue_progress(db, new_run, [
+        {**items[0], "project_item_id": "PVTI_42"}, dict(items[1]),
+    ])
+    # same number on a different ticket must not match
+    other = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=8))
+    writers.update_ticket_issue_progress(db, other, [dict(items[0])])
+
+    target = writers.update_ticket_issue_estimate(db, 1, 7, "helpdesk.ticket", 42, 5.0)
+
+    assert target == {
+        "github_url": "https://github.com/acme/widgets",
+        "github_project_url": project,
+        "project_item_id": "PVTI_42",
+    }
+    for run in (old_run, new_run):
+        row = writers.get_ticket_issue_run(db, run)
+        assert row["issues"][0]["estimate_hours"] == 5.0
+        assert row["issues"][1]["estimate_hours"] == 2.0
+    assert writers.get_ticket_issue_run(db, other)["issues"][0]["estimate_hours"] == 1.5
+
+
+def test_update_ticket_issue_estimate_no_match_or_no_board(db):
+    run = writers.record_ticket_issue_run_created(db, _issue_params(ticket_id=7))
+    writers.update_ticket_issue_progress(db, run, [
+        {"title": "A", "number": 42, "url": "u", "state": "open", "estimate_hours": 1.5},
+    ])
+    # unknown number / wrong instance → None
+    assert writers.update_ticket_issue_estimate(db, 1, 7, "helpdesk.ticket", 999, 5.0) is None
+    assert writers.update_ticket_issue_estimate(db, 2, 7, "helpdesk.ticket", 42, 5.0) is None
+    # known issue never placed on a board → DB updated, no board target
+    target = writers.update_ticket_issue_estimate(db, 1, 7, "helpdesk.ticket", 42, 5.0)
+    assert target == {
+        "github_url": "https://github.com/acme/widgets",
+        "github_project_url": None,
+        "project_item_id": None,
+    }
+    assert writers.get_ticket_issue_run(db, run)["issues"][0]["estimate_hours"] == 5.0
 
 
 def test_update_ticket_issue_state_no_match_returns_empty(db):

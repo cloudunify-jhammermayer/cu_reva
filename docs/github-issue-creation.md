@@ -98,6 +98,17 @@ Each issue item carries a `state` (`open` at creation, synced thereafter). When 
 
 The TUI **Tickets tab** is the union of the analysis and create-issues feeds: one row per Odoo record that has an analysis, an issue run, or both (newest activity first) — so a task that only had issues created (never analyzed) still appears, with a blank Analysis cell and the Issues count. **Enter** on a ticket drills into its full issue list (number, open/`done ✓`/`not created` state, title; `o` opens the highlighted issue on GitHub, `esc` returns). Per-issue done state **requires the GitHub App to be subscribed to "Issues" events** (app settings on GitHub — without it the close/reopen webhook never arrives).
 
+### Estimate sync (Odoo → board)
+
+Estimates live in exactly two places: the run rows' `estimate_hours` (echoed to Odoo on every callback) and the project board's **Estimate** NUMBER field. Issue **bodies never render them** — a body estimate would go stale the moment someone edits it in Odoo.
+
+When a user edits an issue's estimate in Odoo's issue table, the addon POSTs `/api/v1/update-issue-estimate` (`{ticket_id, model_name, number, estimate_hours}`, instance-key gated, no budget check — the job makes GitHub API calls only). The route rejects an unknown issue with 404 (Odoo blocks the edit and rolls back — no silent drift), otherwise enqueues `worker.ticket_issue_tasks.update_issue_estimate`:
+
+1. Writes the new `estimate_hours` on the issue across **every** run carrying it (the union feeds later callbacks — a single-row update would resurrect the old value).
+2. Mirrors the value to the board's Estimate field via the persisted `project_item_id` (paired with the `github_project_url` of the run that placed it). No board / never placed → the DB update is all there is (`no_board`). Estimate field deleted since placement → ops event `estimate_field_missing`, job still succeeds.
+
+No callback echoes the change back to Odoo — Odoo already holds the value, and the callback writes it does receive carry a context guard so they never bounce it back to REVA.
+
 ### Failure semantics
 
 | Failure | Run row | Callback | Recovery |
