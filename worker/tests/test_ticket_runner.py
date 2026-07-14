@@ -14,6 +14,7 @@ import pytest
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.db.models import OpsEvent, TicketAnalysis
 from reva.errors import MalformedModelOutput, PermanentError, TransientError
+from reva.ticket_knowledge import TicketKnowledge
 from reva.types import (
     ClaudeResponse,
     MissingInfoItem,
@@ -429,7 +430,7 @@ def test_instance_budget_gate_declines_before_paid_call(ctx_and_fakes, monkeypat
     assert s["analyzer"].call_count == 0
 
 
-def test_knowledge_block_passed_and_spend_recorded(ctx_and_fakes, monkeypatch):
+def test_knowledge_blocks_passed_and_spend_recorded(ctx_and_fakes, monkeypatch):
     s = ctx_and_fakes
     block = {
         "type": "text",
@@ -437,24 +438,70 @@ def test_knowledge_block_passed_and_spend_recorded(ctx_and_fakes, monkeypatch):
         "cache_control": {"type": "ephemeral"},
     }
     monkeypatch.setattr(
-        "worker.ticket_runner.build_knowledge_block",
-        lambda claude, core, prompts, version, text: (block, 0.002, None),
+        "worker.ticket_runner.build_ticket_knowledge",
+        lambda *a, **k: TicketKnowledge(
+            blocks=[block], planner_cost=0.002, repo_docs_sections=2
+        ),
     )
-    monkeypatch.setattr(
-        "worker.ticket_runner.instance_odoo_version",
-        lambda ctx, iid: "19.0",
-    )
-    fake_core = type("CK", (), {"resolve": lambda self, version: "19.0"})()
-    object.__setattr__(s["ctx"], "core_knowledge", fake_core)
-    object.__setattr__(s["ctx"], "prompts_dir", _PROMPTS_DIR)
     params = _make_params(s["db"])
 
     out = run_ticket_analysis(params)
 
     assert out["status"] == "completed"
     assert s["analyzer"].extra_blocks == [block]
+    # The injected repo-doc section count is persisted for the TUI.
+    row = writers.get_ticket_analysis(s["db"], out["analysis_id"])
+    assert row["repo_docs_sections_used"] == 2
 
     from datetime import datetime, timedelta, timezone
 
     since = datetime.now(timezone.utc) - timedelta(hours=1)
     assert writers.sum_estimated_cost_since(s["db"], since) >= 0.002
+
+
+def test_repo_docs_error_records_ops_event(ctx_and_fakes, monkeypatch):
+    s = ctx_and_fakes
+    monkeypatch.setattr(
+        "worker.ticket_runner.build_ticket_knowledge",
+        lambda *a, **k: TicketKnowledge(
+            blocks=[], repo_docs_error="invalid github_url: 'x'", repo_docs_sections=0
+        ),
+    )
+    params = _make_params(s["db"])
+
+    out = run_ticket_analysis(params)
+
+    assert out["status"] == "completed"
+    with s["db"].session() as session:
+        event = session.query(OpsEvent).filter_by(event="retrieval_failed").one()
+        assert event.component == "repo_docs"
+        assert event.severity == "warning"
+    row = writers.get_ticket_analysis(s["db"], out["analysis_id"])
+    assert row["repo_docs_sections_used"] == 0
+
+
+def test_resume_path_leaves_repo_docs_column_untouched(ctx_and_fakes, monkeypatch):
+    """Resume (completed row + persisted HTML) never re-runs retrieval, so the
+    section count set on the first completion is not clobbered."""
+    s = ctx_and_fakes
+    monkeypatch.setattr(
+        "worker.ticket_runner.build_ticket_knowledge",
+        lambda *a, **k: TicketKnowledge(blocks=[], repo_docs_sections=3),
+    )
+    params = _make_params(s["db"])
+
+    # First run: callback fails, but the row is persisted with the section count.
+    s["odoo"].raise_exc = TransientError("Odoo 503")
+    with pytest.raises(TransientError):
+        run_ticket_analysis(params)
+    assert writers.get_ticket_analysis(s["db"], params["analysis_id"])[
+        "repo_docs_sections_used"
+    ] == 3
+
+    # Resume: analyzer not re-run; the column keeps its first value.
+    s["odoo"].raise_exc = None
+    run_ticket_analysis(params)
+    assert s["analyzer"].call_count == 1
+    assert writers.get_ticket_analysis(s["db"], params["analysis_id"])[
+        "repo_docs_sections_used"
+    ] == 3

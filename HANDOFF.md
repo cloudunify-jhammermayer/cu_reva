@@ -6,6 +6,28 @@ Messages-API design and is now history in git).
 
 ---
 
+## Addendum 2026-07-14 — ticket analysis grounded in customer repo docs
+
+Implemented per `docs/superpowers/specs/2026-07-14-ticket-repo-docs-grounding-design.md`
+(plan: `docs/superpowers/plans/2026-07-14-ticket-repo-docs-grounding.md`; how it
+works: `docs/technical.md` → "Ticket knowledge grounding"). Migration 039,
+`reva/repo_docs.py`, `ticket_knowledge` restructure (one planner call feeds the
+core block AND a new repo-docs block), new *Existing Customizations* output
+section (prompt v2.10), `repo_docs_sections_used` surfaced through API + TUI.
+All suites green incl. the real-Postgres integration tier.
+
+**Owed:**
+- **Staging validation** (model behavior): one real ticket against a repo with
+  addon READMEs — check the new HTML section, `repo docs:N` in the TUI, and the
+  second-run `fresh` fast path.
+- **Possible follow-up:** `search_repo_docs` uses **OR-of-terms** ranking
+  (fixed 2026-07-14 after review — a single `plainto_tsquery` ANDs all terms
+  and near-never matched a realistic many-term planner query).
+  `core_knowledge.search_docs` still has the pre-existing AND behavior; decide
+  separately whether the official-docs search should switch too.
+
+---
+
 ## 🚀 RESUME HERE — Tiers 0–2 done, Tier 3 started; **next: Tier 3 step B**
 
 **⏭️ TOMORROW: implement Tier 3 feature B — per-repo learned memory.** Everything it

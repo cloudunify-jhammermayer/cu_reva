@@ -88,6 +88,26 @@ problems degrade to a graph-less review, never a failed one.
 - **Ticket analysis**: Messages API with a fixed tool schema; result HTML is
   written back via the `write-field` callback. Attachments (docx/pdf/txt) are
   text-extracted and analyzed with the description.
+- **Ticket knowledge grounding** (one cheap planner call feeds two retrievals,
+  `reva/ticket_knowledge.py`): a small-model planner derives English search
+  terms from the ticket; those terms retrieve (a) sections of the official
+  **Odoo docs + core registry** (operator-provisioned `/core` worktrees,
+  version-matched to the instance) backing the *Standard Odoo Coverage* output
+  section, and (b) sections of the **customer repo's own custom-addon markdown
+  docs** backing the *Existing Customizations* section (spec 2026-07-14). Repo
+  docs are indexed lazily into Postgres (`repo_doc_sections`, FTS-ranked;
+  `reva/repo_docs.py`): at analysis time the worker resolves the repo's
+  **default branch** from `TicketJobParams.github_url`, compares the git-tree
+  SHA against the stored sync state (`repo_docs_sync`) and re-indexes only on
+  change — the common case is two GitHub API calls and zero file fetches.
+  Concurrent syncs of one repo are serialized by a per-repo advisory lock
+  (loser skips and reads the current index); caps: 50 files, 2 000-char
+  sections, 8 injected. Both retrieval blocks are reference-data-framed; the
+  repo-docs block is additionally **nonce-fenced** (repo-authored content).
+  Every degradation (invalid URL, uninstalled app, sync/search failure) falls
+  back to a narrower analysis with a `repo_docs`/`core_knowledge` ops event —
+  never a failed run. The injected-section count is persisted per analysis
+  (`repo_docs_sections_used`) and shown in the TUI Tickets tab.
 - **Issue creation**: Claude plans 1–10 issues + epic (schema-enforced, incl.
   per-issue `estimate_hours`); creation is resumable — the plan is persisted, a
   retry creates only what's missing, and callbacks always send the **union** of
@@ -123,9 +143,9 @@ problems degrade to a graph-less review, never a failed one.
 - Webhooks: HMAC signature verification; deliveries deduped by `delivery_id`.
 - API: master key (ops/TUI) vs per-instance keys (Odoo) vs shared scoped routes;
   fail-closed when auth is required but unconfigured; nginx + per-key rate limits.
-- Prompt safety: repo file content and issue bodies are nonce-fenced before the
-  model sees them; internal paths redacted from GitHub-bound output; secrets via
-  `NAME`/`NAME_FILE` convention.
+- Prompt safety: repo file content, issue bodies, and customer-repo doc
+  excerpts are nonce-fenced before the model sees them; internal paths redacted
+  from GitHub-bound output; secrets via `NAME`/`NAME_FILE` convention.
 - Retention: raw customer ticket text (and Claude-rendered derivatives of it) is
   scrubbed after 30 days (`REVA_TICKET_TEXT_RETENTION_DAYS`); consultant files
   are never stored server-side.
@@ -159,8 +179,9 @@ one small Messages-API call.
 - **Advisory vs blocking**: only finding severity ≥ `block_on_severity` fails
   the Check Run. Requirements check, board sync, change notes, estimates are
   advisory/additive and individually switchable per repo.
-- **Fail-soft surfaces**: board projection/status, CodeGraph, change notes, and
-  callbacks degrade without failing the paid work — always leaving an ops event.
+- **Fail-soft surfaces**: board projection/status, CodeGraph, change notes,
+  ticket knowledge retrieval (core + repo docs), and callbacks degrade without
+  failing the paid work — always leaving an ops event.
 - **Known boundaries**: reviews see the repo at the head SHA (not your IDE
   state); the requirements check only sees *linked* issues; estimates are
   low-end AI-assisted figures for planning, not commitments; board "In review"

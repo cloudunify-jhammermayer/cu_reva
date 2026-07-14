@@ -52,6 +52,7 @@ def list_ticket_analyses(
                     "estimate_hours_min": est_min,
                     "estimate_hours_max": est_max,
                     "odoo_instance_id": r.odoo_instance_id,
+                    "repo_docs_sections_used": r.repo_docs_sections_used,
                 }
             )
     return items, total

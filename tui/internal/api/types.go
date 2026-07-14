@@ -240,6 +240,9 @@ type TicketAnalysisSummary struct {
 	CallbackError    *string    `json:"callback_error"`
 	EstimateHoursMin *float64   `json:"estimate_hours_min"`
 	EstimateHoursMax *float64   `json:"estimate_hours_max"`
+	// RepoDocsSectionsUsed is how many customer-repo doc sections grounded the
+	// analysis; nil for legacy/not-attempted rows, 0 when nothing was injected.
+	RepoDocsSectionsUsed *int `json:"repo_docs_sections_used"`
 }
 
 type TicketAnalysisPage struct {

@@ -89,10 +89,14 @@ attachments like a spec `.docx`/`.pdf` are read too):
 
 - Summary — is this ticket clear enough to build?
 - **Missing information** — the questions to ask the customer *before* work starts
-- **Acceptance criteria** (GIVEN/WHEN/THEN) and test cases
-- Definition of Ready / Definition of Done
-- Odoo-specific notes (affected modules, views, security, migration)
-- A **dev-time estimate** (low-end, AI-assisted hours)
+- Odoo-specific notes (consultant-level observations)
+- **Standard Odoo Coverage** — does stock Odoo already do this? Grounded in the
+  official Odoo docs for the instance's version, with references.
+- **Existing Customizations** — does one of *your* custom addons already do (or
+  touch) this? Grounded in the addon docs in the project's own repository —
+  shown when the project has a GitHub repo configured.
+- A **dev-time estimate** per user story (low-end, AI-assisted hours) with
+  assumptions and a total
 
 ### Create GitHub issues from a ticket
 Click **Create Issues**: REVA plans 1–10 well-scoped GitHub issues (plus a parent

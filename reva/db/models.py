@@ -451,6 +451,10 @@ class TicketAnalysis(Base):
     # after the row is 'completed'; callback_sent_at is NULL until it lands.
     callback_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     callback_error: Mapped[str | None] = mapped_column(Text)
+    # How many customer-repo doc sections were injected into this analysis
+    # (migration 039). NULL = retrieval never attempted (no github_url / resume
+    # path / legacy row); 0 = attempted, nothing injected; N = sections injected.
+    repo_docs_sections_used: Mapped[int | None] = mapped_column(Integer)
 
     __table_args__ = (
         # Partial UNIQUE index (migration 006): job_id is unique only when set.
@@ -923,6 +927,44 @@ class CoreKnowledgeVersion(Base):
     models: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     fields: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sections: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class RepoDocSection(Base):
+    """One heading-delimited section of a customer repo's custom-addon docs
+    (migration 039). Lazily synced from the repo's default branch at ticket-
+    analysis time; keyed by lowercased owner/repo. The Postgres GIN FTS index
+    lives in the migration only (SQLite tests use the ilike fallback)."""
+
+    __tablename__ = "repo_doc_sections"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    repo_full_name: Mapped[str] = mapped_column(Text, nullable=False)
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    anchor: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (Index("idx_repo_doc_sections_repo", "repo_full_name"),)
+
+
+class RepoDocsSync(Base):
+    """Sync bookkeeping: one row per repo recording which tree SHA is indexed
+    (migration 039). Drives the lazy staleness check in
+    reva/repo_docs.py::sync_repo_docs."""
+
+    __tablename__ = "repo_docs_sync"
+
+    repo_full_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    tree_sha: Mapped[str] = mapped_column(Text, nullable=False)
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sections: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 # ------------------------------------------------------------- weekly_reports

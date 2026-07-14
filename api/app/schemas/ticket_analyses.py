@@ -84,6 +84,9 @@ class TicketAnalysisSummary(BaseModel):
     estimate_hours_min: float | None = None
     estimate_hours_max: float | None = None
     odoo_instance_id: int | None = None
+    # How many customer-repo doc sections grounded this analysis (null = not
+    # attempted / legacy row; 0 = attempted, nothing injected).
+    repo_docs_sections_used: int | None = None
 
 
 class TicketAnalysisPage(BaseModel):

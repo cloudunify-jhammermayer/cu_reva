@@ -34,22 +34,19 @@ from app.schemas.docs import (
 from reva.db.engine import Database
 from reva.db.repo_lookup import get_repo_meta
 from reva.errors import PermanentError, TransientError
+# Markdown served as text through /file; the doc scope (DOC_EXTENSIONS +
+# in_scope) is shared with ticket-analysis retrieval — one definition of "the
+# repo's docs" (reva/repo_docs.py).
+from reva.repo_docs import DOC_EXTENSIONS, in_scope
 
 router = APIRouter()
 
-# Markdown served as text through /file; everything the docs embed (images,
-# diagrams, PDFs) served as bytes through /raw. Anything else is rejected so the
-# surface stays "docs + their assets", not an arbitrary source-file proxy.
-DOC_EXTENSIONS = (".md", ".markdown")
+# Everything the docs embed (images, diagrams, PDFs) served as bytes through
+# /raw. Anything else is rejected so the surface stays "docs + their assets",
+# not an arbitrary source-file proxy.
 ASSET_EXTENSIONS = (
     ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".avif", ".ico", ".bmp", ".pdf",
 )
-# The tree is scoped to addon paths (mirrors REVA's review scope in
-# reva/diff_utils.py). Top-level docs/, 3rd_party_addons/, .claude/, etc. are
-# intentionally excluded — consultants only want the custom addons' docs.
-SCOPE_PREFIXES = ("custom_addons/", "custom-addons/")
-# CLAUDE.md files are agent instructions, not consultant docs — hide them.
-EXCLUDED_BASENAMES = ("CLAUDE.md",)
 # Bounds for full-text search (first call fetches files; cached thereafter).
 MAX_SEARCH_FILES = 300
 MAX_SEARCH_RESULTS = 50
@@ -74,14 +71,6 @@ def _meta_and_token(db: Database, github, repository_id: int):
     return meta, token
 
 
-def _in_scope(path: str) -> bool:
-    return (
-        path.lower().endswith(DOC_EXTENSIONS)
-        and path.startswith(SCOPE_PREFIXES)
-        and not path.endswith(tuple("/" + b for b in EXCLUDED_BASENAMES))
-    )
-
-
 def _cached_tree(github, repository_id, owner, name, ref, token) -> dict:
     """{entries, truncated} for a repo+ref, cached. Raises Permanent/Transient
     on the underlying GitHub call (caller maps to 404/502)."""
@@ -94,7 +83,7 @@ def _cached_tree(github, repository_id, owner, name, ref, token) -> dict:
         (
             {"path": e["path"], "size": e.get("size")}
             for e in tree.get("tree", [])
-            if e.get("type") == "blob" and _in_scope(e["path"])
+            if e.get("type") == "blob" and in_scope(e["path"])
         ),
         key=lambda e: e["path"],
     )

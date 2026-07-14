@@ -43,9 +43,13 @@ pytestmark = pytest.mark.skipif(
 def pg_db():
     db = Database(create_engine_from_url(PG_URL))
     db.migrate(_MIGRATIONS_DIR)
-    # Clean slate per test. repositories CASCADEs to PRs/pending/runs/findings.
+    # Clean slate per test. repositories CASCADEs to PRs/pending/runs/findings;
+    # the repo-docs tables key on repo_full_name (no FK) so truncate them too.
     with db.engine.begin() as conn:
-        conn.execute(text("TRUNCATE repositories, claude_spend RESTART IDENTITY CASCADE"))
+        conn.execute(text(
+            "TRUNCATE repositories, claude_spend, repo_doc_sections, repo_docs_sync "
+            "RESTART IDENTITY CASCADE"
+        ))
     yield db
     db.engine.dispose()
 
@@ -231,3 +235,130 @@ def test_reaper_does_not_double_reap_under_concurrency(pg_db):
     t1.start(); t2.start(); t1.join(); t2.join()
 
     assert sum(reaped) == 1, f"stale row must be reaped exactly once, got {reaped}"
+
+
+# ---- repo-docs retrieval (migration 039, FTS + advisory lock) ---------------
+
+
+class _FakeGitHub:
+    """Serves a default-branch tree + file contents for sync_repo_docs."""
+
+    def __init__(self, sha, files):
+        self._sha = sha
+        self._files = files
+
+    def get_repo_installation_id(self, owner, repo):
+        return 1
+
+    def get_installation_token(self, installation_id):
+        return "tok"
+
+    def get_repo(self, token, owner, repo):
+        return {"default_branch": "main"}
+
+    def get_tree(self, token, owner, repo, ref, recursive=True):
+        return {
+            "sha": self._sha, "truncated": False,
+            "tree": [{"path": p, "type": "blob", "size": 1} for p in self._files],
+        }
+
+    def get_file_content(self, token, owner, repo, path, ref):
+        return self._files.get(path)
+
+
+def _seed_sections(db, repo, rows):
+    from reva.db.models import RepoDocSection
+
+    with db.session() as s:
+        for path, title, body in rows:
+            s.add(RepoDocSection(
+                repo_full_name=repo, path=path, anchor="a", title=title, body=body,
+            ))
+
+
+def test_migration_039_creates_repo_docs_tables_and_column(pg_db):
+    """The tables + ticket_analyses column exist after migrate (real DDL)."""
+    with pg_db.engine.connect() as conn:
+        for tbl in ("repo_doc_sections", "repo_docs_sync"):
+            assert conn.execute(
+                text("SELECT to_regclass(:t)"), {"t": tbl}
+            ).scalar_one() is not None, tbl
+        col = conn.execute(text(
+            "SELECT 1 FROM information_schema.columns WHERE table_name = 'ticket_analyses' "
+            "AND column_name = 'repo_docs_sections_used'"
+        )).scalar_one_or_none()
+        assert col == 1
+
+
+def test_repo_docs_fts_ranks_and_scopes(pg_db):
+    """The real Postgres FTS query ranks a dense title+body match above a
+    passing mention and never crosses repo boundaries."""
+    from reva.repo_docs import search_repo_docs
+
+    _seed_sections(pg_db, "acme/widgets", [
+        ("p1", "Quotation templates", "manage quotation templates for quotation flows"),
+        ("p2", "Misc notes", "a passing mention of quotation somewhere in prose"),
+    ])
+    _seed_sections(pg_db, "other/repo", [
+        ("p3", "Quotation", "quotation quotation quotation"),  # must not leak in
+    ])
+
+    hits = search_repo_docs(pg_db, "acme/widgets", ["quotation"])
+    paths = [h["path"] for h in hits]
+    assert paths == ["p1", "p2"]          # dense match ranks first; other repo absent
+
+
+def test_repo_docs_fts_or_of_terms_realistic_planner_query(pg_db):
+    """A section matching only SOME of a realistic many-term planner query must
+    still hit (OR-of-terms), and a section matching more terms ranks first.
+    Under the old single plainto_tsquery (AND of all terms) this returned
+    nothing at all."""
+    from reva.repo_docs import search_repo_docs
+
+    _seed_sections(pg_db, "acme/widgets", [
+        ("layout", "Custom quotation layout",
+         "we customized the quotation PDF output for sales orders"),
+        ("hr", "Payroll rules", "salary computation for employees"),
+    ])
+
+    planner_terms = ["quotation", "template", "pdf", "layout", "sale", "sale_management"]
+    hits = search_repo_docs(pg_db, "acme/widgets", planner_terms)
+    paths = [h["path"] for h in hits]
+    assert paths and paths[0] == "layout"  # multi-term match found and ranked first
+    assert "hr" not in paths               # zero-term match stays out
+
+
+def test_repo_docs_advisory_lock_busy_skip(pg_db):
+    """A second sync of the SAME repo while the per-repo lock is held returns
+    'busy' and writes nothing; a DIFFERENT repo syncs concurrently (per-repo
+    key). On SQLite this lock is a no-op — only real here."""
+    from reva.db.models import RepoDocsSync
+    from reva.repo_docs import _LOCK_CLASSID, _lock_objid, sync_repo_docs
+
+    gh = _FakeGitHub("sha-new", {"custom_addons/a/README.md": "# H\nbody\n"})
+
+    conn_a = pg_db.engine.connect()
+    tx_a = conn_a.begin()
+    try:
+        conn_a.execute(
+            text("SELECT pg_advisory_xact_lock(:c, :o)"),
+            {"c": _LOCK_CLASSID, "o": _lock_objid("acme/widgets")},
+        )
+
+        # Same repo → contends with the held lock → busy, no writes.
+        from reva.db.models import RepoDocSection
+
+        result = sync_repo_docs(pg_db, gh, "acme", "widgets")
+        assert result["status"] == "busy"
+        with pg_db.session() as s:
+            assert s.get(RepoDocsSync, "acme/widgets") is None
+            assert s.query(RepoDocSection).filter_by(
+                repo_full_name="acme/widgets"
+            ).count() == 0
+
+        # Different repo → different objid → syncs fine while A holds its lock.
+        other = sync_repo_docs(pg_db, gh, "other", "repo")
+        assert other["status"] == "synced"
+    finally:
+        tx_a.rollback()
+        conn_a.close()

@@ -29,6 +29,7 @@ def build_ticket_tool_schema() -> dict[str, Any]:
         "missing_info",
         "odoo_notes",
         "standard_coverage",
+        "existing_customizations",
         "estimates",
     }
     properties = {k: v for k, v in schema.get("properties", {}).items() if k in allowed}
@@ -41,6 +42,7 @@ def build_ticket_tool_schema() -> dict[str, Any]:
             "missing_info",
             "odoo_notes",
             "standard_coverage",
+            "existing_customizations",
             "estimates",
         ],
         "additionalProperties": False,

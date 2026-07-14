@@ -11,7 +11,7 @@ from reva.db import writers
 from reva.errors import MalformedModelOutput, PermanentError, TransientError
 from reva.html_guard import ensure_renderable
 from reva.ticket_formatter import format_ticket_html
-from reva.ticket_knowledge import build_knowledge_block
+from reva.ticket_knowledge import build_ticket_knowledge
 from reva.types import TicketJobParams
 from worker.runner import build_odoo_client, get_context, instance_budget_exceeded
 
@@ -66,7 +66,7 @@ def run_ticket_analysis(job_params: dict) -> dict:
             writers.record_ticket_analysis_failed(ctx.db, params.analysis_id, error)
             raise PermanentError(error)
         try:
-            extra_blocks = None
+            version = None
             if ctx.core_knowledge is not None:
                 version = ctx.core_knowledge.resolve(
                     instance_odoo_version(ctx, params.odoo_instance_id)
@@ -83,26 +83,40 @@ def run_ticket_analysis(job_params: dict) -> dict:
                             "odoo_instance_id": params.odoo_instance_id,
                         },
                     )
-                else:
-                    block, planner_cost, error = build_knowledge_block(
-                        ctx.claude,
-                        ctx.core_knowledge,
-                        ctx.prompts_dir,
-                        version,
-                        params.text,
-                    )
-                    if planner_cost:
-                        writers.record_claude_spend(ctx.db, "ticket_planner", planner_cost)
-                    if error is not None:
-                        writers.record_ops_event(
-                            ctx.db,
-                            "ticket_planner",
-                            "warning",
-                            "planner_failed",
-                            {"analysis_id": params.analysis_id, "error": error[:300]},
-                        )
-                    elif block is not None:
-                        extra_blocks = [block]
+            knowledge = build_ticket_knowledge(
+                ctx.claude,
+                ctx.prompts_dir,
+                params.text,
+                core=ctx.core_knowledge,
+                version=version,
+                db=ctx.db,
+                github=ctx.github,
+                github_url=params.github_url,
+            )
+            if knowledge.planner_cost:
+                writers.record_claude_spend(ctx.db, "ticket_planner", knowledge.planner_cost)
+            if knowledge.planner_error is not None:
+                writers.record_ops_event(
+                    ctx.db,
+                    "ticket_planner",
+                    "warning",
+                    "planner_failed",
+                    {"analysis_id": params.analysis_id, "error": knowledge.planner_error[:300]},
+                )
+            if knowledge.repo_docs_error is not None:
+                log.warning("ticket_repo_docs_failed", error=knowledge.repo_docs_error)
+                writers.record_ops_event(
+                    ctx.db,
+                    "repo_docs",
+                    "warning",
+                    "retrieval_failed",
+                    {
+                        "analysis_id": params.analysis_id,
+                        "github_url": params.github_url,
+                        "error": knowledge.repo_docs_error[:300],
+                    },
+                )
+            extra_blocks = knowledge.blocks or None
             try:
                 response_obj, result = ctx.ticket_analyzer.analyze_with_response(
                     params,
@@ -145,6 +159,7 @@ def run_ticket_analysis(job_params: dict) -> dict:
             html,
             response_obj,
             result_structured=result.model_dump(mode="json"),
+            repo_docs_sections_used=knowledge.repo_docs_sections,
         )
 
     # Well-formedness guard right before the callback: a malformed render must

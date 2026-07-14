@@ -1,3 +1,13 @@
+## v2.10 — Existing-customizations grounding
+
+- ticket_analysis.md: new "### 4. Existing Customizations" section (Development
+  Estimate renumbered to 5). When a *Retrieved project documentation* system
+  block is present (the customer repo's own custom-addon docs), REVA fills
+  `existing_customizations` — whether a documented customization already covers
+  or is extended by the request. Based ONLY on that block, gated to
+  `"unknown"`/empty when absent. Exempt from the no-technical-details rule only
+  for custom addon and documented feature names.
+
 ## v2.9 — Ticket-level issue typing
 
 - ticket_issues.md: the work-item `type` is classified once from the ticket's

@@ -625,6 +625,9 @@ func (t Tickets) view(w, h int) string {
 			if a.EstimateHoursMin != nil && a.EstimateHoursMax != nil {
 				meta = append(meta, fmt.Sprintf("est. %g–%gh", *a.EstimateHoursMin, *a.EstimateHoursMax))
 			}
+			if a.RepoDocsSectionsUsed != nil && *a.RepoDocsSectionsUsed > 0 {
+				meta = append(meta, fmt.Sprintf("repo docs:%d", *a.RepoDocsSectionsUsed))
+			}
 			extras = append(extras, styleSubtitle.Render("  "+strings.Join(meta, "  ")))
 			if a.ErrorMessage != nil && *a.ErrorMessage != "" {
 				extras = append(extras, styleStatusFailed.Render(truncate("  analysis error: "+*a.ErrorMessage, w-2)))

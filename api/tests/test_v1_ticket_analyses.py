@@ -220,6 +220,27 @@ def test_list_estimate_sums_null_when_absent(client_db_queue):
     assert item["callback_error"] is None
 
 
+def test_list_exposes_repo_docs_sections_used(client_db_queue):
+    """The repo-docs grounding count is exposed for the TUI (set + null rows)."""
+    from reva.db.models import TicketAnalysis
+
+    client, db, _, headers = client_db_queue
+    with db.session() as s:
+        s.add(TicketAnalysis(
+            odoo_instance_id=None, ticket_id=7, model_name="helpdesk.ticket",
+            field_name="x", input_text="t", status="completed",
+            repo_docs_sections_used=3,
+        ))
+        s.add(TicketAnalysis(
+            odoo_instance_id=None, ticket_id=8, model_name="helpdesk.ticket",
+            field_name="x", input_text="t", status="completed",
+        ))
+
+    items = {i["ticket_id"]: i for i in client.get("/api/v1/ticket-analyses").json()["items"]}
+    assert items[7]["repo_docs_sections_used"] == 3
+    assert items[8]["repo_docs_sections_used"] is None  # legacy row
+
+
 def test_fresh_pending_cannot_be_requeued(client_db_queue):
     """A pending analysis with a presumably-live job must not be requeued."""
     client, _, _, headers = client_db_queue

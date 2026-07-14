@@ -515,6 +515,23 @@ func TestDeliveredAnalysisNotFlaggedNotInOdoo(t *testing.T) {
 	}
 }
 
+func TestAnalysisExtrasShowRepoDocsCount(t *testing.T) {
+	// Mock ticket 456 was grounded in 4 repo doc sections — the extras meta
+	// line surfaces it; a nil/0 count (ticket 777) shows no such line.
+	tab := ticketsWithData()
+	if out := tab.view(120, 30); strings.Contains(out, "repo docs:") {
+		t.Fatalf("repo docs line shown before selecting the grounded row:\n%s", out)
+	}
+	out := onRow(tab, 456).view(120, 30)
+	if !strings.Contains(out, "repo docs:4") {
+		t.Fatalf("view missing the repo-docs count, got:\n%s", out)
+	}
+	out = onRow(ticketsWithData(), 777).view(120, 30)
+	if strings.Contains(out, "repo docs:") {
+		t.Fatalf("repo-docs line shown for an ungrounded analysis:\n%s", out)
+	}
+}
+
 func TestTicketsGroupedByRepo(t *testing.T) {
 	tab := ticketsWithData()
 	out := tab.view(120, 30)

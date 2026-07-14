@@ -315,6 +315,31 @@ class StandardCoverage(BaseModel):
         return _unwrap_json_list(v)
 
 
+class CustomizationFeature(BaseModel):
+    """One documented existing customization in the customer repo that a ticket
+    already touches or is covered by."""
+
+    name: str
+    addon: str = ""             # the custom addon the repo docs attribute it to
+    how: str = ""               # what it does / how it relates to the request
+    reference: str = ""         # retrieved doc path#anchor
+    confidence: Literal["high", "medium", "low"] = "medium"
+
+
+class ExistingCustomizations(BaseModel):
+    """Whether the customer's own customizations already cover/touch a ticket,
+    grounded in the repo's project documentation."""
+
+    coverage: Literal["full", "partial", "none", "unknown"] = "unknown"
+    features: list[CustomizationFeature] = Field(default_factory=list)
+    notes: str = ""
+
+    @field_validator("features", mode="before")
+    @classmethod
+    def _parse_json_string_list(cls, v: object) -> object:
+        return _unwrap_json_list(v)
+
+
 class StoryEstimate(BaseModel):
     """Development-time estimate for one user story split out of a ticket."""
 
@@ -338,6 +363,9 @@ class TicketAnalysisResult(BaseModel):
     missing_info: list[MissingInfoItem] = Field(default_factory=list)
     odoo_notes: list[SourcedItem] = Field(default_factory=list)
     standard_coverage: StandardCoverage = Field(default_factory=StandardCoverage)
+    existing_customizations: ExistingCustomizations = Field(
+        default_factory=ExistingCustomizations
+    )
     estimates: list[StoryEstimate] = Field(default_factory=list)
 
     @field_validator("missing_info", "odoo_notes", "estimates", mode="before")
@@ -367,9 +395,10 @@ class TicketJobParams(BaseModel):
     field_name: str
     text: str
     attachment: Attachment | None = None  # optional .docx/.pdf/.txt, folded into the prompt
-    # Optional repo URL from the record's Odoo project, stamped at create time
-    # for dashboard repo grouping. Not used by the worker (analysis is repo-
-    # agnostic); default None keeps every worker path untouched.
+    # Optional repo URL from the record's Odoo project, stamped at create time.
+    # Used for dashboard repo grouping AND by the worker to ground the analysis
+    # in the repo's own custom-addon docs (reva/repo_docs.py, spec 2026-07-14);
+    # default None keeps every worker path untouched.
     github_url: str | None = None
 
 

@@ -24,6 +24,8 @@ helpers that more than one process needs.
 | `prompt_builder.py` | Assembles cache-tagged system blocks for the Messages-API paths; exposes the prompt `version`. |
 | `review_formatter.py` | Pure formatters: Check Run conclusion matrix, PR review body, inline-comment payloads, decline templates, diff-hunk → inline split. |
 | `ticket_formatter.py` | Pure formatting of ticket-analysis results. |
+| `ticket_knowledge.py` | Ticket-path knowledge retrieval: one planner call (`plan_core_queries`) feeds both the Odoo core-knowledge block and the customer-repo docs block (`build_ticket_knowledge`). |
+| `repo_docs.py` | Customer-repo docs index: markdown scope shared with the docs browser (`in_scope`), sectionizer, lazy default-branch sync (`sync_repo_docs`, tree-SHA staleness + per-repo advisory lock), FTS search (`search_repo_docs`). |
 | `diff_utils.py` | Diff filtering (reviewable prefixes / excluded extensions / skip paths), line + token estimates, hunk parsing. |
 | `finding_verifier.py` | Asks Claude whether a prior finding is resolved — used by the delta-review resolution pass. |
 | `cost.py` | Token-count → USD pricing table + `estimate_cost`. |

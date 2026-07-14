@@ -12,15 +12,14 @@ Given a ticket description (in any language — German or English), REVA generat
 
 | Section | Contents |
 |---|---|
-| **Summary** | 2–4 sentence assessment of clarity and critical gaps |
-| **Missing Information** | Concrete list of what is absent (who, what, why, scope, edge cases, permissions, Odoo module, …) |
-| **Acceptance Criteria** | GIVEN / WHEN / THEN format, independently testable, max 10 |
-| **Test Cases** | Grouped: Happy Path · Edge Cases · Error Scenarios |
-| **Definition of Ready** | Checklist of conditions before dev can start |
-| **Definition of Done** | Checklist of conditions before ticket can be closed |
-| **Odoo-Specific Notes** | Affected modules/models, view/security changes, data migration, Odoo 19 quirks |
+| **Summary** | 2–4 sentence business assessment of clarity and critical gaps |
+| **Missing Information** | Concrete questions for the ticket author (who, what, why, scope, edge cases, permissions, …), each tagged `certain`/`likely`/`possible` |
+| **Odoo-Specific Notes** | Consultant-level observations, tagged `explicit`/`inferred`/`assumed` |
+| **Standard Odoo Coverage** | Whether stock Odoo already covers the request — grounded in the retrieved official Odoo knowledge. Rendered only when a knowledge block was available. |
+| **Existing Customizations** | Whether the customer's own custom addons (as documented in their repo) already cover or touch the request — grounded in the repo's docs. Rendered only when the repo-docs block was available. |
+| **Development Estimate** | Per-user-story hour ranges (mid-level dev, AI-assisted; implementation + developer testing) with assumptions, plus a total |
 
-The result is written as HTML directly into a field on the Odoo record (e.g. `description` on `helpdesk.ticket`).
+The result is written as HTML directly into a field on the Odoo record (e.g. `description` on `helpdesk.ticket`). Sections whose grounding is absent are omitted rather than shown empty.
 
 ---
 
@@ -64,7 +63,7 @@ Content-Type: application/json
 
 `attachment` is optional (`null`/omitted for text-only tickets). When present it must be a `.docx`, `.pdf`, or `.txt` file; its text is extracted and folded into the prompt alongside `text`. An unsupported extension, bad base64, or content/extension mismatch is rejected with `422` at accept time (`reva/attachment_text.py`).
 
-`github_url` is optional (`null`/`""`/omitted): the record's project repo, persisted for dashboard repo grouping (TUI Tickets tab). Format-validated at accept time (`422` on a non-`https://github.com/{owner}/{repo}` URL), with no reachability check.
+`github_url` is optional (`null`/`""`/omitted): the record's project repo. It drives dashboard repo grouping (TUI Tickets tab) **and** grounds the analysis in the repo's own custom-addon docs — the worker lazily indexes `custom_addons/**/*.md` from the repo's default branch and injects the sections relevant to the ticket, backing the *Existing Customizations* section (see [Repo-docs grounding](#repo-docs-grounding)). Format-validated at accept time (`422` on a non-`https://github.com/{owner}/{repo}` URL), with no reachability check — a well-formed but uninstalled repo degrades silently to a core-only analysis.
 
 **Response `202 Accepted`:**
 
@@ -83,7 +82,7 @@ Content-Type: application/json
 | `field_name` | Field on the record where REVA writes the result |
 | `text` | Full ticket description text. German and English are supported. |
 | `attachment` | Optional `{filename, content_base64}` — a `.docx`/`.pdf`/`.txt` file folded into the analysis. Omit or `null` for text-only. |
-| `github_url` | Optional repository URL from the record's project, for dashboard repo grouping. Format-validated, no reachability check. Omit, `null`, or `""` when unknown. |
+| `github_url` | Optional repository URL from the record's project — dashboard repo grouping and repo-docs grounding of the *Existing Customizations* section. Format-validated, no reachability check. Omit, `null`, or `""` when unknown. |
 
 ---
 
@@ -163,35 +162,30 @@ The HTML written to the Odoo field follows this structure (renders correctly in 
   <li>Error handling behaviour not described</li>
 </ul>
 
-<h2>Acceptance Criteria</h2>
-<ul>
-  <li><strong>Given</strong> a logged-in user <strong>When</strong> they submit the form <strong>Then</strong> the record is saved and a confirmation is shown</li>
-</ul>
-
-<h2>Test Cases</h2>
-<h3>Happy Path</h3>
-<ul><li>Submit a valid form and verify the record is created</li></ul>
-<h3>Edge Cases</h3>
-<ul><li>Submit with an empty required field</li></ul>
-<h3>Error Scenarios</h3>
-<ul><li>Submit without the required access right and verify the action is blocked</li></ul>
-
-<h2>Definition of Ready</h2>
-<ul>
-  <li>&#9744; Problem statement is clearly defined</li>
-  <li>&#9744; Affected Odoo module identified</li>
-</ul>
-
-<h2>Definition of Done</h2>
-<ul>
-  <li>&#9744; Code reviewed by a peer</li>
-  <li>&#9744; All acceptance criteria verified on staging</li>
-</ul>
-
 <h2>Odoo-Specific Notes</h2>
 <ul>
-  <li>Affects helpdesk.ticket — no model changes required</li>
+  <li>Concerns the quotation workflow in Sales</li>
 </ul>
+
+<!-- Only when an Odoo knowledge block was retrieved -->
+<h2>Standard Odoo Coverage</h2>
+<p><strong>Coverage:</strong> partial</p>
+<ul>
+  <li><strong>Quotation templates</strong> (sale_management, feature) - Enable under Sales &gt; Configuration <em>[applications/sales/sale.rst#quotation-templates]</em> <small>confidence: high</small></li>
+</ul>
+
+<!-- Only when the repo-docs block was retrieved -->
+<h2>Existing Customizations</h2>
+<p><strong>Coverage:</strong> partial</p>
+<ul>
+  <li><strong>Custom quotation layout</strong> (cu_sale_reports) - extends the existing quotation PDF layout <em>[custom_addons/cu_sale_reports/README.md#layout]</em> <small>confidence: high</small></li>
+</ul>
+
+<h2>Development Estimate</h2>
+<ul>
+  <li>As a sales user I want a custom quote layout — <strong>3–6 h</strong> <small>custom development · confidence: medium</small><br><small>Assumptions: extends the existing report layout</small></li>
+</ul>
+<p><strong>Total: 3–6 h</strong> <small>(mid-level Odoo developer, AI-assisted; implementation + developer testing only)</small></p>
 
 <p><em>Generated by REVA</em></p>
 ```
@@ -214,9 +208,37 @@ Leave `ODOO_CALLBACK_URL` empty to disable the write-back (analysis is still sto
 
 ---
 
+## Repo-docs grounding
+
+When the request carries a `github_url`, the worker grounds the *Existing
+Customizations* section in the repo's own documentation:
+
+- A single core-query planner call derives English search terms from the ticket;
+  those same terms drive both the Odoo-core retrieval and the repo-docs retrieval.
+- The repo's default-branch markdown docs under `custom_addons/`/`custom-addons/`
+  (excluding `CLAUDE.md`) are indexed **section-level** into Postgres
+  (`repo_doc_sections`, full-text searchable). Indexing is **lazy**: at analysis
+  time the worker compares the default branch's git-tree SHA against the stored
+  one (`repo_docs_sync`) and re-indexes only when it changed — the common case is
+  a 2-call no-op. Concurrent analyses of the same repo are serialized by a
+  per-repo advisory lock (a losing worker just uses the current index).
+- Only the sections relevant to the ticket are injected (capped), so the added
+  prompt cost stays small. The count of injected sections is stored on
+  `ticket_analyses.repo_docs_sections_used` and surfaced on the
+  `GET /api/v1/ticket-analyses` list endpoint and the TUI Tickets tab.
+- Everything degrades soft: an invalid URL, an uninstalled app, a sync failure,
+  or no matching docs all fall back to a core-only analysis and are recorded as
+  `repo_docs` ops events (visible in the TUI Failures tab), never a failed
+  analysis. The repo-docs block is fenced as untrusted data, like the ticket text.
+
+Docs are always read from the repository's **default branch**.
+
+---
+
 ## Language support
 
-Ticket text may be in German or English (or mixed). REVA always responds in English.
+Ticket text may be in German or English (or mixed). **REVA responds in the same
+language the ticket is written in.**
 
 ---
 

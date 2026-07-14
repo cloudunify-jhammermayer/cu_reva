@@ -1242,6 +1242,7 @@ def record_ticket_analysis_completed(
     result_html: str,
     response: ClaudeResponse,
     result_structured: dict | None = None,
+    repo_docs_sections_used: int | None = None,
 ) -> None:
     """Mark a ticket analysis as completed and store the result."""
     with db.session() as s:
@@ -1251,6 +1252,7 @@ def record_ticket_analysis_completed(
         row.status = "completed"
         row.result_html = result_html
         row.result_structured = result_structured
+        row.repo_docs_sections_used = repo_docs_sections_used
         row.model = response.model
         row.input_tokens = response.input_tokens
         row.output_tokens = response.output_tokens
@@ -1453,6 +1455,7 @@ def get_ticket_analysis(db: Database, analysis_id: int) -> dict | None:
             "estimated_cost_usd": float(row.estimated_cost_usd) if row.estimated_cost_usd else None,
             "created_at": row.created_at,
             "completed_at": row.completed_at,
+            "repo_docs_sections_used": row.repo_docs_sections_used,
         }
 
 

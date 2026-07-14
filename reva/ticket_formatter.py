@@ -140,6 +140,26 @@ def format_ticket_html(result: TicketAnalysisResult) -> str:
         if sc.notes:
             parts.append(f"<p>{_esc(sc.notes)}</p>")
 
+    ec = result.existing_customizations
+    if ec.coverage != "unknown" or ec.features:
+        parts.append("<h2>Existing Customizations</h2>")
+        parts.append(f"<p><strong>Coverage:</strong> {_esc(ec.coverage)}</p>")
+        if ec.features:
+            items = []
+            for feature in ec.features:
+                bits = [f"<strong>{_esc(feature.name)}</strong>"]
+                if feature.addon:
+                    bits.append(f"({_esc(feature.addon)})")
+                if feature.how:
+                    bits.append(f"- {_esc(feature.how)}")
+                if feature.reference:
+                    bits.append(f"<em>[{_esc(feature.reference)}]</em>")
+                bits.append(f"<small>confidence: {_esc(feature.confidence)}</small>")
+                items.append("<li>" + " ".join(bits) + "</li>")
+            parts.append("<ul>" + "".join(items) + "</ul>")
+        if ec.notes:
+            parts.append(f"<p>{_esc(ec.notes)}</p>")
+
     # Development estimate
     if result.estimates:
         total_min = sum(e.min_hours for e in result.estimates)
