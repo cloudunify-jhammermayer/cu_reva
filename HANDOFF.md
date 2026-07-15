@@ -19,9 +19,11 @@ Two changes (spec: `docs/superpowers/specs/2026-07-15-ticket-actuals-design.md`)
 - **Audits now honor `.claude-review.yml`'s `odoo` flag** (CORR-4 follow-up):
   loader extracted to `worker/repo_config.py`, read at the default branch.
 
-**Owed:** ast-odoo sender on ticket-done (fire-and-forget); C1 second half
-(estimate join + drift output — Joseph to pick the shape, default proposal is
-display-only stats in TUI/report); staging: one real done-ticket push.
+**Owed:** ast-odoo sender on ticket-done — designed, see
+`docs/superpowers/specs/2026-07-15-ticket-actuals-sender-design.md`; C1
+second half (estimate drift stats, display-only locked) — designed, see
+`docs/superpowers/specs/2026-07-15-estimate-drift-stats-design.md`; owed ops
+items packaged in `docs/ops-debt-runbook-2026-07.md` (manual execution).
 
 ---
 

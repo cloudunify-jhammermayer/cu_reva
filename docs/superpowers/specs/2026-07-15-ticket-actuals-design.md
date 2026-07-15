@@ -41,7 +41,8 @@ timesheet-wording review persists line ids and verdicts, never hours.
 
 ## Owed
 
-- ast-odoo: sender on the ticket-done transition (fire-and-forget; a REVA
-  failure must not block marking the ticket done).
-- C1 second half: estimate join + drift output (awaiting Joseph's pick).
-- Staging: one real done-ticket push once the addon side ships.
+- ast-odoo sender: designed in `2026-07-15-ticket-actuals-sender-design.md`.
+- C1 second half: designed in `2026-07-15-estimate-drift-stats-design.md`
+  (display-only, locked 2026-07-15).
+- Staging: one real done-ticket push once the addon side ships (tracked in
+  `docs/ops-debt-runbook-2026-07.md`).
