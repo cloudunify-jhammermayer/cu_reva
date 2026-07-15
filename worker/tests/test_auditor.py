@@ -12,8 +12,17 @@ from worker.auditor import Auditor
 
 @dataclass
 class FakeGitHub:
+    claude_review_yml: str | None = None
+    last_config_ref: str | None = None
+
     def get_installation_token(self, installation_id: int) -> str:
         return "ghs_tok"
+
+    def get_file_content(self, token, owner, repo, path, ref) -> str | None:
+        if path == ".claude-review.yml":
+            self.last_config_ref = ref
+            return self.claude_review_yml
+        return None
 
 
 @dataclass
@@ -25,6 +34,7 @@ class FakeRunner:
     last_skill: str | None = None
     last_params: dict | None = None
     last_model: str | None = None
+    last_odoo: bool | None = None
 
     def repo_lock(self, owner, name):
         import contextlib
@@ -37,6 +47,7 @@ class FakeRunner:
         self.last_skill = skill
         self.last_params = params
         self.last_model = model
+        self.last_odoo = odoo
         if self.raise_exc:
             raise self.raise_exc
         return self.response
@@ -98,6 +109,22 @@ def test_audit_uses_deep_model():
     auditor, runner, _, _ = _make_auditor()
     auditor.execute(_params())
     assert runner.last_model == runner.deep_model
+
+
+def test_audit_forwards_odoo_flag_when_repo_opts_in():
+    """An Odoo repo's audit must load the odoo19.md rules, same as its reviews
+    (CORR-4 follow-up): .claude-review.yml is read at the default branch."""
+    github = FakeGitHub(claude_review_yml="odoo: true")
+    auditor, runner, _, _ = _make_auditor(github=github)
+    auditor.execute(_params())
+    assert runner.last_odoo is True
+    assert github.last_config_ref == "main"
+
+
+def test_audit_odoo_defaults_false_without_config():
+    auditor, runner, _, _ = _make_auditor()
+    auditor.execute(_params())
+    assert runner.last_odoo is False
 
 
 def test_audit_ensure_repo_called_with_none_sha():

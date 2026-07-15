@@ -19,12 +19,17 @@ from reva.cost import estimate_cost
 from reva.diff_utils import is_excluded_path
 from reva.errors import PermanentError
 from reva.types import AuditJobParams, AuditResult, Finding
+from worker.repo_config import load_repo_config
 
 logger = structlog.get_logger()
 
 
 class GitHubReader(Protocol):
     def get_installation_token(self, installation_id: int) -> str: ...
+
+    def get_file_content(
+        self, token: str, owner: str, repo: str, path: str, ref: str
+    ) -> str | None: ...
 
 
 class RepoMetaLookup(Protocol):
@@ -54,6 +59,13 @@ class Auditor:
 
         token = self.github.get_installation_token(params.installation_id)
 
+        # Audits have no PR head — read .claude-review.yml at the default
+        # branch so an Odoo repo's audit gets the odoo19.md rules, same as
+        # its reviews (CORR-4 follow-up).
+        config = load_repo_config(
+            self.github, token, owner, name, meta["default_branch"]
+        )
+
         started_at = datetime.now(timezone.utc)
         with self.runner.repo_lock(owner, name):
             repo_path = self.runner.ensure_repo(owner, name, None, token)
@@ -64,6 +76,7 @@ class Auditor:
                 # is worth the stronger reasoning, unlike cost-sensitive reviews.
                 model=self.runner.deep_model,
                 params={"repo": f"{owner}/{name}", "default_branch": meta["default_branch"]},
+                odoo=config.odoo,
             )
         completed_at = datetime.now(timezone.utc)
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)

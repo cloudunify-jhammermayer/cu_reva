@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 import structlog
-import yaml
 from pydantic import ValidationError
 
 from reva import triage as triage_mod
@@ -58,6 +57,7 @@ from reva.types import (
     RiskLevel,
     Severity,
 )
+from worker.repo_config import load_repo_config
 
 logger = structlog.get_logger()
 
@@ -980,38 +980,7 @@ class Reviewer:
         self, token: str, owner: str, name: str, head_sha: str
     ) -> RepoConfig:
         """Load .claude-review.yml. Malformed or missing YAML -> empty config."""
-        raw = self.github.get_file_content(
-            token, owner, name, ".claude-review.yml", head_sha
-        )
-        if not raw:
-            return RepoConfig()
-        try:
-            parsed = yaml.safe_load(raw)
-        except yaml.YAMLError as exc:
-            logger.warning(
-                "claude_review_yml_parse_failed",
-                owner=owner,
-                name=name,
-                head_sha=head_sha[:8],
-                error=str(exc),
-            )
-            return RepoConfig()
-        if not isinstance(parsed, dict):
-            return RepoConfig()
-        try:
-            return RepoConfig.model_validate(parsed)
-        except ValidationError as exc:
-            # A bad value for a known field (e.g. block_on_severity: high) would
-            # otherwise fail every review on this repo. Degrade to defaults, same
-            # as the malformed-YAML path above.
-            logger.warning(
-                "claude_review_yml_invalid",
-                owner=owner,
-                name=name,
-                head_sha=head_sha[:8],
-                error=str(exc),
-            )
-            return RepoConfig()
+        return load_repo_config(self.github, token, owner, name, head_sha)
 
     def _resolve_limits(self, repo_config: RepoConfig) -> tuple[int, int]:
         """Per-repo overrides for diff size guards."""
