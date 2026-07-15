@@ -133,6 +133,23 @@ def test_journey_404_for_unknown_ticket(client_and_db):
     assert resp.status_code == 404
 
 
+def test_journey_actuals_reported_event(client_and_db):
+    """Timesheet actuals pushed on ticket-done show up as a journey event."""
+    client, db = client_and_db
+    _add_analysis(db, odoo_instance_id=1, ticket_id=4715, status="completed")
+    writers.record_ticket_actuals(
+        db, odoo_instance_id=1, ticket_id=4715, model_name="helpdesk.ticket",
+        actual_hours=7.5, timesheet_line_count=4,
+    )
+
+    resp = client.get("/api/v1/ticket-journeys?model_name=helpdesk.ticket&ticket_id=4715&odoo_instance_id=1")
+    assert resp.status_code == 200
+    events = resp.json()["events"]
+    actuals = [e for e in events if e["kind"] == "actuals_reported"]
+    assert len(actuals) == 1
+    assert "7.5h actual" in actuals[0]["summary"]
+
+
 def test_journey_analyses_only(client_and_db):
     client, db = client_and_db
     _add_analysis(db, odoo_instance_id=1, ticket_id=4711, status="completed")

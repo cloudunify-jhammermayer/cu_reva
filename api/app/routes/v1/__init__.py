@@ -27,6 +27,7 @@ from app.routes.v1 import (
     pending,
     repos,
     reviews,
+    ticket_actuals,
     ticket_analyses,
     ticket_issues,
     ticket_journeys,
@@ -54,6 +55,7 @@ _master.include_router(odoo_instances.router)
 _master.include_router(ops_events.router)
 
 _instance = APIRouter(dependencies=[Depends(require_odoo_instance), Depends(rate_limit)])
+_instance.include_router(ticket_actuals.create_router)
 _instance.include_router(ticket_analyses.create_router)
 _instance.include_router(ticket_issues.create_router)
 _instance.include_router(timesheet_reviews.create_router)

@@ -6,6 +6,25 @@ Messages-API design and is now history in git).
 
 ---
 
+## Addendum 2026-07-15 — ticket-actuals endpoint + audit odoo-flag fix
+
+Two changes (spec: `docs/superpowers/specs/2026-07-15-ticket-actuals-design.md`):
+
+- **`POST /api/v1/ticket-actuals`** — Odoo pushes per-ticket timesheet totals
+  when a ticket is marked done (actuals half of the estimate-calibration loop
+  C1). Migration 040, `TicketActual` model, latest-wins upsert, journey event
+  `actuals_reported`. Contracts regenerated (`8fc96171…`) and synced to
+  ast-odoo + pin bumped (uncommitted there, rides the connector's next wave).
+  All suites green incl. the real-Postgres tier.
+- **Audits now honor `.claude-review.yml`'s `odoo` flag** (CORR-4 follow-up):
+  loader extracted to `worker/repo_config.py`, read at the default branch.
+
+**Owed:** ast-odoo sender on ticket-done (fire-and-forget); C1 second half
+(estimate join + drift output — Joseph to pick the shape, default proposal is
+display-only stats in TUI/report); staging: one real done-ticket push.
+
+---
+
 ## Addendum 2026-07-14 — ticket analysis grounded in customer repo docs
 
 Implemented per `docs/superpowers/specs/2026-07-14-ticket-repo-docs-grounding-design.md`

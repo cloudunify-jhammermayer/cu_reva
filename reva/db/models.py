@@ -613,6 +613,43 @@ class ChangeNote(Base):
     )
 
 
+# ------------------------------------------------------------ ticket_actuals
+
+
+class TicketActual(Base):
+    """Mirrors db/migrations/040_ticket_actuals.sql — per-ticket timesheet
+    actuals pushed by Odoo when a ticket is marked done (estimate-calibration
+    loop C1). Estimates stay on the Projects board; one row per (instance,
+    ticket), latest push wins."""
+
+    __tablename__ = "ticket_actuals"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    odoo_instance_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("odoo_instances.id"), nullable=False
+    )
+    ticket_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_name: Mapped[str] = mapped_column(Text, nullable=False)
+    actual_hours: Mapped[float] = mapped_column(Numeric(8, 2), nullable=False)
+    timesheet_line_count: Mapped[int | None] = mapped_column(Integer)
+    reported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index(
+            "idx_ticket_actuals_instance_ticket",
+            "odoo_instance_id",
+            "ticket_id",
+            "model_name",
+            unique=True,
+        ),
+    )
+
+
 # ------------------------------------------------------------- value_reports
 
 

@@ -42,6 +42,7 @@ from reva.db.models import (
     ReviewFeedback,
     ReviewFinding,
     ReviewRun,
+    TicketActual,
     TicketAnalysis,
     TicketIssueRun,
     TimesheetReviewLine,
@@ -2476,6 +2477,64 @@ def purge_old_ticket_issue_text(db: Database, older_than_days: int) -> int:
             .execution_options(synchronize_session=False),
         )
         return result.rowcount
+
+
+# --- ticket actuals (estimate-calibration loop C1) ---------------------------
+
+
+def record_ticket_actuals(
+    db: Database,
+    odoo_instance_id: int,
+    ticket_id: int,
+    model_name: str,
+    actual_hours: float,
+    timesheet_line_count: int | None = None,
+) -> None:
+    """Upsert the timesheet totals Odoo pushed for a done ticket.
+
+    One row per (instance, ticket): a re-done ticket re-sends its totals and
+    the latest push wins; reported_at is bumped on every push.
+    """
+    with db.session() as s:
+        row = s.execute(
+            select(TicketActual).where(
+                TicketActual.odoo_instance_id == odoo_instance_id,
+                TicketActual.ticket_id == ticket_id,
+                TicketActual.model_name == model_name,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            s.add(TicketActual(
+                odoo_instance_id=odoo_instance_id,
+                ticket_id=ticket_id,
+                model_name=model_name,
+                actual_hours=actual_hours,
+                timesheet_line_count=timesheet_line_count,
+            ))
+        else:
+            row.actual_hours = actual_hours
+            row.timesheet_line_count = timesheet_line_count
+            row.reported_at = datetime.now(timezone.utc)
+
+
+def get_ticket_actuals(
+    db: Database, odoo_instance_id: int, ticket_id: int, model_name: str
+) -> dict | None:
+    with db.session() as s:
+        row = s.execute(
+            select(TicketActual).where(
+                TicketActual.odoo_instance_id == odoo_instance_id,
+                TicketActual.ticket_id == ticket_id,
+                TicketActual.model_name == model_name,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return None
+        return {
+            "actual_hours": float(row.actual_hours),
+            "timesheet_line_count": row.timesheet_line_count,
+            "reported_at": row.reported_at,
+        }
 
 
 # --- internals --------------------------------------------------------------

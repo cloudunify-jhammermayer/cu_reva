@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.schemas.ticket_actuals import TicketActualsRequest
 from app.schemas.ticket_analyses import TicketAnalysisRequest
 from app.schemas.ticket_issues import CreateIssuesRequest, UpdateIssueEstimateRequest
 from app.schemas.timesheet_reviews import TimesheetReviewRequest
@@ -11,6 +12,7 @@ _MODELS = {
     "ticket-analysis": TicketAnalysisRequest,
     "create-issues": CreateIssuesRequest,
     "update-issue-estimate": UpdateIssueEstimateRequest,
+    "ticket-actuals": TicketActualsRequest,
     "timesheet-review": TimesheetReviewRequest,
 }
 

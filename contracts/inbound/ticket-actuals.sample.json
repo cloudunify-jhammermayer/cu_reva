@@ -1,0 +1,6 @@
+{
+  "actual_hours": 7.5,
+  "model_name": "helpdesk.ticket",
+  "ticket_id": 42,
+  "timesheet_line_count": 4
+}

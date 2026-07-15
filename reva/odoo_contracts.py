@@ -152,6 +152,7 @@ def _inbound_models() -> dict[str, type[BaseModel]]:
     api_dir = str(Path(__file__).resolve().parents[1] / "api")
     if api_dir not in sys.path:
         sys.path.insert(0, api_dir)
+    from app.schemas.ticket_actuals import TicketActualsRequest
     from app.schemas.ticket_analyses import TicketAnalysisRequest
     from app.schemas.ticket_issues import CreateIssuesRequest, UpdateIssueEstimateRequest
     from app.schemas.timesheet_reviews import TimesheetReviewRequest
@@ -160,6 +161,7 @@ def _inbound_models() -> dict[str, type[BaseModel]]:
         "ticket-analysis": TicketAnalysisRequest,
         "create-issues": CreateIssuesRequest,
         "update-issue-estimate": UpdateIssueEstimateRequest,
+        "ticket-actuals": TicketActualsRequest,
         "timesheet-review": TimesheetReviewRequest,
     }
 
@@ -373,6 +375,19 @@ CONTRACTS: list[Contract] = [
             "model_name": "project.task",
             "number": 42,
             "estimate_hours": 5.0,
+        },
+    ),
+    Contract(
+        name="ticket-actuals",
+        direction="odoo->reva",
+        method="POST",
+        path="/api/v1/ticket-actuals",
+        auth="bearer:instance-inbound-key",
+        sample={
+            "ticket_id": 42,
+            "model_name": "helpdesk.ticket",
+            "actual_hours": 7.5,
+            "timesheet_line_count": 4,
         },
     ),
     Contract(

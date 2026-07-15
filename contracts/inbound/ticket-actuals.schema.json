@@ -1,0 +1,41 @@
+{
+  "description": "Timesheet totals for a ticket, pushed by Odoo when it is marked done\n(the manual deployment step). Fire-and-forget from Odoo's side: no\ncallback echoes it. A re-done ticket re-sends its totals \u2014 latest wins.",
+  "properties": {
+    "actual_hours": {
+      "description": "Total timesheet hours booked on the ticket at done-time",
+      "minimum": 0,
+      "title": "Actual Hours",
+      "type": "number"
+    },
+    "model_name": {
+      "description": "Odoo model name, e.g. \"helpdesk.ticket\" or \"project.task\"",
+      "title": "Model Name",
+      "type": "string"
+    },
+    "ticket_id": {
+      "title": "Ticket Id",
+      "type": "integer"
+    },
+    "timesheet_line_count": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Number of timesheet lines behind the total",
+      "title": "Timesheet Line Count"
+    }
+  },
+  "required": [
+    "ticket_id",
+    "model_name",
+    "actual_hours"
+  ],
+  "title": "TicketActualsRequest",
+  "type": "object"
+}

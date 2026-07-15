@@ -23,6 +23,7 @@ from reva.db.models import (
     PullRequest,
     Repository,
     ReviewRun,
+    TicketActual,
     TicketAnalysis,
     TicketIssueRun,
 )
@@ -62,6 +63,25 @@ def get_ticket_journey(
         ).scalars().all()
         if not analyses and not runs:
             return None
+
+        # Timesheet actuals pushed by Odoo when the ticket was marked done
+        # (estimate-calibration loop C1). At most one row per ticket.
+        actual = s.execute(
+            select(TicketActual).where(
+                TicketActual.ticket_id == ticket_id,
+                TicketActual.model_name == model_name,
+                _instance(TicketActual.odoo_instance_id),
+            )
+        ).scalar_one_or_none()
+        if actual is not None:
+            lines = (
+                f", {actual.timesheet_line_count} lines"
+                if actual.timesheet_line_count else ""
+            )
+            events.append({
+                "ts": actual.reported_at, "kind": "actuals_reported",
+                "summary": f"Ticket done — {float(actual.actual_hours):.1f}h actual{lines}",
+            })
 
         for a in analyses:
             events.append({"ts": a.created_at, "kind": "analysis_requested",
