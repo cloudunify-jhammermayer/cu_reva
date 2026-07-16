@@ -1,3 +1,14 @@
+## v2.11 — Structured issue dependencies (builds_on)
+
+- ticket_issues.md: dependencies between issues move from hand-written body
+  lines to the structured `builds_on` field (1-based positions in the returned
+  array, earlier issues only). The planner must never write sequence
+  references like "(1/3)" into titles or bodies — the runner re-orders the
+  plan dependency-first and renders the "Builds on (n/total)." line itself
+  (was: the model guessed the total and could reference later issues; ticket
+  6324 produced "Builds on (1/3)" inside a 4-issue plan with a forward
+  reference).
+
 ## v2.10 — Existing-customizations grounding
 
 - ticket_analysis.md: new "### 4. Existing Customizations" section (Development

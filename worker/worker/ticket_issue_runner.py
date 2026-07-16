@@ -253,6 +253,56 @@ def _fallback_issue_body(params: TicketIssueJobParams) -> str:
     return "\n".join(sections)
 
 
+def _sequence_planned_issues(items: list) -> list[tuple[object, list[int]]]:
+    """Dependency-first order for a fresh plan, with remapped references.
+
+    The planner marks each issue's prerequisites in `builds_on` as 1-based
+    positions into its own array, but nothing forces it to order the array
+    that way (ticket 6324 returned issue 2 building on issue 3). Emit every
+    issue after its prerequisites — planner order otherwise — and pair each
+    item with its prerequisites as 1-based positions in the NEW order, so
+    references always point backward and carry the real total. Bad hints
+    never fail planning: out-of-range/self references are dropped and a
+    reference cycle breaks at the back-edge.
+    """
+    n = len(items)
+    deps: list[list[int]] = []
+    for i, item in enumerate(items):
+        refs = sorted({r - 1 for r in item.builds_on})
+        deps.append([r for r in refs if 0 <= r < n and r != i])
+
+    order: list[int] = []
+    done = [False] * n
+
+    def _emit(i: int, stack: set[int]) -> None:
+        if done[i] or i in stack:
+            return
+        stack.add(i)
+        for dep in deps[i]:
+            _emit(dep, stack)
+        stack.discard(i)
+        done[i] = True
+        order.append(i)
+
+    for i in range(n):
+        _emit(i, set())
+
+    position = {orig: new for new, orig in enumerate(order)}
+    return [
+        (
+            items[orig],
+            sorted(position[d] + 1 for d in deps[orig] if position[d] < position[orig]),
+        )
+        for orig in order
+    ]
+
+
+def _builds_on_line(deps: list[int], total: int) -> str:
+    refs = [f"({d}/{total})" for d in deps]
+    joined = refs[0] if len(refs) == 1 else ", ".join(refs[:-1]) + " and " + refs[-1]
+    return f"Builds on {joined}."
+
+
 def _normalize_planned_issue(item, params: TicketIssueJobParams) -> dict:
     """Never let an empty/placeholder Claude plan create an empty GitHub issue."""
     title = item.title
@@ -846,7 +896,18 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
                 _send_failed_callback(ctx, params, error, log)
                 raise PermanentError(error)
             response, plan = ctx.ticket_issue_planner.plan_with_response(params)
-            issues = [_normalize_planned_issue(item, params) for item in plan.issues]
+            # Dependency-first order + system-rendered "Builds on" lines: the
+            # line is baked into the persisted body here, so resumes and the
+            # branch-line re-render never recompute numbering.
+            sequenced = _sequence_planned_issues(plan.issues)
+            issues = []
+            for item, deps in sequenced:
+                normalized = _normalize_planned_issue(item, params)
+                if deps:
+                    normalized["body"] = (
+                        f"{_builds_on_line(deps, len(sequenced))}\n\n{normalized['body']}"
+                    )
+                issues.append(normalized)
             plan_summary = plan.summary
             # Plan + spend persist BEFORE any GitHub call: a partial failure must
             # resume from this plan, never re-plan (titles would drift and the

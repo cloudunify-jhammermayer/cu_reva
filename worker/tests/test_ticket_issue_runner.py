@@ -615,6 +615,76 @@ def test_mixed_types_title_sequence_and_dominant_parent(ctx_and_fakes):
     assert sorted(s["github"].labels_ensured) == ["DEV", "FEAT", "reva-ticket"]
 
 
+def test_builds_on_reorders_dependencies_first_and_renders_line(ctx_and_fakes):
+    """The ticket-6324 case: the planner returned issue 2 building on issues 1
+    and 3 and hand-guessed the total ("Builds on (1/3)" in a 4-issue plan).
+    The runner must re-order the plan so references point backward and render
+    the Builds-on line itself with the real total."""
+    s = ctx_and_fakes
+    s["planner"].plan = TicketIssuePlan(issues=[
+        TicketIssueItem(title="Cascading fields", body="Body A"),
+        TicketIssueItem(title="Entitlement field", body="Body B", builds_on=[1, 3]),
+        TicketIssueItem(title="Settings fields", body="Body C"),
+        TicketIssueItem(title="Serial column", body="Body D", builds_on=[1]),
+    ])
+    params = _make_params(s["db"])
+
+    run_ticket_issues(params)
+
+    children = [c for c in s["github"].created if "/4)" in c["title"]]
+    assert [c["title"] for c in children] == [
+        "[DEV] 123 - Cascading fields (1/4)",
+        "[DEV] 123 - Settings fields (2/4)",
+        "[DEV] 123 - Entitlement field (3/4)",
+        "[DEV] 123 - Serial column (4/4)",
+    ]
+    assert children[2]["body"].startswith("Builds on (1/4) and (2/4).\n\nBody B")
+    assert children[3]["body"].startswith("Builds on (1/4).\n\nBody D")
+    assert "Builds on" not in children[0]["body"]
+    assert "Builds on" not in children[1]["body"]
+
+
+def test_builds_on_invalid_refs_are_dropped(ctx_and_fakes):
+    """Self, zero and out-of-range references are planner noise: order stays,
+    no Builds-on line appears, the run completes."""
+    s = ctx_and_fakes
+    s["planner"].plan = TicketIssuePlan(issues=[
+        TicketIssueItem(title="Issue 1", body="Body 1"),
+        TicketIssueItem(title="Issue 2", body="Body 2", builds_on=[0, 2, 5]),
+    ])
+    params = _make_params(s["db"])
+
+    run_ticket_issues(params)
+
+    children = [c for c in s["github"].created if "/2)" in c["title"]]
+    assert [c["title"] for c in children] == [
+        "[DEV] 123 - Issue 1 (1/2)",
+        "[DEV] 123 - Issue 2 (2/2)",
+    ]
+    assert all("Builds on" not in c["body"] for c in children)
+
+
+def test_builds_on_cycle_never_fails_and_renders_only_backward_refs(ctx_and_fakes):
+    """A reference cycle must not fail planning; whatever order comes out,
+    every rendered reference points to an earlier issue."""
+    s = ctx_and_fakes
+    s["planner"].plan = TicketIssuePlan(issues=[
+        TicketIssueItem(title="Issue 1", body="Body 1", builds_on=[2]),
+        TicketIssueItem(title="Issue 2", body="Body 2", builds_on=[1]),
+    ])
+    params = _make_params(s["db"])
+
+    run_ticket_issues(params)
+
+    children = [c for c in s["github"].created if "/2)" in c["title"]]
+    assert [c["title"] for c in children] == [
+        "[DEV] 123 - Issue 2 (1/2)",
+        "[DEV] 123 - Issue 1 (2/2)",
+    ]
+    assert "Builds on" not in children[0]["body"]
+    assert children[1]["body"].startswith("Builds on (1/2).\n\nBody 1")
+
+
 def test_issue_title_format():
     from worker.ticket_issue_runner import _issue_title
 

@@ -423,6 +423,12 @@ class TicketIssueItem(BaseModel):
     # mid-level AI-assisted dev). None on plans persisted before the estimate
     # rollout; the tool schema requires it for fresh plans.
     estimate_hours: float | None = None
+    # 1-based positions (in this plan's issues array) of the issues this one
+    # builds on. The runner re-orders the plan dependency-first and renders the
+    # "Builds on (n/total)." body line itself — the planner hand-writing
+    # numbering guessed the total wrong (ticket 6324: "(1/3)" in a 4-issue
+    # plan). Empty on plans persisted before the rollout.
+    builds_on: list[int] = Field(default_factory=list)
 
     @field_validator("title", mode="before")
     @classmethod
@@ -432,7 +438,7 @@ class TicketIssueItem(BaseModel):
             return v[:197] + "..."
         return v
 
-    @field_validator("acceptance_criteria", mode="before")
+    @field_validator("acceptance_criteria", "builds_on", mode="before")
     @classmethod
     def _parse_json_string_list(cls, v: object) -> object:
         return _unwrap_json_list(v)
