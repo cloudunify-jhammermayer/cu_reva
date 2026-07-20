@@ -1,7 +1,7 @@
 # Ticket-level PR review signal to Odoo (no-linked-issue fallback) — Design
 
 - **Date:** 2026-07-20
-- **Status:** approved (design), not yet planned
+- **Status:** implemented 2026-07-20 (REVA side; ast-odoo controller + prod is_default flag pending)
 - **Repos:** cu_reva (this spec) + ast-odoo consumer (controller change owed on their
   side; contract sync per the usual flow)
 - **Context:** requested by Joseph 2026-07-20. The work-status leg
