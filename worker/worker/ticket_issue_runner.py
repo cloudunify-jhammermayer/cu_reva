@@ -172,21 +172,20 @@ def _dominant_type(params: TicketIssueJobParams, issues: list[dict]) -> str:
 
 
 def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str,
-                       branch: str | None = None) -> str:
+                       branch: str) -> str:
     """Render one planned issue as a GitHub issue body with the mandatory
     Odoo back-link (Contract 1: ticket_url) and the hidden dedup marker.
 
-    `branch` (e.g. "issue/42") is only known after creation — the caller
-    re-renders the body with it and PATCHes the issue (branch-name convention
-    for developers picking up the issue)."""
+    `branch` is the ticket's feature branch (the epic's `<type>/<ticket-id>`),
+    named on every sub-issue so developers always work on the shared ticket
+    branch instead of inventing per-issue `issue/<n>` ones."""
     # .get: the retention purge strips bodies from old plans; a requeued
     # post-purge item still renders its criteria + back-link.
     lines = [_compact_issue_body(item.get("body", ""))]
     if item.get("acceptance_criteria"):
         lines += ["", "### Acceptance criteria", ""]
         lines += [f"- [ ] {criterion}" for criterion in item["acceptance_criteria"]]
-    if branch:
-        lines += ["", f"**Branch:** `{branch}`"]
+    lines += ["", f"**Branch:** `{branch}`"]
     lines += [
         "",
         "---",
@@ -378,7 +377,7 @@ def _format_parent_body(params: TicketIssueJobParams, marker: str, parent_marker
         lines += ["", "### Summary", "", summary]
     if issues:
         # Feature-branch convention: the epic's branch is <type>/<ticket-id>;
-        # each sub-issue body carries its own issue/<n> line.
+        # every sub-issue body names the same branch (never issue/<n>).
         lines += ["", f"**Branch:** `{_dominant_type(params, issues).lower()}/{params.ticket_id}`"]
     lines += [
         "",
@@ -897,8 +896,8 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
                 raise PermanentError(error)
             response, plan = ctx.ticket_issue_planner.plan_with_response(params)
             # Dependency-first order + system-rendered "Builds on" lines: the
-            # line is baked into the persisted body here, so resumes and the
-            # branch-line re-render never recompute numbering.
+            # line is baked into the persisted body here, so resumes never
+            # recompute numbering.
             sequenced = _sequence_planned_issues(plan.issues)
             issues = []
             for item, deps in sequenced:
@@ -953,7 +952,9 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
         writers.set_ticket_issue_parent(ctx.db, params.run_id, parent)
         log.info("ticket_issue_parent_created", issue=created["number"])
 
-    # 2) children
+    # 2) children — each names the epic's <type>/<ticket-id> branch so all work
+    # for the ticket lands on the one shared branch (never issue/<n>).
+    branch = f"{_dominant_type(params, issues).lower()}/{params.ticket_id}"
     for idx, item in enumerate(issues):
         if item.get("number") is not None:
             continue
@@ -965,27 +966,10 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             ctx,
             token, owner, repo,
             title=title,
-            body=_format_issue_body(item, params, marker),
+            body=_format_issue_body(item, params, marker, branch),
             labels=[_TICKET_ISSUE_LABEL, issue_type],
             assignees=[params.github_username] if params.github_username else None,
         )
-        # Branch-name hint (issue/<n>) needs the number, so the body is
-        # re-rendered and PATCHed after creation. Cosmetic — a failure must
-        # never fail or retry the run (resume skips created issues, so a
-        # retry could not repair it anyway).
-        try:
-            ctx.github.update_issue(
-                token, owner, repo, created["number"],
-                body=_format_issue_body(item, params, marker,
-                                        branch=f"issue/{created['number']}"),
-            )
-        except Exception:  # noqa: BLE001
-            log.warning("ticket_issue_branch_line_failed",
-                        issue=created["number"], exc_info=True)
-            writers.record_ops_event(
-                ctx.db, "github", "warning", "issue_branch_line_failed",
-                {"run_id": params.run_id, "issue": created["number"]},
-            )
         # Keep only what resume, Contract 2, and state tracking need; the body
         # lives on GitHub now, and dropping it keeps Claude-rendered customer
         # text out of the retained JSON (the retention purge keeps `issues`).
