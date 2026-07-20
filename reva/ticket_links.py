@@ -73,6 +73,17 @@ _TICKET_TITLE_TOKEN_RE = re.compile(r"\b(?:bug|feat|cr|conf|dev|mig|sup|doc)/(\d
 FALLBACK_MODEL_NAME = "helpdesk.ticket"
 
 
+def _github_url_matches_repo(github_url: str | None, repo: str) -> bool:
+    """Boundary-checked owner/repo match — `acme/widgets` must not match
+    `acme/widgets-legacy` (Task 2 review finding)."""
+    url = (github_url or "").lower()
+    idx = url.find("github.com/")
+    if idx == -1:
+        return False
+    path = url[idx + len("github.com/"):].removesuffix(".git").rstrip("/")
+    return path == repo or path.startswith(f"{repo}/")
+
+
 def extract_ticket_id(head_branch: str | None, pr_title: str | None) -> int | None:
     """Ticket id from the PR itself, for PRs with no linked REVA issue: the
     head branch (`cr/2010`, the convention ticket_issue_runner writes into
@@ -121,9 +132,8 @@ def resolve_ticket_by_id(
                 )
                 .order_by(TicketAnalysis.created_at.desc(), TicketAnalysis.id.desc())
             ).all()
-            needle = f"github.com/{repo}"
             row = next(
-                (c for c in candidates if needle in (c.github_url or "").lower()),
+                (c for c in candidates if _github_url_matches_repo(c.github_url, repo)),
                 None,
             ) or (candidates[0] if candidates else None)
         if row is not None:

@@ -186,6 +186,27 @@ def test_resolve_by_id_analyses_no_repo_match_newest_wins(db: Database) -> None:
     assert resolve_ticket_by_id(db, "acme/widgets", 210) == (4, "project.task")
 
 
+def test_resolve_by_id_analyses_prefix_collision_is_not_a_repo_match(db: Database) -> None:
+    # acme/widgets-legacy must not win the repo-match tier for acme/widgets.
+    with db.session() as s:
+        s.add(_analysis(210, odoo_instance_id=3,
+                        github_url="https://github.com/acme/widgets-legacy",
+                        created=datetime(2026, 7, 1, tzinfo=timezone.utc)))
+        s.add(_analysis(210, odoo_instance_id=4,
+                        github_url="https://github.com/acme/widgets",
+                        created=datetime(2026, 5, 1, tzinfo=timezone.utc)))
+
+    assert resolve_ticket_by_id(db, "acme/widgets", 210) == (4, "project.task")
+
+
+def test_resolve_by_id_analyses_git_suffix_still_matches(db: Database) -> None:
+    with db.session() as s:
+        s.add(_analysis(210, odoo_instance_id=5,
+                        github_url="https://github.com/Acme/Widgets.git"))
+
+    assert resolve_ticket_by_id(db, "acme/widgets", 210) == (5, "project.task")
+
+
 def test_resolve_by_id_skips_instanceless_rows(db: Database) -> None:
     with db.session() as s:
         s.add(_analysis(210, odoo_instance_id=None))
