@@ -2628,6 +2628,7 @@ def get_odoo_instance(db: Database, instance_id: int) -> dict | None:
             "callback_url": row.callback_url,
             "callback_api_key_enc": row.callback_api_key_enc,
             "active": row.active,
+            "is_default": row.is_default,
             "daily_budget_usd": (
                 float(row.daily_budget_usd) if row.daily_budget_usd is not None else None
             ),

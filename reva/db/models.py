@@ -762,11 +762,26 @@ class OdooInstance(Base):
     rate_limit_per_minute: Mapped[int | None] = mapped_column(Integer)
     # Which Odoo version this instance's tickets are analysed against.
     odoo_version: Mapped[str | None] = mapped_column(Text)
+    # Default instance for the no-linked-issue PR fallback (migration 041):
+    # extracted ticket ids REVA has never seen resolve here. At most one row
+    # set — partial unique index below; setting it is a manual deploy step.
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        # Partial UNIQUE index (migration 041): at most one default instance.
+        Index(
+            "uq_odoo_instances_default",
+            "is_default",
+            unique=True,
+            postgresql_where=text("is_default"),
+            sqlite_where=text("is_default"),
+        ),
     )
 
 
