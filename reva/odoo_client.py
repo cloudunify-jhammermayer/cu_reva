@@ -288,18 +288,23 @@ class OdooCallbackClient:
         ticket_id: int,
         model_name: str,
         issues: list[dict],
+        work_status: str | None = None,
+        pr: dict | None = None,
     ) -> None:
-        """Post per-issue work-status hints ({number, work_status}) to Odoo.
-
-        Only the issues linked by the triggering PR are sent; Odoo upserts by
-        number against existing records. A last-signal-wins display flag, not a
-        state machine."""
+        """Post work-status hints to Odoo. Two legs, never mixed by callers:
+        per-issue ({number, work_status} upserts against existing records,
+        issues non-empty) or ticket-level (issues=[], work_status + pr set —
+        the no-linked-issue PR fallback, spec 2026-07-20). A last-signal-wins
+        display flag, not a state machine. exclude_none keeps the per-issue
+        payload byte-identical to the pre-extension wire shape."""
         payload = IssueWorkStatusPayload(
             ticket_id=ticket_id,
             model_name=model_name,
             issues=issues,
+            work_status=work_status,
+            pr=pr,
         )
-        self._post("/tickets/issue-work-status", payload.model_dump())
+        self._post("/tickets/issue-work-status", payload.model_dump(exclude_none=True))
         logger.bind(ticket_id=ticket_id, model_name=model_name).info(
             "odoo_issue_work_status_ok"
         )

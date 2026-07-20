@@ -22,10 +22,40 @@
       ],
       "title": "IssueWorkStatusItem",
       "type": "object"
+    },
+    "PrRefPayload": {
+      "properties": {
+        "number": {
+          "title": "Number",
+          "type": "integer"
+        },
+        "repo": {
+          "title": "Repo",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "title",
+        "url",
+        "repo"
+      ],
+      "title": "PrRefPayload",
+      "type": "object"
     }
   },
+  "description": "Two legs share this wire shape, never mixed in one call: the per-issue\nleg (issues non-empty \u2014 spec 2026-07-11) and the ticket-level leg\n(work_status + pr set, issues empty \u2014 the no-linked-issue PR fallback,\nspec 2026-07-20). Senders dump with exclude_none so the per-issue payload\nstays byte-identical to the pre-extension shape.",
   "properties": {
     "issues": {
+      "default": [],
       "items": {
         "$ref": "#/$defs/IssueWorkStatusItem"
       },
@@ -36,15 +66,41 @@
       "title": "Model Name",
       "type": "string"
     },
+    "pr": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PrRefPayload"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "ticket_id": {
       "title": "Ticket Id",
       "type": "integer"
+    },
+    "work_status": {
+      "anyOf": [
+        {
+          "enum": [
+            "in_progress",
+            "in_review"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Work Status"
     }
   },
   "required": [
     "ticket_id",
-    "model_name",
-    "issues"
+    "model_name"
   ],
   "title": "IssueWorkStatusPayload",
   "type": "object"

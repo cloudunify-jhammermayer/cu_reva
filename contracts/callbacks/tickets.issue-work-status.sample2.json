@@ -1,0 +1,12 @@
+{
+  "issues": [],
+  "model_name": "helpdesk.ticket",
+  "pr": {
+    "number": 42,
+    "repo": "acme/widgets",
+    "title": "Fix rounding",
+    "url": "https://github.com/acme/widgets/pull/42"
+  },
+  "ticket_id": 123,
+  "work_status": "in_review"
+}

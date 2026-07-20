@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class WriteFieldPayload(BaseModel):
@@ -103,9 +103,25 @@ class IssueWorkStatusItem(BaseModel):
 
 
 class IssueWorkStatusPayload(BaseModel):
+    """Two legs share this wire shape, never mixed in one call: the per-issue
+    leg (issues non-empty — spec 2026-07-11) and the ticket-level leg
+    (work_status + pr set, issues empty — the no-linked-issue PR fallback,
+    spec 2026-07-20). Senders dump with exclude_none so the per-issue payload
+    stays byte-identical to the pre-extension shape."""
+
     ticket_id: int
     model_name: str
-    issues: list[IssueWorkStatusItem]
+    issues: list[IssueWorkStatusItem] = []
+    work_status: Literal["in_progress", "in_review"] | None = None
+    pr: PrRefPayload | None = None
+
+    @model_validator(mode="after")
+    def _one_leg_present(self) -> "IssueWorkStatusPayload":
+        if not self.issues and self.work_status is None:
+            raise ValueError(
+                "either issues (per-issue leg) or work_status (ticket-level leg) is required"
+            )
+        return self
 
 
 class ChangeSummaryNote(BaseModel):
@@ -285,6 +301,15 @@ CONTRACTS: list[Contract] = [
             "model_name": "helpdesk.ticket",
             "issues": [{"number": 42, "work_status": "in_progress"}],
         },
+        extra_samples=[{
+            "ticket_id": 123,
+            "model_name": "helpdesk.ticket",
+            "issues": [],
+            "work_status": "in_review",
+            "pr": {"number": 42, "title": "Fix rounding",
+                   "url": "https://github.com/acme/widgets/pull/42",
+                   "repo": "acme/widgets"},
+        }],
     ),
     Contract(
         name="tickets.change-summary",

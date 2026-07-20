@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from reva.odoo_contracts import (
     CONTRACTS,
@@ -105,7 +106,7 @@ def test_issue_work_status_wire_shape():
         model_name="helpdesk.ticket",
         issues=[{"number": 42, "work_status": "in_progress"}],
     )
-    assert payload.model_dump() == {
+    assert payload.model_dump(exclude_none=True) == {
         "ticket_id": 123,
         "model_name": "helpdesk.ticket",
         "issues": [{"number": 42, "work_status": "in_progress"}],
@@ -118,6 +119,45 @@ def test_issue_work_status_rejects_unknown_status():
             ticket_id=1, model_name="project.task",
             issues=[{"number": 1, "work_status": "done"}],
         )
+
+
+def test_issue_work_status_rejects_payload_with_neither_leg():
+    with pytest.raises(ValidationError):
+        IssueWorkStatusPayload(ticket_id=1, model_name="helpdesk.ticket", issues=[])
+
+
+def test_issue_work_status_per_issue_wire_shape_unchanged():
+    # The pre-extension wire shape must stay byte-identical (spec 2026-07-20):
+    # exclude_none drops the new optional fields on the per-issue leg.
+    payload = IssueWorkStatusPayload(
+        ticket_id=123,
+        model_name="helpdesk.ticket",
+        issues=[{"number": 42, "work_status": "in_progress"}],
+    )
+    assert payload.model_dump(exclude_none=True) == {
+        "ticket_id": 123,
+        "model_name": "helpdesk.ticket",
+        "issues": [{"number": 42, "work_status": "in_progress"}],
+    }
+
+
+def test_issue_work_status_ticket_level_wire_shape():
+    payload = IssueWorkStatusPayload(
+        ticket_id=123,
+        model_name="helpdesk.ticket",
+        issues=[],
+        work_status="in_review",
+        pr={"number": 42, "title": "Fix rounding",
+            "url": "https://github.com/acme/widgets/pull/42", "repo": "acme/widgets"},
+    )
+    assert payload.model_dump(exclude_none=True) == {
+        "ticket_id": 123,
+        "model_name": "helpdesk.ticket",
+        "issues": [],
+        "work_status": "in_review",
+        "pr": {"number": 42, "title": "Fix rounding",
+               "url": "https://github.com/acme/widgets/pull/42", "repo": "acme/widgets"},
+    }
 
 
 def test_change_summary_wire_shape():
