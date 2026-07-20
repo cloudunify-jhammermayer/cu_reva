@@ -64,9 +64,17 @@ def resolve_pr_tickets(db: Database, repo_full_name: str, issue_numbers: list[in
     return list(out.values())
 
 
-_TICKET_BRANCH_RE = re.compile(r"^(?:bug|feat|cr|conf|dev|mig|sup|doc)/(\d+)$", re.IGNORECASE)
-_TICKET_TITLE_TAG_RE = re.compile(r"\[(?:bug|feat|cr|conf|dev|mig|sup|doc)\]\s*(\d+)", re.IGNORECASE)
-_TICKET_TITLE_TOKEN_RE = re.compile(r"\b(?:bug|feat|cr|conf|dev|mig|sup|doc)/(\d+)\b", re.IGNORECASE)
+_TICKET_BRANCH_RE = re.compile(r"^(?:bug|feat|cr|conf|dev|mig|sup|doc)/(\d{1,9})$", re.IGNORECASE)
+# Trailing \b on the tag form (matching the token form's existing one) is
+# required, not cosmetic: without it, capping the digit group at 9 chars
+# would silently truncate a >9-digit run to a false 9-digit match instead of
+# rejecting it outright.
+_TICKET_TITLE_TAG_RE = re.compile(
+    r"\[(?:bug|feat|cr|conf|dev|mig|sup|doc)\]\s*(\d{1,9})(?!\.\d)\b", re.IGNORECASE
+)
+_TICKET_TITLE_TOKEN_RE = re.compile(
+    r"\b(?:bug|feat|cr|conf|dev|mig|sup|doc)/(\d{1,9})(?!\.\d)\b", re.IGNORECASE
+)
 
 # Fallback model for extracted tickets REVA has never seen (spec 2026-07-20).
 # The branch type prefix is a work-item type, not an Odoo model — never map it.
@@ -88,13 +96,20 @@ def extract_ticket_id(head_branch: str | None, pr_title: str | None) -> int | No
     """Ticket id from the PR itself, for PRs with no linked REVA issue: the
     head branch (`cr/2010`, the convention ticket_issue_runner writes into
     issue bodies) first, then the PR title (`[CR] 2010 - …` tag form, then a
-    `cr/2010` token). None = no recognisable reference — normal lifecycle."""
+    `cr/2010` token). None = no recognisable reference — normal lifecycle.
+    Ids are bounded to 9 digits and 0 is rejected (never a real ticket id)."""
     match = _TICKET_BRANCH_RE.match((head_branch or "").strip())
     if match:
-        return int(match.group(1))
+        value = int(match.group(1))
+        if value != 0:
+            return value
     title = pr_title or ""
     match = _TICKET_TITLE_TAG_RE.search(title) or _TICKET_TITLE_TOKEN_RE.search(title)
-    return int(match.group(1)) if match else None
+    if match:
+        value = int(match.group(1))
+        if value != 0:
+            return value
+    return None
 
 
 def resolve_ticket_by_id(

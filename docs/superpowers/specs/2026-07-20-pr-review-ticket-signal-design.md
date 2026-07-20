@@ -83,13 +83,15 @@ items anyway.
 
 **Extraction ladder** (new pure helpers in `reva/ticket_links.py`):
 
-1. Head branch vs `^(bug|feat|cr|conf|dev|mig|sup|doc)/(\d+)$`, case-insensitive —
+1. Head branch vs `^(bug|feat|cr|conf|dev|mig|sup|doc)/(\d{1,9})$`, case-insensitive —
    the convention `ticket_issue_runner` writes into issue bodies (`cr/2010`).
-2. PR title, two patterns in order: `\[(BUG|FEAT|CR|CONF|DEV|MIG|SUP|DOC)\]\s*(\d+)`
-   (the issue-title format `[CR] 2010 - …`), then a `\b(bug|feat|cr|conf|dev|mig|sup|doc)/(\d+)\b`
-   token anywhere in the title.
+2. PR title, two patterns in order: `\[(BUG|FEAT|CR|CONF|DEV|MIG|SUP|DOC)\]\s*(\d{1,9})(?!\.\d)\b`
+   (the issue-title format `[CR] 2010 - …`), then a `\b(bug|feat|cr|conf|dev|mig|sup|doc)/(\d{1,9})(?!\.\d)\b`
+   token anywhere in the title. The `(?!\.\d)` lookahead keeps a version number like
+   `17.0` from being read as ticket `17`.
 3. No match → `no_ticket_ref`: normal lifecycle, debug log, **no ops event** (mirror
-   of `no_refs` today).
+   of `no_refs` today). 0 and >9-digit ids are rejected (never real ticket ids; the
+   9-digit bound also keeps an extracted id from overflowing the DB integer bind).
 
 The type prefix is a work-item type, not an Odoo model — it is only used to anchor
 the regex, never mapped to `model_name`.

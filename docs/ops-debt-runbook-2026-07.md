@@ -76,6 +76,20 @@ The connector already sends `Authorization: Bearer <instance key>`
 `reva.api_key` param holds its own **per-instance** key (not the master
 key), and `GET /api/v1/health` with that key authenticates as the instance.
 
+## 6. Set the default Odoo instance (migration 041)
+
+The ticket-level PR signal fallback (spec 2026-07-20) needs one `odoo_instances`
+row flagged as default so an unknown ticket still has somewhere to land. The
+migration adds the column/index but can't know which row — this is a manual
+step after item 1's deploy lands migration 041.
+
+```sql
+UPDATE odoo_instances SET is_default = TRUE WHERE name = '<cloudunify-prod-name>';
+```
+
+**Verify:** `select name from odoo_instances where is_default;` returns exactly
+the one row (the partial unique index enforces at most one default).
+
 ## Closed
 
 - ~~Migrations 036–040 raw SQL on real Postgres~~ — exercised locally

@@ -136,6 +136,21 @@ def test_extract_nothing_anywhere_is_none() -> None:
     assert extract_ticket_id("feature/misc", "chore: bump deps") is None
 
 
+def test_extract_rejects_overlong_ticket_ids() -> None:
+    # >9 digits would overflow the DB integer bind (final-review finding).
+    assert extract_ticket_id("cr/99999999999999999999", None) is None
+    assert extract_ticket_id(None, "[CR] 99999999999999999999 - big") is None
+
+
+def test_extract_rejects_ticket_id_zero() -> None:
+    assert extract_ticket_id("cr/0", None) is None
+    assert extract_ticket_id("cr/0", "[CR] 210 - real one") == 210
+
+
+def test_extract_title_number_followed_by_version_dot_is_not_a_ticket() -> None:
+    assert extract_ticket_id(None, "[MIG] 17.0 upgrade to Odoo 17.0") is None
+
+
 # --- resolve_ticket_by_id (spec 2026-07-20) ------------------------------------
 
 

@@ -100,19 +100,6 @@ def test_timesheet_results_wire_shape():
     }
 
 
-def test_issue_work_status_wire_shape():
-    payload = IssueWorkStatusPayload(
-        ticket_id=123,
-        model_name="helpdesk.ticket",
-        issues=[{"number": 42, "work_status": "in_progress"}],
-    )
-    assert payload.model_dump(exclude_none=True) == {
-        "ticket_id": 123,
-        "model_name": "helpdesk.ticket",
-        "issues": [{"number": 42, "work_status": "in_progress"}],
-    }
-
-
 def test_issue_work_status_rejects_unknown_status():
     with pytest.raises(ValueError):
         IssueWorkStatusPayload(

@@ -391,6 +391,17 @@ def test_fallback_suppressed_when_issues_resolve(db, odoo):
     assert odoo.calls[0]["work_status"] is None
 
 
+def test_non_reva_refs_still_fall_back_to_ticket_signal(db, odoo):
+    # PR closes an issue REVA didn't create (#99 not in any run) → per-issue
+    # leg has nothing, fallback fires, board leg finds no items.
+    _seed_board_issue(db, ticket_id=97)  # run holds issue #50, not #99
+    _ctx(db, pr_body="Closes #99", head_ref="cr/97")
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "no_board_items"}
+    assert odoo.calls and odoo.calls[0]["issues"] == []
+    assert odoo.calls[0]["ticket_id"] == 97
+
+
 def test_no_refs_and_no_extraction_stays_no_refs(db, odoo):
     _seed_board_issue(db)
     ctx = _ctx(db, pr_body="plain refactor")
@@ -428,6 +439,15 @@ def test_fallback_respects_work_status_kill_switch(db, odoo):
     out = run_board_status_update(_params("pr_active"))
     assert out == {"status": "ticket_signal_only"}
     assert odoo.calls == []
+
+
+def test_fallback_with_board_disabled_still_reports_ticket_signal_only(db, odoo):
+    _seed_board_issue(db, ticket_id=97)
+    _ctx(db, pr_body="plain refactor", head_ref="cr/97",
+         config_yaml="board_status_sync: false\n")
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "ticket_signal_only"}
+    assert odoo.calls and odoo.calls[0]["work_status"] == "in_progress"
 
 
 def test_fallback_permanent_error_records_ops_event(db, odoo):

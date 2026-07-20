@@ -33,6 +33,7 @@ from reva.db import writers
 from reva.errors import PermanentError, TransientError
 from reva.github_urls import parse_github_project_url
 from reva.ticket_links import (
+    TicketRef,
     extract_ticket_id,
     parse_closing_refs,
     resolve_pr_tickets,
@@ -98,6 +99,8 @@ def run_board_status_update(job_params: dict) -> dict:
             ctx.db, "board_status", "warning", "link_resolution_failed",
             {"repo": repo, "pr": pr_number, "error": str(exc)[:300]},
         )
+    # Board-independent: resolved via resolve_pr_tickets (the change_note_runner
+    # way), NOT get_board_items_for_issues, so board-less tickets are included.
     ticket_refs = resolve_pr_tickets(ctx.db, repo, refs) if refs else []
 
     # Ticket-level fallback (spec 2026-07-20): no REVA ticket resolves via the
@@ -120,6 +123,8 @@ def run_board_status_update(job_params: dict) -> dict:
                 )
             else:
                 fallback = (resolved[0], extracted, resolved[1])
+        else:
+            log.debug("ticket_signal_no_ticket_ref")
 
     if not refs and fallback is None:
         # No linked issues and no extractable ticket → neither leg has anything
@@ -137,13 +142,15 @@ def run_board_status_update(job_params: dict) -> dict:
             _send_ticket_signal(ctx, repo, pr_number, pr, fallback, work_status, log)
 
     # --- Board leg ---
+    if not refs:
+        # Fallback-only run: nothing for the board leg to look up, regardless
+        # of whether the board switch itself is on — a truthful status even
+        # when board_status_sync is disabled.
+        return {"status": "ticket_signal_only"}
+
     if not board_enabled:
         log.debug("board_status_disabled")
         return {"status": "disabled"}
-
-    if not refs:
-        # Fallback-only run: nothing for the board leg to look up.
-        return {"status": "ticket_signal_only"}
 
     items = writers.get_board_items_for_issues(ctx.db, repo, refs)
     if not items:
@@ -201,7 +208,7 @@ def _repo_flags(ctx, token: str, owner: str, name: str, pr: dict, log) -> tuple[
 
 
 def _update_work_status(
-    ctx, repo: str, refs: list[int], ticket_refs: list, work_status: str, log
+    ctx, repo: str, refs: list[int], ticket_refs: list[TicketRef], work_status: str, log
 ) -> None:
     """Send per-issue work-status hints to Odoo for the REVA-created issues this
     PR links, one callback per resolved ticket. Only the issues linked by THIS
