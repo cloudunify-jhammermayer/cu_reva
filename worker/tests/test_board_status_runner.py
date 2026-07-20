@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import select
 
 from reva.db.engine import Database, create_engine_from_url
-from reva.db.models import Base, OpsEvent, TicketIssueRun
+from reva.db.models import Base, OdooInstance, OpsEvent, TicketIssueRun
 from reva.errors import PermanentError, TransientError
 from worker.board_status_runner import run_board_status_update
 from worker.runner import WorkerContext, set_context
@@ -23,9 +23,10 @@ class FakeOdoo:
     raise_exc: Exception | None = None
     calls: list[dict] = field(default_factory=list)
 
-    def issue_work_status(self, ticket_id, model_name, issues):
+    def issue_work_status(self, ticket_id, model_name, issues, work_status=None, pr=None):
         self.calls.append(
-            {"ticket_id": ticket_id, "model_name": model_name, "issues": issues}
+            {"ticket_id": ticket_id, "model_name": model_name, "issues": issues,
+             "work_status": work_status, "pr": pr}
         )
         if self.raise_exc:
             raise self.raise_exc
@@ -77,10 +78,13 @@ def _seed_board_issue(db, *, number=50, state="open", item_id="PVTI_50",
 
 
 def _ctx(db, *, pr_body="Closes #50", config_yaml=None, closing_numbers=None,
-         project=_PROJECT):
+         project=_PROJECT, head_ref="feature/misc", pr_title="chore: misc"):
     github = MagicMock()
     github.get_installation_token.return_value = "tok"
-    github.get_pull_request.return_value = {"body": pr_body, "head": {"sha": "abc"}}
+    github.get_pull_request.return_value = {
+        "body": pr_body, "head": {"sha": "abc", "ref": head_ref},
+        "title": pr_title, "html_url": "https://github.com/acme/widgets/pull/42",
+    }
     github.get_file_content.return_value = config_yaml
     github.get_closing_issue_numbers.return_value = closing_numbers or []
     github.get_project.return_value = project
@@ -266,6 +270,7 @@ def test_pr_active_sends_in_progress_work_status(db, odoo):
     assert odoo.calls == [{
         "ticket_id": 97, "model_name": "helpdesk.ticket",
         "issues": [{"number": 50, "work_status": "in_progress"}],
+        "work_status": None, "pr": None,
     }]
 
 
@@ -339,3 +344,118 @@ def test_single_config_fetch_serves_both_flags(db, odoo):
     assert ctx.github.get_file_content.call_count == 1
     assert odoo.calls  # work leg ran
     ctx.github.set_project_item_option.assert_called_once()  # board leg ran
+
+
+# --- Ticket-level fallback (spec 2026-07-20) -----------------------------------
+
+
+_PR_REF = {"number": 42, "title": "chore: misc",
+           "url": "https://github.com/acme/widgets/pull/42", "repo": "acme/widgets"}
+
+
+def test_branch_fallback_sends_ticket_level_signal(db, odoo):
+    # Ticket 97 is known from an issue run, but this PR links none of its issues.
+    _seed_board_issue(db, ticket_id=97)
+    _ctx(db, pr_body="plain refactor", head_ref="cr/97")
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "ticket_signal_only"}
+    assert odoo.calls == [{
+        "ticket_id": 97, "model_name": "helpdesk.ticket", "issues": [],
+        "work_status": "in_progress", "pr": _PR_REF,
+    }]
+
+
+def test_review_done_fallback_sends_in_review(db, odoo):
+    _seed_board_issue(db, ticket_id=97)
+    _ctx(db, pr_body="plain refactor", head_ref="cr/97")
+    run_board_status_update(_params("review_done"))
+    assert odoo.calls[0]["work_status"] == "in_review"
+    assert odoo.calls[0]["issues"] == []
+
+
+def test_title_fallback_when_branch_unparseable(db, odoo):
+    _seed_board_issue(db, ticket_id=97)
+    _ctx(db, pr_body="plain refactor", head_ref="feature/stuff",
+         pr_title="[CR] 97 - fix rounding")
+    run_board_status_update(_params("pr_active"))
+    assert odoo.calls[0]["ticket_id"] == 97
+
+
+def test_fallback_suppressed_when_issues_resolve(db, odoo):
+    # Linked issues win: only the per-issue leg fires, never both.
+    _seed_board_issue(db, ticket_id=97)
+    _ctx(db, pr_body="Closes #50", head_ref="cr/97")
+    run_board_status_update(_params("pr_active"))
+    assert len(odoo.calls) == 1
+    assert odoo.calls[0]["issues"] == [{"number": 50, "work_status": "in_progress"}]
+    assert odoo.calls[0]["work_status"] is None
+
+
+def test_no_refs_and_no_extraction_stays_no_refs(db, odoo):
+    _seed_board_issue(db)
+    ctx = _ctx(db, pr_body="plain refactor")
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "no_refs"}
+    ctx.github.get_file_content.assert_not_called()  # config fetch still skipped
+    assert odoo.calls == []
+
+
+def test_fallback_unknown_ticket_uses_default_instance(db, odoo):
+    with db.session() as s:
+        s.add(OdooInstance(name="prod", key_hash="h1", key_prefix="rk_1",
+                           is_default=True))
+    _ctx(db, pr_body="plain refactor", head_ref="cr/2010")
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "ticket_signal_only"}
+    assert odoo.calls[0]["ticket_id"] == 2010
+    assert odoo.calls[0]["model_name"] == "helpdesk.ticket"
+
+
+def test_fallback_unknown_ticket_no_default_records_ops_event(db, odoo):
+    _ctx(db, pr_body="plain refactor", head_ref="cr/2010")
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "no_refs"}
+    assert odoo.calls == []
+    events = _ops_events(db, limit=10)
+    assert any(e["event"] == "no_default_instance" and e["component"] == "odoo_callback"
+               for e in events)
+
+
+def test_fallback_respects_work_status_kill_switch(db, odoo):
+    _seed_board_issue(db, ticket_id=97)
+    _ctx(db, pr_body="plain refactor", head_ref="cr/97",
+         config_yaml="work_status: false\n")
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "ticket_signal_only"}
+    assert odoo.calls == []
+
+
+def test_fallback_permanent_error_records_ops_event(db, odoo):
+    _seed_board_issue(db, ticket_id=97)
+    _ctx(db, pr_body="plain refactor", head_ref="cr/97")
+    odoo.raise_exc = PermanentError("Odoo 404: no such ticket")
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "ticket_signal_only"}
+    events = _ops_events(db, limit=10)
+    assert any(e["event"] == "ticket_signal_rejected" and e["component"] == "odoo_callback"
+               for e in events)
+
+
+def test_fallback_transient_error_reraises_for_rq_retry(db, odoo):
+    _seed_board_issue(db, ticket_id=97)
+    _ctx(db, pr_body="plain refactor", head_ref="cr/97")
+    odoo.raise_exc = TransientError("Odoo 503")
+    with pytest.raises(TransientError):
+        run_board_status_update(_params("pr_active"))
+
+
+def test_fallback_on_closed_pr_is_pr_closed_noop(db, odoo):
+    ctx = _ctx(db, pr_body="plain refactor", head_ref="cr/97")
+    ctx.github.get_pull_request.return_value = {
+        "body": "plain refactor", "state": "closed", "merged": True,
+        "head": {"sha": "abc", "ref": "cr/97"}, "title": "t",
+        "html_url": "https://github.com/acme/widgets/pull/42",
+    }
+    out = run_board_status_update(_params("review_done"))
+    assert out == {"status": "pr_closed"}
+    assert odoo.calls == []

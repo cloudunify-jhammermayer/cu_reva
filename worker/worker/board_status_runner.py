@@ -11,6 +11,11 @@ webhook, review_done from the reviewer):
   - Odoo leg: sends per-issue work-status hints (in_progress/in_review) for every
     REVA-created issue linked by the PR, board or no board. Gated on
     RepoConfig.work_status.
+  - Ticket-level fallback (spec 2026-07-20): when NO REVA ticket resolves via
+    linked issues, extract the ticket id from the PR (head branch `cr/2010`,
+    then title) and send one ticket-level work-status + PR ref to the ticket's
+    instance (REVA DB lookup, else the is_default instance). Same
+    RepoConfig.work_status gate as the per-issue leg.
 
 Both switches read from ONE .claude-review.yml fetch. Fail-soft by design: the
 board and the callbacks are a bonus; every degradation logs AND records an ops
@@ -27,7 +32,12 @@ import yaml
 from reva.db import writers
 from reva.errors import PermanentError, TransientError
 from reva.github_urls import parse_github_project_url
-from reva.ticket_links import parse_closing_refs, resolve_pr_tickets
+from reva.ticket_links import (
+    extract_ticket_id,
+    parse_closing_refs,
+    resolve_pr_tickets,
+    resolve_ticket_by_id,
+)
 from reva.types import RepoConfig
 from worker.runner import build_odoo_client, get_context
 
@@ -88,9 +98,32 @@ def run_board_status_update(job_params: dict) -> dict:
             ctx.db, "board_status", "warning", "link_resolution_failed",
             {"repo": repo, "pr": pr_number, "error": str(exc)[:300]},
         )
-    if not refs:
-        # No linked issues → neither leg has anything to do; skip the config
-        # fetch entirely.
+    ticket_refs = resolve_pr_tickets(ctx.db, repo, refs) if refs else []
+
+    # Ticket-level fallback (spec 2026-07-20): no REVA ticket resolves via the
+    # linked issues — covers "no refs at all" and "refs that aren't
+    # REVA-created issues". (instance_id, ticket_id, model_name) or None.
+    fallback: tuple[int, int, str] | None = None
+    if not ticket_refs:
+        extracted = extract_ticket_id(
+            (pr.get("head") or {}).get("ref"), pr.get("title")
+        )
+        if extracted is not None:
+            resolved = resolve_ticket_by_id(ctx.db, repo, extracted)
+            if resolved is None:
+                # Unknown ticket and no active default instance: the fallback
+                # is configured off at the data level — visible, not silent.
+                log.warning("ticket_signal_no_default_instance", ticket_id=extracted)
+                writers.record_ops_event(
+                    ctx.db, "odoo_callback", "warning", "no_default_instance",
+                    {"repo": repo, "pr": pr_number, "ticket_id": extracted},
+                )
+            else:
+                fallback = (resolved[0], extracted, resolved[1])
+
+    if not refs and fallback is None:
+        # No linked issues and no extractable ticket → neither leg has anything
+        # to do; skip the config fetch entirely (pre-fallback semantics).
         return {"status": "no_refs"}
 
     # ONE config fetch serves both kill switches (spec 2026-07-11).
@@ -98,12 +131,19 @@ def run_board_status_update(job_params: dict) -> dict:
 
     # --- Odoo work-status leg (board-independent) ---
     if work_enabled and work_status is not None:
-        _update_work_status(ctx, repo, refs, work_status, log)
+        if ticket_refs:
+            _update_work_status(ctx, repo, refs, ticket_refs, work_status, log)
+        elif fallback is not None:
+            _send_ticket_signal(ctx, repo, pr_number, pr, fallback, work_status, log)
 
     # --- Board leg ---
     if not board_enabled:
         log.debug("board_status_disabled")
         return {"status": "disabled"}
+
+    if not refs:
+        # Fallback-only run: nothing for the board leg to look up.
+        return {"status": "ticket_signal_only"}
 
     items = writers.get_board_items_for_issues(ctx.db, repo, refs)
     if not items:
@@ -160,14 +200,14 @@ def _repo_flags(ctx, token: str, owner: str, name: str, pr: dict, log) -> tuple[
         return True, True
 
 
-def _update_work_status(ctx, repo: str, refs: list[int], work_status: str, log) -> None:
+def _update_work_status(
+    ctx, repo: str, refs: list[int], ticket_refs: list, work_status: str, log
+) -> None:
     """Send per-issue work-status hints to Odoo for the REVA-created issues this
-    PR links, one callback per resolved ticket. Board-independent: resolves
-    tickets the way change_note_runner does (resolve_pr_tickets), never via
-    get_board_items_for_issues, so board-less tickets are included. Only the
-    issues linked by THIS PR are sent (intersection with the ticket's union) —
-    Odoo upserts by number against existing records."""
-    for ref in resolve_pr_tickets(ctx.db, repo, refs):
+    PR links, one callback per resolved ticket. Only the issues linked by THIS
+    PR are sent (intersection with the ticket's union) — Odoo upserts by number
+    against existing records."""
+    for ref in ticket_refs:
         union = writers.get_ticket_issue_union(
             ctx.db, ref.odoo_instance_id, ref.ticket_id, ref.model_name
         )
@@ -190,6 +230,38 @@ def _update_work_status(ctx, repo: str, refs: list[int], work_status: str, log) 
                 ctx.db, "odoo_callback", "warning", "work_status_rejected",
                 {"ticket_id": ref.ticket_id},
             )
+
+
+def _send_ticket_signal(
+    ctx, repo: str, pr_number: int, pr: dict,
+    fallback: tuple[int, int, str], work_status: str, log,
+) -> None:
+    """Ticket-level signal for a PR with no linked REVA issue (spec
+    2026-07-20): same last-signal-wins semantics as the per-issue leg,
+    addressed at the ticket itself, with the PR ref for Odoo's chatter."""
+    instance_id, ticket_id, model_name = fallback
+    try:
+        odoo = build_odoo_client(ctx, instance_id)
+        odoo.issue_work_status(
+            ticket_id=ticket_id,
+            model_name=model_name,
+            issues=[],
+            work_status=work_status,
+            pr={
+                "number": pr_number,
+                "title": pr.get("title") or "",
+                "url": pr.get("html_url") or "",
+                "repo": repo,
+            },
+        )
+    except TransientError:
+        raise  # idempotent last-signal-wins in Odoo — RQ retries the whole job
+    except PermanentError:
+        log.warning("ticket_signal_rejected", ticket_id=ticket_id, exc_info=True)
+        writers.record_ops_event(
+            ctx.db, "odoo_callback", "warning", "ticket_signal_rejected",
+            {"repo": repo, "pr": pr_number, "ticket_id": ticket_id},
+        )
 
 
 def _resolve_status_option(
