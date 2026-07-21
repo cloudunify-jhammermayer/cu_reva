@@ -9,18 +9,56 @@ import structlog
 
 from reva.db import writers
 from reva.errors import MalformedModelOutput, PermanentError, TransientError
+from reva.github_urls import parse_github_repo_url
 from reva.html_guard import ensure_renderable
 from reva.ticket_formatter import format_ticket_html
 from reva.ticket_knowledge import build_ticket_knowledge
 from reva.types import TicketJobParams
+from worker.repo_config import load_repo_config
 from worker.runner import build_odoo_client, get_context, instance_budget_exceeded
 
 logger = structlog.get_logger()
 
 
-def instance_odoo_version(ctx, odoo_instance_id: int) -> str | None:
-    row = writers.get_odoo_instance(ctx.db, odoo_instance_id)
-    return row.get("odoo_version") if row else None
+def repo_core_version(ctx, github_url: str | None, analysis_id: int, log) -> str | None:
+    """Resolve the Odoo /core knowledge version for a ticket from its TARGET
+    repo's ``.claude-review.yml`` ``odoo_version`` — the version of the project
+    the ticket affects, not the helpdesk instance that raised it. Mirrors the
+    PR-review path (``reviewer.py``): a repo that requests no version is a
+    silent skip; a ``version_unavailable`` ops event is recorded only on genuine
+    config drift (the repo requests a version /core doesn't carry). Returns a
+    provisioned version string, or None to ground without core knowledge.
+    """
+    if ctx.core_knowledge is None or not github_url:
+        return None
+    parsed = parse_github_repo_url(github_url)
+    if parsed is None:
+        return None
+    owner, repo = parsed
+    try:
+        installation_id = ctx.github.get_repo_installation_id(owner, repo)
+        token = ctx.github.get_installation_token(installation_id)
+        default_branch = ctx.github.get_repo(token, owner, repo).get("default_branch") or "main"
+        config = load_repo_config(ctx.github, token, owner, repo, default_branch)
+    except Exception:
+        log.warning("ticket_core_knowledge_config_failed", exc_info=True)
+        return None
+    if not config.odoo_version:
+        return None
+    version = ctx.core_knowledge.resolve(config.odoo_version)
+    if version is None:
+        # Config drift (repo requests a version /core doesn't carry): degrade
+        # + record it, per the degradations-are-visible invariant.
+        log.warning("core_knowledge_unavailable", version=config.odoo_version)
+        writers.record_ops_event(
+            ctx.db,
+            "core_knowledge",
+            "warning",
+            "version_unavailable",
+            {"repo": f"{owner}/{repo}", "requested": config.odoo_version,
+             "analysis_id": analysis_id},
+        )
+    return version
 
 
 def run_ticket_analysis(job_params: dict) -> dict:
@@ -66,23 +104,7 @@ def run_ticket_analysis(job_params: dict) -> dict:
             writers.record_ticket_analysis_failed(ctx.db, params.analysis_id, error)
             raise PermanentError(error)
         try:
-            version = None
-            if ctx.core_knowledge is not None:
-                version = ctx.core_knowledge.resolve(
-                    instance_odoo_version(ctx, params.odoo_instance_id)
-                )
-                if version is None:
-                    log.warning("ticket_core_knowledge_unavailable")
-                    writers.record_ops_event(
-                        ctx.db,
-                        "core_knowledge",
-                        "warning",
-                        "ticket_version_unavailable",
-                        {
-                            "analysis_id": params.analysis_id,
-                            "odoo_instance_id": params.odoo_instance_id,
-                        },
-                    )
+            version = repo_core_version(ctx, params.github_url, params.analysis_id, log)
             knowledge = build_ticket_knowledge(
                 ctx.claude,
                 ctx.prompts_dir,

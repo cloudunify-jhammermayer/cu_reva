@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import structlog
 
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.db.models import OpsEvent, TicketAnalysis
@@ -23,7 +25,7 @@ from reva.types import (
     TicketJobParams,
 )
 from worker.runner import WorkerContext, set_context
-from worker.ticket_runner import run_ticket_analysis
+from worker.ticket_runner import repo_core_version, run_ticket_analysis
 
 _PROMPTS_DIR = str(Path(__file__).resolve().parents[2] / "prompts")
 
@@ -505,3 +507,157 @@ def test_resume_path_leaves_repo_docs_column_untouched(ctx_and_fakes, monkeypatc
     assert writers.get_ticket_analysis(s["db"], params["analysis_id"])[
         "repo_docs_sections_used"
     ] == 3
+
+
+# --- repo_core_version: version comes from the TARGET repo, not the instance --
+
+
+@dataclass
+class FakeCoreKnowledge:
+    """resolve() mimics CoreKnowledge: a version is usable only if provisioned."""
+    provisioned: set[str]
+    resolve_calls: list[str | None] = field(default_factory=list)
+
+    def resolve(self, version):
+        self.resolve_calls.append(version)
+        return version if version in self.provisioned else None
+
+
+@dataclass
+class FakeGithub:
+    """Just enough of the GitHub client for repo_core_version + load_repo_config."""
+    claude_review_yml: str | None
+    default_branch: str = "main"
+
+    def get_repo_installation_id(self, owner, repo):
+        return 1
+
+    def get_installation_token(self, installation_id):
+        return "tok"
+
+    def get_repo(self, token, owner, repo):
+        return {"default_branch": self.default_branch}
+
+    def get_file_content(self, token, owner, name, path, ref):
+        assert path == ".claude-review.yml"
+        return self.claude_review_yml
+
+
+def _core_ctx(db, *, provisioned, yml):
+    core = FakeCoreKnowledge(provisioned=set(provisioned))
+    github = FakeGithub(claude_review_yml=yml)
+    ctx = SimpleNamespace(db=db, github=github, core_knowledge=core)
+    return ctx, core, github
+
+
+@pytest.fixture()
+def db():
+    engine = create_engine_from_url("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    return Database(engine)
+
+
+def _ops_events(db):
+    with db.session() as s:
+        return [(e.component, e.event, dict(e.detail)) for e in s.query(OpsEvent).all()]
+
+
+def test_repo_core_version_uses_target_repo_config(db):
+    """The version is read from the ticket's target repo .claude-review.yml —
+    the instance is never consulted. Provisioned version resolves cleanly."""
+    ctx, core, _ = _core_ctx(db, provisioned=["19.0"], yml="odoo: true\nodoo_version: '19.0'\n")
+
+    version = repo_core_version(
+        ctx, "https://github.com/cloudunify/ast-odoo", analysis_id=7, log=structlog.get_logger()
+    )
+
+    assert version == "19.0"
+    assert core.resolve_calls == ["19.0"]
+    assert _ops_events(db) == []  # clean resolve — no degradation
+
+
+def test_repo_core_version_drift_records_ops_event(db):
+    """A repo requesting a version /core doesn't carry (e.g. dmu on 17.0 before
+    it's provisioned) degrades to no core knowledge AND records it."""
+    ctx, core, _ = _core_ctx(db, provisioned=["19.0"], yml="odoo_version: '17.0'\n")
+
+    version = repo_core_version(
+        ctx, "https://github.com/cloudunify/dmu-gmbh-odoo-sh", analysis_id=8,
+        log=structlog.get_logger(),
+    )
+
+    assert version is None
+    assert core.resolve_calls == ["17.0"]
+    assert _ops_events(db) == [
+        ("core_knowledge", "version_unavailable",
+         {"repo": "cloudunify/dmu-gmbh-odoo-sh", "requested": "17.0", "analysis_id": 8}),
+    ]
+
+
+def test_repo_core_version_defaults_to_19_when_unset(db):
+    """A repo that sets no odoo_version inherits the org baseline (19.0), so
+    grounding still happens — and it's still keyed off the repo, never the
+    instance. (This is also what keeps the old per-analysis noise gone.)"""
+    ctx, core, _ = _core_ctx(db, provisioned=["19.0"], yml="odoo: true\n")
+
+    version = repo_core_version(
+        ctx, "https://github.com/cloudunify/aurium-systems", analysis_id=9,
+        log=structlog.get_logger(),
+    )
+
+    assert version == "19.0"
+    assert core.resolve_calls == ["19.0"]
+    assert _ops_events(db) == []
+
+
+def test_repo_core_version_explicit_null_disables(db):
+    """A repo opts out of core grounding with `odoo_version:` (null) in its
+    .claude-review.yml — a silent skip, no resolve, no ops event."""
+    ctx, core, _ = _core_ctx(db, provisioned=["19.0"], yml="odoo_version:\n")
+
+    version = repo_core_version(
+        ctx, "https://github.com/cloudunify/aurium-systems", analysis_id=9,
+        log=structlog.get_logger(),
+    )
+
+    assert version is None
+    assert core.resolve_calls == []
+    assert _ops_events(db) == []
+
+
+def test_repo_core_version_skips_without_core_or_url(db):
+    """No core-knowledge layer, no github_url, or an unparseable url → None,
+    and no GitHub/DB work is attempted."""
+    log = structlog.get_logger()
+
+    # core disabled
+    ctx = SimpleNamespace(db=db, github=FakeGithub(claude_review_yml=None), core_knowledge=None)
+    assert repo_core_version(ctx, "https://github.com/x/y", 1, log) is None
+
+    # no url
+    ctx, core, _ = _core_ctx(db, provisioned=["19.0"], yml="odoo_version: '19.0'\n")
+    assert repo_core_version(ctx, None, 1, log) is None
+    assert core.resolve_calls == []
+
+    # unparseable url
+    assert repo_core_version(ctx, "not-a-github-url", 1, log) is None
+    assert core.resolve_calls == []
+    assert _ops_events(db) == []
+
+
+def test_repo_core_version_github_error_degrades(db):
+    """If resolving the repo's config raises (token/API failure), grounding
+    degrades to no core knowledge rather than failing the analysis."""
+    ctx, core, github = _core_ctx(db, provisioned=["19.0"], yml="odoo_version: '19.0'\n")
+
+    def boom(owner, repo):
+        raise RuntimeError("GitHub 500")
+
+    github.get_repo_installation_id = boom
+
+    version = repo_core_version(
+        ctx, "https://github.com/cloudunify/ast-odoo", 10, log=structlog.get_logger()
+    )
+
+    assert version is None
+    assert _ops_events(db) == []  # transient infra error, not config drift

@@ -95,8 +95,26 @@ class RepoConfig(BaseModel):
     # in_review), independent of board_status_sync: false stops REVA sending
     # work-status hints for this repo while the board keeps moving (or vice versa).
     work_status: bool = True
-    # Which /core version reviews consult, e.g. "19.0". None disables it.
-    odoo_version: str | None = None
+    # Which /core version this repo's reviews + ticket analyses consult, e.g.
+    # "19.0". Defaults to the org baseline "19.0"; set it explicitly for a repo
+    # on another version (e.g. "17.0"), or to null in .claude-review.yml to
+    # disable core-knowledge grounding for this repo.
+    odoo_version: str | None = "19.0"
+
+    @field_validator("odoo_version", mode="before")
+    @classmethod
+    def _normalize_odoo_version(cls, v: object) -> object:
+        # YAML parses an unquoted `17.0` as a float and `19` as an int. Without
+        # this, a numeric value fails str-validation and load_repo_config falls
+        # back to the "19.0" default — silently grounding the WRONG version.
+        # Coerce numbers to the "<major>.0" string form. Quoting is still
+        # recommended, and required for suffixes like "saas~17.4".
+        if isinstance(v, bool):  # bool is an int subclass — leave it to fail
+            return v
+        if isinstance(v, (int, float)):
+            s = str(v)
+            return s if "." in s else f"{s}.0"
+        return v
 
 
 # --- Finding ------------------------------------------------------------------

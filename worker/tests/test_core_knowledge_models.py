@@ -97,5 +97,10 @@ def test_instance_odoo_version_create(db):
 
 
 def test_repo_config_odoo_version():
-    assert RepoConfig().odoo_version is None
+    assert RepoConfig().odoo_version == "19.0"  # org baseline default
     assert RepoConfig(odoo_version="18.0").odoo_version == "18.0"
+    assert RepoConfig(odoo_version=None).odoo_version is None  # explicit opt-out
+    # Unquoted YAML numbers (float 17.0, int 19) are coerced to "<major>.0"
+    # strings instead of silently collapsing to the default via a ValidationError.
+    assert RepoConfig.model_validate({"odoo_version": 17.0}).odoo_version == "17.0"
+    assert RepoConfig.model_validate({"odoo_version": 19}).odoo_version == "19.0"
