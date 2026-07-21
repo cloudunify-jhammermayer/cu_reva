@@ -4,7 +4,7 @@ Automatic GitHub PR review platform built on Claude.
 
 REVA listens for `pull_request`, `issue_comment`, and `pull_request_review_comment` webhook events, waits 10 minutes for the developer to settle on a head SHA (debounce), then reviews the change and posts a Check Run + PR Review (with inline comments) back to GitHub. All review data is persisted to Postgres for analytics, cost tracking, and developer feedback loops.
 
-REVA uses **two Claude clients** (see `docs/superpowers/archive/specs/2026-05-25-headless-claude-design.md`):
+REVA uses **two Claude clients** (see `docs/superpowers/specs/archive/2026-05-25-headless-claude-design.md`):
 
 - **Headless Claude Code CLI** (`reva/claude_code_runner.py`) — runs against a *locally cloned copy of the repo* at the head SHA, so Claude can read connected files, not just the diff. Used for all PR review modes (diff / full / deep) and repo audits. Output is the `submit_review` tool schema written to a temp JSON file.
 - **Direct Messages API** (`reva/claude_client.py`) — used for the structured/fast paths: Odoo ticket analysis, Odoo timesheet wording review, and inline-comment reply answers.
