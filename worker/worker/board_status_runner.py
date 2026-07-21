@@ -2,8 +2,9 @@
 linked-PR signals native workflows can't express (board-status spec 2026-07-10,
 work-status spec 2026-07-11).
 
-Two independent legs fire on the same two triggers (pr_active from the api
-webhook, review_done from the reviewer):
+Two independent legs; pr_active (api webhook) and review_done (reviewer) fire
+both, review_started (worker claim, ticket-signal addendum 2026-07-21) fires
+the Odoo leg only:
 
   - Board leg: moves cards to "In Progress"/"In review" (existing options only —
     never creates fields/options, never touches Todo/Done; native workflows own
@@ -45,9 +46,15 @@ from worker.runner import build_odoo_client, get_context
 logger = structlog.get_logger()
 
 _OPTION_BY_TRIGGER = {"pr_active": "In Progress", "review_done": "In review"}
-# Odoo work-status leg (spec 2026-07-11): the same two triggers map to Odoo's
-# per-issue display hints, independent of the board leg.
-_WORK_STATUS_BY_TRIGGER = {"pr_active": "in_progress", "review_done": "in_review"}
+# Odoo work-status leg (spec 2026-07-11): board triggers map to Odoo's display
+# hints, independent of the board leg. review_started (addendum 2026-07-21) is
+# work-status-only: pushes alone never fire pr_active, so this is what clears
+# Odoo's reviewed badge (and re-arms its review timesheet) per review cycle.
+_WORK_STATUS_BY_TRIGGER = {
+    "pr_active": "in_progress",
+    "review_started": "in_progress",
+    "review_done": "in_review",
+}
 
 
 def run_board_status_update(job_params: dict) -> dict:
@@ -57,7 +64,7 @@ def run_board_status_update(job_params: dict) -> dict:
     trigger = job_params["trigger"]
     option_name = _OPTION_BY_TRIGGER.get(trigger)
     work_status = _WORK_STATUS_BY_TRIGGER.get(trigger)
-    if option_name is None:
+    if option_name is None and work_status is None:
         return {"status": "unknown_trigger"}
     owner, name = repo.split("/", 1)
     log = logger.bind(repo=repo, pr=pr_number, trigger=trigger)
@@ -142,6 +149,10 @@ def run_board_status_update(job_params: dict) -> dict:
             _send_ticket_signal(ctx, repo, pr_number, pr, fallback, work_status, log)
 
     # --- Board leg ---
+    if option_name is None:
+        # review_started is work-status-only: the board keeps its
+        # pr_active/review_done cadence (no card churn mid-review).
+        return {"status": "work_status_only"}
     if not refs:
         # Fallback-only run: nothing for the board leg to look up, regardless
         # of whether the board switch itself is on — a truthful status even

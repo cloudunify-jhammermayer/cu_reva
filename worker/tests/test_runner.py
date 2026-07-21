@@ -636,10 +636,12 @@ def test_completed_review_enqueues_board_status(ctx_and_fakes):
     assert call.args[1]["pr_number"] == 42
 
 
-def test_declined_review_does_not_enqueue_board_status(ctx_and_fakes):
+def test_declined_review_does_not_enqueue_review_done(ctx_and_fakes):
     # A declined result flows through the full post path (issue comment +
     # neutral check) and reaches the enqueue guard — its status check must
-    # keep non-completed reviews off the board-status queue.
+    # keep non-completed reviews off the review_done leg. review_started
+    # already fired at claim time (truthful: new work existed), so the badge
+    # clears and stays cleared for the unreviewed changes.
     s = ctx_and_fakes
     queue = MagicMock()
     _set_queue(s, queue)
@@ -653,6 +655,35 @@ def test_declined_review_does_not_enqueue_board_status(ctx_and_fakes):
     run_review(_params(s))
 
     assert len(s["github"].created_issue_comments) == 1  # decline WAS posted
+    triggers = [c.args[1]["trigger"] for c in queue.enqueue.call_args_list]
+    assert triggers == ["review_started"]
+
+
+def test_review_started_enqueued_at_claim_before_review_done(ctx_and_fakes):
+    # Ticket-signal addendum 2026-07-21: in_progress fires once we commit to a
+    # paid review (claimed, under budget), in_review after completion — one
+    # clear→set cycle per actual review, since pushes never fire pr_active.
+    s = ctx_and_fakes
+    queue = MagicMock()
+    _set_queue(s, queue)
+    s["reviewer"].result = _completed_result()
+
+    run_review(_params(s))
+
+    triggers = [c.args[1]["trigger"] for c in queue.enqueue.call_args_list]
+    assert triggers == ["review_started", "review_done"]
+
+
+def test_budget_declined_review_enqueues_nothing(ctx_and_fakes):
+    # Over-budget declines happen before the claim commits to a review cycle —
+    # no review_started, so Odoo's reviewed badge is left untouched.
+    s = ctx_and_fakes
+    queue = MagicMock()
+    set_context(replace(s["ctx"], rq_queue=queue, daily_budget_usd=1.0))
+    writers.record_claude_spend(s["db"], "review", 5.0)
+
+    run_review(_params(s))
+
     queue.enqueue.assert_not_called()
 
 

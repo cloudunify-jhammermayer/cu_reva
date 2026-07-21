@@ -320,34 +320,49 @@ def run_review(job_params: dict) -> dict:
         log.info("review_job_done", status="declined", reason="over_budget")
         return budget_decline.model_dump(mode="json")
 
+    # Review-started signal (work-status leg only, ticket-signal addendum
+    # 2026-07-21): sent once we've committed to a paid review (claimed, under
+    # budget). Pushes alone never fire pr_active, so this is what clears Odoo's
+    # reviewed badge per review cycle; review_done below re-sets it.
+    _enqueue_board_status(ctx, params, owner, name, pr_number, "review_started", log)
+
     result = _execute_and_persist(ctx, params, run_id, owner, name, pr_number, log)
     _post_result_to_github(ctx, params, result, run_id, owner, name, pr_number, log)
 
-    if result.status == "completed" and ctx.rq_queue is not None:
-        # Board-status sync (review_done leg). Fail-soft: a queue hiccup must
-        # never fail a finished review — log + ops event and move on.
-        try:
-            from rq import Retry
-
-            ctx.rq_queue.enqueue(
-                "worker.board_status_tasks.run_board_status_update",
-                {
-                    "repo_full_name": f"{owner}/{name}".lower(),
-                    "pr_number": pr_number,
-                    "installation_id": params.installation_id,
-                    "trigger": "review_done",
-                },
-                retry=Retry(max=3, interval=[30, 120, 300]),
-            )
-        except Exception as exc:  # noqa: BLE001
-            log.warning("board_status_enqueue_failed", exc_info=True)
-            writers.record_ops_event(
-                ctx.db, "board_status", "warning", "enqueue_failed",
-                {"repo": f"{owner}/{name}", "pr": pr_number, "error": str(exc)[:300]},
-            )
+    if result.status == "completed":
+        _enqueue_board_status(ctx, params, owner, name, pr_number, "review_done", log)
 
     log.info("review_job_done", status=result.status)
     return result.model_dump(mode="json")
+
+
+def _enqueue_board_status(
+    ctx: WorkerContext, params: JobParams, owner: str, name: str,
+    pr_number: int, trigger: str, log,
+) -> None:
+    """Enqueue a board-status/work-status sync job. Fail-soft: a queue hiccup
+    must never fail the review job — log + ops event and move on."""
+    if ctx.rq_queue is None:
+        return
+    try:
+        from rq import Retry
+
+        ctx.rq_queue.enqueue(
+            "worker.board_status_tasks.run_board_status_update",
+            {
+                "repo_full_name": f"{owner}/{name}".lower(),
+                "pr_number": pr_number,
+                "installation_id": params.installation_id,
+                "trigger": trigger,
+            },
+            retry=Retry(max=3, interval=[30, 120, 300]),
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("board_status_enqueue_failed", exc_info=True)
+        writers.record_ops_event(
+            ctx.db, "board_status", "warning", "enqueue_failed",
+            {"repo": f"{owner}/{name}", "pr": pr_number, "error": str(exc)[:300]},
+        )
 
 
 def budget_exceeded(ctx: WorkerContext) -> float | None:

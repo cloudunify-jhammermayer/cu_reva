@@ -28,6 +28,15 @@ belongs to (single instance today: Cloudunify Prod, as default).
   at most one row set.
 - Triggers: **mirror the existing leg** — `pr_active` → `in_progress`, every
   `review_done` → `in_review`, idempotent repeats, no dedup state.
+  **Addendum 2026-07-21** (cross-check with ast's reviewed-badge-timesheet spec):
+  pushes alone never fire `pr_active` (webhook enqueues only on
+  opened/reopened/ready_for_review), which would have left ast's reviewed badge
+  set — and its per-cycle review timesheet unbooked — across re-review rounds
+  within one PR. New `review_started` trigger, enqueued by `run_review` once a
+  paid review is committed to (claimed, under budget): `in_progress` on the
+  **work-status leg only** (both sub-legs, per-issue and ticket-level); the
+  board leg keeps its two-trigger cadence. One clear→set cycle per actual
+  review. No contract change — same payloads, same values.
 - Payload: **ticket-level status + PR reference** so Odoo can both flip its REVA
   work-status indicator and log "REVA reviewed PR #42 (link)" in chatter.
 - Implementation shape: **extend `board_status_runner` in place** (approach 1);

@@ -281,6 +281,27 @@ def test_review_done_sends_in_review_work_status(db, odoo):
     assert odoo.calls[0]["issues"] == [{"number": 50, "work_status": "in_review"}]
 
 
+def test_review_started_is_work_status_only(db, odoo):
+    # Ticket-signal addendum 2026-07-21: review_started (worker claim) sends
+    # in_progress on the Odoo leg but never touches the board — the card keeps
+    # its pr_active/review_done cadence.
+    _seed_board_issue(db)
+    ctx = _ctx(db)
+    out = run_board_status_update(_params("review_started"))
+    assert out == {"status": "work_status_only"}
+    assert odoo.calls[0]["issues"] == [{"number": 50, "work_status": "in_progress"}]
+    ctx.github.set_project_item_option.assert_not_called()
+
+
+def test_unknown_trigger_is_still_a_noop(db, odoo):
+    _seed_board_issue(db)
+    ctx = _ctx(db)
+    out = run_board_status_update(_params("bogus"))
+    assert out == {"status": "unknown_trigger"}
+    assert odoo.calls == []
+    ctx.github.get_pull_request.assert_not_called()
+
+
 def test_board_less_ticket_still_gets_work_status(db, odoo):
     # No board URL on the run → no board items, but the Odoo leg still fires.
     _seed_board_issue(db, url=None)
@@ -359,6 +380,19 @@ def test_branch_fallback_sends_ticket_level_signal(db, odoo):
     _ctx(db, pr_body="plain refactor", head_ref="cr/97")
     out = run_board_status_update(_params("pr_active"))
     assert out == {"status": "ticket_signal_only"}
+    assert odoo.calls == [{
+        "ticket_id": 97, "model_name": "helpdesk.ticket", "issues": [],
+        "work_status": "in_progress", "pr": _PR_REF,
+    }]
+
+
+def test_review_started_fallback_sends_ticket_level_in_progress(db, odoo):
+    # The review-cycle clear reaches fallback tickets too (badge + timesheet
+    # re-arm on the ast side apply to no-linked-issue PRs the same way).
+    _seed_board_issue(db, ticket_id=97)
+    _ctx(db, pr_body="plain refactor", head_ref="cr/97")
+    out = run_board_status_update(_params("review_started"))
+    assert out == {"status": "work_status_only"}
     assert odoo.calls == [{
         "ticket_id": 97, "model_name": "helpdesk.ticket", "issues": [],
         "work_status": "in_progress", "pr": _PR_REF,
