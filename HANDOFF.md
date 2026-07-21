@@ -8,7 +8,7 @@ Messages-API design and is now history in git).
 
 ## Addendum 2026-07-15 — ticket-actuals endpoint + audit odoo-flag fix
 
-Two changes (spec: `docs/superpowers/specs/2026-07-15-ticket-actuals-design.md`):
+Two changes (spec: `docs/superpowers/archive/specs/2026-07-15-ticket-actuals-design.md`):
 
 - **`POST /api/v1/ticket-actuals`** — Odoo pushes per-ticket timesheet totals
   when a ticket is marked done (actuals half of the estimate-calibration loop
@@ -29,8 +29,8 @@ items packaged in `docs/ops-debt-runbook-2026-07.md` (manual execution).
 
 ## Addendum 2026-07-14 — ticket analysis grounded in customer repo docs
 
-Implemented per `docs/superpowers/specs/2026-07-14-ticket-repo-docs-grounding-design.md`
-(plan: `docs/superpowers/plans/2026-07-14-ticket-repo-docs-grounding.md`; how it
+Implemented per `docs/superpowers/archive/specs/2026-07-14-ticket-repo-docs-grounding-design.md`
+(plan: `docs/superpowers/archive/plans/2026-07-14-ticket-repo-docs-grounding.md`; how it
 works: `docs/technical.md` → "Ticket knowledge grounding"). Migration 039,
 `reva/repo_docs.py`, `ticket_knowledge` restructure (one planner call feeds the
 core block AND a new repo-docs block), new *Existing Customizations* output

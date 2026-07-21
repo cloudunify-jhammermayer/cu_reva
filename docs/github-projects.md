@@ -6,7 +6,7 @@ URL** (and, optionally, a **plan date**), REVA adds every issue it creates —
 each child issue **and** the parent epic — to that Projects v2 board and stamps
 its fields. Absent those inputs, issue creation behaves exactly as before.
 
-Implemented 2026-07-09 (spec `docs/superpowers/specs/2026-07-09-github-projects-plan-date-design.md`).
+Implemented 2026-07-09 (spec `docs/superpowers/archive/specs/2026-07-09-github-projects-plan-date-design.md`).
 The Odoo side (`cu_reva_ticket_analysis`) already sends `github_project_url` +
 `plan_date` and renders the per-issue **Planned Date** / **Completed Date**
 columns REVA echoes back.
