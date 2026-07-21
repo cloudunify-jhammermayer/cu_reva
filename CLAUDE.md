@@ -69,6 +69,8 @@ REVA — automated GitHub PR review platform built on Claude. Webhook-driven: it
 
 Authoritative docs: root `README.md`, per-directory `README.md` files, `docs/` guides and `docs/superpowers/specs/`. `HANDOFF.md` is the current work handoff / resume point — read it when resuming work.
 
+`docs/superpowers/specs/` and `docs/superpowers/plans/` hold **open work only**. Once a spec/plan is implemented and shipped, move it (spec and plan together) into the `archive/` subfolder of each — do this as part of the shipping change. Archived files keep their original text, so a stale `Status:` line inside one doesn't mean open work; the archive location is authoritative.
+
 ## Commands
 
 ```bash
