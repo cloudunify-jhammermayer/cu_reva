@@ -453,6 +453,18 @@ def test_fallback_unknown_ticket_uses_default_instance(db, odoo):
     out = run_board_status_update(_params("pr_active"))
     assert out == {"status": "ticket_signal_only"}
     assert odoo.calls[0]["ticket_id"] == 2010
+    # Bare number → project.task (helpdesk tickets carry an H prefix).
+    assert odoo.calls[0]["model_name"] == "project.task"
+
+
+def test_fallback_unknown_h_prefixed_ticket_is_helpdesk(db, odoo):
+    with db.session() as s:
+        s.add(OdooInstance(name="prod", key_hash="h1", key_prefix="rk_1",
+                           is_default=True))
+    _ctx(db, pr_body="plain refactor", head_ref="sup/H1213")
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "ticket_signal_only"}
+    assert odoo.calls[0]["ticket_id"] == 1213
     assert odoo.calls[0]["model_name"] == "helpdesk.ticket"
 
 

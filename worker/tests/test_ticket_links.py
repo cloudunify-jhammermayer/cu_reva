@@ -100,11 +100,11 @@ def _instance(name: str, *, is_default: bool = False, active: bool = True) -> Od
 
 @pytest.mark.parametrize("prefix", ["bug", "feat", "cr", "conf", "dev", "mig", "sup", "doc"])
 def test_extract_from_branch_all_type_prefixes(prefix: str) -> None:
-    assert extract_ticket_id(f"{prefix}/210", None) == 210
+    assert extract_ticket_id(f"{prefix}/210", None) == (210, "project.task")
 
 
 def test_extract_from_branch_is_case_insensitive() -> None:
-    assert extract_ticket_id("CR/210", None) == 210
+    assert extract_ticket_id("CR/210", None) == (210, "project.task")
 
 
 @pytest.mark.parametrize("branch", ["cr/210/extra", "feature/210", "cr/abc", "cr210", "", None])
@@ -113,23 +113,25 @@ def test_extract_rejects_non_matching_branches(branch: str | None) -> None:
 
 
 def test_extract_from_title_tag_form() -> None:
-    assert extract_ticket_id("feature/misc", "[CR] 210 - fix invoice rounding") == 210
+    assert extract_ticket_id("feature/misc", "[CR] 210 - fix invoice rounding") == (
+        210, "project.task"
+    )
 
 
 def test_extract_from_title_tag_form_without_space() -> None:
-    assert extract_ticket_id(None, "[cr]210 follow-up") == 210
+    assert extract_ticket_id(None, "[cr]210 follow-up") == (210, "project.task")
 
 
 def test_extract_from_title_slash_token() -> None:
-    assert extract_ticket_id(None, "backport of cr/99 to 17.0") == 99
+    assert extract_ticket_id(None, "backport of cr/99 to 17.0") == (99, "project.task")
 
 
 def test_extract_title_tag_beats_slash_token() -> None:
-    assert extract_ticket_id(None, "[BUG] 5 supersedes cr/9") == 5
+    assert extract_ticket_id(None, "[BUG] 5 supersedes cr/9") == (5, "project.task")
 
 
 def test_extract_branch_beats_title() -> None:
-    assert extract_ticket_id("dev/7", "[CR] 210 - unrelated") == 7
+    assert extract_ticket_id("dev/7", "[CR] 210 - unrelated") == (7, "project.task")
 
 
 def test_extract_nothing_anywhere_is_none() -> None:
@@ -144,11 +146,34 @@ def test_extract_rejects_overlong_ticket_ids() -> None:
 
 def test_extract_rejects_ticket_id_zero() -> None:
     assert extract_ticket_id("cr/0", None) is None
-    assert extract_ticket_id("cr/0", "[CR] 210 - real one") == 210
+    assert extract_ticket_id("cr/0", "[CR] 210 - real one") == (210, "project.task")
 
 
 def test_extract_title_number_followed_by_version_dot_is_not_a_ticket() -> None:
     assert extract_ticket_id(None, "[MIG] 17.0 upgrade to Odoo 17.0") is None
+
+
+# --- H-prefix → helpdesk.ticket (bare number stays project.task) ---------------
+
+
+def test_extract_h_prefixed_branch_is_helpdesk() -> None:
+    assert extract_ticket_id("sup/H1213", None) == (1213, "helpdesk.ticket")
+
+
+def test_extract_h_prefix_is_case_insensitive() -> None:
+    assert extract_ticket_id("sup/h1213", None) == (1213, "helpdesk.ticket")
+
+
+def test_extract_h_prefixed_title_tag_is_helpdesk() -> None:
+    assert extract_ticket_id(None, "[SUP] H1213 - portal login") == (1213, "helpdesk.ticket")
+
+
+def test_extract_h_prefixed_title_token_is_helpdesk() -> None:
+    assert extract_ticket_id(None, "backport of sup/H1213 to 17.0") == (1213, "helpdesk.ticket")
+
+
+def test_extract_bare_h_without_digits_is_not_a_ticket() -> None:
+    assert extract_ticket_id("feat/hotfix", None) is None
 
 
 # --- resolve_ticket_by_id (spec 2026-07-20) ------------------------------------
@@ -235,7 +260,20 @@ def test_resolve_by_id_unknown_ticket_uses_default_instance(db: Database) -> Non
 
     with db.session() as s:
         default_id = s.query(OdooInstance).filter_by(name="prod").one().id
-    assert resolve_ticket_by_id(db, "acme/widgets", 9999) == (default_id, "helpdesk.ticket")
+    # Unknown ticket, no model hint → the bare-id default is project.task.
+    assert resolve_ticket_by_id(db, "acme/widgets", 9999) == (default_id, "project.task")
+
+
+def test_resolve_by_id_unknown_ticket_honours_helpdesk_hint(db: Database) -> None:
+    with db.session() as s:
+        s.add(_instance("prod", is_default=True))
+
+    with db.session() as s:
+        default_id = s.query(OdooInstance).filter_by(name="prod").one().id
+    # An H-prefixed extraction passes helpdesk.ticket as the fallback model.
+    assert resolve_ticket_by_id(db, "acme/widgets", 9999, "helpdesk.ticket") == (
+        default_id, "helpdesk.ticket"
+    )
 
 
 def test_resolve_by_id_inactive_default_is_ignored(db: Database) -> None:

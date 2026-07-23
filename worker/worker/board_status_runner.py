@@ -119,17 +119,18 @@ def run_board_status_update(job_params: dict) -> dict:
             (pr.get("head") or {}).get("ref"), pr.get("title")
         )
         if extracted is not None:
-            resolved = resolve_ticket_by_id(ctx.db, repo, extracted)
+            ticket_id, model_hint = extracted
+            resolved = resolve_ticket_by_id(ctx.db, repo, ticket_id, model_hint)
             if resolved is None:
                 # Unknown ticket and no active default instance: the fallback
                 # is configured off at the data level — visible, not silent.
-                log.warning("ticket_signal_no_default_instance", ticket_id=extracted)
+                log.warning("ticket_signal_no_default_instance", ticket_id=ticket_id)
                 writers.record_ops_event(
                     ctx.db, "odoo_callback", "warning", "no_default_instance",
-                    {"repo": repo, "pr": pr_number, "ticket_id": extracted},
+                    {"repo": repo, "pr": pr_number, "ticket_id": ticket_id},
                 )
             else:
-                fallback = (resolved[0], extracted, resolved[1])
+                fallback = (resolved[0], ticket_id, resolved[1])
         else:
             log.debug("ticket_signal_no_ticket_ref")
 
