@@ -10,6 +10,26 @@ from reva.db import writers
 from reva.db.engine import Database
 from reva.db.models import PendingReview, PullRequest, Repository, ReviewFeedback, ReviewFinding, ReviewRun
 
+
+def _carried_from_pr_by_run(s, runs: list) -> dict[int, int | None]:
+    """Map carried_from_run_id -> the source run's PR number, for a batch of
+    ReviewRun rows. One extra query per page/detail, not per row."""
+    ids = {rr.carried_from_run_id for rr in runs if rr.carried_from_run_id}
+    if not ids:
+        return {}
+    rows = s.execute(
+        select(ReviewRun.id, PullRequest.pr_number)
+        .join(PullRequest, ReviewRun.pull_request_id == PullRequest.id)
+        .where(ReviewRun.id.in_(ids))
+    ).all()
+    return {rid: pr_number for rid, pr_number in rows}
+
+
+def _carried_from_field(rr: ReviewRun, pr_by_run: dict[int, int | None]) -> dict | None:
+    if not rr.carried_from_run_id:
+        return None
+    return {"run_id": rr.carried_from_run_id, "pr": pr_by_run.get(rr.carried_from_run_id)}
+
 # Severity sort order for findings (critical first).
 _SEVERITY_ORDER = case(
     (ReviewFinding.severity == "critical", 0),
@@ -54,6 +74,7 @@ def list_reviews(
         rows = s.execute(
             base.order_by(ReviewRun.created_at.desc()).limit(limit).offset(offset)
         ).all()
+        pr_by_run = _carried_from_pr_by_run(s, [rr for rr, *_ in rows])
 
         items = [
             {
@@ -73,6 +94,7 @@ def list_reviews(
                     float(rr.estimated_cost_usd) if rr.estimated_cost_usd is not None else None
                 ),
                 "created_at": rr.created_at,
+                "carried_from": _carried_from_field(rr, pr_by_run),
             }
             for rr, repo_full_name, pr_number, pr_title, author_login in rows
         ]
@@ -133,6 +155,7 @@ def get_review_detail(db: Database, review_run_id: int) -> dict | None:
             }
             for f, thumbs_up, thumbs_down in finding_rows
         ]
+        pr_by_run = _carried_from_pr_by_run(s, [rr])
 
     return {
         "id": rr.id,
@@ -159,6 +182,7 @@ def get_review_detail(db: Database, review_run_id: int) -> dict | None:
         "output_tokens": rr.output_tokens,
         "findings": findings,
         "intent_check": rr.intent_check,
+        "carried_from": _carried_from_field(rr, pr_by_run),
     }
 
 
@@ -225,6 +249,7 @@ def list_failures(db: Database, *, limit: int = 20) -> tuple[list[dict], int]:
 
         total = s.execute(select(func.count()).select_from(base.subquery())).scalar_one()
         rows = s.execute(base.order_by(ReviewRun.created_at.desc()).limit(limit)).all()
+        pr_by_run = _carried_from_pr_by_run(s, [rr for rr, *_ in rows])
 
         items = [
             {
@@ -251,6 +276,7 @@ def list_failures(db: Database, *, limit: int = 20) -> tuple[list[dict], int]:
                 "input_tokens": rr.input_tokens,
                 "output_tokens": rr.output_tokens,
                 "findings": [],
+                "carried_from": _carried_from_field(rr, pr_by_run),
             }
             for rr, repo_full_name, pr_number, pr_title, author_login in rows
         ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import os
 import re
 from collections.abc import Iterator
@@ -416,3 +417,17 @@ def analyze_test_coverage(diff: str) -> list[ModuleCoverage]:
         for mod, route in added_route.items()
         if mod not in has_test_change
     ]
+
+
+_INDEX_LINE_RE = re.compile(r"^index [0-9a-fA-F]+\.\.[0-9a-fA-F]+.*$", re.MULTILINE)
+
+
+def diff_content_hash(diff: str) -> str:
+    """Stable SHA-256 (hex) of a unified diff for cross-branch matching.
+
+    `index <old>..<new>` lines are normalised out: their blob-abbreviation width
+    is repo-state-dependent, so the same content can render them differently on
+    two clones. `\\ No newline` and rename markers are kept — they are content.
+    """
+    normalized = _INDEX_LINE_RE.sub("index", diff)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()

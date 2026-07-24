@@ -184,6 +184,10 @@ class ReviewRun(Base):
     # Set when an explicit re-review clears the row's posted state; scopes crash
     # recovery to the current attempt (H3). NULL until first re-review.
     reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Force-push-aware delta + cross-branch reuse (migration 042).
+    diff_hash: Mapped[str | None] = mapped_column(Text)
+    delta_base_sha: Mapped[str | None] = mapped_column(Text)
+    carried_from_run_id: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -20,6 +20,9 @@ DEEP_MODEL = os.environ.get("REVA_DEEP_MODEL", "claude-opus-4-8")
 # pass): short outputs, windowed inputs — Haiku-priced by default.
 VERIFY_MODEL = os.environ.get("REVA_VERIFY_MODEL", "claude-haiku-4-5")
 
+# Global kill switch for cross-branch review reuse (spec 2026-07-24). Default on.
+CROSS_BRANCH_REUSE = os.environ.get("REVA_CROSS_BRANCH_REUSE", "true").strip().lower() not in ("false", "0", "no")
+
 
 def env_or_file(name: str, default: str | None = None) -> str | None:
     """Return env var `name`, or the stripped contents of the file at `{name}_FILE`.

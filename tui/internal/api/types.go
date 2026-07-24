@@ -126,21 +126,27 @@ type RepoPage struct {
 	Total int           `json:"total"`
 }
 
+type CarriedFrom struct {
+	RunID int `json:"run_id"`
+	PR    int `json:"pr"`
+}
+
 type ReviewSummary struct {
-	ID               int       `json:"id"`
-	RepoFullName     string    `json:"repo_full_name"`
-	PRNumber         int       `json:"pr_number"`
-	PRTitle          string    `json:"pr_title"`
-	AuthorLogin      *string   `json:"author_login"`
-	HeadSHA          string    `json:"head_sha"`
-	Status           string    `json:"status"`
-	ReviewMode       string    `json:"review_mode"`
-	Model            *string   `json:"model"`
-	RiskLevel        *string   `json:"risk_level"`
-	FindingCount     int       `json:"finding_count"`
-	DurationMS       *int      `json:"duration_ms"`
-	EstimatedCostUSD *float64  `json:"estimated_cost_usd"`
-	CreatedAt        time.Time `json:"created_at"`
+	ID               int          `json:"id"`
+	RepoFullName     string       `json:"repo_full_name"`
+	PRNumber         int          `json:"pr_number"`
+	PRTitle          string       `json:"pr_title"`
+	AuthorLogin      *string      `json:"author_login"`
+	HeadSHA          string       `json:"head_sha"`
+	Status           string       `json:"status"`
+	ReviewMode       string       `json:"review_mode"`
+	Model            *string      `json:"model"`
+	RiskLevel        *string      `json:"risk_level"`
+	FindingCount     int          `json:"finding_count"`
+	DurationMS       *int         `json:"duration_ms"`
+	EstimatedCostUSD *float64     `json:"estimated_cost_usd"`
+	CreatedAt        time.Time    `json:"created_at"`
+	CarriedFrom      *CarriedFrom `json:"carried_from,omitempty"`
 }
 
 type FindingDetail struct {

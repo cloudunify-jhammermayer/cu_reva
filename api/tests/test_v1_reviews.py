@@ -89,6 +89,38 @@ def _seed_review(
 # --- tests --------------------------------------------------------------------
 
 
+def test_reviews_expose_carried_from(client_and_db):
+    """A carried-forward run's row exposes {run_id, pr} of the source review;
+    an ordinary review's row exposes null (spec 2026-07-24)."""
+    client, db = client_and_db
+    source_repo_id, source_pr_id = _seed_repo_and_pr(db, repo_num=1001, pr_num=101)
+    source_run_id = _seed_review(db, repo_id=source_repo_id, pr_id=source_pr_id, pr_num=101)
+
+    carried_repo_id, carried_pr_id = _seed_repo_and_pr(db, repo_num=1001, pr_num=102)
+    params = JobParams(
+        repository_id=carried_repo_id, pull_request_id=carried_pr_id,
+        head_sha="deadbeef", installation_id=99,
+        review_mode="diff", trigger_event="opened",
+    )
+    writers.record_review_completed(
+        db, params,
+        ReviewResult(
+            status="completed", summary="carried", risk_level="low",
+            carried_from_run_id=source_run_id,
+        ),
+    )
+
+    resp = client.get("/api/v1/reviews")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+
+    carried_row = next(r for r in items if r["pr_number"] == 102)
+    assert carried_row["carried_from"] == {"run_id": source_run_id, "pr": 101}
+
+    source_row = next(r for r in items if r["pr_number"] == 101)
+    assert source_row["carried_from"] is None
+
+
 def test_reviews_empty_returns_empty_list(client_and_db):
     client, _ = client_and_db
     resp = client.get("/api/v1/reviews")

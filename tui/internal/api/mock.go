@@ -79,7 +79,7 @@ func (m *MockClient) Reviews(limit int, repo, status, author string) (*ReviewPag
 		},
 		{
 			ID: 99, RepoFullName: "acme/integrations", PRNumber: 88,
-			PRTitle:     "chore: bump dependencies",
+			PRTitle:     "chore: promote to prod",
 			AuthorLogin: strPtr("carol"),
 			HeadSHA:     "b2c3d4e5",
 			Status:      "completed", ReviewMode: "diff",
@@ -89,6 +89,9 @@ func (m *MockClient) Reviews(limit int, repo, status, author string) (*ReviewPag
 			DurationMS:       intPtr(2100),
 			EstimatedCostUSD: f64Ptr(0.0015),
 			CreatedAt:        now.Add(-2 * time.Hour),
+			// Demo of a carry-forward review (spec 2026-07-24): identical diff
+			// already reviewed on PR #311, so this promotion reuses the verdict.
+			CarriedFrom: &CarriedFrom{RunID: 100, PR: 311},
 		},
 		{
 			ID: 98, RepoFullName: "acme/odoo-modules", PRNumber: 310,

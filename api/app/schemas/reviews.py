@@ -37,6 +37,11 @@ class IntentCheckItem(BaseModel):
     note: str = ""
 
 
+class CarriedFrom(BaseModel):
+    run_id: int
+    pr: int | None
+
+
 class ReviewSummary(BaseModel):
     model_config = {"from_attributes": True}
 
@@ -54,6 +59,7 @@ class ReviewSummary(BaseModel):
     duration_ms: int | None
     estimated_cost_usd: float | None
     created_at: datetime
+    carried_from: CarriedFrom | None = None
 
 
 class ReviewDetail(ReviewSummary):

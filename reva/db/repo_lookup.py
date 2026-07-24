@@ -117,6 +117,19 @@ class DatabaseRepoLookup:
         from reva.db import writers
         return writers.get_muted_categories(self._db, repository_id)
 
+    def find_reusable_review(
+        self, repository_id: int, diff_hash: str, exclude_pull_request_id: int
+    ) -> dict | None:
+        from reva.db import writers
+        return writers.find_reusable_review(
+            self._db, repository_id, diff_hash, exclude_pull_request_id
+        )
+
+    def get_all_open_findings_for_pr(self, pull_request_id: int) -> list[dict]:
+        # Full PR-wide open set (no 30-item prompt cap) for carry-forward.
+        from reva.db import writers
+        return writers.get_open_findings_for_pr(self._db, pull_request_id)
+
     def get_active_memory(self, repository_id: int) -> str | None:
         from reva.db import writers
         return writers.get_active_memory(self._db, repository_id)

@@ -105,6 +105,54 @@ def test_repo_lookup_missing_id_raises(db):
         lookup.get_owner_name(999_999)
 
 
+# --- find_reusable_review (cross-branch reuse, spec 2026-07-24) --------------
+
+
+def test_find_reusable_review_matches_other_pr_by_diff_hash(db, seeded):
+    def make_run(*, pull_request_id, head_sha, diff_hash, check_run_id, status="completed"):
+        params = JobParams(
+            repository_id=seeded["repository_id"], pull_request_id=pull_request_id,
+            head_sha=head_sha, installation_id=500,
+            review_mode="diff", trigger_event="opened",
+        )
+        result = ReviewResult(status=status, summary="s", risk_level="low", diff_hash=diff_hash)
+        rid = writers.record_review_completed(db, params, result)
+        with db.session() as s:
+            s.get(ReviewRun, rid).check_run_id = check_run_id
+        return rid
+
+    # seeded["pull_request_id"] is PR 1. Add two more PRs in the same repo.
+    pr2 = writers.upsert_pull_request(
+        db, repository_id=seeded["repository_id"], github_pr_id=9002, pr_number=2,
+        title="p2", author_login="alice", base_branch="main", head_branch="feat/2",
+        head_sha="sha2", state="open", draft=False,
+    )
+    pr3 = writers.upsert_pull_request(
+        db, repository_id=seeded["repository_id"], github_pr_id=9003, pr_number=3,
+        title="p3", author_login="alice", base_branch="main", head_branch="feat/3",
+        head_sha="sha3", state="open", draft=False,
+    )
+    make_run(pull_request_id=pr2, head_sha="a", diff_hash="H", check_run_id=10)
+
+    lookup = DatabaseRepoLookup(db)
+    hit = lookup.find_reusable_review(
+        repository_id=seeded["repository_id"], diff_hash="H",
+        exclude_pull_request_id=seeded["pull_request_id"],
+    )
+    assert hit["pull_request_id"] == pr2
+    assert hit["pr_number"] == 2
+
+    # same PR excluded:
+    assert lookup.find_reusable_review(seeded["repository_id"], "H", exclude_pull_request_id=pr2) is None
+
+    # a NULL diff_hash (delta) run on a third PR must not shadow the real match.
+    make_run(pull_request_id=pr3, head_sha="b", diff_hash=None, check_run_id=11)
+    hit2 = lookup.find_reusable_review(
+        seeded["repository_id"], "H", exclude_pull_request_id=99999
+    )
+    assert hit2["pull_request_id"] == pr2
+
+
 # --- review_runs lifecycle ---------------------------------------------------
 
 
@@ -180,6 +228,19 @@ def test_record_review_completed_is_idempotent_on_retry(db, seeded):
         assert run.summary == "second"
         assert run.finding_count == 2
         assert s.query(ReviewFinding).filter_by(review_run_id=rid2).count() == 2
+
+
+def test_record_review_completed_persists_reuse_fields(db, seeded):
+    result = ReviewResult(
+        status="completed", summary="s", risk_level="low",
+        diff_hash="abc123", delta_base_sha=None, carried_from_run_id=None,
+    )
+    rid = writers.record_review_completed(db, _params(seeded), result)
+    with db.session() as s:
+        run = s.get(ReviewRun, rid)
+        assert run.diff_hash == "abc123"
+        assert run.delta_base_sha is None
+        assert run.carried_from_run_id is None
 
 
 def test_record_review_declined(db, seeded):

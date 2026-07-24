@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1192,3 +1193,75 @@ def test_clone_uses_blob_filter(tmp_path, monkeypatch):
     clone = next(c for c in calls if "clone" in c)
     assert "--filter=blob:none" in clone
     assert clone.index("clone") < clone.index("--filter=blob:none")
+
+
+# ---- two_tree_diff (force-push-aware delta, spec 2026-07-24) ----------------
+
+
+def _git(cwd, *args):
+    subprocess.run(["git", "-C", cwd, *args], check=True, capture_output=True, text=True)
+
+
+def test_two_tree_diff_amend_same_base(tmp_path):
+    # origin bare repo with a base commit; two amended heads sharing that base.
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
+    work = tmp_path / "work"
+    subprocess.run(["git", "clone", str(origin), str(work)], check=True, capture_output=True)
+    w = str(work)
+    _git(w, "config", "user.email", "t@t")
+    _git(w, "config", "user.name", "t")
+    os.makedirs(work / "custom_addons" / "m", exist_ok=True)
+    (work / "custom_addons" / "m" / "a.py").write_text("x = 1\n")
+    _git(w, "add", "-A")
+    _git(w, "commit", "-m", "base")
+    _git(w, "push", "origin", "HEAD:main")
+    # amend 1: the head the PRIOR review saw.
+    (work / "custom_addons" / "m" / "b.py").write_text("y = 1\n")
+    _git(w, "add", "-A")
+    _git(w, "commit", "-m", "feat")
+    prior = subprocess.run(
+        ["git", "-C", w, "rev-parse", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    _git(w, "update-ref", "refs/pull/7/head", prior)
+    _git(w, "push", "origin", "refs/pull/7/head")
+
+    runner = ClaudeCodeRunner(repo_cache_dir=str(tmp_path / "cache"), api_key="k", skills_dir="s")
+    # Prime the cache clone as ensure_repo would (blobless full-history clone of
+    # origin), then fetch the PR ref while it still points at `prior` — exactly
+    # what the FIRST review's two_tree_diff/ensure_repo call would have done.
+    # This is what makes `prior` locally present later, once the ref moves on.
+    cache = tmp_path / "cache" / "o" / "r"
+    os.makedirs(cache.parent, exist_ok=True)
+    subprocess.run(["git", "clone", str(origin), str(cache)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(cache), "fetch", "origin", "+refs/pull/7/head:refs/pull/7/head"],
+        check=True, capture_output=True,
+    )
+
+    # amend 2 (same base): tweak b.py and force-push over the PR ref, so `prior`
+    # is no longer reachable from any ref on origin — only the earlier fetch
+    # above keeps its object resident in the cache clone.
+    (work / "custom_addons" / "m" / "b.py").write_text("y = 2\n")
+    _git(w, "add", "-A")
+    _git(w, "commit", "--amend", "-m", "feat")
+    new = subprocess.run(
+        ["git", "-C", w, "rev-parse", "HEAD"], capture_output=True, text=True
+    ).stdout.strip()
+    _git(w, "update-ref", "refs/pull/7/head", new)
+    subprocess.run(["git", "-C", w, "push", "--force", "origin", "refs/pull/7/head"],
+                   check=True, capture_output=True)
+
+    diff, reason = runner.two_tree_diff("tok", "o", "r", "main", prior, new, 7)
+    assert reason == "ok"
+    assert "y = 2" in diff and "b.py" in diff
+    assert "a.py" not in diff  # unchanged file absent from a two-tree diff
+
+
+def test_two_tree_diff_missing_prior_object(tmp_path):
+    runner = ClaudeCodeRunner(repo_cache_dir=str(tmp_path / "cache"), api_key="k", skills_dir="s")
+    # No cache clone at all → cold_cache, never raises.
+    diff, reason = runner.two_tree_diff(
+        "tok", "o", "r", "main", "dead" * 10, "beef" * 10, 1
+    )
+    assert diff is None and reason == "cold_cache"

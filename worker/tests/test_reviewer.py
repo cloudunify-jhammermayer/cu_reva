@@ -127,6 +127,10 @@ class FakeRepos:
     prior_open_findings_calls: int = 0
     muted_categories: set[str] = field(default_factory=set)
     active_memory_row: dict | None = None
+    reusable: dict | None = None                    # find_reusable_review() return
+    reusable_calls: int = 0
+    open_findings: list[dict] = field(default_factory=list)  # get_all_open_findings_for_pr()
+    open_findings_calls: int = 0
 
     def get_owner_name(self, repository_id: int) -> tuple[str, str]:
         return self.owner, self.name
@@ -143,6 +147,16 @@ class FakeRepos:
 
     def get_muted_categories(self, repository_id: int) -> set[str]:
         return self.muted_categories
+
+    def find_reusable_review(
+        self, repository_id: int, diff_hash: str, exclude_pull_request_id: int
+    ) -> dict | None:
+        self.reusable_calls += 1
+        return self.reusable
+
+    def get_all_open_findings_for_pr(self, pull_request_id: int) -> list[dict]:
+        self.open_findings_calls += 1
+        return self.open_findings
 
     def get_active_memory_row(self, repository_id: int) -> dict | None:
         return self.active_memory_row
@@ -167,6 +181,11 @@ class FakeRunner:
     last_odoo: bool | None = None
     last_extra_dirs: list[str] | None = None
     repo_path_returned: str = "/fake/repos/acme/widgets"
+    # (None, "cold_cache") mirrors a fresh worker with no cache clone yet —
+    # existing diverged/behind tests (predating two_tree_diff) expect a full
+    # review fallback, which this default preserves.
+    two_tree_diff_result: tuple[str | None, str] = (None, "cold_cache")
+    two_tree_diff_calls: int = 0
 
     def repo_lock(self, owner: str, name: str):
         import contextlib
@@ -174,6 +193,10 @@ class FakeRunner:
 
     def ensure_repo(self, owner: str, name: str, head_sha: str | None, token: str) -> str:
         return self.repo_path_returned
+
+    def two_tree_diff(self, token, owner, name, base_ref, prior_sha, new_head, pr_number):
+        self.two_tree_diff_calls += 1
+        return self.two_tree_diff_result
 
     def review(self, repo_path: str, skill: str, params: dict,
                model: str | None = None, odoo: bool = False,
@@ -535,6 +558,12 @@ def test_block_on_severity_resolved_from_yml():
     assert result.block_on_severity == "critical"
 
 
+def test_repo_config_parses_cross_branch_reuse():
+    from reva.types import RepoConfig
+    assert RepoConfig().cross_branch_reuse is True
+    assert RepoConfig(**{"cross_branch_reuse": False}).cross_branch_reuse is False
+
+
 def test_block_on_severity_defaults_to_major():
     github = FakeGitHub(file_contents={})  # no .claude-review.yml
     runner = FakeRunner(response=_claude_response_with_findings([]))
@@ -750,6 +779,326 @@ def test_behind_falls_back_to_full_review():
     )
     result = reviewer.execute(params)
     assert result.delta_base_sha is None
+
+
+# --- force-push-aware two-tree delta (#2, spec 2026-07-24) --------------------
+
+
+def test_diverged_amend_same_base_uses_two_tree_delta():
+    """A force-push whose merge-base with the target is unchanged (pure amend)
+    uses the local two-tree diff instead of falling back to a full review."""
+    github = FakeGitHub(head_sha="newsha", compare_status="diverged")
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 5, "head_sha": "prevsha"})
+    two_tree_diff = (
+        "diff --git a/custom_addons/m/b.py b/custom_addons/m/b.py\n"
+        "--- a/custom_addons/m/b.py\n+++ b/custom_addons/m/b.py\n"
+        "@@ -1 +1 @@\n-y = 1\n+y = 2\n"
+    )
+    runner = FakeRunner(
+        response=_claude_response_with_findings([]),
+        two_tree_diff_result=(two_tree_diff, "ok"),
+    )
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(
+        repository_id=1, pull_request_id=1, head_sha="newsha",
+        installation_id=99, trigger_event="synchronize",
+    )
+
+    result = reviewer.execute(params)
+
+    assert result.status == "completed"
+    assert result.delta_base_sha == "prevsha"
+    assert runner.two_tree_diff_calls == 1
+    assert github.diff_calls == 0            # NOT a full review
+    assert github.compare_diff_calls == 0    # the compare API is never used on divergence
+
+
+def test_diverged_base_moved_falls_back_to_full():
+    github = FakeGitHub(head_sha="newsha", compare_status="diverged")
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 5, "head_sha": "prevsha"})
+    runner = FakeRunner(
+        response=_claude_response_with_findings([]),
+        two_tree_diff_result=(None, "base_moved"),
+    )
+    events: list[tuple] = []
+    reviewer, *_ = _make_reviewer(
+        github=github, repos=repos, runner=runner,
+        ops_recorder=lambda *args: events.append(args),
+    )
+    params = JobParams(
+        repository_id=1, pull_request_id=1, head_sha="newsha",
+        installation_id=99, trigger_event="synchronize",
+    )
+
+    result = reviewer.execute(params)
+
+    assert result.delta_base_sha is None
+    assert github.diff_calls == 1
+    assert any(e[:3] == ("reviewer", "info", "delta_base_moved") for e in events)
+
+
+def test_diverged_object_missing_falls_back_to_full():
+    github = FakeGitHub(head_sha="newsha", compare_status="diverged")
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 5, "head_sha": "prevsha"})
+    runner = FakeRunner(
+        response=_claude_response_with_findings([]),
+        two_tree_diff_result=(None, "object_missing"),
+    )
+    events: list[tuple] = []
+    reviewer, *_ = _make_reviewer(
+        github=github, repos=repos, runner=runner,
+        ops_recorder=lambda *args: events.append(args),
+    )
+    params = JobParams(
+        repository_id=1, pull_request_id=1, head_sha="newsha",
+        installation_id=99, trigger_event="synchronize",
+    )
+
+    result = reviewer.execute(params)
+
+    assert result.delta_base_sha is None
+    assert github.diff_calls == 1
+    assert any(e[:3] == ("reviewer", "info", "delta_fallback_object_missing") for e in events)
+
+
+def test_diverged_empty_delta_carries_forward_not_stale():
+    """An amend touching only non-reviewed paths yields an empty two-tree delta.
+    This must carry the prior review's own open findings forward onto the new
+    SHA — NOT the old `stale`/skipped path, which would clear a blocking gate."""
+    github = FakeGitHub(head_sha="newsha", compare_status="diverged")
+    repos = FakeRepos(
+        pr=_DEFAULT_PR,
+        last_completed_review={"id": 5, "head_sha": "prevsha"},
+        open_findings=[
+            {"id": 1, "file_path": "custom_addons/m/a.py", "line_start": 3,
+             "title": "t", "body": "b", "severity": "major", "category": "bug",
+             "github_comment_id": 9},
+        ],
+    )
+    runner = FakeRunner(
+        response=_claude_response_with_findings([]),
+        two_tree_diff_result=("", "ok"),
+    )
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(
+        repository_id=1, pull_request_id=1, head_sha="newsha",
+        installation_id=99, trigger_event="synchronize",
+    )
+
+    result = reviewer.execute(params)
+
+    assert result.status == "completed"
+    assert result.carried_from_run_id == 5
+    assert result.delta_base_sha is None
+    assert any(f.severity == "major" for f in result.findings)  # NOT laundered to skipped
+    assert runner.last_skill is None       # Claude never called
+    assert github.diff_calls == 1          # full diff fetched for the carried result's `diff`
+
+
+# --- cross-branch diff_hash carry-forward (#3, spec 2026-07-24) --------------
+
+
+def test_first_review_carries_forward_on_diff_hash_match():
+    repos = FakeRepos(
+        last_completed_review=None,   # first review of this PR
+        reusable={"id": 77, "pull_request_id": 5, "pr_number": 101},
+        open_findings=[
+            {"id": 1, "file_path": "custom_addons/m/x.py", "line_start": 10,
+             "title": "Zero-recipient gap", "body": "...", "severity": "major",
+             "category": "bug", "github_comment_id": 9},
+        ],
+    )
+    events: list[tuple] = []
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(
+        repos=repos, runner=runner,
+        ops_recorder=lambda *args: events.append(args),
+    )
+
+    result = reviewer.execute(_params())
+
+    assert result.status == "completed"
+    assert result.carried_from_run_id == 77
+    assert result.model is None
+    assert result.estimated_cost_usd in (0, 0.0)
+    assert any(f.severity == "major" for f in result.findings)
+    assert runner.last_skill is None              # NO Claude call
+    assert any(e[:3] == ("reviewer", "info", "review_carried_forward") for e in events)
+
+
+def test_carry_forward_skipped_when_not_first_review():
+    github = FakeGitHub(head_sha="newsha", compare_diff=_DEFAULT_DIFF, compare_status="ahead")
+    repos = FakeRepos(
+        pr=_DEFAULT_PR,
+        last_completed_review={"id": 5, "head_sha": "prevsha"},   # NOT first review
+        reusable={"id": 77, "pull_request_id": 5, "pr_number": 101},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(repository_id=1, pull_request_id=1, head_sha="newsha",
+                       installation_id=99, trigger_event="synchronize")
+
+    result = reviewer.execute(params)
+
+    assert result.carried_from_run_id is None
+    assert repos.reusable_calls == 0   # lookup never attempted on a delta review
+
+
+def test_carry_forward_disabled_by_global_flag(monkeypatch):
+    monkeypatch.setattr("reva.config.CROSS_BRANCH_REUSE", False)
+    repos = FakeRepos(
+        last_completed_review=None,
+        reusable={"id": 77, "pull_request_id": 5, "pr_number": 101},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(repos=repos, runner=runner)
+
+    result = reviewer.execute(_params())
+
+    assert result.carried_from_run_id is None
+
+
+def test_carry_forward_disabled_by_repo_flag():
+    github = FakeGitHub(file_contents={".claude-review.yml": "cross_branch_reuse: false\n"})
+    repos = FakeRepos(
+        last_completed_review=None,
+        reusable={"id": 77, "pull_request_id": 5, "pr_number": 101},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+
+    result = reviewer.execute(_params())
+
+    assert result.carried_from_run_id is None
+
+
+def test_explicit_comment_trigger_never_carries_forward():
+    repos = FakeRepos(
+        last_completed_review=None,
+        reusable={"id": 77, "pull_request_id": 5, "pr_number": 101},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(repos=repos, runner=runner)
+
+    result = reviewer.execute(_params(trigger_event="comment"))
+
+    assert result.carried_from_run_id is None
+
+
+def test_explicit_manual_requeue_trigger_never_carries_forward():
+    repos = FakeRepos(
+        last_completed_review=None,
+        reusable={"id": 77, "pull_request_id": 5, "pr_number": 101},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(repos=repos, runner=runner)
+
+    result = reviewer.execute(_params(trigger_event="manual_requeue"))
+
+    assert result.carried_from_run_id is None
+
+
+def test_explicit_trigger_empty_delta_runs_full_review():
+    """An explicit /review on a diverged head whose reviewed-path delta is empty
+    must run a FRESH full review, not carry the prior verdict forward — the
+    escape hatch wins over the #2 empty-delta carry-forward."""
+    github = FakeGitHub(head_sha="newsha", compare_status="diverged")
+    repos = FakeRepos(
+        pr=_DEFAULT_PR,
+        last_completed_review={"id": 5, "head_sha": "prevsha"},
+        open_findings=[
+            {"id": 1, "file_path": "custom_addons/m/a.py", "line_start": 3,
+             "title": "t", "body": "b", "severity": "major", "category": "bug",
+             "github_comment_id": 9},
+        ],
+    )
+    runner = FakeRunner(
+        response=_claude_response_with_findings([]),
+        two_tree_diff_result=("", "ok"),
+    )
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+
+    result = reviewer.execute(_params(head_sha="newsha", trigger_event="comment"))
+
+    assert result.carried_from_run_id is None      # NOT carried forward
+    assert runner.last_skill is not None           # a real (full) review ran
+    assert github.diff_calls == 1                  # full PR diff fetched
+
+
+def test_carry_forward_drops_currently_muted_category():
+    """Carried findings pass through the CURRENT repo's mutes, so a category
+    muted since the source review is not re-posted on the new PR."""
+    repos = FakeRepos(
+        last_completed_review=None,
+        reusable={"id": 77, "pull_request_id": 5, "pr_number": 101},
+        muted_categories={"bug"},
+        open_findings=[
+            {"id": 1, "file_path": "custom_addons/m/x.py", "line_start": 10,
+             "title": "muted", "body": "b", "severity": "major", "category": "bug",
+             "github_comment_id": 9},
+            {"id": 2, "file_path": "custom_addons/m/y.py", "line_start": 20,
+             "title": "kept", "body": "b", "severity": "major", "category": "security",
+             "github_comment_id": 10},
+        ],
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(repos=repos, runner=runner)
+
+    result = reviewer.execute(_params())
+
+    assert result.carried_from_run_id == 77
+    assert {f.category for f in result.findings} == {"security"}  # muted "bug" dropped
+    assert runner.last_skill is None                             # still no Claude call
+
+
+def test_oversized_diff_still_carries_forward():
+    """The reuse lookup precedes the size guards, so a promotion whose diff would
+    otherwise be size-declined is still carried forward (reuse spends no Claude)."""
+    github = FakeGitHub(file_contents={".claude-review.yml": "max_diff_lines: 1\n"})
+    repos = FakeRepos(
+        last_completed_review=None,
+        reusable={"id": 77, "pull_request_id": 5, "pr_number": 101},
+        open_findings=[
+            {"id": 1, "file_path": "custom_addons/m/x.py", "line_start": 10,
+             "title": "t", "body": "b", "severity": "major", "category": "bug",
+             "github_comment_id": 9},
+        ],
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+
+    result = reviewer.execute(_params())
+
+    assert result.status == "completed"            # NOT declined for size
+    assert result.carried_from_run_id == 77
+    assert runner.last_skill is None
+
+
+def test_no_reusable_match_runs_normal_review_and_stores_diff_hash():
+    repos = FakeRepos(last_completed_review=None, reusable=None)
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(repos=repos, runner=runner)
+
+    result = reviewer.execute(_params())
+
+    assert result.status == "completed"
+    assert result.carried_from_run_id is None
+    assert result.diff_hash is not None
+    assert runner.last_skill is not None          # Claude WAS called
+
+
+def test_delta_review_never_sets_diff_hash():
+    github = FakeGitHub(head_sha="newsha", compare_diff=_DEFAULT_DIFF, compare_status="ahead")
+    repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 1, "head_sha": "prevsha"})
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+    params = JobParams(repository_id=1, pull_request_id=1, head_sha="newsha",
+                       installation_id=99, trigger_event="synchronize")
+
+    result = reviewer.execute(params)
+
+    assert result.delta_base_sha == "prevsha"
+    assert result.diff_hash is None
 
 
 def test_compare_status_error_falls_back_to_full_review():

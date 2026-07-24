@@ -6,6 +6,7 @@ from reva.diff_utils import (
     DiffHunk,
     analyze_test_coverage,
     count_diff_lines,
+    diff_content_hash,
     estimate_diff_tokens,
     extract_file_paths,
     filter_diff,
@@ -580,3 +581,19 @@ def test_xml_only_diff_false_for_mixed_and_code_and_empty():
     assert xml_only_diff(mixed) is False
     assert xml_only_diff(_file_diff("custom_addons/m/models/x.py", "+x = 1\n")) is False
     assert xml_only_diff("") is False
+
+
+# --- diff_content_hash (cross-branch reuse fingerprint) -----------------------
+
+
+def test_diff_content_hash_ignores_index_lines():
+    a = ("diff --git a/f.py b/f.py\nnew file mode 100644\n"
+         "index 0000000..1a2b3c4\n--- /dev/null\n+++ b/f.py\n@@ -0,0 +1 @@\n+x = 1\n")
+    b = a.replace("1a2b3c4", "9f8e7d6")  # different abbrev, same content
+    assert diff_content_hash(a) == diff_content_hash(b)
+
+
+def test_diff_content_hash_differs_on_content():
+    a = "@@ -0,0 +1 @@\n+x = 1\n"
+    b = "@@ -0,0 +1 @@\n+x = 2\n"
+    assert diff_content_hash(a) != diff_content_hash(b)

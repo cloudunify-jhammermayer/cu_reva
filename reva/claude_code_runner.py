@@ -428,6 +428,56 @@ class ClaudeCodeRunner:
             if mcp_config_path:
                 Path(mcp_config_path).unlink(missing_ok=True)
 
+    def two_tree_diff(
+        self, token: str, owner: str, name: str, base_ref: str,
+        prior_sha: str, new_head: str, pr_number: int,
+    ) -> tuple[str | None, str]:
+        """Raw `git diff <prior_sha> <new_head>`, or (None, reason) to signal a
+        full-review fallback. Lock-free (object reads + a PR-ref fetch, no
+        checkout/reset), authenticated (blobless clone needs the header for the
+        lazy promisor blob fetch), and it NEVER raises — any failure returns a
+        reason and the caller degrades to a full review."""
+        repo_path = os.path.join(self.repo_cache_dir, owner, name)
+        if not (os.path.isdir(repo_path) and self._is_git_repo(repo_path)):
+            return None, "cold_cache"
+        basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+        auth = ["-c", f"http.extraHeader=Authorization: Basic {basic}"]
+
+        def _run(args: list[str]) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                ["git"] + args, capture_output=True, text=True,
+                timeout=_GIT_TIMEOUT, env=self._subprocess_env(),
+            )
+        try:
+            # Materialise new_head via the PR head ref (reliably served); best-effort.
+            # Also refresh origin/<base_ref> so the merge-base gate compares against
+            # the CURRENT target tip, not a stale one left by the last ensure_repo
+            # (a rebase onto newer target commits must be detected as base_moved).
+            refspecs = [f"+refs/pull/{pr_number}/head:refs/pull/{pr_number}/head"]
+            if base_ref and base_ref != "HEAD":
+                refspecs.append(f"+refs/heads/{base_ref}:refs/remotes/origin/{base_ref}")
+            _run(auth + ["-C", repo_path, "fetch", "origin", *refspecs])
+            # prior_sha must already be local (its own review fetched it); a
+            # force-pushed-away commit is NOT assumed re-fetchable.
+            if _run(["-C", repo_path, "cat-file", "-e", f"{prior_sha}^{{commit}}"]).returncode != 0:
+                return None, "object_missing"
+            if _run(["-C", repo_path, "cat-file", "-e", f"{new_head}^{{commit}}"]).returncode != 0:
+                return None, "object_missing"
+            mb_prior = _run(["-C", repo_path, "merge-base", f"origin/{base_ref}", prior_sha])
+            mb_new = _run(["-C", repo_path, "merge-base", f"origin/{base_ref}", new_head])
+            if mb_prior.returncode != 0 or mb_new.returncode != 0:
+                return None, "object_missing"
+            if mb_prior.stdout.strip() != mb_new.stdout.strip():
+                return None, "base_moved"
+            diff = _run(auth + ["-C", repo_path, "diff", prior_sha, new_head])
+            if diff.returncode != 0:
+                return None, "error"
+            return diff.stdout, "ok"
+        except (subprocess.TimeoutExpired, OSError):
+            logger.warning("two_tree_diff_failed", owner=owner, repo=name,
+                           prior=prior_sha[:8], new=new_head[:8], exc_info=True)
+            return None, "error"
+
     # ----------------------------------------------------------------- helpers
 
     def _subprocess_env(self) -> dict:

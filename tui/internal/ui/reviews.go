@@ -288,7 +288,11 @@ func (r Reviews) renderList(w, h int) string {
 		if item.DurationMS != nil {
 			timeInfo += "  " + fmtDurationMS(*item.DurationMS)
 		}
-		titleBase := truncate(fmt.Sprintf("  #%d %s", item.PRNumber, item.PRTitle), w-2-len(timeInfo)-2)
+		titleRaw := fmt.Sprintf("  #%d %s", item.PRNumber, item.PRTitle)
+		if item.CarriedFrom != nil {
+			titleRaw += fmt.Sprintf(" (carried from #%d)", item.CarriedFrom.PR)
+		}
+		titleBase := truncate(titleRaw, w-2-len(timeInfo)-2)
 
 		var combined string
 		if i == r.cursor {

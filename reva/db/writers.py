@@ -205,6 +205,9 @@ def record_review_completed(db: Database, params: JobParams, result: ReviewResul
         run.risk_level = result.risk_level
         run.summary = result.summary
         run.triage_escalation = result.triage_escalation
+        run.diff_hash = result.diff_hash
+        run.delta_base_sha = result.delta_base_sha
+        run.carried_from_run_id = result.carried_from_run_id
         run.finding_count = len(result.findings)
         run.intent_check = (
             [v.model_dump() for v in result.intent_check] if result.intent_check else None
@@ -860,6 +863,29 @@ def get_open_findings_for_pr(db: Database, pull_request_id: int, before_run_id: 
         }
         for r in rows
     ]
+
+
+def find_reusable_review(
+    db: Database, repository_id: int, diff_hash: str, exclude_pull_request_id: int
+) -> dict | None:
+    """Most-recent completed, POSTED, full-scope review in this repo whose
+    diff_hash matches, on a DIFFERENT PR. diff_hash is NULL on delta runs, so
+    the equality filter excludes them. Returns {id, pull_request_id, pr_number}."""
+    with db.session() as s:
+        row = s.execute(
+            select(ReviewRun.id, ReviewRun.pull_request_id, PullRequest.pr_number)
+            .join(PullRequest, ReviewRun.pull_request_id == PullRequest.id)
+            .where(ReviewRun.repository_id == repository_id)
+            .where(ReviewRun.status == "completed")
+            .where(ReviewRun.diff_hash == diff_hash)
+            .where(ReviewRun.check_run_id.is_not(None))
+            .where(ReviewRun.pull_request_id != exclude_pull_request_id)
+            .order_by(ReviewRun.completed_at.desc())
+            .limit(1)
+        ).first()
+    if not row:
+        return None
+    return {"id": row[0], "pull_request_id": row[1], "pr_number": row[2]}
 
 
 def attach_finding_comment_ids(db: Database, finding_id_to_comment_id: dict[int, int]) -> None:

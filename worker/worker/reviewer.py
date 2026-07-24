@@ -19,7 +19,7 @@ from typing import Protocol
 import structlog
 from pydantic import ValidationError
 
-from reva import triage as triage_mod
+from reva import config, triage as triage_mod
 from reva.claude_code_runner import ClaudeCodeRunner
 from reva.claude_client import ClaudeClient
 from reva.core_knowledge import CoreKnowledge, extract_added_definitions
@@ -30,6 +30,7 @@ from reva.diff_utils import (
     ModuleCoverage,
     analyze_test_coverage,
     count_diff_lines,
+    diff_content_hash,
     estimate_diff_tokens,
     filter_diff,
     filter_diff_by_paths,
@@ -245,6 +246,17 @@ class RepoLookup(Protocol):
         """Finding categories a trusted user muted for this repo (/mute)."""
         ...
 
+    def find_reusable_review(
+        self, repository_id: int, diff_hash: str, exclude_pull_request_id: int
+    ) -> dict | None:
+        """Most-recent completed, posted, full-scope review in this repo whose
+        diff_hash matches, on a different PR. {id, pull_request_id, pr_number} or None."""
+        ...
+
+    def get_all_open_findings_for_pr(self, pull_request_id: int) -> list[dict]:
+        """PR-wide open, posted, non-dismissed findings (no prompt cap) for carry-forward."""
+        ...
+
     def get_active_memory_row(self, repository_id: int) -> dict | None:
         """Active learned-memory row {version, content, ...} or None (Tier 3 B)."""
         ...
@@ -351,14 +363,27 @@ class Reviewer:
         review_all = params.review_mode == "diff-all" or repo_config.review_all_paths
         review_prefixes = () if review_all else DEFAULT_REVIEW_PREFIXES
         # Delta detection: if a prior completed review exists AND its head is an
-        # ancestor of the current head, review only the compare diff. A rebase /
-        # squash / force-push makes the prior head a non-ancestor, so the two-dot
-        # compare diff would be garbage — fall back to a full review for that push.
-        # (The thread-resolution pass runs on every completed review either way, so
-        # divergence now only affects diff scope, not resolution.)
+        # ancestor of the current head, review only the compare diff. A force-push
+        # / amend / rebase makes the prior head a non-ancestor ("diverged"/"behind");
+        # try a LOCAL two-tree delta gated on the PR's merge-base being unchanged
+        # (pure amend/reword) before falling back to a full review. (The
+        # thread-resolution pass runs on every completed review either way, so
+        # divergence only ever affects diff scope, not resolution.)
         last_review = self.repos.get_last_completed_review(params.pull_request_id)
         prior_findings: list[dict] = []
-        use_delta = False
+        delta_base_sha: str | None = None
+        base_ref = (pr_detail.get("base") or {}).get("ref")
+        # Explicit triggers (/review-family comments, admin requeue) always run a
+        # real review — they must bypass BOTH carry-forward paths (the #2 empty-delta
+        # re-post and the #3 cross-branch reuse). Computed here so the empty-delta
+        # branch below can honor it. (A scoped delta review is still a real review,
+        # so explicit triggers may still take the delta path when the delta is non-empty.)
+        explicit = params.trigger_event in ("comment", "manual_requeue")
+
+        def _full_diff() -> tuple[str, str]:
+            raw = self.github.get_pull_request_diff(token, owner, name, pr_number)
+            return raw, filter_diff(raw, include_prefixes=review_prefixes)
+
         if last_review:
             try:
                 status = self.github.get_compare_status(
@@ -369,33 +394,76 @@ class Reviewer:
                             delta_base=last_review["head_sha"][:8], exc_info=True)
                 status = ""
             if status in ("ahead", "identical"):
-                use_delta = True
+                # Clean follow-up push: the API two-dot compare diff is a true delta.
+                raw_diff = self.github.get_compare_diff(
+                    token, owner, name, last_review["head_sha"], params.head_sha
+                )
+                diff = filter_diff(raw_diff, include_prefixes=review_prefixes)
+                if not diff.strip():
+                    log.info("review_skipped", reason="no reviewable changes since last review",
+                             delta_base=last_review["head_sha"][:8])
+                    return self._stale("No reviewable changes since last review.")
+                delta_base_sha = last_review["head_sha"]
+                # Show the model what it already flagged so it doesn't re-post the same
+                # issue as a fresh inline comment (the still-present case; the fixed case
+                # is handled by runner._verify_and_resolve_findings resolving threads).
+                prior_findings = self.repos.get_prior_open_findings(params.pull_request_id)
+            elif status in ("diverged", "behind"):
+                # Force-push / amend: try a LOCAL two-tree delta, gated on the base
+                # being unchanged. Lock-free; any failure → full review.
+                td, reason = self.runner.two_tree_diff(
+                    token, owner, name, base_ref or "HEAD",
+                    last_review["head_sha"], params.head_sha, pr_number,
+                )
+                if reason == "ok" and td is not None:
+                    raw_diff = td
+                    diff = filter_diff(td, include_prefixes=review_prefixes)
+                    if not diff.strip() and not explicit:
+                        # Amend touched only non-reviewed paths → content unchanged in
+                        # reviewed paths. Do NOT emit a `skipped` check (would clear a
+                        # blocking gate the prior review failed). Carry the prior verdict
+                        # forward onto the new SHA instead. Explicit triggers skip this
+                        # (they fall through to a full review — the escape hatch wins).
+                        self._record_ops_event(
+                            "reviewer", "info", "delta_empty_carry_forward",
+                            {"pr": pr_number, "prior_run": last_review["id"]},
+                        )
+                        muted = self.repos.get_muted_categories(params.repository_id)
+                        matched = {
+                            "id": last_review["id"],
+                            "pull_request_id": params.pull_request_id,
+                            "pr_number": pr_number,
+                        }
+                        _, full_filtered_diff = _full_diff()
+                        return self._carry_forward_result(
+                            matched, full_filtered_diff, repo_config, muted
+                        )
+                    if not diff.strip():
+                        # Explicit trigger on an empty reviewed-path delta → re-review
+                        # the whole PR (a fresh review is what /review demanded).
+                        log.info("review_delta_empty_explicit_full",
+                                 delta_base=last_review["head_sha"][:8])
+                        raw_diff, diff = _full_diff()
+                    else:
+                        delta_base_sha = last_review["head_sha"]
+                        prior_findings = self.repos.get_prior_open_findings(params.pull_request_id)
+                else:
+                    # base_moved / object_missing / cold_cache / error → full review.
+                    log.info("review_delta_fallback", status=status, reason=reason,
+                             delta_base=last_review["head_sha"][:8])
+                    event = "delta_base_moved" if reason == "base_moved" else f"delta_fallback_{reason}"
+                    self._record_ops_event(
+                        "reviewer", "info", event,
+                        {"pr": pr_number, "reason": reason,
+                         "prior": last_review["head_sha"][:8], "new": params.head_sha[:8]},
+                    )
+                    raw_diff, diff = _full_diff()
             else:
                 log.info("review_delta_diverged",
                          delta_base=last_review["head_sha"][:8], status=status)
-
-        if use_delta:
-            raw_diff = self.github.get_compare_diff(
-                token, owner, name, last_review["head_sha"], params.head_sha
-            )
-            diff = filter_diff(raw_diff, include_prefixes=review_prefixes)
-            if not diff.strip():
-                log.info("review_skipped", reason="no reviewable changes since last review",
-                         delta_base=last_review["head_sha"][:8])
-                return ReviewResult(
-                    status="stale",
-                    summary="No reviewable changes since last review.",
-                    risk_level="low",
-                )
-            delta_base_sha: str | None = last_review["head_sha"]
-            # Show the model what it already flagged so it doesn't re-post the same
-            # issue as a fresh inline comment (the still-present case; the fixed case
-            # is handled by runner._verify_and_resolve_findings resolving threads).
-            prior_findings = self.repos.get_prior_open_findings(params.pull_request_id)
+                raw_diff, diff = _full_diff()
         else:
-            raw_diff = self.github.get_pull_request_diff(token, owner, name, pr_number)
-            diff = filter_diff(raw_diff, include_prefixes=review_prefixes)
-            delta_base_sha = None
+            raw_diff, diff = _full_diff()
         # Skill is selected below (after skip_paths + trivial-diff shrink the diff)
         # so content-driven routing — e.g. migration scripts — sees the final diff.
 
@@ -418,6 +486,33 @@ class Reviewer:
                 f"No reviewable files found (excluding "
                 f"{', '.join(sorted(DEFAULT_EXCLUDE_EXTENSIONS))})."
             )
+
+        # 5c. diff_hash + cross-branch reuse (#3). Computed here — after filter_diff,
+        # before the size guards — so store-point == lookup-point and a matched
+        # carry-forward pre-empts a "diff too large" decline (reuse spends no Claude).
+        diff_hash = diff_content_hash(diff) if delta_base_sha is None else None
+        if (delta_base_sha is None and last_review is None and not explicit
+                and config.CROSS_BRANCH_REUSE and repo_config.cross_branch_reuse):
+            try:
+                matched = self.repos.find_reusable_review(
+                    params.repository_id, diff_hash, params.pull_request_id
+                )
+            except Exception:  # noqa: BLE001 — lookup failure → no reuse; review anyway
+                log.warning("review_reuse_lookup_failed", exc_info=True)
+                self._record_ops_event(
+                    "reviewer", "warning", "reuse_lookup_failed", {"pr": pr_number},
+                )
+                matched = None
+            if matched:
+                log.info("review_carried_forward",
+                         matched_pr=matched["pr_number"], matched_run=matched["id"])
+                self._record_ops_event(
+                    "reviewer", "info", "review_carried_forward",
+                    {"pr": pr_number, "matched_pr": matched["pr_number"],
+                     "matched_run_id": matched["id"]},
+                )
+                muted = self.repos.get_muted_categories(params.repository_id)
+                return self._carry_forward_result(matched, diff, repo_config, muted)
 
         changed_files_payload = self.github.get_changed_files(token, owner, name, pr_number)
         changed_files = [
@@ -846,12 +941,49 @@ class Reviewer:
             cache_creation_tokens=response.cache_creation_tokens,
             estimated_cost_usd=cost,
             delta_base_sha=delta_base_sha,
+            diff_hash=diff_hash,
             learned_memory_version=learned_memory_version,
             block_on_severity=repo_config.block_on_severity,
             triage_escalation=triage_escalation,
         )
 
     # ----------------------------------------------------------------- helpers
+
+    def _stale(self, summary: str) -> ReviewResult:
+        return ReviewResult(status="stale", summary=summary, risk_level="low")
+
+    def _finding_from_row(self, row: dict) -> Finding:
+        # get_open_findings_for_pr rows omit line_end/suggestion/confidence — carried
+        # findings are display-only re-posts, so fill safe defaults.
+        return Finding(
+            severity=row["severity"], category=row["category"],
+            file=row["file_path"], line_start=row["line_start"],
+            line_end=row["line_start"], title=row["title"], body=row["body"],
+            suggestion=None, confidence=1.0, is_odoo_specific=False,
+        )
+
+    def _carry_forward_result(
+        self, matched: dict, diff: str, repo_config: RepoConfig, muted: set[str],
+    ) -> ReviewResult:
+        rows = self.repos.get_all_open_findings_for_pr(matched["pull_request_id"])
+        findings = [self._finding_from_row(r) for r in rows]
+        findings = _drop_muted_findings(findings, muted)
+        findings = _cap_findings(findings, MAX_FINDINGS)
+        risk = _recompute_risk_level(findings)
+        note = (f"Content matches already-reviewed #{matched['pr_number']} "
+                f"(run #{matched['id']}); verdict carried forward. "
+                f"Reply `/review` to force a fresh review.")
+        now = datetime.now(timezone.utc)
+        return ReviewResult(
+            status="completed", summary=note, risk_level=risk, findings=findings,
+            diff=diff, model=None, prompt_version=None,
+            started_at=now, completed_at=now, duration_ms=0,
+            input_tokens=0, output_tokens=0, cache_read_tokens=0, cache_creation_tokens=0,
+            estimated_cost_usd=0.0, delta_base_sha=None,
+            diff_hash=diff_content_hash(diff),
+            carried_from_run_id=matched["id"],
+            block_on_severity=repo_config.block_on_severity,
+        )
 
     def _triage_allowed(self, params: JobParams, repo_config: RepoConfig) -> bool:
         return (

@@ -77,6 +77,8 @@ class RepoConfig(BaseModel):
     # Kill switch for per-repo learned memory (Tier 3 B): false disables both
     # injecting the learned block and distilling new versions for this repo.
     learned_memory: bool = True
+    # Kill switch for cross-branch review reuse (dev→stage→prod promotions).
+    cross_branch_reuse: bool = True
     # Kill switch for the default-off triage pre-pass. Global
     # REVA_TRIAGE_ENABLED must also be true.
     triage: bool = True
@@ -243,6 +245,10 @@ class ReviewResult(BaseModel):
     error_message: str | None = None
     error_class: Literal["transient", "permanent"] | None = None
     delta_base_sha: str | None = None   # set when this was a delta review
+    # Cross-branch reuse fingerprint (full-scope reviews only; NULL on delta runs).
+    diff_hash: str | None = None
+    # Set on a carried-forward run: the review_runs.id whose verdict was reused.
+    carried_from_run_id: int | None = None
     # Learned-memory version injected into this review's prompt (Tier 3 B), or
     # None when none was active/allowed. Runner stamps it onto the run row.
     learned_memory_version: int | None = None
