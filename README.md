@@ -131,7 +131,17 @@ Per-repo config (`.claude-review.yml`):
 | `skip_paths` | `[]` | Glob patterns to drop from the diff. |
 | `block_on_severity` | `major` | Lowest finding severity that fails the Check Run (`none` never blocks). |
 | `verify_findings` | global | Per-repo override for the second-pass self-critique (see `REVA_VERIFY_HIGH_COST`). |
+| `cross_branch_reuse` | `true` | Allow a promotion PR to reuse an identical prior review's verdict (see below). Global kill switch: `REVA_CROSS_BRANCH_REUSE`. |
 | `odoo` / `custom_instructions` | — | Apply the Odoo guidance / inject repo-specific reviewer instructions. |
+
+## Incremental & carried-forward reviews
+
+When a PR already has a completed review, REVA reviews only what changed since it, and quietly resolves inline threads whose findings are now fixed:
+
+- **Clean follow-up push** (the new head is a descendant of the last-reviewed SHA): REVA reviews the GitHub *compare* diff.
+- **Force-push / amend / rebase** (the new head *diverged*): REVA reviews a **local two-tree `git diff <prior> <new>`** in the worker clone — gated on the PR's merge-base with its target branch being unchanged. If the base moved (rebased onto a newer target) or the prior commit's objects are gone, it falls back to a full review. This stops a promote-to-prod PR that is amended repeatedly from being fully re-reviewed on every push. If the diverged delta is empty (the amend touched only non-reviewed paths), the prior verdict is re-posted onto the new SHA rather than clearing the Check Run.
+
+**Cross-branch reuse (`cross_branch_reuse`, default on).** On a PR's *first* review, if its reviewable diff is byte-identical (`diff_hash`) to a prior completed review elsewhere in the same repo — the dev→stage→prod promotion case — REVA carries that review's open findings forward as a fresh Check Run + PR review **without a paid Claude run**, noting *"carried forward from #N"*. It respects the current repo's mutes/dismissals and recomputes risk. An explicit `/review` (or admin requeue) always forces a fresh review. Disable globally with `REVA_CROSS_BRANCH_REUSE=false` or per-repo with `cross_branch_reuse: false`.
 
 ## Repository audits
 

@@ -14,7 +14,7 @@ the `Write` tool. REVA reads that file back and validates it against the
 |---|---|---|
 | `reva-diff-review.md` | default push / `/review` (diff mode) / `/review-all` (diff, all paths) | The diff + the cloned repo; reads connected files before deciding. |
 | `reva-full-review.md` | `/deep-review` / full mode | Explores the repo freely, not just the diff. |
-| `reva-delta-review.md` | incremental review when a prior completed review exists | Reviews only the *compare* diff since the last reviewed SHA. |
+| `reva-delta-review.md` | incremental review when a prior completed review exists | Reviews only the delta since the last reviewed SHA — the GitHub *compare* diff for a clean follow-up push, or a local two-tree `git diff <prior> <new>` when the head diverged (force-push/amend, base unchanged). |
 | `reva-migration-review.md` | any PR whose diff touches `migrations/<ver>/{pre,post,end}-migrate.py` | Odoo upgrade-script review (destructive DDL, idempotency, JSONB, SQL injection). |
 | `reva-xml-review.md` | an **XML-only** PR diff | Odoo view/QWeb review; resolves xpath/`inherit_id`/`ref` against the clone. |
 | `reva-repo-audit.md` | on-demand repo audit (API / TUI) | Audits the whole default branch, produces a structured report. |
