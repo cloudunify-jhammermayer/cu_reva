@@ -79,9 +79,10 @@ stock Odoo already covers part of it), or `"other"`.
   (The field name is historical; it carries text, not markup.)
 - `"partially_answered"` — you can answer part of it; write that part in
   `answer` and list what's missing in `open_questions`.
-- `"cannot_answer"` — you cannot draft a genuine answer. Leave `answer`
-  empty, explain why in `cannot_answer_reason`, and list exactly what you
-  would need in `open_questions`.
+- `"cannot_answer"` — you cannot draft a genuine answer. Set `answer` to
+  `null`, explain why in `cannot_answer_reason`, and list exactly what you
+  would need in `open_questions`. Emit the JSON value `null` — not an empty
+  string, not a placeholder, not a note about why the field is empty.
 
   **No answer is better than a bad answer.** Use `cannot_answer` whenever:
   - there is no grounding for the question, or the grounding contradicts

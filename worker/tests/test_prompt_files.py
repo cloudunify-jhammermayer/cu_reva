@@ -310,3 +310,14 @@ def test_support_prompts_refuse_answers_from_the_wrong_system():
         body = " ".join(path.read_text().split()).lower()
         assert "different system" in body or "different one" in body, path.name
         assert "no answer is better" in body, path.name
+
+
+def test_support_prompts_ask_for_a_null_answer_not_an_empty_one():
+    """"Leave `answer` empty" against a non-nullable required string is an
+    instruction the model cannot follow cleanly; it leaked control-token
+    fragments into the field instead. Schema and prompt must agree on null."""
+    for path in (PROMPTS_DIR / "support_answer.md",
+                 SKILLS_DIR / "reva-support-answer.md"):
+        body = " ".join(path.read_text().split())
+        assert "`answer` to `null`" in body, path.name
+        assert "Leave `answer` empty" not in body, path.name

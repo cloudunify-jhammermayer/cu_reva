@@ -18,7 +18,7 @@ import pytest
 from reva.claude_client import ClaudeClient
 from reva.errors import MalformedModelOutput, PermanentError
 from reva.support_answerer import SupportAnswerer
-from reva.support_tool import SUPPORT_TOOL_NAME
+from reva.support_tool import SUPPORT_TOOL_NAME, build_support_tool_schema
 from reva.types import Attachment, ChatterEntry, SupportAnswerResult, SupportJobParams
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -449,3 +449,35 @@ def test_cache_breakpoints_stay_within_the_api_limit():
     assert len(cached) <= 4, (
         f"{len(cached)} cache_control blocks — the Messages API rejects more than 4"
     )
+
+
+# ---------------------------------------------------------------------------
+# nullable answer
+# ---------------------------------------------------------------------------
+
+
+def test_answer_is_nullable_in_the_model_facing_schema():
+    """Every property is `required`, so a plain `type: string` left the model no
+    way to say "nothing belongs here" on cannot_answer. Forced to invent an
+    empty string it degenerated — leaking `</antml parameter>` into the field,
+    and once looping to max_tokens (16384 output tokens for a 1.1 KB payload)."""
+    schema = build_support_tool_schema()["input_schema"]
+    assert schema["properties"]["answer"]["anyOf"] == [
+        {"type": "string"}, {"type": "null"}]
+    assert schema["$defs"]["SupportHandoff"]["properties"]["rationale"]["anyOf"] == [
+        {"type": "string"}, {"type": "null"}]
+    # still required — nullability is how "absent" is expressed, not omission
+    assert "answer" in schema["required"]
+
+
+def test_a_null_answer_validates_as_empty():
+    result = SupportAnswerResult.model_validate({
+        "request_kind": "change_request", "answer_status": "cannot_answer",
+        "answer": None, "cannot_answer_reason": "Kein Bezug zur Frage.",
+        "open_questions": ["Welches System?"], "sources": [],
+        "handoff": {"suggest_analysis": True, "suggest_issues": False,
+                    "rationale": None},
+        "language": "de", "confidence": "low",
+    })
+    assert result.answer == ""
+    assert result.handoff.rationale == ""

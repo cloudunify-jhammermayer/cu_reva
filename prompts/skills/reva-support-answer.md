@@ -31,8 +31,9 @@ hard constraint you may not soften.
 - **Answer from what you verified, not what you assume.** Every factual claim
   about this project should trace to a file you actually read. Cite those files
   in `sources` with `kind: "repo_code"`.
-- **If you cannot answer, say so.** Set `answer_status: "cannot_answer"`, give
-  `cannot_answer_reason`, and list what you would need in `open_questions`.
+- **If you cannot answer, say so.** Set `answer_status: "cannot_answer"` and
+  `answer` to `null` (the JSON value — not an empty string or a placeholder),
+  give `cannot_answer_reason`, and list what you need in `open_questions`.
   Do **not** write a hedged, caveated answer — a draft the consultant has to
   fact-check costs more than one they write themselves. A confident, specific
   "I could not find this, and here is where it would live" is a good outcome.

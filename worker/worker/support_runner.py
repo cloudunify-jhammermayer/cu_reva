@@ -18,7 +18,7 @@ from __future__ import annotations
 import structlog
 
 from reva.db import writers
-from reva.errors import PermanentError, TransientError
+from reva.errors import MalformedModelOutput, PermanentError, TransientError
 from reva.github_urls import parse_github_repo_url
 from reva.html_guard import ensure_renderable
 from reva.persona import render_persona_block, resolve_persona
@@ -246,10 +246,27 @@ def _produce_answer(ctx, params: SupportJobParams, odoo, log) -> str:
                 grounding = "code"
 
     if response is None:
-        response, result = ctx.support_answerer.answer_with_response(
-            params, persona_block, prior_turns,
-            extra_system_blocks=knowledge.blocks or None,
-        )
+        try:
+            response, result = ctx.support_answerer.answer_with_response(
+                params, persona_block, prior_turns,
+                extra_system_blocks=knowledge.blocks or None,
+            )
+        except MalformedModelOutput as exc:
+            # `strict: true` is NOT enforced for this tool (verified against the
+            # live API, with and without the structured-outputs beta header), so
+            # roughly one call in ten still returns drifted output — typically
+            # `handoff` as a mangled JSON string that no unwrap can repair. It's
+            # a one-off formatting hiccup, not a doomed input: one paid retry
+            # before the consultant sees a failure. Mirrors ticket_runner.
+            log.warning("support_answer_malformed_output_retry", error=str(exc))
+            writers.record_ops_event(
+                ctx.db, "support_answer", "warning", "malformed_output_retried",
+                {"turn_id": params.turn_id, "error": str(exc)[:300]},
+            )
+            response, result = ctx.support_answerer.answer_with_response(
+                params, persona_block, prior_turns,
+                extra_system_blocks=knowledge.blocks or None,
+            )
     else:
         if response.tool_use_input is None:
             raise PermanentError(

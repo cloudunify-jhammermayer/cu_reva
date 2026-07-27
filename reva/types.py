@@ -501,6 +501,10 @@ class SupportHandoff(BaseModel):
     @field_validator("rationale", mode="before")
     @classmethod
     def _truncate_rationale(cls, v: object) -> object:
+        if v is None:
+            # The tool schema offers null so the model can say "nothing here"
+            # instead of being forced to invent an empty string.
+            return ""
         if isinstance(v, str) and len(v) > 1000:
             return v[:997] + "..."
         return v
@@ -545,6 +549,10 @@ class SupportAnswerResult(BaseModel):
     @field_validator("answer", mode="before")
     @classmethod
     def _truncate_answer(cls, v: object) -> object:
+        if v is None:
+            # cannot_answer draws a null here — see _make_nullable in
+            # support_tool.py for why the schema offers one.
+            return ""
         if isinstance(v, str) and len(v) > 20000:
             return v[:19997] + "..."
         return v

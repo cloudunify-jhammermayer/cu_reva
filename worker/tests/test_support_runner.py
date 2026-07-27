@@ -14,7 +14,7 @@ import pytest
 
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.db.models import OpsEvent
-from reva.errors import PermanentError, TransientError
+from reva.errors import MalformedModelOutput, PermanentError, TransientError
 from reva.ticket_knowledge import TicketKnowledge
 from reva.types import ClaudeResponse, SupportAnswerResult, SupportJobParams
 from worker.runner import WorkerContext, set_context
@@ -392,3 +392,39 @@ def test_a_delivered_follow_up_is_replayed_but_an_undelivered_one_is_not(env):
 
     run_support_answer(_params(env, turn_id=current, question="Und nun?"))
     assert [t["question"] for t in env.answerer.prior_turns] == ["Wie?"]
+
+
+# --- malformed output ---------------------------------------------------------
+
+
+def test_malformed_output_gets_one_paid_retry(env):
+    """`strict: true` is not actually enforced for this tool, so ~1 call in 10
+    returns drifted output (typically `handoff` as a mangled JSON string). One
+    retry, and the degradation is visible — not a silent swallow."""
+    calls = {"n": 0}
+    real = env.answerer.answer_with_response
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise MalformedModelOutput("handoff arrived as a JSON string")
+        return real(*a, **k)
+
+    env.answerer.answer_with_response = flaky
+    out = run_support_answer(_params(env))
+
+    assert out["status"] == "completed"
+    assert calls["n"] == 2
+    assert "malformed_output_retried" in _ops(env.db)
+
+
+def test_a_second_malformed_output_fails_the_turn(env):
+    """One retry, not a loop — a genuinely doomed input must surface."""
+    def always_bad(*a, **k):
+        raise MalformedModelOutput("handoff arrived as a JSON string")
+
+    env.answerer.answer_with_response = always_bad
+    with pytest.raises(MalformedModelOutput):
+        run_support_answer(_params(env))
+
+    assert writers.get_support_turn(env.db, env.turn_id)["status"] == "failed"
