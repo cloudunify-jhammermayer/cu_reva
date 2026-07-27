@@ -130,25 +130,26 @@ def test_cannot_answer_renders_reason_and_open_questions_no_answer():
 # --- handoff ---------------------------------------------------------------
 
 
-def test_handoff_hint_surfaced_when_suggested():
+def test_handoff_never_reaches_the_draft():
+    """"Next step: consider Analyse Ticket" is a note to the consultant about
+    internal process, and it sat in the body the composer sends to the
+    customer. The tab raises its own change-request alert off
+    reva_support_kind, which is where that belongs."""
     result = _answered(
         request_kind="mixed",
         handoff=SupportHandoff(
             suggest_analysis=True,
-            suggest_issues=False,
+            suggest_issues=True,
             rationale="Standard Odoo does not cover the custom discount rule.",
         ),
     )
     html = format_support_html(result)
-    assert "Next step" in html
-    assert "Analyse Ticket" in html
-    assert "Create Issues" not in html
-    assert "Standard Odoo does not cover the custom discount rule." in html
-
-
-def test_no_handoff_hint_when_not_suggested():
-    html = format_support_html(_answered())
     assert "Next step" not in html
+    assert "Analyse Ticket" not in html
+    assert "Create Issues" not in html
+    assert "Standard Odoo does not cover the custom discount rule." not in html
+    # the draft is the answer prose and nothing else
+    assert html == "<p>Yes, the billing run can be restarted from the wizard.</p>"
 
 
 # --- empty lists -------------------------------------------------------------

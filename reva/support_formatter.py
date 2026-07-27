@@ -52,19 +52,10 @@ def format_support_html(result: SupportAnswerResult) -> str:
     # with it. Those three ride beside the HTML in the write-field payload and
     # land in dedicated, internal-only fields on the Odoo record.
 
-    # Handoff hint — point the consultant at the next action when this
-    # request also looks like a change request / bug report.
-    handoff = result.handoff
-    if handoff.suggest_analysis or handoff.suggest_issues:
-        actions = []
-        if handoff.suggest_analysis:
-            actions.append("Analyse Ticket")
-        if handoff.suggest_issues:
-            actions.append("Create Issues")
-        hint = f"<strong>Next step:</strong> consider {' / '.join(actions)}."
-        if handoff.rationale:
-            hint += f" {_esc(handoff.rationale)}"
-        parts.append(f'<p style="font-size:0.85em;color:#57606a;">{hint}</p>')
+    # No handoff hint either. "Next step: consider Analyse Ticket…" is a note to
+    # the consultant about internal process, and it sat directly in the body the
+    # composer sends. The tab already raises its own change-request alert off
+    # reva_support_kind, which is where that belongs.
 
     heading = _HEADINGS.get(result.language, _HEADINGS["en"])
 
