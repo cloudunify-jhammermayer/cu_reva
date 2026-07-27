@@ -20,6 +20,15 @@ server {
     listen [::]:80;
     server_name ${REVA_DOMAIN};
 
+    # Re-resolve the `api` container name per request instead of once at config
+    # load. Compose hands a rebuilt api a NEW IP; nginx pinned the old one and
+    # every request 502'd until the nginx container itself was restarted. The
+    # variable in proxy_pass is what forces runtime resolution — 127.0.0.11 is
+    # Docker's embedded DNS. (URI-less proxy_pass with a variable still passes
+    # the original request URI through unchanged.)
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $api_upstream api;
+
     # Security headers. TLS/HSTS are enforced at the Cloudflare edge, not here.
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "DENY" always;
@@ -53,7 +62,7 @@ server {
         deny all;
 
         limit_req zone=webhooks burst=10 nodelay;
-        proxy_pass http://api:8080;
+        proxy_pass http://$api_upstream:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -64,7 +73,7 @@ server {
     # Internal API — rate-limited per source IP.
     location /api/ {
         limit_req zone=api burst=20 nodelay;
-        proxy_pass http://api:8080;
+        proxy_pass http://$api_upstream:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -73,7 +82,7 @@ server {
 
     # Health check (used by monitoring / load balancer).
     location /health {
-        proxy_pass http://api:8080;
+        proxy_pass http://$api_upstream:8080;
     }
 
     # --- Consultant docs site -------------------------------------------------
@@ -84,7 +93,7 @@ server {
     # Docs data API — browser-driven, so reuse the per-IP api rate-limit zone.
     location /repo-docs/ {
         limit_req zone=api burst=20 nodelay;
-        proxy_pass http://api:8080;
+        proxy_pass http://$api_upstream:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
