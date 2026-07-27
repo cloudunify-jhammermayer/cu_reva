@@ -1,5 +1,15 @@
 {
   "properties": {
+    "answer_status": {
+      "default": "",
+      "title": "Answer Status",
+      "type": "string"
+    },
+    "confidence": {
+      "default": "",
+      "title": "Confidence",
+      "type": "string"
+    },
     "field_name": {
       "title": "Field Name",
       "type": "string"
@@ -10,6 +20,11 @@
     },
     "model_name": {
       "title": "Model Name",
+      "type": "string"
+    },
+    "request_kind": {
+      "default": "",
+      "title": "Request Kind",
       "type": "string"
     },
     "ticket_id": {

@@ -29,6 +29,11 @@ def test_write_field_wire_shape():
         "model_name": "helpdesk.ticket",
         "field_name": "description",
         "html": "<h2>x</h2>",
+        # Support-answer metadata; empty on the ticket-analysis path, which is
+        # the only caller that omits them. Older addons ignore the extra keys.
+        "answer_status": "",
+        "confidence": "",
+        "request_kind": "",
     }
 
 

@@ -24,6 +24,13 @@ class WriteFieldPayload(BaseModel):
     model_name: str
     field_name: str
     html: str
+    # Support-answer metadata, split OUT of `html` so the consultant sees it in
+    # the tab and the customer never does — the draft is sent verbatim through
+    # the mail composer, so anything left in the body reaches them. Empty on
+    # the ticket-analysis path, and older addons ignore the extra keys.
+    answer_status: str = ""
+    confidence: str = ""
+    request_kind: str = ""
 
 
 class ResetStatusPayload(BaseModel):

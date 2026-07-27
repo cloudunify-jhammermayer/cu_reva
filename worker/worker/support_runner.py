@@ -133,12 +133,21 @@ def run_support_answer(job_params: dict) -> dict:
             "turn_id": params.turn_id, "ticket_id": params.ticket_id,
         })
 
+    # Read the metadata back off the persisted turn rather than threading it out
+    # of _produce_answer: the resume branch above never calls that function, and
+    # both branches must deliver the same three values.
+    row = writers.get_support_turn(ctx.db, params.turn_id) or {}
+    structured = row.get("result_structured") or {}
+
     try:
         odoo.write_field(
             ticket_id=params.ticket_id,
             model_name=params.model_name,
             field_name=params.field_name,
             html=html,
+            answer_status=row.get("answer_status") or "",
+            confidence=structured.get("confidence") or "",
+            request_kind=row.get("request_kind") or "",
         )
     except (PermanentError, TransientError) as exc:
         # The turn is already completed; record the delivery failure so the TUI

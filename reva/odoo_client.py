@@ -139,8 +139,16 @@ class OdooCallbackClient:
         model_name: str,
         field_name: str,
         html: str,
+        answer_status: str = "",
+        confidence: str = "",
+        request_kind: str = "",
     ) -> None:
-        """POST the analysis HTML to the Odoo callback endpoint."""
+        """POST the analysis HTML to the Odoo callback endpoint.
+
+        The three metadata args are the support path's; ticket analysis leaves
+        them empty. They travel beside the HTML rather than inside it because
+        the consultant sends the HTML on to the customer unchanged.
+        """
         self._post(
             "/tickets/write-field",
             WriteFieldPayload(
@@ -148,6 +156,9 @@ class OdooCallbackClient:
                 model_name=model_name,
                 field_name=field_name,
                 html=html,
+                answer_status=answer_status,
+                confidence=confidence,
+                request_kind=request_kind,
             ).model_dump(),
         )
         logger.bind(ticket_id=ticket_id, model_name=model_name).info("odoo_callback_ok")
