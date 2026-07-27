@@ -7,6 +7,8 @@ import pytest
 from reva.db import Base, Database, create_engine_from_url
 from reva.db.models import OpsEvent, RepoDocSection, RepoDocsSync
 from reva.repo_docs import (
+    _MAX_FILES,
+    doc_priority,
     in_scope,
     search_repo_docs,
     split_markdown_sections,
@@ -268,15 +270,59 @@ def test_sync_truncated_records_ops_event(db):
 
 
 def test_sync_caps_file_count(db):
-    paths = [f"custom_addons/a/doc{i}.md" for i in range(60)]
+    paths = [f"custom_addons/a/doc{i}.md" for i in range(_MAX_FILES + 10)]
     gh = _FakeGitHub(
         tree=_tree("sha1", paths),
         files={p: "# H\nb\n" for p in paths},
     )
     r = sync_repo_docs(db, gh, "acme", "widgets")
     assert r["status"] == "synced"
-    assert len(gh.file_fetches) == 50           # _MAX_FILES
+    assert len(gh.file_fetches) == _MAX_FILES
     assert len(_ops(db, "files_capped")) == 1
+
+
+def test_the_cap_drops_the_least_useful_docs_not_the_alphabetical_tail(db):
+    """A cap of 50 sorted by path dropped cu_sale/docs/consultant.md while
+    keeping cu_approval/CHANGELOG.md — purely because of the starting letter.
+    That is why a question about cu_sale's dummy-article block was answered
+    from the code: its documentation was never indexed."""
+    changelogs = [f"custom_addons/cu_a{i:03d}/CHANGELOG.md" for i in range(_MAX_FILES)]
+    wanted = "custom_addons/cu_sale/docs/consultant.md"
+    paths = changelogs + [wanted]
+    gh = _FakeGitHub(
+        tree=_tree("sha1", paths),
+        files={p: "# H\nb\n" for p in paths},
+    )
+    sync_repo_docs(db, gh, "acme", "widgets")
+
+    assert wanted in [path for path, _ref in gh.file_fetches]
+    assert len(gh.file_fetches) == _MAX_FILES
+
+
+def test_doc_priority_ranks_consultant_docs_over_changelogs():
+    ordered = sorted(
+        [
+            "custom_addons/cu_approval/CHANGELOG.md",
+            "custom_addons/cu_sale/qualitycheck.md",
+            "custom_addons/cu_sale/docs/testguide.md",
+            "custom_addons/cu_sale/README.md",
+            "custom_addons/cu_sale/docs/consultant.md",
+        ],
+        key=doc_priority,
+    )
+    assert ordered == [
+        "custom_addons/cu_sale/docs/consultant.md",
+        "custom_addons/cu_sale/README.md",
+        "custom_addons/cu_sale/docs/testguide.md",
+        "custom_addons/cu_sale/qualitycheck.md",
+        "custom_addons/cu_approval/CHANGELOG.md",
+    ]
+
+
+def test_doc_priority_is_deterministic_within_a_tier():
+    """A reshuffle between syncs would re-index the whole repo for nothing."""
+    paths = ["custom_addons/b/docs/consultant.md", "custom_addons/a/docs/consultant.md"]
+    assert sorted(paths, key=doc_priority) == sorted(paths)
 
 
 def test_sync_installation_error_fails_without_writes(db):

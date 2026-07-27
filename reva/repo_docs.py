@@ -35,7 +35,11 @@ SCOPE_PREFIXES = ("custom_addons/", "custom-addons/")
 EXCLUDED_BASENAMES = ("CLAUDE.md",)
 
 _MAX_SECTION_CHARS = 2000  # mirrors reva/odoo_registry
-_MAX_FILES = 50
+# 69 in-scope files in the largest customer repo today, and growing. The old
+# cap of 50 silently dropped the 19 that sorted last — which is how a question
+# about cu_sale's dummy-article block reached Claude with documentation about
+# renting and reporting, and had to be answered from the code instead.
+_MAX_FILES = 200
 _MAX_FILE_CHARS = 100_000
 
 _ATX_RE = re.compile(r"^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$")
@@ -49,6 +53,31 @@ def in_scope(path: str) -> bool:
         and path.startswith(SCOPE_PREFIXES)
         and not path.endswith(tuple("/" + b for b in EXCLUDED_BASENAMES))
     )
+
+
+def doc_priority(path: str) -> tuple[int, str]:
+    """Sort key ranking docs by how likely they are to answer a support question.
+
+    The cap has to fall on SOMETHING, and alphabetical order is the one choice
+    that correlates with nothing: it drops `cu_sale/docs/consultant.md` while
+    keeping `cu_approval/CHANGELOG.md`, purely because of the letter it starts
+    with. Ranking by kind means a repo over the cap loses its least useful docs
+    instead of the tail of the alphabet. Path breaks ties so the selection stays
+    deterministic (a reshuffle would re-index the whole repo for nothing).
+    """
+    parts = PurePosixPath(path.lower())
+    name, parent = parts.name, parts.parent.name
+    if parent == "docs" and name == "consultant.md":
+        tier = 0          # written for exactly this audience
+    elif name == "readme.md":
+        tier = 1
+    elif parent == "docs":
+        tier = 2          # testguide, technical, workflow notes
+    elif name == "changelog.md":
+        tier = 4          # release history answers almost no support question
+    else:
+        tier = 3
+    return (tier, path)
 
 
 def _slugify(title: str) -> str:
@@ -206,8 +235,9 @@ def sync_repo_docs(db: Database, github, owner: str, repo: str) -> dict:
             return {"status": "fresh", "sections": row.sections, "error": None}
 
     all_paths = sorted(
-        e["path"] for e in tree.get("tree", [])
-        if e.get("type") == "blob" and in_scope(e["path"])
+        (e["path"] for e in tree.get("tree", [])
+         if e.get("type") == "blob" and in_scope(e["path"])),
+        key=doc_priority,
     )
     capped = len(all_paths) > _MAX_FILES
     paths = all_paths[:_MAX_FILES]
