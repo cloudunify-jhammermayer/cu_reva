@@ -67,6 +67,13 @@ class SupportAnswerer:
             tools=[tool_schema],
             tool_choice=support_tool_choice(),
             max_tokens=_MAX_TOKENS,
+            # Sonnet 5 runs adaptive thinking when `thinking` is omitted, and
+            # max_tokens caps thinking + response text TOGETHER — which
+            # truncated a real support answer mid-tool-call at 16384. This
+            # budget is sized for the draft, so spend all of it on the draft.
+            # Scoped to the support path deliberately; ticket analysis has the
+            # same exposure and is a separate call.
+            thinking={"type": "disabled"},
         )
 
         if response.stop_reason == "max_tokens":

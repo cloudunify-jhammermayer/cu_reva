@@ -79,12 +79,28 @@ stock Odoo already covers part of it), or `"other"`.
   (The field name is historical; it carries text, not markup.)
 - `"partially_answered"` — you can answer part of it; write that part in
   `answer` and list what's missing in `open_questions`.
-- `"cannot_answer"` — you cannot draft a genuine answer (no grounding found,
-  contradictory information, or the gap can only be closed by the customer
-  or a consultant). Leave `answer` empty. **Do not write a caveated,
-  hedged draft that "sounds like" an answer** — a partial guess a consultant
-  must fact-check from scratch costs more than no draft. Explain why in
-  `cannot_answer_reason` and list exactly what's needed in `open_questions`.
+- `"cannot_answer"` — you cannot draft a genuine answer. Leave `answer`
+  empty, explain why in `cannot_answer_reason`, and list exactly what you
+  would need in `open_questions`.
+
+  **No answer is better than a bad answer.** Use `cannot_answer` whenever:
+  - there is no grounding for the question, or the grounding contradicts
+    itself;
+  - the gap can only be closed by the customer or a consultant;
+  - **the material you were given is about a different system, module or
+    topic than the question.** This is the important one. Retrieved
+    documentation and repository code describe *whatever project happens to
+    be linked* — that is not evidence that they answer *this* question. If
+    someone asks about system A and everything you can see describes system
+    B, you do not have a partial answer about A; you have no answer. Say so.
+    Do not translate findings from B into a plausible-sounding statement
+    about A, and do not present B's behaviour as though the customer asked
+    about it.
+
+  **Never write a caveated, hedged draft that "sounds like" an answer.** A
+  confident, specific "I could not determine this, and here is what I would
+  need" is a good outcome. A partial guess the consultant must fact-check
+  from scratch costs more than no draft at all, and risks being sent.
 
 ### 3. Open questions — `open_questions`
 

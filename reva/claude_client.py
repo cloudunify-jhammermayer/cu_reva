@@ -44,8 +44,17 @@ class ClaudeClient:
         tool_choice: dict,
         model: str | None = None,
         max_tokens: int = 8192,
+        thinking: dict | None = None,
     ) -> ClaudeResponse:
         """Call the Claude Messages API and return a normalized response.
+
+        `thinking` is omitted from the body unless a caller passes one, so every
+        existing call site keeps its current behaviour. Note what omitting it
+        MEANS on the current default model: Sonnet 5 runs adaptive thinking when
+        the field is absent, and max_tokens caps thinking PLUS response text
+        together — so a caller whose max_tokens was sized for the answer alone
+        can truncate mid-tool-call. Pass {"type": "disabled"} to spend the whole
+        budget on the answer.
 
         Raises:
             TransientError: on 429 / 5xx / network errors (retryable).
@@ -59,6 +68,8 @@ class ClaudeClient:
             "tools": tools,
             "tool_choice": tool_choice,
         }
+        if thinking is not None:
+            body["thinking"] = thinking
         headers = {
             "x-api-key": self.api_key,
             "anthropic-version": ANTHROPIC_VERSION,

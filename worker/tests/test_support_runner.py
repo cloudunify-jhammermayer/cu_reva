@@ -354,3 +354,41 @@ def test_terminal_failure_marks_the_turn_not_just_the_log(env):
     assert "answer_failed" in _ops(env.db)
     # the record is usable again: no pending turn blocking a new request
     assert writers.get_pending_support_turn(env.db, env.thread_id) is None
+
+
+# --- prior turns --------------------------------------------------------------
+
+
+def _complete(env, turn_id: int, question: str, *, delivered: bool) -> None:
+    writers.record_support_turn_completed(
+        env.db, turn_id, f"<p>{question}</p>", _response(), {"answer": question},
+        "question", "answered", "docs")
+    if delivered:
+        writers.record_support_turn_callback_sent(env.db, turn_id)
+
+
+def test_a_retry_of_the_same_question_is_not_replayed_as_history(env):
+    """Pressing "Support request" again after a failure produces a turn with
+    identical text. Replaying those made the model answer "nothing new since my
+    previous replies" instead of answering the question — and one of the earlier
+    drafts had been grounded in the wrong repo. A retry is not a follow-up."""
+    _complete(env, env.turn_id, "Wie?", delivered=True)
+    current = writers.record_support_turn_created(
+        env.db, env.thread_id, env.instance_id, "Wie?")
+
+    run_support_answer(_params(env, turn_id=current))
+    assert env.answerer.prior_turns == []
+
+
+def test_a_delivered_follow_up_is_replayed_but_an_undelivered_one_is_not(env):
+    """An answer whose callback never landed was seen by nobody, so it is not
+    shared context — but a delivered answer to a different question is."""
+    _complete(env, env.turn_id, "Wie?", delivered=True)
+    undelivered = writers.record_support_turn_created(
+        env.db, env.thread_id, env.instance_id, "Zwischenfrage?")
+    _complete(env, undelivered, "Zwischenfrage?", delivered=False)
+    current = writers.record_support_turn_created(
+        env.db, env.thread_id, env.instance_id, "Und nun?")
+
+    run_support_answer(_params(env, turn_id=current, question="Und nun?"))
+    assert [t["question"] for t in env.answerer.prior_turns] == ["Wie?"]

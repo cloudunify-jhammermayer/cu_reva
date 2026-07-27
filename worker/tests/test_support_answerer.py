@@ -420,6 +420,17 @@ def test_max_tokens_16384_is_sent():
     assert captured["body"]["max_tokens"] == 16384
 
 
+def test_thinking_is_disabled_so_max_tokens_belongs_to_the_answer():
+    """Sonnet 5 runs ADAPTIVE thinking when `thinking` is omitted, and
+    max_tokens caps thinking + response text together — which truncated a real
+    support answer mid-tool-call and failed the turn. The support path buys the
+    whole budget for the answer."""
+    handler, captured = _capture()
+    answerer = _make_answerer(handler)
+    answerer.answer(_params(), "## Persona\nFormal.", [])
+    assert captured["body"]["thinking"] == {"type": "disabled"}
+
+
 def test_cache_breakpoints_stay_within_the_api_limit():
     """The Messages API allows at most 4 cache_control breakpoints per request.
     This path already uses all four: static prompt + persona (from

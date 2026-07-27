@@ -299,3 +299,14 @@ def test_support_prompts_forbid_caveated_draft_on_cannot_answer():
         body = path.read_text().lower()
         assert "cannot_answer" in body, path.name
         assert "caveated" in body or "hedged" in body, path.name
+
+
+def test_support_prompts_refuse_answers_from_the_wrong_system():
+    """REVA answered an rs2 question out of a linked BMD repo, because being
+    handed a repo reads as evidence the repo is relevant. Both prompts must
+    say that wrong-topic grounding is cannot_answer, not a partial answer."""
+    for path in (PROMPTS_DIR / "support_answer.md",
+                 SKILLS_DIR / "reva-support-answer.md"):
+        body = " ".join(path.read_text().split()).lower()
+        assert "different system" in body or "different one" in body, path.name
+        assert "no answer is better" in body, path.name

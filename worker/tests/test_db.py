@@ -1766,6 +1766,7 @@ def test_prior_support_turns_oldest_first_excludes_current(db):
         writers.record_support_turn_completed(
             db, turn_id, f"<p>a{n}</p>", _resp(), {}, "question", "answered", "docs"
         )
+        writers.record_support_turn_callback_sent(db, turn_id)
         ids.append(turn_id)
     current = writers.record_support_turn_created(db, tid, 1, "q3")
 
@@ -1817,3 +1818,35 @@ def test_support_thread_status_follows_its_latest_turn(db):
     thread = writers.get_support_thread(db, tid)
     assert thread["status"] == "answered"
     assert thread["last_turn_at"] is not None
+
+
+def test_prior_turns_exclude_undelivered_and_repeated_questions(db):
+    """A thread of retries is not a conversation. Replaying it made the model
+    answer "nothing new since my previous replies" to a question it had never
+    successfully answered."""
+    tid = _thread(db)
+
+    # delivered answer to a DIFFERENT question -> genuine history
+    a = writers.record_support_turn_created(db, tid, 1, "Frage A")
+    writers.record_support_turn_completed(
+        db, a, "<p>A</p>", _resp(), {"answer": "A"}, "question", "answered", "docs")
+    writers.record_support_turn_callback_sent(db, a)
+
+    # completed but NEVER delivered -> nobody saw it, so not shared context
+    b = writers.record_support_turn_created(db, tid, 1, "Frage B")
+    writers.record_support_turn_completed(
+        db, b, "<p>B</p>", _resp(), {"answer": "B"}, "question", "answered", "docs")
+
+    # delivered, but the SAME question as the one being asked now -> a retry
+    c = writers.record_support_turn_created(db, tid, 1, "Frage C")
+    writers.record_support_turn_completed(
+        db, c, "<p>C</p>", _resp(), {"answer": "C"}, "question", "answered", "docs")
+    writers.record_support_turn_callback_sent(db, c)
+
+    current = writers.record_support_turn_created(db, tid, 1, "Frage C")
+    prior = writers.prior_support_turns(
+        db, tid,
+        before_seq=writers.get_support_turn(db, current)["seq"],
+        exclude_question="Frage C",
+    )
+    assert [p["question"] for p in prior] == ["Frage A"]

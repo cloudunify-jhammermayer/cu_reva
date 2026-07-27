@@ -3069,21 +3069,41 @@ def list_support_turns(db: Database, thread_id: int, limit: int = 50) -> list[di
 
 
 def prior_support_turns(
-    db: Database, thread_id: int, before_seq: int, limit: int = 10
+    db: Database,
+    thread_id: int,
+    before_seq: int,
+    exclude_question: str | None = None,
+    limit: int = 10,
 ) -> list[dict]:
-    """Completed turns before `before_seq`, oldest-first for prompt replay.
+    """Turns that are genuinely CONVERSATION HISTORY, oldest-first for replay.
+
+    Two filters, both learned the hard way — without them a thread of retries
+    reads as a conversation and the model answers "nothing new since my
+    previous replies":
+
+    - **Delivered only** (`callback_sent_at` set). An answer whose callback
+      failed was never seen by anyone, so it is not shared context; replaying
+      it makes the model refer to something the consultant never received.
+    - **Not the same question.** Pressing "Support request" again after a
+      failure creates a new turn with IDENTICAL text. That is a retry, not a
+      follow-up, and replaying it teaches the model to restate its earlier
+      answer instead of answering afresh.
 
     Ordering is chronological because the model reads them as a conversation;
     the current turn is excluded so it can't be replayed as its own history.
     """
     with db.session() as s:
+        conditions = [
+            SupportTurn.thread_id == thread_id,
+            SupportTurn.seq < before_seq,
+            SupportTurn.status == "completed",
+            SupportTurn.callback_sent_at.is_not(None),
+        ]
+        if exclude_question is not None:
+            conditions.append(SupportTurn.question != exclude_question)
         rows = s.execute(
             select(SupportTurn)
-            .where(
-                SupportTurn.thread_id == thread_id,
-                SupportTurn.seq < before_seq,
-                SupportTurn.status == "completed",
-            )
+            .where(*conditions)
             .order_by(SupportTurn.seq.asc())
             .limit(limit)
         ).scalars().all()

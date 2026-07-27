@@ -198,6 +198,10 @@ def _produce_answer(ctx, params: SupportJobParams, odoo, log) -> str:
     prior_turns = writers.prior_support_turns(
         ctx.db, params.thread_id,
         before_seq=(writers.get_support_turn(ctx.db, params.turn_id) or {}).get("seq", 1),
+        # A re-press of "Support request" after a failure is a RETRY of this
+        # exact question, not a follow-up — replaying it makes the model
+        # restate its earlier answer instead of answering afresh.
+        exclude_question=params.question,
     )
 
     grounding = "docs" if knowledge.blocks else "none"

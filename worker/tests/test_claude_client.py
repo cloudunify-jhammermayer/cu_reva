@@ -226,3 +226,32 @@ def test_review_defaults_to_sonnet_when_no_model_passed():
     client.review(**_review_args())
 
     assert captured["body"]["model"] == "claude-sonnet-5"
+
+
+# --- thinking -----------------------------------------------------------------
+
+
+def test_thinking_is_absent_unless_a_caller_asks_for_it():
+    """Every pre-existing call site relies on the model's default behaviour;
+    adding the field for the support path must not change what they send."""
+    payload = _load_fixture("successful_review.json")
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=payload)
+
+    _make_client(handler).review(**_review_args())
+    assert "thinking" not in captured["body"]
+
+
+def test_thinking_is_forwarded_verbatim_when_passed():
+    payload = _load_fixture("successful_review.json")
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=payload)
+
+    _make_client(handler).review(**_review_args(), thinking={"type": "disabled"})
+    assert captured["body"]["thinking"] == {"type": "disabled"}
