@@ -44,7 +44,7 @@ def test_prompts_dir_exists():
 
 
 def test_get_version_returns_current_version(builder):
-    assert builder.get_version() == "v2.12"
+    assert builder.get_version() == "v2.13"
 
 
 def test_ticket_issue_type_is_ticket_level():

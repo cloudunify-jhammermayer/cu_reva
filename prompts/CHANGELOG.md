@@ -1,3 +1,25 @@
+## v2.13 — Support answers: refuse the wrong system, emit null for "no answer"
+
+- Both support prompts (`support_answer.md`, `skills/reva-support-answer.md`):
+  grounding that is about a **different system, module or topic** than the
+  question is not grounding. Retrieved docs and repository code describe
+  whatever project happens to be linked, which is not evidence that they
+  answer *this* question — so that case is `cannot_answer`, not a partial
+  answer translated out of the wrong codebase. Prompted by a real turn that
+  answered an rs2/Mandanten question out of a linked BMD repo. The rule the
+  operator asked for, in their words: no answer is better than a bad one.
+- `cannot_answer` now says **set `answer` to `null`** — the JSON value, not an
+  empty string, not a placeholder. This is a prompt/schema agreement, not a
+  wording preference: every property is `required` in a strict tool schema, so
+  a non-nullable `answer` left the model no way to express "nothing belongs
+  here". Told to leave it empty and unable to, Sonnet 5 degenerated — emitting
+  `</antml parameter><parameter name="cannot_answer_reason">` into the field,
+  writing `"placeholder"` as the reason, and in one run never terminating
+  (16384 output tokens for a 1.1 KB payload, failing the turn). The schema
+  side now offers null for `answer` and `handoff.rationale`; Pydantic coerces
+  it back to `""`. Measured on the live API against the question that failed:
+  0/3 valid calls before, 24/28 at ~800 output tokens after.
+
 ## v2.12 — Support answer drafts
 
 - New `support_answer.md`: Messages-API prompt for `reva/support_answerer.py`
