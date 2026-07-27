@@ -213,7 +213,8 @@ services:
       redis:
         condition: service_started
     deploy:
-      # Six concurrent jobs (was 2, raised 2026-07-26): planner-gated code
+      # Three concurrent jobs (was 2; briefly set to 6, held at 3 on
+      # 2026-07-27 by request): planner-gated code
       # grounding means ticket analyses and support answers can now take the
       # per-repo lock and run for minutes, so a customer-facing draft must not
       # queue behind them. Cross-replica safety is designed in (advisory repo
@@ -231,15 +232,15 @@ services:
       #
       # DB CONNECTIONS: the engine uses SQLAlchemy defaults (pool_size 5 +
       # max_overflow 10 = 15 per process) and postgres runs at the image
-      # default max_connections=100. Worst case is now 6 x 15 = 90 for workers
-      # alone, before api and scheduler — it fit comfortably at 2 replicas (30)
-      # and does not at 6. In practice each RQ worker runs ONE job at a time so
+      # default max_connections=100. Worst case at 3 replicas is 45 for
+      # workers alone, before api and scheduler — comfortable. Revisit this
+      # arithmetic before raising the count. In practice each RQ worker runs ONE job at a time so
       # it holds 1-2 connections, and the pool is a ceiling rather than a
       # reservation, which is why this is a watch item and not a blocker. If
       # "too many clients" ever appears, raise postgres max_connections or pin
       # a smaller pool_size for the worker engine — do NOT also add per-worker
       # job concurrency, which would make the worst case real.
-      replicas: 6
+      replicas: 3
       resources:
         limits:
           cpus: "2.0"
