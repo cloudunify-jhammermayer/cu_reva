@@ -23,7 +23,7 @@ def _answer(**overrides):
         "sources": [],
         "handoff": {},
         "language": "en",
-        "confidence": 0.8,
+        "confidence": "high",
     }
     payload.update(overrides)
     return SupportAnswerResult.model_validate(payload)
@@ -149,12 +149,24 @@ def test_schema_carries_no_keywords_the_messages_api_rejects():
     walk(build_support_tool_schema()["input_schema"])
 
 
-def test_confidence_is_clamped_not_rejected():
-    """An out-of-range confidence is a trivial model slip; failing the tool
-    call over it would discard a good (already paid for) answer."""
-    assert _answered(confidence=1.4).confidence == 1.0
-    assert _answered(confidence=-0.2).confidence == 0.0
-    assert _answered(confidence=0.65).confidence == 0.65
+def test_confidence_is_the_same_enum_as_every_other_reva_output():
+    """It was a float; the model answered "medium" against a `type: number`
+    field even under strict:true. Strict does not reliably coerce numeric
+    types, so this matches MissingInfoItem/CoverageFeature/StoryEstimate —
+    the shape the model already emits."""
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    assert _answered(confidence="medium").confidence == "medium"
+    assert _answered(confidence="high").confidence == "high"
+    with _pytest.raises(ValidationError):
+        _answered(confidence=0.9)
+
+
+def test_confidence_is_a_string_enum_in_the_tool_schema():
+    prop = build_support_tool_schema()["input_schema"]["properties"]["confidence"]
+    assert prop.get("type") != "number"
+    assert set(prop.get("enum", [])) == {"high", "medium", "low"}
 
 
 def _answered(**over):
@@ -162,7 +174,7 @@ def _answered(**over):
 
     payload = dict(
         request_kind="question", answer_status="answered",
-        answer="Enable it under Settings.", language="en", confidence=0.9,
+        answer="Enable it under Settings.", language="en", confidence="high",
     )
     payload.update(over)
     return SupportAnswerResult(**payload)

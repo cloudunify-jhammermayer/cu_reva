@@ -524,24 +524,16 @@ class SupportAnswerResult(BaseModel):
     sources: list[SupportSource] = Field(default_factory=list)
     handoff: SupportHandoff = Field(default_factory=SupportHandoff)
     language: SupportLanguage
-    # NOT Field(ge=…, le=…): pydantic emits those as JSON-Schema
-    # minimum/maximum, and the Messages API rejects a strict tool whose number
-    # property carries them ("For 'number' type, properties maximum, minimum
-    # are not supported"). The range is enforced below instead — same
-    # guarantee, a schema the API accepts. Finding.confidence keeps ge/le
-    # because it only ever reaches Claude through the CLI, which sends no
-    # tool schema.
-    confidence: float
-
-    @field_validator("confidence", mode="before")
-    @classmethod
-    def _clamp_confidence(cls, v: object) -> object:
-        # Clamp rather than reject: an out-of-range confidence is a trivial
-        # model slip, and failing the whole tool call over it would throw away
-        # a good answer (and re-pay for it).
-        if isinstance(v, (int, float)) and not isinstance(v, bool):
-            return min(1.0, max(0.0, float(v)))
-        return v
+    # Qualitative, matching every other Odoo-facing REVA output
+    # (MissingInfoItem, CoverageFeature, StoryEstimate). It was briefly a float:
+    # ge/le made the API reject the tool outright ("For 'number' type,
+    # properties maximum, minimum are not supported"), and dropping them made
+    # the model answer "medium" against a `type: number` field — even with
+    # strict:true, additionalProperties:false and every property required.
+    # Strict does not reliably coerce numeric types, the prompt saying 0.0-1.0
+    # did not help, and nothing consumes this value, so the enum the model
+    # already wants to emit is the right shape.
+    confidence: Literal["high", "medium", "low"] = "medium"
 
     @field_validator("open_questions", "sources", mode="before")
     @classmethod

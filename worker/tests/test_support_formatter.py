@@ -18,7 +18,7 @@ def _answered(**overrides) -> SupportAnswerResult:
         answer="Yes, the billing run can be restarted from the wizard.",
         sources=[_source()],
         language="en",
-        confidence=0.9,
+        confidence="high",
     )
     data.update(overrides)
     return SupportAnswerResult(**data)
@@ -32,7 +32,7 @@ def _partial(**overrides) -> SupportAnswerResult:
         open_questions=["Which invoicing policy is configured on the journal?"],
         sources=[_source()],
         language="en",
-        confidence=0.5,
+        confidence="high",
     )
     data.update(overrides)
     return SupportAnswerResult(**data)
@@ -46,7 +46,7 @@ def _cannot(**overrides) -> SupportAnswerResult:
         cannot_answer_reason="No documentation or code covers this billing scenario.",
         open_questions=["Which module raises the error?"],
         language="en",
-        confidence=0.2,
+        confidence="high",
     )
     data.update(overrides)
     return SupportAnswerResult(**data)
@@ -229,7 +229,7 @@ def test_answer_paragraphs_split_on_blank_lines_and_stay_escaped():
         answer_status="answered",
         answer="First paragraph.\n\nSecond <script>alert(1)</script> paragraph.",
         language="en",
-        confidence=0.9,
+        confidence="high",
     )
     html = format_support_html(result)
     assert html.count("<p>First paragraph.</p>") == 1
@@ -246,7 +246,7 @@ def test_answer_with_trailing_blank_lines_has_no_empty_paragraph():
         answer_status="answered",
         answer="Only one.\n\n\n",
         language="en",
-        confidence=0.9,
+        confidence="high",
     )
     html = format_support_html(result)
     assert "<p></p>" not in html

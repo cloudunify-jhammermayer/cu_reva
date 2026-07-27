@@ -20,7 +20,7 @@
         ],
         "handoff": {"suggest_analysis": false, "suggest_issues": false, "rationale": ""},
         "language": "en",
-        "confidence": 0.85
+        "confidence": "high"
       }
     }
   ],

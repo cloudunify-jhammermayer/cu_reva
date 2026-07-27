@@ -27,7 +27,7 @@ _RESULT = SupportAnswerResult(
     answer_status="answered",
     answer="Enable it under Settings.",
     language="en",
-    confidence=0.9,
+    confidence="high",
 )
 
 

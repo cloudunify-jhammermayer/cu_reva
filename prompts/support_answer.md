@@ -107,9 +107,10 @@ REVA's existing ticket-analysis / create-issues actions, with a one-line
 
 ### 6. Confidence — `confidence`
 
-A `0.0`–`1.0` honest estimate of how confident you are in the answer as
-drafted (0 for `cannot_answer`, higher only when the grounding is direct and
-unambiguous).
+`high`, `medium` or `low` — an honest estimate of how confident you are in
+the answer as drafted. Use `high` only when the grounding is direct and
+unambiguous, and `low` for `cannot_answer` or a partial answer resting on
+inference.
 
 ---
 
