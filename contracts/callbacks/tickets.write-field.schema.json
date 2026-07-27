@@ -27,6 +27,11 @@
       "title": "Request Kind",
       "type": "string"
     },
+    "sources_html": {
+      "default": "",
+      "title": "Sources Html",
+      "type": "string"
+    },
     "ticket_id": {
       "title": "Ticket Id",
       "type": "integer"

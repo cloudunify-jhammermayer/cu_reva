@@ -27,12 +27,12 @@ _STATUS_BADGE: dict[str, str] = {
     ),
 }
 
-_REQUEST_KIND_LABEL: dict[str, str] = {
-    "question": "question",
-    "change_request": "change request",
-    "bug_report": "bug report",
-    "mixed": "question + change request",
-    "other": "other",
+# The draft is written in the ticket's language, so its headings must be too —
+# a German answer under an English heading reads as a template the consultant
+# forgot to finish. `language` is Literal["de", "en"]; en is the fallback.
+_HEADINGS: dict[str, dict[str, str]] = {
+    "de": {"open_questions": "Offene Fragen", "cannot_answer": "Keine Antwort möglich"},
+    "en": {"open_questions": "Open Questions", "cannot_answer": "Cannot Answer"},
 }
 
 _SOURCE_KIND_LABEL: dict[str, str] = {
@@ -66,35 +66,52 @@ def format_support_html(result: SupportAnswerResult) -> str:
             hint += f" {_esc(handoff.rationale)}"
         parts.append(f'<p style="font-size:0.85em;color:#57606a;">{hint}</p>')
 
+    heading = _HEADINGS.get(result.language, _HEADINGS["en"])
+
     if result.answer_status == "cannot_answer":
         # Product rule: no drafted prose to fact-check — only the reason and
         # what's missing, so the consultant sees the gap instead of a
         # paragraph they must verify.
-        parts.append("<h2>Cannot Answer</h2>")
+        parts.append(f"<h2>{_esc(heading['cannot_answer'])}</h2>")
         parts.append(f"<p>{_esc(result.cannot_answer_reason or '')}</p>")
         if result.open_questions:
-            items = "".join(f"<li>{_esc(q)}</li>" for q in result.open_questions)
-            parts.append(f"<h2>Open Questions</h2><ul>{items}</ul>")
+            parts.append(_question_list(heading, result.open_questions))
         return "\n".join(parts)
 
-    parts.append("<h2>Answer</h2>")
+    # No "Answer" heading: on the answered path this field IS the answer, and
+    # the composer sends it as the message body — a heading announcing what the
+    # message obviously is only reads as boilerplate to the customer.
     parts.append(_paragraphs(result.answer))
 
     if result.answer_status == "partially_answered" and result.open_questions:
-        items = "".join(f"<li>{_esc(q)}</li>" for q in result.open_questions)
-        parts.append(f"<h2>Open Questions</h2><ul>{items}</ul>")
-
-    if result.sources:
-        items = []
-        for source in result.sources:
-            bits = [f"<strong>{_esc(source.title or source.ref)}</strong>"]
-            if source.title and source.ref:
-                bits.append(f"<small>({_esc(source.ref)})</small>")
-            bits.append(f"<small>{_esc(_SOURCE_KIND_LABEL.get(source.kind, source.kind))}</small>")
-            items.append("<li>" + " ".join(bits) + "</li>")
-        parts.append(f"<h2>Sources</h2><ul>{''.join(items)}</ul>")
+        parts.append(_question_list(heading, result.open_questions))
 
     return "\n".join(parts)
+
+
+def _question_list(heading: dict[str, str], questions: list[str]) -> str:
+    items = "".join(f"<li>{_esc(q)}</li>" for q in questions)
+    return f"<h2>{_esc(heading['open_questions'])}</h2><ul>{items}</ul>"
+
+
+def format_support_sources_html(result: SupportAnswerResult) -> str:
+    """Render the grounding REVA used, for an internal-only Odoo field.
+
+    Split out of the draft for the same reason as answer_status and friends:
+    the consultant forwards the draft verbatim, and REVA's citations are its
+    working-out, not something the customer asked for. Returns "" when the
+    answer had no sources, so the field stays hidden.
+    """
+    if not result.sources:
+        return ""
+    items = []
+    for source in result.sources:
+        bits = [f"<strong>{_esc(source.title or source.ref)}</strong>"]
+        if source.title and source.ref:
+            bits.append(f"<small>({_esc(source.ref)})</small>")
+        bits.append(f"<small>{_esc(_SOURCE_KIND_LABEL.get(source.kind, source.kind))}</small>")
+        items.append("<li>" + " ".join(bits) + "</li>")
+    return f"<ul>{''.join(items)}</ul>"
 
 
 def _paragraphs(text: str) -> str:

@@ -142,6 +142,7 @@ class OdooCallbackClient:
         answer_status: str = "",
         confidence: str = "",
         request_kind: str = "",
+        sources_html: str = "",
     ) -> None:
         """POST the analysis HTML to the Odoo callback endpoint.
 
@@ -159,6 +160,7 @@ class OdooCallbackClient:
                 answer_status=answer_status,
                 confidence=confidence,
                 request_kind=request_kind,
+                sources_html=sources_html,
             ).model_dump(),
         )
         logger.bind(ticket_id=ticket_id, model_name=model_name).info("odoo_callback_ok")

@@ -34,6 +34,7 @@ def test_write_field_wire_shape():
         "answer_status": "",
         "confidence": "",
         "request_kind": "",
+        "sources_html": "",
     }
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from reva.html_guard import ensure_renderable
-from reva.support_formatter import format_support_html
+from reva.support_formatter import format_support_html, format_support_sources_html
 from reva.types import SupportAnswerResult, SupportHandoff, SupportSource
 
 
@@ -63,17 +63,18 @@ def test_answered_renders_answer_and_all_sources():
         ]
     )
     html = format_support_html(result)
-    assert "<h2>Answer</h2>" in html
-    assert "Yes, the billing run can be restarted from the wizard." in html
-    assert "<h2>Sources</h2>" in html
-    assert "Account run" in html
-    assert "core/account.md#run" in html
-    assert "core doc" in html
-    assert "Run model" in html
-    assert "custom_addons/billing/models/run.py" in html
-    assert "repo code" in html
-    # cannot_answer content must never appear on an answered draft
-    assert "Cannot Answer" not in html
+    # The draft is the message body the composer sends, so it is the answer
+    # prose and nothing else — no "Answer" heading announcing the obvious, and
+    # no citations. Sources live in their own internal field.
+    assert html == "<p>Yes, the billing run can be restarted from the wizard.</p>"
+
+    sources = format_support_sources_html(result)
+    assert "Account run" in sources
+    assert "core/account.md#run" in sources
+    assert "core doc" in sources
+    assert "Run model" in sources
+    assert "custom_addons/billing/models/run.py" in sources
+    assert "repo code" in sources
 
 
 def test_the_draft_carries_no_reva_metadata_or_byline():
@@ -105,11 +106,11 @@ def test_cannot_answer_without_open_questions_stops_before_the_answer_section():
 
 def test_partially_answered_renders_answer_and_open_questions():
     html = format_support_html(_partial())
-    assert "<h2>Answer</h2>" in html
+    assert "<h2>Answer</h2>" not in html
     assert "Partially, but it depends on the invoicing policy." in html
     assert "<h2>Open Questions</h2>" in html
     assert "Which invoicing policy is configured on the journal?" in html
-    assert "<h2>Sources</h2>" in html
+    assert "<h2>Sources</h2>" not in html
 
 
 # --- cannot_answer -------------------------------------------------------
@@ -200,7 +201,9 @@ def test_escapes_html_metacharacters_in_source_fields():
     result = _answered(
         sources=[SupportSource(kind="repo_doc", ref="a & b", title="<script>x</script>")]
     )
-    html = format_support_html(result)
+    # Sources moved to their own field; the escaping guarantee moves with them —
+    # ref/title are model output shaped by untrusted customer text.
+    html = format_support_sources_html(result)
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
     assert "a &amp; b" in html
@@ -253,9 +256,8 @@ def test_answer_paragraphs_split_on_blank_lines_and_stay_escaped():
     assert html.count("<p>First paragraph.</p>") == 1
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
-    # two authored paragraphs -> two blocks in the Answer section
-    answer_section = html.split("<h2>Answer</h2>")[1]
-    assert answer_section.count("<p>") >= 2
+    # two authored paragraphs -> two blocks
+    assert html.count("<p>") >= 2
 
 
 def test_answer_with_trailing_blank_lines_has_no_empty_paragraph():
@@ -268,3 +270,29 @@ def test_answer_with_trailing_blank_lines_has_no_empty_paragraph():
     )
     html = format_support_html(result)
     assert "<p></p>" not in html
+
+
+# --- ticket language ----------------------------------------------------------
+
+
+def test_headings_follow_the_ticket_language():
+    """A German draft under an English heading reads as an unfinished template.
+    The draft body is already written in the ticket's language; the headings
+    REVA adds around it must match."""
+    de = format_support_html(_partial(language="de"))
+    assert "<h2>Offene Fragen</h2>" in de
+    assert "Open Questions" not in de
+
+    en = format_support_html(_partial(language="en"))
+    assert "<h2>Open Questions</h2>" in en
+
+    assert "<h2>Keine Antwort möglich</h2>" in format_support_html(_cannot(language="de"))
+    assert "<h2>Cannot Answer</h2>" in format_support_html(_cannot(language="en"))
+
+
+def test_sources_are_absent_from_the_draft_and_empty_when_there_are_none():
+    result = _answered(sources=[])
+    assert format_support_sources_html(result) == ""
+    # and a draft with sources still carries none of them
+    assert "Sources" not in format_support_html(_answered())
+    assert "<ul>" not in format_support_html(_answered())

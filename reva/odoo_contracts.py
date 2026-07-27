@@ -31,6 +31,8 @@ class WriteFieldPayload(BaseModel):
     answer_status: str = ""
     confidence: str = ""
     request_kind: str = ""
+    # Rendered <ul> of the grounding REVA cited; "" when there was none.
+    sources_html: str = ""
 
 
 class ResetStatusPayload(BaseModel):

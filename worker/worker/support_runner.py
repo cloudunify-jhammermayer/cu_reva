@@ -22,7 +22,7 @@ from reva.errors import MalformedModelOutput, PermanentError, TransientError
 from reva.github_urls import parse_github_repo_url
 from reva.html_guard import ensure_renderable
 from reva.persona import render_persona_block, resolve_persona
-from reva.support_formatter import format_support_html
+from reva.support_formatter import format_support_html, format_support_sources_html
 from reva.ticket_knowledge import build_ticket_knowledge
 from reva.types import SupportAnswerResult, SupportJobParams
 from worker.repo_config import code_grounding_allowed, resolve_repo_context
@@ -148,6 +148,9 @@ def run_support_answer(job_params: dict) -> dict:
             answer_status=row.get("answer_status") or "",
             confidence=structured.get("confidence") or "",
             request_kind=row.get("request_kind") or "",
+            sources_html=format_support_sources_html(
+                SupportAnswerResult.model_validate(structured)
+            ) if structured else "",
         )
     except (PermanentError, TransientError) as exc:
         # The turn is already completed; record the delivery failure so the TUI

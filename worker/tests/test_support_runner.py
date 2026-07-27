@@ -111,12 +111,14 @@ class FakeOdoo:
     raise_exc: Exception | None = None
 
     def write_field(self, ticket_id, model_name, field_name, html,
-                    answer_status="", confidence="", request_kind=""):
+                    answer_status="", confidence="", request_kind="",
+                    sources_html=""):
         if self.raise_exc:
             raise self.raise_exc
         self.written.append({"ticket_id": ticket_id, "field_name": field_name,
                              "html": html, "answer_status": answer_status,
-                             "confidence": confidence, "request_kind": request_kind})
+                             "confidence": confidence, "request_kind": request_kind,
+                             "sources_html": sources_html})
 
 
 @pytest.fixture()
