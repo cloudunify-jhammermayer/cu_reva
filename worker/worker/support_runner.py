@@ -105,7 +105,26 @@ def run_support_answer(job_params: dict) -> dict:
         log.info("support_answer_resume_completed")
         html = existing["answer_html"]
     else:
-        html = _produce_answer(ctx, params, odoo, log)
+        try:
+            html = _produce_answer(ctx, params, odoo, log)
+        except TransientError:
+            # RQ will retry; the turn stays pending on purpose so the retry
+            # resumes it rather than the dedup treating it as finished.
+            log.warning("support_answer_transient_error", exc_info=True)
+            raise
+        except Exception as exc:
+            # ANY terminal failure must mark the row, or the turn sits in
+            # `pending` forever and the one-pending-turn dedup rejects every
+            # future request for this record — the feature wedges itself on a
+            # single bad run. This is how a malformed tool schema took the
+            # record out of service instead of just failing one answer.
+            log.exception("support_answer_failed")
+            writers.record_support_turn_failed(ctx.db, params.turn_id, str(exc))
+            writers.record_ops_event(
+                ctx.db, "support_answer", "error", "answer_failed",
+                {"turn_id": params.turn_id, "error": str(exc)[:300]},
+            )
+            raise
 
     html, was_repaired = ensure_renderable(html)
     if was_repaired:

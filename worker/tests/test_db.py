@@ -1798,3 +1798,22 @@ def test_list_support_turns_includes_failures_oldest_first(db):
     turns = writers.list_support_turns(db, tid)
     assert [t["seq"] for t in turns] == [1, 2]
     assert [t["status"] for t in turns] == ["failed", "completed"]
+
+
+def test_support_thread_status_follows_its_latest_turn(db):
+    """The thread sat at the 'open' default forever, which reads as "nothing
+    happened" on a thread that has actually answered or failed."""
+    tid = _thread(db)
+    assert writers.get_support_thread(db, tid)["status"] == "open"
+
+    first = writers.record_support_turn_created(db, tid, 1, "q1")
+    writers.record_support_turn_failed(db, first, "boom")
+    assert writers.get_support_thread(db, tid)["status"] == "failed"
+
+    second = writers.record_support_turn_created(db, tid, 1, "q2")
+    writers.record_support_turn_completed(
+        db, second, "<p>a</p>", _resp(), {}, "question", "answered", "docs"
+    )
+    thread = writers.get_support_thread(db, tid)
+    assert thread["status"] == "answered"
+    assert thread["last_turn_at"] is not None

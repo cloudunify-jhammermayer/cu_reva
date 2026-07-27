@@ -334,3 +334,23 @@ def test_code_path_keeps_public_and_internal_chatter_in_separate_params(env):
     assert "INTERNAL_SECRET" not in skill_params["public_chatter"]
     assert "INTERNAL_SECRET" in skill_params["internal_notes"]
     assert "PUBLIC_MSG" not in skill_params["internal_notes"]
+
+
+def test_terminal_failure_marks_the_turn_not_just_the_log(env):
+    """A permanent error used to leave the turn in `pending`, so the
+    one-pending-turn dedup rejected every future request for that record — one
+    bad run took the whole ticket out of service. Reproduced in production by
+    an invalid tool schema (Claude 400)."""
+    def _boom(*a, **k):
+        raise PermanentError("Claude 400: bad schema")
+
+    env.answerer.answer_with_response = _boom
+    with pytest.raises(PermanentError):
+        run_support_answer(_params(env))
+
+    row = writers.get_support_turn(env.db, env.turn_id)
+    assert row["status"] == "failed"
+    assert "bad schema" in row["error_message"]
+    assert "answer_failed" in _ops(env.db)
+    # the record is usable again: no pending turn blocking a new request
+    assert writers.get_pending_support_turn(env.db, env.thread_id) is None

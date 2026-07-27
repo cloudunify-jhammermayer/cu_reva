@@ -122,3 +122,47 @@ def test_rejects_unknown_answer_status():
 def test_rejects_unknown_language():
     with pytest.raises(ValidationError):
         _answer(language="fr")
+
+
+def test_schema_carries_no_keywords_the_messages_api_rejects():
+    """A strict tool schema must not carry numeric range keywords.
+
+    The API answers `tools.0.custom: For 'number' type, properties maximum,
+    minimum are not supported` and the whole call 400s. This escaped every
+    existing test because the answerer tests use a MockTransport that accepts
+    any schema — they proved the shape we intended, not the shape the API
+    takes. Walk the real generated schema instead.
+    """
+    banned = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+              "multipleOf", "minLength", "maxLength", "pattern",
+              "minItems", "maxItems"}
+
+    def walk(node, path="input_schema"):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                assert key not in banned, f"{path}.{key} is rejected by the Messages API"
+                walk(value, f"{path}.{key}")
+        elif isinstance(node, list):
+            for i, item in enumerate(node):
+                walk(item, f"{path}[{i}]")
+
+    walk(build_support_tool_schema()["input_schema"])
+
+
+def test_confidence_is_clamped_not_rejected():
+    """An out-of-range confidence is a trivial model slip; failing the tool
+    call over it would discard a good (already paid for) answer."""
+    assert _answered(confidence=1.4).confidence == 1.0
+    assert _answered(confidence=-0.2).confidence == 0.0
+    assert _answered(confidence=0.65).confidence == 0.65
+
+
+def _answered(**over):
+    from reva.types import SupportAnswerResult
+
+    payload = dict(
+        request_kind="question", answer_status="answered",
+        answer="Enable it under Settings.", language="en", confidence=0.9,
+    )
+    payload.update(over)
+    return SupportAnswerResult(**payload)

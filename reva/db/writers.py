@@ -3002,6 +3002,10 @@ def record_support_turn_completed(
         thread = s.get(SupportThread, row.thread_id)
         if thread is not None:
             thread.last_turn_at = row.completed_at
+            # The thread mirrors its latest turn. Without this it sits at the
+            # 'open' default forever, which reads as "nothing happened" on a
+            # thread that has actually answered.
+            thread.status = "answered"
         _insert_spend(s, "support_answer", row.estimated_cost_usd)
 
 
@@ -3012,6 +3016,10 @@ def record_support_turn_failed(db: Database, turn_id: int, error: str) -> None:
             row.status = "failed"
             row.error_message = error[:2000]
             row.completed_at = datetime.now(timezone.utc)
+            thread = s.get(SupportThread, row.thread_id)
+            if thread is not None:
+                thread.status = "failed"
+                thread.last_turn_at = row.completed_at
 
 
 def reset_support_turn(db: Database, turn_id: int) -> None:
