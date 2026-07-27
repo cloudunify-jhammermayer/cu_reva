@@ -22,6 +22,7 @@ from reva.errors import MalformedModelOutput, PermanentError, TransientError
 from reva.github_urls import parse_github_repo_url
 from reva.html_guard import ensure_renderable
 from reva.persona import render_persona_block, resolve_persona
+from reva.support_answerer import find_code_references
 from reva.support_formatter import format_support_html, format_support_sources_html
 from reva.ticket_knowledge import build_ticket_knowledge
 from reva.types import SupportAnswerResult, SupportJobParams
@@ -285,6 +286,17 @@ def _produce_answer(ctx, params: SupportJobParams, odoo, log) -> str:
                 f"{_SUPPORT_SKILL} produced no {SupportAnswerResult.__name__}"
             )
         result = SupportAnswerResult.model_validate(response.tool_use_input)
+
+    leaks = find_code_references(result)
+    if leaks:
+        # Not fatal: a good answer with one stray path still beats no answer,
+        # and the consultant reviews before sending. But both prompts forbid
+        # this, so a leak means a prompt regression and must be visible.
+        log.warning("support_answer_code_reference_leaked", refs=leaks[:5])
+        writers.record_ops_event(
+            ctx.db, "support_answer", "warning", "code_reference_in_answer",
+            {"turn_id": params.turn_id, "refs": leaks[:5]},
+        )
 
     html = format_support_html(result)
     writers.record_support_turn_completed(

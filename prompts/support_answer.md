@@ -71,6 +71,16 @@ stock Odoo already covers part of it), or `"other"`.
 
 ### 2. Answer — `answer_status` and `answer`
 
+**Technical detail is EVIDENCE, never OUTPUT.** The retrieved documentation
+quotes model names, fields and file paths. The customer reading your draft does
+not read code, so none of that may appear in `answer`, `cannot_answer_reason`
+or `open_questions`. Describe the *behaviour* instead: "Beim Bestätigen eines
+Auftrags wird geprüft, ob noch Dummy-Artikel enthalten sind", never "siehe
+cu_sale/models/sale_order.py, Methode `_action_confirm`". Odoo app and custom
+**addon** names at the consultant level are the one carve-out. Put the
+references in `sources` — that is a separate internal field the customer never
+sees.
+
 - `"answered"` — you have enough grounding for a complete answer. Write it in
   `answer` as **plain text**, matching the persona's tone and length.
   Separate paragraphs with a blank line; the formatter turns those into

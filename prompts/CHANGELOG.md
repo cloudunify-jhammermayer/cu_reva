@@ -1,3 +1,24 @@
+## v2.14 — Support answers: code is evidence, never output
+
+- Both support prompts: no Python model, field, method, XML view, controller,
+  table or file path may appear in `answer`, `cannot_answer_reason` or
+  `open_questions`. A code-grounded answer came back with "siehe
+  cu_sale/models/sale_order.py, Methode `_action_confirm`" in the body the
+  consultant forwards to the customer — unreadable to them, and an
+  unnecessary disclosure of how the system is built. This is the rule
+  `skills/reva-ticket-analysis.md` already carries, applied to a stricter
+  audience: a product owner at least works on the project, the customer does
+  not. Same consultant-level carve-out — Odoo apps, settings, features and
+  custom **addon** names are allowed; a file path or field name is not.
+  `sources` is where the references belong, and it is now a separate internal
+  Odoo field the customer never sees, so citing there costs nothing.
+- Backed by `find_code_references()`, which records a `code_reference_in_answer`
+  ops event when a reference slips through. It does not fail the turn: an
+  otherwise good answer with one stray path still beats no answer, and the
+  consultant reviews before sending. Deliberately high-precision — Odoo dotted
+  model names are not matched, being indistinguishable from "z.B." or
+  "Version 19.0" in ordinary prose.
+
 ## v2.13 — Support answers: refuse the wrong system, emit null for "no answer"
 
 - Both support prompts (`support_answer.md`, `skills/reva-support-answer.md`):

@@ -11,6 +11,7 @@ callback. HTML formatting lives in `support_formatter.py`.
 from __future__ import annotations
 
 import os
+import re
 import secrets
 
 from reva.attachment_text import extract_attachment_text
@@ -229,3 +230,34 @@ class SupportAnswerer:
                 "cache_control": {"type": "ephemeral"},
             },
         ]
+
+
+# High-precision only: a false positive here cries wolf on a clean answer, and
+# the cost of a miss is one visible ops event rather than a broken turn. Odoo
+# dotted model names (`sale.order`) are deliberately NOT matched — they are
+# indistinguishable from ordinary prose ("z.B.", "Version 19.0").
+_CODE_REFERENCE_RE = re.compile(
+    r"""(?xi)
+    \b[\w./-]+\.(?:py|xml|js|xsl|sql|csv|po|pot)\b   # a source file path
+    | (?<![\w])_[a-z][a-z0-9_]{2,}\b                 # _action_confirm, _compute_x
+    """
+)
+
+
+def find_code_references(result: SupportAnswerResult) -> list[str]:
+    """Technical references that leaked into the customer-facing fields.
+
+    The code is evidence, never output: the draft is read by a customer, and
+    "siehe cu_sale/models/sale_order.py, Methode _action_confirm" is both
+    unreadable to them and an unnecessary disclosure of how the system is
+    built. Both prompts forbid it; this is the check that says whether they
+    worked. `sources` is exempt — that is the internal field paths belong in.
+    """
+    haystack = [result.answer, result.cannot_answer_reason or "", *result.open_questions]
+    found: list[str] = []
+    for text in haystack:
+        for match in _CODE_REFERENCE_RE.findall(text):
+            hit = match if isinstance(match, str) else match[0]
+            if hit and hit not in found:
+                found.append(hit)
+    return found

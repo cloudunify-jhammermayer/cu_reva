@@ -44,7 +44,7 @@ def test_prompts_dir_exists():
 
 
 def test_get_version_returns_current_version(builder):
-    assert builder.get_version() == "v2.13"
+    assert builder.get_version() == "v2.14"
 
 
 def test_ticket_issue_type_is_ticket_level():
@@ -321,3 +321,15 @@ def test_support_prompts_ask_for_a_null_answer_not_an_empty_one():
         body = " ".join(path.read_text().split())
         assert "`answer` to `null`" in body, path.name
         assert "Leave `answer` empty" not in body, path.name
+
+
+def test_support_prompts_forbid_technical_references_in_the_answer():
+    """The draft is read by a customer. "siehe cu_sale/models/sale_order.py,
+    Methode _action_confirm" is both unreadable to them and an unnecessary
+    disclosure of how the system is built — the same code-is-evidence rule
+    reva-ticket-analysis carries, for a stricter audience."""
+    for path in (PROMPTS_DIR / "support_answer.md",
+                 SKILLS_DIR / "reva-support-answer.md"):
+        body = " ".join(path.read_text().split())
+        assert "EVIDENCE, never OUTPUT" in body, path.name
+        assert "`sources`" in body, path.name

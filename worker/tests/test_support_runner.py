@@ -462,3 +462,42 @@ def test_a_resumed_turn_delivers_the_same_metadata(env):
     assert resent["answer_status"] == first["answer_status"]
     assert resent["confidence"] == first["confidence"]
     assert resent["request_kind"] == first["request_kind"]
+
+
+# --- code references ----------------------------------------------------------
+
+
+def test_a_leaked_code_reference_is_recorded_but_does_not_fail_the_turn(env):
+    """"siehe cu_sale/models/sale_order.py, Methode _action_confirm" is
+    unreadable to the customer who receives the draft. Both prompts forbid it,
+    so a leak means a prompt regression — visible, but not worth throwing away
+    an otherwise good answer the consultant reviews anyway."""
+    leaky = SupportAnswerResult(
+        request_kind="question", answer_status="answered", language="de",
+        confidence="high",
+        answer="Die Sperre greift beim Bestätigen "
+               "(siehe cu_sale/models/sale_order.py, Methode _action_confirm).",
+    )
+    env.answerer.answer_with_response = lambda *a, **k: (_response(), leaky)
+
+    out = run_support_answer(_params(env))
+
+    assert out["status"] == "completed"
+    assert env.odoo.written                       # still delivered
+    assert "code_reference_in_answer" in _ops(env.db)
+
+
+def test_a_clean_german_answer_does_not_trip_the_detector(env):
+    """Prose full of z.B., version numbers and addon names must stay quiet —
+    a detector that cries wolf on clean answers gets ignored."""
+    clean = SupportAnswerResult(
+        request_kind="question", answer_status="answered", language="de",
+        confidence="high",
+        answer="Beim Bestätigen wird geprüft, ob Dummy-Artikel enthalten sind.\n\n"
+               "Die Prüfung wertet z.B. nur die direkte Kategorie aus. "
+               "Das Modul cu_sale ist ab Version 19.0 aktiv.",
+    )
+    env.answerer.answer_with_response = lambda *a, **k: (_response(), clean)
+
+    run_support_answer(_params(env))
+    assert "code_reference_in_answer" not in _ops(env.db)
