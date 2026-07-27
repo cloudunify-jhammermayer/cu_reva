@@ -34,8 +34,9 @@ PLANNER_TOOL = {
             "worth_checking": {"type": "boolean"},
             "terms": {"type": "array", "items": {"type": "string"}},
             "modules": {"type": "array", "items": {"type": "string"}},
+            "needs_repo_code": {"type": "boolean"},
         },
-        "required": ["worth_checking", "terms", "modules"],
+        "required": ["worth_checking", "terms", "modules", "needs_repo_code"],
         "additionalProperties": False,
     },
 }
@@ -52,6 +53,12 @@ class TicketKnowledge:
     # planner OR core-search failure — the runner records it on the existing
     # ticket_planner ops-event channel.
     planner_error: str | None = None
+    # The code-grounding gate: True when answering needs this project's own code
+    # or configuration, not just the official docs or the repo's markdown. False
+    # on any doubt — a planner failure, an older prompt that omits the key, or a
+    # run where the planner never executed — because escalation costs 10-30x a
+    # docs-only answer and takes the repo lock.
+    needs_repo_code: bool = False
     repo_docs_error: str | None = None
     # None = repo-docs retrieval never attempted (no url / no source); int = the
     # number of repo doc sections injected (0 = attempted, nothing injected).
@@ -110,9 +117,14 @@ def plan_core_queries(
 ) -> tuple[dict | None, float, str | None]:
     """Run the planner once. Returns ``(plan, cost, error)`` and never raises.
 
-    ``plan`` is ``{"terms": [...], "modules": [...]}`` when worth checking, else
-    None (either the planner said not worth checking, or it failed — the error
-    disambiguates).
+    ``plan`` is ``{"worth_checking": bool, "terms": [...], "modules": [...],
+    "needs_repo_code": bool}``, or None when the call failed (``error`` says
+    why).
+
+    Note ``worth_checking`` stays IN the plan rather than collapsing a False
+    into a bare None: "the docs won't help, but the project's code will" is a
+    real case (a question about this customer's own customisation), and the old
+    contract threw that signal away before any caller could read it.
     """
     cost = 0.0
     try:
@@ -141,11 +153,16 @@ def plan_core_queries(
             response.cache_creation_tokens,
         )
         plan = response.tool_use_input or {}
-        if not plan.get("worth_checking"):
-            return None, cost, None
         terms = [term for term in plan.get("terms", []) if isinstance(term, str)][:8]
         modules = [module for module in plan.get("modules", []) if isinstance(module, str)][:5]
-        return {"terms": terms, "modules": modules}, cost, None
+        return {
+            "worth_checking": bool(plan.get("worth_checking")),
+            "terms": terms,
+            "modules": modules,
+            # Default False: an older prompt or a partial tool call must not
+            # trigger a paid CLI escalation by omission.
+            "needs_repo_code": bool(plan.get("needs_repo_code")),
+        }, cost, None
     except Exception as exc:
         logger.warning("ticket_planner_failed", error=str(exc), exc_info=True)
         return None, cost, str(exc)
@@ -226,12 +243,16 @@ def build_ticket_knowledge(
         return TicketKnowledge()  # nothing to search — skip the planner call
 
     plan, cost, err = plan_core_queries(claude, prompts_dir, ticket_text)
-    if err is not None:
+    if err is not None or plan is None:
         return TicketKnowledge(planner_cost=cost, planner_error=err)
-    if plan is None:  # planner: not worth checking
-        return TicketKnowledge(planner_cost=cost)
 
-    knowledge = TicketKnowledge(planner_cost=cost)
+    # Carried even when the planner said the docs aren't worth searching — the
+    # code gate is independent of doc retrieval.
+    needs_repo_code = plan["needs_repo_code"]
+    if not plan["worth_checking"]:
+        return TicketKnowledge(planner_cost=cost, needs_repo_code=needs_repo_code)
+
+    knowledge = TicketKnowledge(planner_cost=cost, needs_repo_code=needs_repo_code)
     if core_ok:
         core_block, core_err = build_core_block(core, version, plan)
         if core_err is not None:

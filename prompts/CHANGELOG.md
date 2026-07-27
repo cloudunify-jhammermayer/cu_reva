@@ -1,3 +1,45 @@
+## v2.12 — Support answer drafts
+
+- New `support_answer.md`: Messages-API prompt for `reva/support_answerer.py`
+  (support-answers feature, spec `docs/superpowers/specs/2026-07-25-support-
+  answers-design.md`). Drafts an answer to an Odoo support request via the
+  structured `submit_support_answer` tool — a **draft for a consultant to
+  review before sending**, never a message posted to the customer directly.
+  Same-language rule as `ticket_analysis.md`; obeys the rendered `## Persona`
+  system block, treating its `### Content policy` section as hard
+  constraints; cites `sources` on `answered`/`partially_answered` drafts; the
+  `cannot_answer` contract forbids a caveated draft — state the reason and
+  `open_questions` instead. Internal-visibility chatter is fenced separately
+  from public chatter in the user prompt with an explicit never-quote
+  instruction — it is context only and must never become recognisable in the
+  output, the single worst failure this feature can have.
+- New `skills/reva-support-answer.md`: the headless-CLI counterpart, used when
+  the planner judges the question needs the project's own code. Same output
+  contract as `support_answer.md`; repo-aware, so it is CodeGraph-enabled and
+  deliberately does NOT receive `review_guidance.md` (findings governance is
+  wasted tokens and contradictory guidance for a skill that emits no findings).
+- `core_query_planner.md`: new `needs_repo_code` flag — the code-grounding
+  gate. `true` only when answering needs this customer's own code or
+  configuration rather than the official docs; false whenever unsure, since it
+  triggers a full agentic repository pass at roughly 10–30× the cost. Stated as
+  independent of `worth_checking`: a question can need the project's code while
+  the official docs are irrelevant, and the planner must judge each separately.
+- The draft field is `answer` (renamed from `answer_html`) and carries **plain
+  text**, not markup: the formatter escapes it — it is model output shaped by
+  untrusted customer text, rendered in a consultant's Odoo view — and rebuilds
+  paragraphs from blank lines. Both support prompts state this, and a test
+  pins the contract in both, since two producers feeding one escaping consumer
+  is exactly the shape that drifts. Note `support_turns.answer_html` keeps its
+  name: that column stores the rendered fragment and genuinely is HTML.
+- New `skills/reva-ticket-analysis.md`: ticket analysis grounded in the
+  project's code, on the same planner gate. Its load-bearing rule is that the
+  code is **evidence, never output** — the analysis is written for a product
+  owner, so no model, field, method, view, or file path may appear in
+  `summary`, `missing_info`, or `story_estimates`; the existing
+  consultant-level carve-out for Odoo app and custom **addon** names stands.
+  CodeGraph-enabled, and excluded from `review_guidance.md` like the support
+  skill.
+
 ## v2.11 — Structured issue dependencies (builds_on)
 
 - ticket_issues.md: dependencies between issues move from hand-written body

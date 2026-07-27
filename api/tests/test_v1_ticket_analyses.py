@@ -351,3 +351,75 @@ def test_list_exposes_github_url(client_db_queue):
 
     item = client.get("/api/v1/ticket-analyses").json()["items"][0]
     assert item["github_url"] == "https://github.com/acme/portal"
+
+
+# --- Phase 0: readiness for planner-gated CLI escalation ----------------------
+
+
+def test_job_timeout_covers_cli_escalation(client_db_queue):
+    """Once a ticket analysis can escalate to the headless CLI, a 300s job
+    timeout SIGKILLs the work-horse mid-paid-run and RQ re-pays on every retry.
+    The enqueue must derive its timeout from REVIEW_JOB_TIMEOUT, exactly as the
+    review/audit enqueues do (claude_code_runner.py says so in a comment)."""
+    from reva.claude_code_runner import REVIEW_JOB_TIMEOUT
+
+    client, _, queue, headers = client_db_queue
+    client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers)
+    _, _, kwargs = queue.enqueued[0]
+    assert kwargs["job_timeout"] >= REVIEW_JOB_TIMEOUT
+
+
+def test_stale_pending_window_outlives_a_live_retrying_job(client_db_queue):
+    """_STALE_PENDING must exceed the worst case a LIVE job can still be
+    running, or a stale-requeue spawns a second paid run alongside the first
+    (the pending-unique index can't help — requeue resets the same row)."""
+    from app.routes.v1.ticket_analyses import _JOB_TIMEOUT, _RETRY, _STALE_PENDING
+
+    worst_case = (_RETRY.max + 1) * _JOB_TIMEOUT + sum(_RETRY.intervals)
+    assert _STALE_PENDING.total_seconds() > worst_case
+
+
+def _make_requeueable(db, analysis_id):
+    from reva.db.models import TicketAnalysis
+
+    with db.session() as s:
+        s.get(TicketAnalysis, analysis_id).status = "completed"
+
+
+def test_requeue_preserves_github_url(client_db_queue):
+    """Requeue rebuilt TicketJobParams from the row but dropped github_url,
+    silently downgrading grounding — and once code grounding is planner-gated,
+    making a requeued analysis permanently unable to escalate."""
+    client, db, queue, headers = client_db_queue
+    payload = {**BASE_PAYLOAD, "github_url": GITHUB_URL}
+    aid = client.post(
+        "/api/v1/ticket-analysis", json=payload, headers=headers
+    ).json()["analysis_id"]
+    _make_requeueable(db, aid)
+
+    r = client.post(f"/api/v1/ticket-analysis/{aid}/requeue")
+    assert r.status_code == 202
+    _, params, _ = queue.enqueued[-1]
+    assert params["github_url"] == GITHUB_URL
+
+
+def test_requeue_of_purged_row_is_409(client_db_queue):
+    """After the retention purge input_text is a sentinel (SECU-8). Requeuing
+    would spend a paid call analysing placeholder text and overwrite the real
+    result with nonsense."""
+    from reva.db.models import TicketAnalysis
+    from reva.db.writers import PURGED_TICKET_TEXT
+
+    client, db, queue, headers = client_db_queue
+    aid = client.post(
+        "/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers
+    ).json()["analysis_id"]
+    with db.session() as s:
+        row = s.get(TicketAnalysis, aid)
+        row.status = "completed"
+        row.input_text = PURGED_TICKET_TEXT
+
+    before = len(queue.enqueued)
+    r = client.post(f"/api/v1/ticket-analysis/{aid}/requeue")
+    assert r.status_code == 409
+    assert len(queue.enqueued) == before

@@ -25,8 +25,10 @@ from app.routes.v1 import (
     odoo_instances,
     ops_events,
     pending,
+    personas,
     repos,
     reviews,
+    support_requests,
     ticket_actuals,
     ticket_analyses,
     ticket_issues,
@@ -53,11 +55,14 @@ _master.include_router(value_reports.router)
 _master.include_router(audits.router)
 _master.include_router(odoo_instances.router)
 _master.include_router(ops_events.router)
+_master.include_router(support_requests.router)
+_master.include_router(personas.router)
 
 _instance = APIRouter(dependencies=[Depends(require_odoo_instance), Depends(rate_limit)])
 _instance.include_router(ticket_actuals.create_router)
 _instance.include_router(ticket_analyses.create_router)
 _instance.include_router(ticket_issues.create_router)
+_instance.include_router(support_requests.create_router)
 _instance.include_router(timesheet_reviews.create_router)
 
 # Connection test: accepts master OR instance key, so it sits outside both
@@ -70,6 +75,7 @@ _any.include_router(health.router)
 _shared = APIRouter(dependencies=[Depends(rate_limit)])
 _shared.include_router(ticket_analyses.shared_router)
 _shared.include_router(ticket_issues.shared_router)
+_shared.include_router(support_requests.shared_router)
 
 router.include_router(_master)
 router.include_router(_instance)

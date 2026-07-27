@@ -1,0 +1,33 @@
+{
+  "id": "msg_01SUPPORTANSWERXYZ",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-6",
+  "stop_reason": "tool_use",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01SUPPORT",
+      "name": "submit_support_answer",
+      "input": {
+        "request_kind": "question",
+        "answer_status": "answered",
+        "answer": "<p>You can configure this under Settings &gt; Invoicing.</p>",
+        "cannot_answer_reason": null,
+        "open_questions": [],
+        "sources": [
+          {"kind": "core_doc", "ref": "accounting/invoicing#terms", "title": "Invoicing Terms"}
+        ],
+        "handoff": {"suggest_analysis": false, "suggest_issues": false, "rationale": ""},
+        "language": "en",
+        "confidence": 0.85
+      }
+    }
+  ],
+  "usage": {
+    "input_tokens": 2200,
+    "cache_creation_input_tokens": 500,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 340
+  }
+}

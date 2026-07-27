@@ -428,3 +428,115 @@ type OdooInstanceCreated struct {
 	KeyPrefix string `json:"key_prefix"`
 	APIKey    string `json:"api_key"`
 }
+
+// SupportThreadSummary is one REVA<->consultant Q&A thread about an Odoo
+// record. GithubURL is "" (JSON null) for a project-less ticket, matching the
+// TicketAnalysisSummary convention. Served by GET /api/v1/support-threads.
+type SupportThreadSummary struct {
+	ID             int        `json:"id"`
+	OdooInstanceID *int       `json:"odoo_instance_id"`
+	TicketID       int        `json:"ticket_id"`
+	ModelName      string     `json:"model_name"`
+	FieldName      string     `json:"field_name"`
+	GithubURL      string     `json:"github_url"`
+	Status         string     `json:"status"`
+	CreatedAt      time.Time  `json:"created_at"`
+	LastTurnAt     *time.Time `json:"last_turn_at"`
+}
+
+type SupportThreadPage struct {
+	Items []SupportThreadSummary `json:"items"`
+	Total int                    `json:"total"`
+}
+
+// SupportThreadDetail is the drill-down payload for one thread: the summary
+// fields plus its turns, oldest-first by seq and including failed ones (this
+// is the operator view, so failures must stay visible). The list endpoint
+// deliberately omits turns — a page of 50 threads would drag every answer
+// body with it. Served by GET /api/v1/support-threads/{thread_id}.
+type SupportThreadDetail struct {
+	SupportThreadSummary
+	Turns []SupportTurnDetail `json:"turns"`
+}
+
+// SupportTurnDetail is one question/answer round inside a support thread.
+// GroundingLevel is "code" / "docs" / "none" (nil until the turn completes) —
+// operationally the most important field: how well-grounded the drafted
+// answer was. Served by GET /api/v1/support-turn/{turn_id}.
+type SupportTurnDetail struct {
+	ID               int        `json:"id"`
+	ThreadID         int        `json:"thread_id"`
+	Seq              int        `json:"seq"`
+	JobID            *string    `json:"job_id"`
+	Question         string     `json:"question"`
+	AnswerHTML       *string    `json:"answer_html"`
+	RequestKind      *string    `json:"request_kind"`
+	AnswerStatus     *string    `json:"answer_status"`
+	GroundingLevel   *string    `json:"grounding_level"`
+	Status           string     `json:"status"`
+	ErrorMessage     *string    `json:"error_message"`
+	EstimatedCostUSD *float64   `json:"estimated_cost_usd"`
+	CreatedAt        time.Time  `json:"created_at"`
+	CompletedAt      *time.Time `json:"completed_at"`
+	CallbackSentAt   *time.Time `json:"callback_sent_at"`
+	CallbackError    *string    `json:"callback_error"`
+}
+
+// Persona is one configured tone row — either the single 'default' scope row
+// or one 'repo' scope row. A nil knob inherits from the default row at
+// resolution time (see ResolvedPersona / GET /personas/resolved).
+type Persona struct {
+	ID             int     `json:"id"`
+	Scope          string  `json:"scope"`
+	RepoFullName   *string `json:"repo_full_name"`
+	Language       *string `json:"language"`
+	Formality      *string `json:"formality"`
+	TechnicalDepth *string `json:"technical_depth"`
+	Length         *string `json:"length"`
+	Salutation     *string `json:"salutation"`
+	SignOff        *string `json:"sign_off"`
+	StyleNotes     *string `json:"style_notes"`
+	ContentPolicy  *string `json:"content_policy"`
+	Active         bool    `json:"active"`
+}
+
+type PersonaPage struct {
+	Items []Persona `json:"items"`
+	Total int       `json:"total"`
+}
+
+// PersonaBody is the create/update payload. Replace semantics: PATCH replaces
+// every knob with what's set here (nil clears it back to "inherit"), so an
+// active-only toggle must resend the row's other current values.
+type PersonaBody struct {
+	Scope          string  `json:"scope"`
+	RepoFullName   *string `json:"repo_full_name,omitempty"`
+	Language       *string `json:"language,omitempty"`
+	Formality      *string `json:"formality,omitempty"`
+	TechnicalDepth *string `json:"technical_depth,omitempty"`
+	Length         *string `json:"length,omitempty"`
+	Salutation     *string `json:"salutation,omitempty"`
+	SignOff        *string `json:"sign_off,omitempty"`
+	StyleNotes     *string `json:"style_notes,omitempty"`
+	ContentPolicy  *string `json:"content_policy,omitempty"`
+	Active         bool    `json:"active"`
+}
+
+// ResolvedPersona is what a support answer for RepoFullName would actually be
+// written with — the merged knobs (default < repo < hardcoded fallback), plus
+// RenderedBlock, the exact text injected into the prompt. This is the view
+// that answers "why did REVA write it in that tone". Served by
+// GET /api/v1/personas/resolved?repo_full_name=.
+type ResolvedPersona struct {
+	RepoFullName   *string   `json:"repo_full_name"`
+	Language       *string   `json:"language"`
+	Formality      *string   `json:"formality"`
+	TechnicalDepth *string   `json:"technical_depth"`
+	Length         *string   `json:"length"`
+	Salutation     *string   `json:"salutation"`
+	SignOff        *string   `json:"sign_off"`
+	StyleNotes     *string   `json:"style_notes"`
+	ContentPolicy  *string   `json:"content_policy"`
+	RenderedBlock  string    `json:"rendered_block"`
+	ResolvedAt     time.Time `json:"resolved_at"`
+}

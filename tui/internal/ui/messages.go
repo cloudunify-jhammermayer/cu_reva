@@ -96,3 +96,30 @@ type odooActionMsg struct {
 	err error
 }
 type tickMsg struct{}
+
+type supportThreadsLoadedMsg struct {
+	data *api.SupportThreadPage
+	err  error
+}
+type supportThreadDetailLoadedMsg struct {
+	threadID int // guards against a response for a thread the user has left
+	data     *api.SupportThreadDetail
+	err      error
+}
+type supportTurnRequeuedMsg struct {
+	turnID int
+	err    error
+}
+type personasLoadedMsg struct {
+	data *api.PersonaPage
+	err  error
+}
+type personaResolvedMsg struct {
+	repoFullName string // guards against a response for a row the user has left
+	data         *api.ResolvedPersona
+	err          error
+}
+type personaUpdatedMsg struct {
+	id  int
+	err error
+}

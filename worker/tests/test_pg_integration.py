@@ -44,10 +44,12 @@ def pg_db():
     db = Database(create_engine_from_url(PG_URL))
     db.migrate(_MIGRATIONS_DIR)
     # Clean slate per test. repositories CASCADEs to PRs/pending/runs/findings;
-    # the repo-docs tables key on repo_full_name (no FK) so truncate them too.
+    # the repo-docs tables key on repo_full_name and odoo_docs_sections on
+    # odoo_version (no FKs), so truncate those too.
     with db.engine.begin() as conn:
         conn.execute(text(
-            "TRUNCATE repositories, claude_spend, repo_doc_sections, repo_docs_sync "
+            "TRUNCATE repositories, claude_spend, repo_doc_sections, repo_docs_sync, "
+            "odoo_docs_sections, personas, support_turns, support_threads "
             "RESTART IDENTITY CASCADE"
         ))
     yield db
@@ -362,3 +364,103 @@ def test_repo_docs_advisory_lock_busy_skip(pg_db):
     finally:
         tx_a.rollback()
         conn_a.close()
+
+
+def _seed_core_sections(db, version, rows):
+    from reva.db.models import OdooDocsSection
+
+    with db.session() as s:
+        for path, title, body in rows:
+            s.add(OdooDocsSection(
+                odoo_version=version, path=path, anchor="a", title=title, body=body,
+            ))
+
+
+def test_core_docs_fts_or_of_terms_realistic_planner_query(pg_db):
+    """A core doc section matching only SOME of a realistic many-term planner
+    query must still hit (OR-of-terms), and a denser match ranks first. Under
+    the old single plainto_tsquery (AND of every term) this returned nothing —
+    which silently emptied the Standard Odoo Coverage block on most tickets."""
+    from reva.core_knowledge import CoreKnowledge
+
+    _seed_core_sections(pg_db, "19.0", [
+        ("sale.rst", "Quotation templates",
+         "quotation templates pre-fill common quotations for sales orders"),
+        ("hr.rst", "Payroll", "salary rules for employees"),
+        ("misc.rst", "Notes", "nothing relevant here"),
+    ])
+
+    core = CoreKnowledge(pg_db, "/nonexistent", ["19.0"])
+    planner_terms = ["quotation", "template", "pdf", "layout", "sale", "sale_management"]
+    hits = core.search_docs("19.0", planner_terms)
+    paths = [h["path"] for h in hits]
+    assert paths and paths[0] == "sale.rst"  # multi-term match found and ranked first
+    assert "misc.rst" not in paths           # zero-term match stays out
+
+
+def test_core_docs_fts_scopes_to_version(pg_db):
+    """OR-of-terms must not leak across odoo_version."""
+    from reva.core_knowledge import CoreKnowledge
+
+    _seed_core_sections(pg_db, "19.0", [("a.rst", "Quotation templates", "quotation")])
+    _seed_core_sections(pg_db, "17.0", [("b.rst", "Quotation templates", "quotation")])
+
+    core = CoreKnowledge(pg_db, "/nonexistent", ["19.0", "17.0"])
+    assert [h["path"] for h in core.search_docs("19.0", ["quotation"])] == ["a.rst"]
+    assert [h["path"] for h in core.search_docs("17.0", ["quotation"])] == ["b.rst"]
+
+
+def test_migrations_043_044_create_persona_and_support_tables(pg_db):
+    """Real DDL: the raw SQL in db/migrations/ is never exercised by the unit
+    suite (tests build from the ORM models), so a drift between the two is only
+    visible here."""
+    with pg_db.engine.connect() as conn:
+        for tbl in ("personas", "support_threads", "support_turns"):
+            assert conn.execute(
+                text("SELECT to_regclass(:t)"), {"t": tbl}
+            ).scalar_one() is not None, tbl
+
+
+def test_personas_partial_unique_indexes_enforced(pg_db):
+    """Postgres-only: the partial unique indexes are what stop two competing
+    default personas, or two personas for one repo."""
+    from sqlalchemy.exc import IntegrityError
+
+    from reva.db import writers
+
+    writers.upsert_persona(pg_db, scope="default", formality="formal")
+    with pytest.raises(IntegrityError):
+        with pg_db.session() as s:
+            s.execute(text(
+                "INSERT INTO personas (scope, formality) VALUES ('default', 'informal')"
+            ))
+
+    writers.upsert_persona(pg_db, scope="repo", repo_full_name="acme/widgets")
+    with pytest.raises(IntegrityError):
+        with pg_db.session() as s:
+            s.execute(text(
+                "INSERT INTO personas (scope, repo_full_name) "
+                "VALUES ('repo', 'acme/widgets')"
+            ))
+
+
+def test_support_turns_pending_partial_index_enforced(pg_db):
+    """One pending turn per thread — the concurrent-POST race guard."""
+    from sqlalchemy.exc import IntegrityError
+
+    from reva.db import writers
+
+    thread_id = writers.get_or_create_support_thread(
+        pg_db, odoo_instance_id=None, ticket_id=1,
+        model_name="helpdesk.ticket", field_name="reva_support_answer",
+    )
+    writers.record_support_turn_created(pg_db, thread_id, None, "q1")
+    with pytest.raises(IntegrityError):
+        with pg_db.session() as s:
+            s.execute(
+                text(
+                    "INSERT INTO support_turns (thread_id, seq, question, status) "
+                    "VALUES (:t, 99, 'q2', 'pending')"
+                ),
+                {"t": thread_id},
+            )

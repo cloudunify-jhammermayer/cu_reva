@@ -86,8 +86,41 @@ problems degrade to a graph-less review, never a failed one.
   hashed, vendored into ast-odoo (`scripts/sync_contracts.sh`) and pinned by
   tests on both sides — wire drift fails CI, not production.
 - **Ticket analysis**: Messages API with a fixed tool schema; result HTML is
-  written back via the `write-field` callback. Attachments (docx/pdf/txt) are
-  text-extracted and analyzed with the description.
+  written back via the `write-field` callback. Attachments (docx/pdf/txt/md) are
+  text-extracted and analyzed with the description. Can escalate to the
+  headless CLI — see *Planner-gated code grounding* below.
+- **Support answers** (spec 2026-07-25): Odoo asks a question via
+  `POST /api/v1/support-request`; REVA drafts an answer into an HTML field for
+  a **consultant to review and send** — it is never posted to the customer.
+  Threads and turns live in `support_threads` / `support_turns` (migration
+  044); REVA owns the turn history and replays it, while Odoo re-sends the full
+  chatter snapshot each turn (delta bookkeeping drifts the moment a message is
+  edited or deleted, with no cheap way to detect it). Chatter entries marked
+  `visibility: "internal"` are fenced separately with a never-quote
+  instruction: they routinely hold the real answer, so they must inform the
+  draft without ever surfacing in it.
+- **Personas** (migration 043, `reva/persona.py`): per-project tone, resolved
+  **per field** — a `default` row, overlaid by a repo row's non-NULL knobs,
+  plus additive `persona_context` from the request that never overrides a knob.
+  `content_policy` is a separate column from `style_notes` so it renders as a
+  hard constraint rather than tone advice. An inactive row resolves as absent,
+  so deactivating actually falls back. Master-key API only — an Odoo instance
+  must not be able to change what REVA says to its own customer. The resolved
+  block is deterministic because it sits in a `cache_control` prompt prefix.
+- **Planner-gated code grounding** (shared by ticket analysis and support
+  answers): `plan_core_queries` returns `needs_repo_code` alongside its search
+  terms, carried on `TicketKnowledge` and **independent of `worth_checking`** —
+  a question can need the project's code while the official docs are
+  irrelevant. True runs one headless-CLI pass (`reva-ticket-analysis` /
+  `reva-support-answer`) under `repo_lock` against the worker clone; false stays
+  on the Messages API. Escalation is roughly 10-30x the cost and takes the lock,
+  so the gate shuts on any doubt — planner failure, no `github_url`, App not
+  installed, kill switch — and every shut reason is an ops event, because a
+  silently ungrounded answer looks exactly like a well-grounded one. Brakes:
+  `REVA_TICKET_CODE_GROUNDING`, per-repo `code_grounding`. The ticket skill's
+  load-bearing rule is that code is **evidence, never output**: the analysis is
+  written for a product owner, so no field, method, view, or file path may
+  appear in it.
 - **Ticket knowledge grounding** (one cheap planner call feeds two retrievals,
   `reva/ticket_knowledge.py`): a small-model planner derives English search
   terms from the ticket; those terms retrieve (a) sections of the official

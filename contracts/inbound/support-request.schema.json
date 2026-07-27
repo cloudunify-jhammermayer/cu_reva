@@ -1,0 +1,166 @@
+{
+  "$defs": {
+    "Attachment": {
+      "description": "A file forwarded by Odoo ({filename, content_base64}). Accepted types are\n.docx / .pdf / .txt / .md \u2014 the filename extension is the authoritative gate\n(see reva.attachment_text). Shared by the ticket-analysis attachment and the\ncreate-issues description_docx; on a create-issues request it is THE basis\nfor the issue split.",
+      "properties": {
+        "content_base64": {
+          "title": "Content Base64",
+          "type": "string"
+        },
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        }
+      },
+      "required": [
+        "filename",
+        "content_base64"
+      ],
+      "title": "Attachment",
+      "type": "object"
+    },
+    "ChatterEntry": {
+      "description": "One Odoo chatter message on a support-request ticket.",
+      "properties": {
+        "author": {
+          "title": "Author",
+          "type": "string"
+        },
+        "author_kind": {
+          "enum": [
+            "customer",
+            "internal",
+            "system"
+          ],
+          "title": "Author Kind",
+          "type": "string"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "posted_at": {
+          "format": "date-time",
+          "title": "Posted At",
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "public",
+            "internal"
+          ],
+          "title": "Visibility",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "posted_at",
+        "author",
+        "author_kind",
+        "visibility",
+        "body"
+      ],
+      "title": "ChatterEntry",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "attachment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Attachment"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional .docx/.pdf/.txt/.md file; its text is extracted and folded into the prompt alongside `question`"
+    },
+    "chatter": {
+      "description": "The ticket's chatter, oldest first. `visibility` is load-bearing: entries marked internal are given to REVA as context but are never quoted or revealed in the drafted answer.",
+      "items": {
+        "$ref": "#/$defs/ChatterEntry"
+      },
+      "title": "Chatter",
+      "type": "array"
+    },
+    "field_name": {
+      "description": "Field on the Odoo record where the draft answer is written",
+      "title": "Field Name",
+      "type": "string"
+    },
+    "github_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Repository URL from the record's project (https://github.com/{owner}/{repo}). Odoo requires a linked project, but REVA degrades rather than refusing: without it the answer is grounded in Odoo core knowledge only, with no project-code grounding.",
+      "title": "Github Url"
+    },
+    "model_name": {
+      "description": "Odoo model name, e.g. \"helpdesk.ticket\" or \"project.task\"",
+      "title": "Model Name",
+      "type": "string"
+    },
+    "persona_context": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Consultant-authored tone/context for this record. Additive on top of the configured persona; never overrides its structured knobs.",
+      "title": "Persona Context"
+    },
+    "question": {
+      "description": "The question to answer. On the first turn this is normally the ticket description.",
+      "title": "Question",
+      "type": "string"
+    },
+    "subject": {
+      "default": "",
+      "description": "Ticket subject line",
+      "title": "Subject",
+      "type": "string"
+    },
+    "thread_id": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "REVA thread id, echoed back on follow-up turns. Null on the first turn; REVA resolves or creates the thread from the record.",
+      "title": "Thread Id"
+    },
+    "ticket_id": {
+      "title": "Ticket Id",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "ticket_id",
+    "model_name",
+    "field_name",
+    "question"
+  ],
+  "title": "SupportRequestBody",
+  "type": "object"
+}

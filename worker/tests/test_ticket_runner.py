@@ -124,7 +124,7 @@ def ctx_and_fakes(monkeypatch):
     return {"ctx": ctx, "db": db, "analyzer": analyzer, "odoo": odoo}
 
 
-def _make_params(db: Database) -> dict:
+def _make_params(db: Database, github_url: str | None = None) -> dict:
     params = TicketJobParams(
         analysis_id=0,
         odoo_instance_id=1,
@@ -132,6 +132,7 @@ def _make_params(db: Database) -> dict:
         model_name="helpdesk.ticket",
         field_name="description",
         text="Add a button to the form view.",
+        github_url=github_url,
     )
     analysis_id = writers.record_ticket_analysis_created(db, params)
     writers.attach_ticket_job_id(db, analysis_id, "rq:job:test-123")
@@ -142,6 +143,7 @@ def _make_params(db: Database) -> dict:
         model_name=params.model_name,
         field_name=params.field_name,
         text=params.text,
+        github_url=github_url,
     ).model_dump()
 
 
@@ -661,3 +663,189 @@ def test_repo_core_version_github_error_degrades(db):
 
     assert version is None
     assert _ops_events(db) == []  # transient infra error, not config drift
+
+
+# --- planner-gated code grounding (Task 10) ----------------------------------
+
+
+class _FakeCodeRunner:
+    """Stands in for ClaudeCodeRunner on the escalated ticket path."""
+
+    def __init__(self, result: TicketAnalysisResult, lock_busy: bool = False):
+        self.result = result
+        self.lock_busy = lock_busy
+        self.lock_calls: list = []
+        self.review_calls: list = []
+
+    def repo_lock(self, owner, name, wait_budget=None):
+        if self.lock_busy:
+            raise TransientError(f"repo_lock for {owner}/{name} busy")
+        self.lock_calls.append((owner, name))
+        import contextlib
+
+        return contextlib.nullcontext()
+
+    def ensure_repo(self, owner, name, head_sha, token):
+        return f"/repos/{owner}/{name}"
+
+    def review(self, repo_path, skill, params, model=None, odoo=False, extra_dirs=None):
+        self.review_calls.append({"skill": skill, "params": params})
+        return ClaudeResponse(
+            model="claude-sonnet-5", stop_reason="tool_use",
+            tool_use_input=self.result.model_dump(mode="json"),
+            input_tokens=9000, output_tokens=1200,
+        )
+
+
+class _FakeGitHubRepo:
+    def __init__(self, installed: bool = True):
+        self.installed = installed
+
+    def get_repo_installation_id(self, owner, repo):
+        if not self.installed:
+            raise PermanentError("App not installed")
+        return 1
+
+    def get_installation_token(self, installation_id):
+        return "tok"
+
+    def get_repo(self, token, owner, repo):
+        return {"default_branch": "main"}
+
+    def get_file_content(self, token, owner, repo, path, ref):
+        return None
+
+
+def _needs_code(monkeypatch, value=True):
+    monkeypatch.setattr(
+        "worker.ticket_runner.build_ticket_knowledge",
+        lambda *a, **k: TicketKnowledge(planner_cost=0.002, needs_repo_code=value),
+    )
+
+
+def _wire_repo(s, code_runner, github):
+    """WorkerContext is frozen — swap in the repo-aware collaborators and
+    re-register the context."""
+    import dataclasses
+
+    ctx = dataclasses.replace(s["ctx"], runner=code_runner, github=github)
+    set_context(ctx)
+    return ctx
+
+
+_GH_URL = "https://github.com/acme/widgets"
+
+
+def test_code_grounded_analysis_runs_the_skill_under_the_lock(ctx_and_fakes, monkeypatch):
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    out = run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+
+    assert out["status"] == "completed"
+    assert code_runner.lock_calls == [("acme", "widgets")]
+    assert code_runner.review_calls[0]["skill"] == "reva-ticket-analysis"
+    assert s["analyzer"].call_count == 0        # the CLI replaced the API call
+
+
+def test_project_less_ticket_never_escalates(ctx_and_fakes, monkeypatch):
+    """github_url is None for bare project.task records — common, and there is
+    no repo to read, so the gate must stay shut without an ops event."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    run_ticket_analysis(_make_params(s["db"]))          # no github_url
+
+    assert code_runner.review_calls == []
+    assert s["analyzer"].call_count == 1
+    with s["db"].session() as sess:
+        events = [e.event for e in sess.query(OpsEvent).all()]
+    assert "code_grounding_unavailable" not in events
+
+
+def test_app_not_installed_degrades_with_ops_event(ctx_and_fakes, monkeypatch):
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo(installed=False))
+
+    run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+
+    assert code_runner.review_calls == []
+    assert s["analyzer"].call_count == 1
+    with s["db"].session() as sess:
+        events = [e.event for e in sess.query(OpsEvent).all()]
+    assert "code_grounding_unavailable" in events
+
+
+def test_per_repo_kill_switch_keeps_the_ticket_on_docs(ctx_and_fakes, monkeypatch):
+    """`code_grounding: false` in .claude-review.yml is the per-repo brake."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+    monkeypatch.setattr(
+        "worker.ticket_runner.code_grounding_allowed", lambda config: False
+    )
+
+    run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+
+    assert code_runner.review_calls == []
+    assert s["analyzer"].call_count == 1
+    with s["db"].session() as sess:
+        events = [e.event for e in sess.query(OpsEvent).all()]
+    assert "code_grounding_disabled" in events
+
+
+def test_repo_lock_busy_retries_rather_than_downgrading(ctx_and_fakes, monkeypatch):
+    """The planner said this ticket needs code. A busy lock must retry, not
+    quietly produce a weaker docs-only analysis and call it done."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    _wire_repo(s, _FakeCodeRunner(s["analyzer"].result, lock_busy=True),
+               _FakeGitHubRepo())
+
+    with pytest.raises(TransientError):
+        run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+    assert s["analyzer"].call_count == 0
+
+
+def test_code_grounded_skill_forbids_code_identifiers_in_the_analysis():
+    """The output prohibition is the whole risk of this path: a model that just
+    read the repository will want to cite it, but the analysis is for a product
+    owner who does not read code. Assert the skill states the rule explicitly —
+    a regression here makes the analysis unusable for its actual audience."""
+    from pathlib import Path
+
+    skill = (
+        Path(__file__).resolve().parents[2]
+        / "prompts" / "skills" / "reva-ticket-analysis.md"
+    ).read_text()
+    collapsed = " ".join(skill.split()).lower()
+
+    assert "evidence, never output" in collapsed
+    # Names the concrete artifacts it must not emit, not just a vague "no code".
+    for artifact in ("field", "method", "xml view", "file path"):
+        assert artifact in collapsed, artifact
+    # And preserves the existing carve-out for consultant-level addon names.
+    assert "addon" in collapsed
+
+
+def test_code_grounded_run_passes_ticket_text_not_the_analysis_prompt(
+    ctx_and_fakes, monkeypatch
+):
+    """The CLI path gets the ticket as a fenced task parameter (review() wraps
+    every value); it must not be handed a pre-rendered Messages-API prompt."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+
+    skill_params = code_runner.review_calls[0]["params"]
+    assert skill_params["ticket_text"] == "Add a button to the form view."

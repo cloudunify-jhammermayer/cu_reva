@@ -23,6 +23,14 @@ VERIFY_MODEL = os.environ.get("REVA_VERIFY_MODEL", "claude-haiku-4-5")
 # Global kill switch for cross-branch review reuse (spec 2026-07-24). Default on.
 CROSS_BRANCH_REUSE = os.environ.get("REVA_CROSS_BRANCH_REUSE", "true").strip().lower() not in ("false", "0", "no")
 
+# Global kill switch for planner-gated code grounding on the ticket-analysis
+# and support-answer paths. False keeps both on the docs-only Messages API
+# path — the brake to pull if the planner over-escalates in production, since
+# an escalated run costs roughly 10-30x and takes the per-repo lock.
+TICKET_CODE_GROUNDING = os.environ.get(
+    "REVA_TICKET_CODE_GROUNDING", "true"
+).strip().lower() not in ("false", "0", "no")
+
 
 def env_or_file(name: str, default: str | None = None) -> str | None:
     """Return env var `name`, or the stripped contents of the file at `{name}_FILE`.

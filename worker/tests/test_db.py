@@ -1574,3 +1574,227 @@ def test_record_review_completed_intent_check_null_when_absent(db, seeded):
     rid = writers.record_review_completed(db, _params(seeded), result)
     with db.session() as s:
         assert s.get(ReviewRun, rid).intent_check is None
+
+
+# --- ticket analysis spend reaches the global cap (Phase 0) -------------------
+
+
+def test_ticket_analysis_completion_records_global_spend(db):
+    """The main analysis call must land in the claude_spend ledger, not only on
+    the ticket_analyses row. sum_estimated_cost_since (the rolling global cap)
+    reads ONLY that ledger, so before this the most expensive leg of the ticket
+    path was invisible to the cap — and CLI escalation makes that leg 10-30x
+    pricier."""
+    from datetime import datetime, timedelta, timezone
+
+    from reva.types import ClaudeResponse, TicketJobParams
+
+    analysis_id = writers.record_ticket_analysis_created(
+        db,
+        TicketJobParams(
+            analysis_id=0, odoo_instance_id=1, ticket_id=42,
+            model_name="helpdesk.ticket", field_name="reva_support_answer",
+            text="t",
+        ),
+    )
+    before = writers.sum_estimated_cost_since(
+        db, datetime.now(timezone.utc) - timedelta(hours=1)
+    )
+    writers.record_ticket_analysis_completed(
+        db,
+        analysis_id,
+        "<h2>Summary</h2>",
+        ClaudeResponse(
+            model="claude-sonnet-5", stop_reason="tool_use", tool_use_input={},
+            input_tokens=10_000, output_tokens=2_000,
+            cache_read_tokens=0, cache_creation_tokens=0,
+        ),
+    )
+    after = writers.sum_estimated_cost_since(
+        db, datetime.now(timezone.utc) - timedelta(hours=1)
+    )
+    assert after > before, "main analysis call missing from the global spend ledger"
+
+
+# --- personas (migration 043) -------------------------------------------------
+
+
+def test_persona_default_and_repo_round_trip(db):
+    writers.upsert_persona(db, scope="default", formality="formal", language="auto")
+    writers.upsert_persona(
+        db, scope="repo", repo_full_name="acme/widgets", formality="informal"
+    )
+
+    default = writers.get_default_persona(db)
+    assert default["formality"] == "formal"
+
+    repo = writers.get_repo_persona(db, "acme/widgets")
+    assert repo["formality"] == "informal"
+    # Unset knobs stay NULL so the resolver can inherit them from the default.
+    assert repo["language"] is None
+
+
+def test_persona_repo_lookup_is_case_insensitive(db):
+    """github_url casing varies; the key is normalised like repo_doc_sections."""
+    writers.upsert_persona(db, scope="repo", repo_full_name="Acme/Widgets")
+    assert writers.get_repo_persona(db, "acme/widgets") is not None
+
+
+def test_persona_upsert_replaces_rather_than_duplicating(db):
+    writers.upsert_persona(db, scope="repo", repo_full_name="acme/widgets",
+                           formality="formal")
+    writers.upsert_persona(db, scope="repo", repo_full_name="acme/widgets",
+                           formality="informal")
+    assert writers.get_repo_persona(db, "acme/widgets")["formality"] == "informal"
+    assert len(writers.list_personas(db)) == 1
+
+
+def test_persona_missing_lookups_return_none(db):
+    assert writers.get_default_persona(db) is None
+    assert writers.get_repo_persona(db, "nobody/here") is None
+
+
+def test_persona_second_default_row_is_rejected(db):
+    """The partial unique index is what stops two competing fallbacks."""
+    from sqlalchemy.exc import IntegrityError
+
+    from reva.db.models import Persona
+
+    writers.upsert_persona(db, scope="default", formality="formal")
+    with pytest.raises(IntegrityError):
+        with db.session() as s:
+            s.add(Persona(scope="default", formality="informal"))
+
+
+def test_persona_list_puts_default_first(db):
+    writers.upsert_persona(db, scope="repo", repo_full_name="zeta/last")
+    writers.upsert_persona(db, scope="repo", repo_full_name="acme/widgets")
+    writers.upsert_persona(db, scope="default")
+    scopes = [p["scope"] for p in writers.list_personas(db)]
+    assert scopes[0] == "default"
+    names = [p["repo_full_name"] for p in writers.list_personas(db)[1:]]
+    assert names == ["acme/widgets", "zeta/last"]
+
+
+# --- support threads / turns (migration 044) ---------------------------------
+
+
+def _thread(db, **over) -> int:
+    kwargs = dict(
+        odoo_instance_id=1, ticket_id=4711, model_name="helpdesk.ticket",
+        field_name="reva_support_answer", github_url="https://github.com/acme/widgets",
+    )
+    kwargs.update(over)
+    return writers.get_or_create_support_thread(db, **kwargs)
+
+
+def test_support_thread_is_idempotent_per_record(db):
+    assert _thread(db) == _thread(db)
+    assert len(writers.list_support_threads(db)) == 1
+
+
+def test_support_thread_separate_per_field_target(db):
+    """Key includes field_name (matching idx_ticket_analyses_pending), so two
+    delivery targets on one record don't collide."""
+    assert _thread(db) != _thread(db, field_name="reva_other_field")
+
+
+def test_support_turn_seq_is_monotonic_per_thread(db):
+    tid = _thread(db)
+    first = writers.record_support_turn_created(db, tid, 1, "q1")
+    writers.record_support_turn_completed(
+        db, first, "<p>a</p>", _resp(), {}, "question", "answered", "docs"
+    )
+    second = writers.record_support_turn_created(db, tid, 1, "q2")
+    assert writers.get_support_turn(db, first)["seq"] == 1
+    assert writers.get_support_turn(db, second)["seq"] == 2
+
+
+def test_support_turn_pending_dedup(db):
+    tid = _thread(db)
+    turn_id = writers.record_support_turn_created(db, tid, 1, "q1")
+    assert writers.get_pending_support_turn(db, tid)["id"] == turn_id
+
+
+def test_support_turn_second_pending_rejected_by_index(db):
+    """The concurrent-POST race guard: two paid turns can't run on one thread."""
+    from sqlalchemy.exc import IntegrityError
+
+    from reva.db.models import SupportTurn
+
+    tid = _thread(db)
+    writers.record_support_turn_created(db, tid, 1, "q1")
+    with pytest.raises(IntegrityError):
+        with db.session() as s:
+            s.add(SupportTurn(thread_id=tid, odoo_instance_id=1, seq=99,
+                              question="q2", status="pending"))
+
+
+def test_support_turn_completion_records_spend_both_caps(db):
+    """Support spend must reach the global ledger AND the per-instance sum, or
+    the budget gates silently ignore an entire paid path."""
+    from datetime import datetime, timedelta, timezone
+
+    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    tid = _thread(db)
+    turn_id = writers.record_support_turn_created(db, tid, 1, "q1")
+    writers.record_support_turn_completed(
+        db, turn_id, "<p>a</p>", _resp(), {"x": 1}, "question", "answered", "code"
+    )
+    assert writers.sum_estimated_cost_since(db, since) > 0
+    assert writers.sum_instance_cost_since(db, 1, since) > 0
+
+
+def test_support_turn_failed_and_reset(db):
+    tid = _thread(db)
+    turn_id = writers.record_support_turn_created(db, tid, 1, "q1")
+    writers.record_support_turn_failed(db, turn_id, "boom")
+    row = writers.get_support_turn(db, turn_id)
+    assert row["status"] == "failed" and row["error_message"] == "boom"
+
+    writers.reset_support_turn(db, turn_id)
+    assert writers.get_support_turn(db, turn_id)["status"] == "pending"
+
+
+def test_prior_support_turns_oldest_first_excludes_current(db):
+    """Prompt replay needs chronological order and must not include the turn
+    being answered right now."""
+    tid = _thread(db)
+    ids = []
+    for n in range(3):
+        turn_id = writers.record_support_turn_created(db, tid, 1, f"q{n}")
+        writers.record_support_turn_completed(
+            db, turn_id, f"<p>a{n}</p>", _resp(), {}, "question", "answered", "docs"
+        )
+        ids.append(turn_id)
+    current = writers.record_support_turn_created(db, tid, 1, "q3")
+
+    prior = writers.prior_support_turns(db, tid, before_seq=
+                                        writers.get_support_turn(db, current)["seq"])
+    assert [p["question"] for p in prior] == ["q0", "q1", "q2"]
+
+
+def _resp():
+    from reva.types import ClaudeResponse
+
+    return ClaudeResponse(
+        model="claude-sonnet-5", stop_reason="tool_use", tool_use_input={},
+        input_tokens=5000, output_tokens=1000,
+        cache_read_tokens=0, cache_creation_tokens=0,
+    )
+
+
+def test_list_support_turns_includes_failures_oldest_first(db):
+    """Distinct from prior_support_turns (prompt replay, completed-only): the
+    drill-down must show the operator everything, failures included."""
+    tid = _thread(db)
+    first = writers.record_support_turn_created(db, tid, 1, "q1")
+    writers.record_support_turn_failed(db, first, "boom")
+    second = writers.record_support_turn_created(db, tid, 1, "q2")
+    writers.record_support_turn_completed(
+        db, second, "<p>a</p>", _resp(), {}, "question", "answered", "code"
+    )
+
+    turns = writers.list_support_turns(db, tid)
+    assert [t["seq"] for t in turns] == [1, 2]
+    assert [t["status"] for t in turns] == ["failed", "completed"]

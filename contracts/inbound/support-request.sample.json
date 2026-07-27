@@ -1,0 +1,29 @@
+{
+  "attachment": null,
+  "chatter": [
+    {
+      "author": "Maria Huber",
+      "author_kind": "customer",
+      "body": "Seit dem Update bricht der Lauf ab.",
+      "id": 98123,
+      "posted_at": "2026-07-25T09:14:00Z",
+      "visibility": "public"
+    },
+    {
+      "author": "Dev Team",
+      "author_kind": "internal",
+      "body": "Bekannt, Fix in 2.3, noch nicht deployed.",
+      "id": 98124,
+      "posted_at": "2026-07-25T10:02:00Z",
+      "visibility": "internal"
+    }
+  ],
+  "field_name": "reva_support_answer",
+  "github_url": "https://github.com/acme/widgets",
+  "model_name": "helpdesk.ticket",
+  "persona_context": "Technisch versierter Kunde; kurz und sachlich.",
+  "question": "Warum bricht der Rechnungslauf seit gestern ab?",
+  "subject": "Rechnungslauf bricht ab",
+  "thread_id": null,
+  "ticket_id": 4711
+}

@@ -71,9 +71,14 @@ def test_classify_accepts_txt_pdf_docx_by_extension():
     assert classify_attachment("spec.docx", _docx_b64())[0] == "docx"
 
 
+def test_classify_accepts_md_by_extension():
+    assert classify_attachment("notes.md", _b64(b"# Heading"))[0] == "md"
+
+
 def test_classify_is_case_insensitive_on_extension():
     assert classify_attachment("NOTES.TXT", _b64(b"hello"))[0] == "txt"
     assert classify_attachment("SPEC.PDF", _pdf_b64("hi"))[0] == "pdf"
+    assert classify_attachment("NOTES.MD", _b64(b"# Heading"))[0] == "md"
 
 
 def test_classify_rejects_unsupported_extension():
@@ -101,6 +106,9 @@ def test_classify_rejects_content_not_matching_extension():
     # .txt bytes that aren't utf-8 decodable
     with pytest.raises(ValueError, match="does not match its .txt"):
         classify_attachment("notes.txt", _b64(b"\xff\xfe\x00\x01binary"))
+    # .md bytes that aren't utf-8 decodable
+    with pytest.raises(ValueError, match="does not match its .md"):
+        classify_attachment("notes.md", _b64(b"\xff\xfe\x00\x01binary"))
 
 
 # --- extract_attachment_text: the worker-side extractor -----------------------
@@ -114,6 +122,12 @@ def test_extract_txt_returns_decoded_text():
 
 def test_extract_txt_tolerates_utf8_bom():
     assert extract_attachment_text("notes.txt", _b64(b"\xef\xbb\xbfHello")) == "Hello"
+
+
+def test_extract_md_returns_decoded_text():
+    assert extract_attachment_text("notes.md", _b64(b"# Title\n\nBody text.")) == (
+        "# Title\n\nBody text."
+    )
 
 
 def test_extract_pdf_returns_text():
@@ -135,6 +149,12 @@ def test_extract_oversized_txt_is_permanent():
     huge = ("word " * 100_000).encode()
     with pytest.raises(PermanentError, match="too large"):
         extract_attachment_text("notes.txt", _b64(huge))
+
+
+def test_extract_oversized_md_is_permanent():
+    huge = ("word " * 100_000).encode()
+    with pytest.raises(PermanentError, match="too large"):
+        extract_attachment_text("notes.md", _b64(huge))
 
 
 def test_extract_corrupt_pdf_is_permanent():

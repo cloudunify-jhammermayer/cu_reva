@@ -79,6 +79,10 @@ class RepoConfig(BaseModel):
     learned_memory: bool = True
     # Kill switch for cross-branch review reuse (dev→stage→prod promotions).
     cross_branch_reuse: bool = True
+    # Per-repo brake on planner-gated CLI code grounding (ticket analyses and
+    # support answers). Global REVA_TICKET_CODE_GROUNDING must also be true.
+    # False keeps this repo's answers on the cheap docs-only path.
+    code_grounding: bool = True
     # Kill switch for the default-off triage pre-pass. Global
     # REVA_TRIAGE_ENABLED must also be true.
     triage: bool = True
@@ -400,8 +404,8 @@ class TicketAnalysisResult(BaseModel):
 
 class Attachment(BaseModel):
     """A file forwarded by Odoo ({filename, content_base64}). Accepted types are
-    .docx / .pdf / .txt — the filename extension is the authoritative gate (see
-    reva.attachment_text). Shared by the ticket-analysis attachment and the
+    .docx / .pdf / .txt / .md — the filename extension is the authoritative gate
+    (see reva.attachment_text). Shared by the ticket-analysis attachment and the
     create-issues description_docx; on a create-issues request it is THE basis
     for the issue split."""
 
@@ -418,12 +422,153 @@ class TicketJobParams(BaseModel):
     model_name: str  # e.g. "helpdesk.ticket" or "project.task"
     field_name: str
     text: str
-    attachment: Attachment | None = None  # optional .docx/.pdf/.txt, folded into the prompt
+    attachment: Attachment | None = None  # optional .docx/.pdf/.txt/.md, folded into the prompt
     # Optional repo URL from the record's Odoo project, stamped at create time.
     # Used for dashboard repo grouping AND by the worker to ground the analysis
     # in the repo's own custom-addon docs (reva/repo_docs.py, spec 2026-07-14);
     # default None keeps every worker path untouched.
     github_url: str | None = None
+
+
+# --- Support answer types -----------------------------------------------------
+
+SupportRequestKind = Literal["question", "change_request", "bug_report", "mixed", "other"]
+SupportAnswerStatus = Literal["answered", "partially_answered", "cannot_answer"]
+SupportLanguage = Literal["de", "en"]
+
+
+class ChatterEntry(BaseModel):
+    """One Odoo chatter message on a support-request ticket."""
+
+    id: int
+    posted_at: datetime
+    author: str
+    author_kind: Literal["customer", "internal", "system"]
+    visibility: Literal["public", "internal"]
+    body: str
+
+
+class SupportJobParams(BaseModel):
+    """Inputs handed to the support-answer RQ job."""
+
+    turn_id: int
+    thread_id: int
+    odoo_instance_id: int
+    ticket_id: int
+    model_name: str  # e.g. "helpdesk.ticket" or "project.task"
+    field_name: str
+    subject: str
+    question: str
+    # Optional repo URL from the record's Odoo project; nullable → default persona
+    # and no code-grounded path (see support_runner).
+    github_url: str | None = None
+    # Nullable, consultant-authored, additive — never overrides the persona knobs.
+    persona_context: str | None = None
+    chatter: list[ChatterEntry]
+    attachment: Attachment | None = None  # optional .docx/.pdf/.txt/.md, folded into the prompt
+
+
+class SupportSource(BaseModel):
+    """One citation backing a support answer draft."""
+
+    kind: Literal["core_doc", "repo_doc", "repo_code"]
+    ref: str
+    title: str = ""
+
+    @field_validator("ref", mode="before")
+    @classmethod
+    def _truncate_ref(cls, v: object) -> object:
+        if isinstance(v, str) and len(v) > 300:
+            return v[:297] + "..."
+        return v
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def _truncate_title(cls, v: object) -> object:
+        if isinstance(v, str) and len(v) > 200:
+            return v[:197] + "..."
+        return v
+
+
+class SupportHandoff(BaseModel):
+    """Signal pointing a consultant at the existing ticket-analysis / create-issues
+    actions when a support request also carries a change request or bug report."""
+
+    suggest_analysis: bool = False
+    suggest_issues: bool = False
+    rationale: str = ""
+
+    @field_validator("rationale", mode="before")
+    @classmethod
+    def _truncate_rationale(cls, v: object) -> object:
+        if isinstance(v, str) and len(v) > 1000:
+            return v[:997] + "..."
+        return v
+
+
+class SupportAnswerResult(BaseModel):
+    """Structured output from the submit_support_answer tool_use call.
+
+    Field population per answer_status:
+      answered            — answer set, cannot_answer_reason empty.
+      partially_answered  — answer set, open_questions non-empty.
+      cannot_answer       — answer empty, cannot_answer_reason required. The
+        product's "no caveated draft" rule: say what's missing, don't guess.
+    """
+
+    request_kind: SupportRequestKind
+    answer_status: SupportAnswerStatus
+    answer: str = ""
+    cannot_answer_reason: str | None = None
+    open_questions: list[str] = Field(default_factory=list)
+    sources: list[SupportSource] = Field(default_factory=list)
+    handoff: SupportHandoff = Field(default_factory=SupportHandoff)
+    language: SupportLanguage
+    confidence: float = Field(ge=0.0, le=1.0)
+
+    @field_validator("open_questions", "sources", mode="before")
+    @classmethod
+    def _parse_json_string_list(cls, v: object) -> object:
+        return _unwrap_json_list(v)
+
+    # Bound long free-text fields so one oversized field can't blow the Odoo
+    # HTML write (write_field) — same defensive intent as Finding.body/suggestion.
+    @field_validator("answer", mode="before")
+    @classmethod
+    def _truncate_answer(cls, v: object) -> object:
+        if isinstance(v, str) and len(v) > 20000:
+            return v[:19997] + "..."
+        return v
+
+    @field_validator("cannot_answer_reason", mode="before")
+    @classmethod
+    def _truncate_cannot_answer_reason(cls, v: object) -> object:
+        if isinstance(v, str) and len(v) > 2000:
+            return v[:1997] + "..."
+        return v
+
+    @field_validator("open_questions", mode="before")
+    @classmethod
+    def _truncate_open_questions(cls, v: object) -> object:
+        if isinstance(v, list):
+            return [
+                item[:497] + "..." if isinstance(item, str) and len(item) > 500 else item
+                for item in v
+            ]
+        return v
+
+    @model_validator(mode="after")
+    def _cannot_answer_contract(self) -> "SupportAnswerResult":
+        # Schema-level half of the "no caveated draft" rule — the prompt alone
+        # is not trusted to enforce it.
+        if self.answer_status == "cannot_answer":
+            if not (self.cannot_answer_reason or "").strip():
+                raise ValueError(
+                    "cannot_answer_reason is required when answer_status is 'cannot_answer'"
+                )
+            if self.answer.strip():
+                raise ValueError("answer must be empty when answer_status is 'cannot_answer'")
+        return self
 
 
 # --- Ticket issue creation types -----------------------------------------------

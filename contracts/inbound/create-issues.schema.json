@@ -1,7 +1,7 @@
 {
   "$defs": {
     "Attachment": {
-      "description": "A file forwarded by Odoo ({filename, content_base64}). Accepted types are\n.docx / .pdf / .txt \u2014 the filename extension is the authoritative gate (see\nreva.attachment_text). Shared by the ticket-analysis attachment and the\ncreate-issues description_docx; on a create-issues request it is THE basis\nfor the issue split.",
+      "description": "A file forwarded by Odoo ({filename, content_base64}). Accepted types are\n.docx / .pdf / .txt / .md \u2014 the filename extension is the authoritative gate\n(see reva.attachment_text). Shared by the ticket-analysis attachment and the\ncreate-issues description_docx; on a create-issues request it is THE basis\nfor the issue split.",
       "properties": {
         "content_base64": {
           "title": "Content Base64",
@@ -42,7 +42,7 @@
         }
       ],
       "default": null,
-      "description": "Consultant file (tasks only): .docx, .pdf, or .txt. When present it is THE basis for the issue split instead of description/analysis_html. (Field name fixed by the Odoo addon.)"
+      "description": "Consultant file (tasks only): .docx, .pdf, .txt, or .md. When present it is THE basis for the issue split instead of description/analysis_html. (Field name fixed by the Odoo addon.)"
     },
     "github_project_url": {
       "anyOf": [

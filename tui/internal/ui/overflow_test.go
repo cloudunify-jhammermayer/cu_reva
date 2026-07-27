@@ -81,6 +81,10 @@ func loadedApp(t *testing.T) *App {
 	stats, _ := mc.Learning()
 	mutes, _ := mc.Mutes()
 	a = apply(t, a, feedbackLoadedMsg{stats: stats, mutes: mutes})
+	threads, _ := mc.SupportThreads(100, 0)
+	a = apply(t, a, supportThreadsLoadedMsg{data: threads})
+	personas, _ := mc.Personas()
+	a = apply(t, a, personasLoadedMsg{data: personas})
 	return a
 }
 
@@ -95,7 +99,8 @@ func TestNoTabOverflowsTerminal(t *testing.T) {
 		{60, 8}, {80, 10}, {100, 14}, {120, 24}, {200, 50},
 	}
 	views := []view{viewDashboard, viewReviews, viewFindings, viewFailures,
-		viewRepos, viewPending, viewTickets, viewAudits, viewFeedback}
+		viewRepos, viewPending, viewTickets, viewAudits, viewFeedback,
+		viewSupport, viewPersonas}
 
 	for _, sz := range sizes {
 		a := loadedApp(t)
@@ -125,6 +130,17 @@ func TestNoTabOverflowsTerminal(t *testing.T) {
 		a.tickets = onRow(a.tickets, 456)
 		a = apply(t, a, keyMsg("enter"))
 		check("tickets/issues")
+
+		// Support → thread detail (fetches GET /support-threads/{id}, which
+		// returns the thread's turns — several of them for the mock's thread 4).
+		a.active = viewSupport
+		a = apply(t, a, keyMsg("enter"))
+		check("support/turns")
+
+		// Personas → resolved-persona view (knobs + the full rendered_block).
+		a.active = viewPersonas
+		a = apply(t, a, keyMsg("enter"))
+		check("personas/resolved")
 	}
 }
 
@@ -167,6 +183,10 @@ func viewName(v view) string {
 		return "audits"
 	case viewFeedback:
 		return "feedback"
+	case viewSupport:
+		return "support"
+	case viewPersonas:
+		return "personas"
 	}
 	return "?"
 }

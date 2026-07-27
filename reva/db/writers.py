@@ -35,6 +35,9 @@ from reva.db.models import (
     OdooInstance,
     OpsEvent,
     PendingReview,
+    Persona,
+    SupportThread,
+    SupportTurn,
     PromptVersion,
     PullRequest,
     RepoReviewMemory,
@@ -1293,6 +1296,13 @@ def record_ticket_analysis_completed(
             cache_write_tokens=response.cache_creation_tokens,
         )
         row.completed_at = datetime.now(timezone.utc)
+        # SECU-3: the rolling global cap reads the claude_spend ledger ONLY
+        # (sum_estimated_cost_since), so the main analysis call has to land
+        # there too — the row's own estimated_cost_usd feeds the per-instance
+        # cap, not the global one. Recorded atomically with the completion,
+        # like reviews and timesheet reviews; the planner leg is recorded
+        # separately by the runner as "ticket_planner".
+        _insert_spend(s, "ticket_analysis", row.estimated_cost_usd)
 
 
 def record_ticket_analysis_failed(
@@ -2732,7 +2742,7 @@ def sum_instance_cost_since(db: Database, odoo_instance_id: int, since: datetime
     """
     total = 0.0
     with db.session() as s:
-        for model in (TicketAnalysis, TicketIssueRun, TimesheetReviewRun):
+        for model in (TicketAnalysis, TicketIssueRun, TimesheetReviewRun, SupportTurn):
             value = s.execute(
                 select(func.coalesce(func.sum(model.estimated_cost_usd), 0)).where(
                     model.odoo_instance_id == odoo_instance_id,
@@ -2741,3 +2751,332 @@ def sum_instance_cost_since(db: Database, odoo_instance_id: int, since: datetime
             ).scalar_one()
             total += float(value)
     return total
+
+
+# ------------------------------------------------------------------- personas
+
+_PERSONA_FIELDS = (
+    "language",
+    "formality",
+    "technical_depth",
+    "length",
+    "salutation",
+    "sign_off",
+    "style_notes",
+    "content_policy",
+    "active",
+)
+
+
+def _persona_key(repo_full_name: str) -> str:
+    """Normalise "Owner/Repo" the way repo_doc_sections does, so a persona is
+    found regardless of the casing Odoo happens to send in github_url."""
+    return repo_full_name.strip().lower()
+
+
+def _persona_to_dict(row: Persona) -> dict:
+    out = {"id": row.id, "scope": row.scope, "repo_full_name": row.repo_full_name}
+    out.update({field: getattr(row, field) for field in _PERSONA_FIELDS})
+    return out
+
+
+def upsert_persona(
+    db: Database, *, scope: str, repo_full_name: str | None = None, **fields
+) -> int:
+    """Create or replace the persona for `scope` (+ repo). Returns its id.
+
+    Only the knobs passed are written; the rest stay NULL so the resolver can
+    inherit them from the default row (per-field resolution, not whole-row).
+    """
+    unknown = set(fields) - set(_PERSONA_FIELDS)
+    if unknown:
+        raise ValueError(f"unknown persona field(s): {sorted(unknown)}")
+    key = _persona_key(repo_full_name) if repo_full_name else None
+    with db.session() as s:
+        row = s.execute(
+            select(Persona).where(Persona.scope == scope, Persona.repo_full_name == key)
+        ).scalar_one_or_none()
+        if row is None:
+            row = Persona(scope=scope, repo_full_name=key)
+            s.add(row)
+        for field, value in fields.items():
+            setattr(row, field, value)
+        row.updated_at = datetime.now(timezone.utc)
+        s.flush()
+        return row.id
+
+
+def get_default_persona(db: Database) -> dict | None:
+    """The fallback persona used when a request names no repo, or names one
+    with no persona of its own."""
+    with db.session() as s:
+        row = s.execute(
+            select(Persona).where(Persona.scope == "default")
+        ).scalar_one_or_none()
+        return _persona_to_dict(row) if row is not None else None
+
+
+def get_repo_persona(db: Database, repo_full_name: str) -> dict | None:
+    with db.session() as s:
+        row = s.execute(
+            select(Persona).where(
+                Persona.scope == "repo",
+                Persona.repo_full_name == _persona_key(repo_full_name),
+            )
+        ).scalar_one_or_none()
+        return _persona_to_dict(row) if row is not None else None
+
+
+def list_personas(db: Database) -> list[dict]:
+    """All personas, default first — the order the TUI/API render them in."""
+    with db.session() as s:
+        # 'default' sorts before 'repo' ascending, which is the order we want.
+        rows = s.execute(
+            select(Persona).order_by(Persona.scope.asc(), Persona.repo_full_name)
+        ).scalars().all()
+        return [_persona_to_dict(row) for row in rows]
+
+
+# ------------------------------------------------- support threads and turns
+
+_SUPPORT_TURN_FIELDS = (
+    "id", "thread_id", "odoo_instance_id", "seq", "job_id", "question",
+    "answer_html", "result_structured", "request_kind", "answer_status",
+    "grounding_level", "status", "error_message", "model", "estimated_cost_usd",
+    "created_at", "completed_at", "callback_sent_at", "callback_error",
+)
+
+
+def _support_turn_to_dict(row: SupportTurn) -> dict:
+    return {field: getattr(row, field) for field in _SUPPORT_TURN_FIELDS}
+
+
+def get_or_create_support_thread(
+    db: Database,
+    *,
+    odoo_instance_id: int | None,
+    ticket_id: int,
+    model_name: str,
+    field_name: str,
+    github_url: str | None = None,
+    persona_snapshot: dict | None = None,
+) -> int:
+    """Return the thread id for this Odoo record, creating it on first contact.
+
+    Keyed including field_name so two delivery targets on one record don't
+    collide (mirrors idx_ticket_analyses_pending).
+    """
+    with db.session() as s:
+        row = s.execute(
+            select(SupportThread).where(
+                SupportThread.odoo_instance_id == odoo_instance_id,
+                SupportThread.ticket_id == ticket_id,
+                SupportThread.model_name == model_name,
+                SupportThread.field_name == field_name,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            row = SupportThread(
+                odoo_instance_id=odoo_instance_id,
+                ticket_id=ticket_id,
+                model_name=model_name,
+                field_name=field_name,
+                github_url=github_url,
+                persona_snapshot=persona_snapshot,
+            )
+            s.add(row)
+            s.flush()
+        return row.id
+
+
+def _support_thread_to_dict(row: SupportThread) -> dict:
+    return {
+        "id": row.id, "odoo_instance_id": row.odoo_instance_id,
+        "ticket_id": row.ticket_id, "model_name": row.model_name,
+        "field_name": row.field_name, "github_url": row.github_url,
+        "status": row.status, "created_at": row.created_at,
+        "last_turn_at": row.last_turn_at,
+    }
+
+
+def get_support_thread(db: Database, thread_id: int) -> dict | None:
+    with db.session() as s:
+        row = s.get(SupportThread, thread_id)
+        return _support_thread_to_dict(row) if row is not None else None
+
+
+def list_support_threads(db: Database, limit: int = 50) -> list[dict]:
+    with db.session() as s:
+        rows = s.execute(
+            select(SupportThread).order_by(SupportThread.created_at.desc()).limit(limit)
+        ).scalars().all()
+        return [_support_thread_to_dict(r) for r in rows]
+
+
+def record_support_turn_created(
+    db: Database, thread_id: int, odoo_instance_id: int | None, question: str
+) -> int:
+    """Open a pending turn, assigning the next seq in the thread."""
+    with db.session() as s:
+        highest = s.execute(
+            select(func.coalesce(func.max(SupportTurn.seq), 0)).where(
+                SupportTurn.thread_id == thread_id
+            )
+        ).scalar_one()
+        row = SupportTurn(
+            thread_id=thread_id,
+            odoo_instance_id=odoo_instance_id,
+            seq=highest + 1,
+            question=question,
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def get_support_turn(db: Database, turn_id: int) -> dict | None:
+    with db.session() as s:
+        row = s.get(SupportTurn, turn_id)
+        return _support_turn_to_dict(row) if row is not None else None
+
+
+def get_pending_support_turn(db: Database, thread_id: int) -> dict | None:
+    """Backs the submit dedup: a re-click while a turn is in flight returns the
+    same turn instead of enqueuing a second paid job."""
+    with db.session() as s:
+        row = s.execute(
+            select(SupportTurn).where(
+                SupportTurn.thread_id == thread_id, SupportTurn.status == "pending"
+            )
+        ).scalar_one_or_none()
+        return _support_turn_to_dict(row) if row is not None else None
+
+
+def attach_support_job_id(db: Database, turn_id: int, job_id: str) -> None:
+    with db.session() as s:
+        row = s.get(SupportTurn, turn_id)
+        if row is not None:
+            row.job_id = job_id
+
+
+def record_support_turn_completed(
+    db: Database,
+    turn_id: int,
+    answer_html: str,
+    response: ClaudeResponse,
+    result_structured: dict | None,
+    request_kind: str | None,
+    answer_status: str | None,
+    grounding_level: str | None,
+) -> None:
+    """Persist the answer and its cost.
+
+    Spend is recorded in the claude_spend ledger atomically with the row, the
+    same way reviews and ticket analyses do it — the global rolling cap reads
+    only that ledger, while the per-instance cap reads estimated_cost_usd via
+    sum_instance_cost_since.
+    """
+    with db.session() as s:
+        row = s.get(SupportTurn, turn_id)
+        if row is None:
+            return
+        row.status = "completed"
+        row.answer_html = answer_html
+        row.result_structured = result_structured
+        row.request_kind = request_kind
+        row.answer_status = answer_status
+        row.grounding_level = grounding_level
+        row.model = response.model
+        row.input_tokens = response.input_tokens
+        row.output_tokens = response.output_tokens
+        row.cache_read_tokens = response.cache_read_tokens
+        row.cache_creation_tokens = response.cache_creation_tokens
+        row.estimated_cost_usd = estimate_cost(
+            model=response.model,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cache_read_tokens=response.cache_read_tokens,
+            cache_write_tokens=response.cache_creation_tokens,
+        )
+        row.completed_at = datetime.now(timezone.utc)
+        thread = s.get(SupportThread, row.thread_id)
+        if thread is not None:
+            thread.last_turn_at = row.completed_at
+        _insert_spend(s, "support_answer", row.estimated_cost_usd)
+
+
+def record_support_turn_failed(db: Database, turn_id: int, error: str) -> None:
+    with db.session() as s:
+        row = s.get(SupportTurn, turn_id)
+        if row is not None:
+            row.status = "failed"
+            row.error_message = error[:2000]
+            row.completed_at = datetime.now(timezone.utc)
+
+
+def reset_support_turn(db: Database, turn_id: int) -> None:
+    """Requeue: back to pending, clearing the previous outcome but keeping the
+    question and seq so thread ordering is stable."""
+    with db.session() as s:
+        row = s.get(SupportTurn, turn_id)
+        if row is None:
+            return
+        row.status = "pending"
+        row.error_message = None
+        row.completed_at = None
+        row.callback_sent_at = None
+        row.callback_error = None
+
+
+def record_support_turn_callback_sent(db: Database, turn_id: int) -> None:
+    with db.session() as s:
+        row = s.get(SupportTurn, turn_id)
+        if row is not None:
+            row.callback_sent_at = datetime.now(timezone.utc)
+            row.callback_error = None
+
+
+def record_support_turn_callback_failed(db: Database, turn_id: int, error: str) -> None:
+    with db.session() as s:
+        row = s.get(SupportTurn, turn_id)
+        if row is not None:
+            row.callback_error = error[:2000]
+
+
+def list_support_turns(db: Database, thread_id: int, limit: int = 50) -> list[dict]:
+    """Every turn on a thread, oldest first — the drill-down view.
+
+    Distinct from `prior_support_turns`, which is the prompt-replay query: that
+    one filters to completed turns before a given seq. This one shows the
+    operator everything, failures included.
+    """
+    with db.session() as s:
+        rows = s.execute(
+            select(SupportTurn)
+            .where(SupportTurn.thread_id == thread_id)
+            .order_by(SupportTurn.seq.asc())
+            .limit(limit)
+        ).scalars().all()
+        return [_support_turn_to_dict(row) for row in rows]
+
+
+def prior_support_turns(
+    db: Database, thread_id: int, before_seq: int, limit: int = 10
+) -> list[dict]:
+    """Completed turns before `before_seq`, oldest-first for prompt replay.
+
+    Ordering is chronological because the model reads them as a conversation;
+    the current turn is excluded so it can't be replayed as its own history.
+    """
+    with db.session() as s:
+        rows = s.execute(
+            select(SupportTurn)
+            .where(
+                SupportTurn.thread_id == thread_id,
+                SupportTurn.seq < before_seq,
+                SupportTurn.status == "completed",
+            )
+            .order_by(SupportTurn.seq.asc())
+            .limit(limit)
+        ).scalars().all()
+        return [_support_turn_to_dict(row) for row in rows]

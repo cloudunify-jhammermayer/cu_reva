@@ -288,6 +288,44 @@ func (c *Client) SetOdooInstanceActive(id int, active bool) error {
 	)
 }
 
+func (c *Client) SupportThreads(limit, offset int) (*SupportThreadPage, error) {
+	var p SupportThreadPage
+	return &p, c.get(fmt.Sprintf("/support-threads?limit=%d&offset=%d", limit, offset), &p)
+}
+
+func (c *Client) SupportThread(threadID int) (*SupportThreadDetail, error) {
+	var d SupportThreadDetail
+	return &d, c.get(fmt.Sprintf("/support-threads/%d", threadID), &d)
+}
+
+func (c *Client) RequeueSupportTurn(turnID int) error {
+	return c.post(fmt.Sprintf("/support-turn/%d/requeue", turnID))
+}
+
+func (c *Client) Personas() (*PersonaPage, error) {
+	var p PersonaPage
+	return &p, c.get("/personas", &p)
+}
+
+func (c *Client) ResolvedPersona(repoFullName string) (*ResolvedPersona, error) {
+	path := "/personas/resolved"
+	if repoFullName != "" {
+		path += "?repo_full_name=" + url.QueryEscape(repoFullName)
+	}
+	var r ResolvedPersona
+	return &r, c.get(path, &r)
+}
+
+func (c *Client) CreatePersona(body PersonaBody) (*Persona, error) {
+	var out Persona
+	return &out, c.postJSON(http.MethodPost, "/personas", body, &out, http.StatusCreated)
+}
+
+func (c *Client) UpdatePersona(id int, body PersonaBody) (*Persona, error) {
+	var out Persona
+	return &out, c.postJSON(http.MethodPatch, fmt.Sprintf("/personas/%d", id), body, &out, http.StatusOK)
+}
+
 func (c *Client) TicketJourney(odooInstanceID *int, modelName string, ticketID int) (*TicketJourney, error) {
 	path := fmt.Sprintf("/ticket-journeys?ticket_id=%d", ticketID)
 	if odooInstanceID != nil {

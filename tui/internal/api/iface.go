@@ -29,4 +29,11 @@ type ClientIface interface {
 	SetOdooInstanceActive(id int, active bool) error
 	DeleteOdooInstance(id int) error
 	TicketJourney(odooInstanceID *int, modelName string, ticketID int) (*TicketJourney, error)
+	SupportThreads(limit, offset int) (*SupportThreadPage, error)
+	SupportThread(threadID int) (*SupportThreadDetail, error)
+	RequeueSupportTurn(turnID int) error
+	Personas() (*PersonaPage, error)
+	ResolvedPersona(repoFullName string) (*ResolvedPersona, error)
+	CreatePersona(body PersonaBody) (*Persona, error)
+	UpdatePersona(id int, body PersonaBody) (*Persona, error)
 }

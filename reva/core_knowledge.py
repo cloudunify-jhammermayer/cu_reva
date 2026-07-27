@@ -90,21 +90,39 @@ class CoreKnowledge:
         return session.get_bind().dialect.name == "postgresql"
 
     def search_docs(self, version: str, terms: list[str], limit: int = 8) -> list[dict]:
+        """Rank official Odoo doc sections against English search terms.
+
+        OR-of-terms semantics, matching `repo_docs.search_repo_docs`: a section
+        matches when it matches ANY term, ranked by how well it matches overall
+        (`ts_rank` over the OR'd query). The planner hands us up to 13
+        terms+modules — ANDing them all into one ``plainto_tsquery`` demanded
+        every term appear in one section and near-never matched. Words WITHIN a
+        term ("quotation template") stay ANDed — one concept.
+        """
         terms = [term.strip() for term in terms if term.strip()]
         if not terms:
             return []
         with self._db.session() as s:
             if self._is_postgres(s):
+                # One tsquery per term, OR'd. Only numbered placeholders are
+                # interpolated into the SQL structure; term values stay bound
+                # parameters (no injection surface).
+                tsq = " || ".join(
+                    f"plainto_tsquery('english', :t{i})" for i in range(len(terms))
+                )
                 rows = s.execute(
                     text(
                         "SELECT path, anchor, title, body FROM odoo_docs_sections "
                         "WHERE odoo_version = :version AND "
-                        "to_tsvector('english', title || ' ' || body) @@ "
-                        "plainto_tsquery('english', :query) "
-                        "ORDER BY ts_rank(to_tsvector('english', title || ' ' || body), "
-                        "plainto_tsquery('english', :query)) DESC LIMIT :limit"
+                        f"to_tsvector('english', title || ' ' || body) @@ ({tsq}) "
+                        f"ORDER BY ts_rank(to_tsvector('english', title || ' ' || body), "
+                        f"({tsq})) DESC LIMIT :limit"
                     ),
-                    {"version": version, "query": " ".join(terms), "limit": limit},
+                    {
+                        "version": version,
+                        "limit": limit,
+                        **{f"t{i}": term for i, term in enumerate(terms)},
+                    },
                 ).all()
                 return [
                     {"path": row[0], "anchor": row[1], "title": row[2], "body": row[3]}
@@ -120,7 +138,7 @@ class CoreKnowledge:
             ]
             rows = s.execute(
                 select(OdooDocsSection)
-                .where(OdooDocsSection.odoo_version == version, *clauses)
+                .where(OdooDocsSection.odoo_version == version, or_(*clauses))
                 .limit(limit)
             ).scalars().all()
             return [

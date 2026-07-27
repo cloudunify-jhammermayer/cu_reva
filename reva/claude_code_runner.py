@@ -57,7 +57,19 @@ _CLAUDE_BIN = "claude"
 # Repo-aware skills that benefit from a pre-indexed code graph (full/deep reviews
 # and audits reason across files). The diff/delta paths are cost-sensitive and
 # don't traverse the repo, so they stay off CodeGraph. See the engine-layer spec.
-_CODEGRAPH_SKILLS = frozenset({"reva-full-review", "reva-repo-audit"})
+_CODEGRAPH_SKILLS = frozenset({
+    "reva-full-review",
+    "reva-repo-audit",
+    # Repo-aware too: both answer "where does this behaviour come from" by
+    # exploring the whole clone, which is exactly what the graph accelerates.
+    "reva-support-answer",
+    "reva-ticket-analysis",
+})
+# Skills that do NOT emit review findings, so the findings governance in
+# review_guidance.md (severity, categories, confidence, summary contract) is
+# both wasted tokens and contradictory guidance. Opt-out rather than opt-in:
+# a new REVIEW skill forgetting to register still gets its governance.
+_NO_REVIEW_GUIDANCE_SKILLS = frozenset({"reva-support-answer", "reva-ticket-analysis"})
 _CODEGRAPH_INDEX_TIMEOUT = 180  # seconds; bound the index step like a git op
 # Stdio MCP server config handed to the Claude CLI via --mcp-config. The server
 # runs in the CLI's cwd (the clone) and finds .codegraph/codegraph.db there.
@@ -283,7 +295,7 @@ class ClaudeCodeRunner:
         """
         self._scrub_clone(repo_path)
         output_path = self._create_output_path(repo_path)
-        preamble = self._build_preamble(odoo)
+        preamble = self._build_preamble(odoo, skill=skill)
         skill_content = self._read_skill(skill)
         body = f"{preamble}\n\n{skill_content}" if preamble else skill_content
         # SECU-6: fence each value with a per-call nonce delimiter. Static tags
@@ -585,10 +597,17 @@ class ClaudeCodeRunner:
         os.close(fd)
         return path
 
-    def _build_preamble(self, odoo: bool = False) -> str:
+    def _build_preamble(self, odoo: bool = False, skill: str | None = None) -> str:
         """Concatenate the shared review-guidance + (for Odoo repos) Odoo-rules files.
 
-        review_guidance.md is path-agnostic governance and always applies.
+        review_guidance.md is governance for skills that emit *findings*:
+        severity and category definitions, confidence scoring, the summary
+        contract, findings output mechanics. Skills in
+        `_NO_REVIEW_GUIDANCE_SKILLS` produce a different artifact entirely (a
+        support-answer draft, a business analysis), so prepending it would cost
+        ~3k tokens and actively contradict their output contract. They still
+        get odoo19.md — the domain rules apply regardless of artifact.
+
         odoo19.md is domain-specific and only prepended when the repo opts in via
         `.claude-review.yml`'s `odoo:` flag (CORR-4) — otherwise a non-Odoo repo
         gets irrelevant Odoo rules + an 'Odoo team' identity and wasted tokens.
@@ -598,7 +617,7 @@ class ClaudeCodeRunner:
         """
         if not self.prompts_dir:
             return ""
-        files = ["review_guidance.md"]
+        files = [] if skill in _NO_REVIEW_GUIDANCE_SKILLS else ["review_guidance.md"]
         if odoo:
             files.append("odoo19.md")
         parts: list[str] = []

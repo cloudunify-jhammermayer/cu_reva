@@ -1,8 +1,8 @@
-"""Extension-gated extraction of attachment text (docx / pdf / txt).
+"""Extension-gated extraction of attachment text (docx / pdf / txt / md).
 
 Odoo forwards consultant files (Contract 1 description_docx, and the ticket
-analysis attachment). The accepted set is .docx / .pdf / .txt; everything else
-is rejected so the api route returns a 422 and Odoo shows the error.
+analysis attachment). The accepted set is .docx / .pdf / .txt / .md; everything
+else is rejected so the api route returns a 422 and Odoo shows the error.
 
 The filename extension is the authoritative gate — .xlsx/.pptx and .docx all
 share the zip magic, so content sniffing alone can't tell them apart — and the
@@ -23,21 +23,21 @@ from reva.docx_text import DOCX_MAGIC, MAX_EXTRACTED_CHARS, extract_docx_text
 from reva.errors import PermanentError
 
 _PDF_MAGIC = b"%PDF-"
-_ALLOWED_EXTENSIONS = {".docx", ".pdf", ".txt"}
+_ALLOWED_EXTENSIONS = {".docx", ".pdf", ".txt", ".md"}
 
 
 def classify_attachment(filename: str, content_base64: str) -> tuple[str, bytes]:
     """Return (kind, decoded_bytes) for a supported attachment.
 
-    kind is "docx" | "pdf" | "txt". The extension gates the type; the bytes are
-    verified against it (cheap — the pdf check is just the %PDF- prefix, no
-    parse). Raises ValueError (not PermanentError) so the api route maps it to a
-    422 at accept time while Odoo still shows the error.
+    kind is "docx" | "pdf" | "txt" | "md". The extension gates the type; the
+    bytes are verified against it (cheap — the pdf check is just the %PDF-
+    prefix, no parse). Raises ValueError (not PermanentError) so the api route
+    maps it to a 422 at accept time while Odoo still shows the error.
     """
     ext = os.path.splitext(filename)[1].lower()
     if ext not in _ALLOWED_EXTENSIONS:
         raise ValueError(
-            f"unsupported attachment {filename!r}; only .docx, .pdf, .txt are accepted"
+            f"unsupported attachment {filename!r}; only .docx, .pdf, .txt, .md are accepted"
         )
 
     compact = "".join(content_base64.split())  # tolerate MIME-style line wrapping
@@ -50,7 +50,7 @@ def classify_attachment(filename: str, content_base64: str) -> tuple[str, bytes]
         matches = data.startswith(DOCX_MAGIC)
     elif ext == ".pdf":
         matches = data.startswith(_PDF_MAGIC)
-    else:  # .txt
+    else:  # .txt / .md
         matches = _is_utf8(data)
     if not matches:
         raise ValueError(f"{filename}: content does not match its {ext} extension")

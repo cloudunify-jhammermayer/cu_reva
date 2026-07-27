@@ -1,7 +1,8 @@
 # tui/ — operations dashboard (Go / Bubble Tea)
 
-A terminal dashboard over REVA's internal API (`/api/v1`). Read-only views plus
-two write actions (requeue, on-demand audit). **This is REVA's single dashboard** —
+A terminal dashboard over REVA's internal API (`/api/v1`). Mostly read views,
+plus write actions (requeue, on-demand audit, repo + Odoo-instance management,
+persona configuration). **This is REVA's single dashboard** —
 the Vue web frontend was retired.
 
 ## Run

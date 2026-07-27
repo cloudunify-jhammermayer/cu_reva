@@ -168,12 +168,14 @@ def _inbound_models() -> dict[str, type[BaseModel]]:
     api_dir = str(Path(__file__).resolve().parents[1] / "api")
     if api_dir not in sys.path:
         sys.path.insert(0, api_dir)
+    from app.schemas.support_requests import SupportRequestBody
     from app.schemas.ticket_actuals import TicketActualsRequest
     from app.schemas.ticket_analyses import TicketAnalysisRequest
     from app.schemas.ticket_issues import CreateIssuesRequest, UpdateIssueEstimateRequest
     from app.schemas.timesheet_reviews import TimesheetReviewRequest
 
     return {
+        "support-request": SupportRequestBody,
         "ticket-analysis": TicketAnalysisRequest,
         "create-issues": CreateIssuesRequest,
         "update-issue-estimate": UpdateIssueEstimateRequest,
@@ -350,6 +352,42 @@ CONTRACTS: list[Contract] = [
                 {"line_id": 3, "status": "needs_human", "reason": "too thin"},
             ],
             "stats": {"total": 3, "ok": 1, "rewritten": 1, "needs_human": 1},
+        },
+    ),
+    Contract(
+        name="support-request",
+        direction="odoo->reva",
+        method="POST",
+        path="/api/v1/support-request",
+        auth="bearer:instance-inbound-key",
+        sample={
+            "ticket_id": 4711,
+            "model_name": "helpdesk.ticket",
+            "field_name": "reva_support_answer",
+            "thread_id": None,
+            "subject": "Rechnungslauf bricht ab",
+            "question": "Warum bricht der Rechnungslauf seit gestern ab?",
+            "github_url": "https://github.com/acme/widgets",
+            "persona_context": "Technisch versierter Kunde; kurz und sachlich.",
+            "chatter": [
+                {
+                    "id": 98123,
+                    "posted_at": "2026-07-25T09:14:00Z",
+                    "author": "Maria Huber",
+                    "author_kind": "customer",
+                    "visibility": "public",
+                    "body": "Seit dem Update bricht der Lauf ab.",
+                },
+                {
+                    "id": 98124,
+                    "posted_at": "2026-07-25T10:02:00Z",
+                    "author": "Dev Team",
+                    "author_kind": "internal",
+                    "visibility": "internal",
+                    "body": "Bekannt, Fix in 2.3, noch nicht deployed.",
+                },
+            ],
+            "attachment": None,
         },
     ),
     Contract(

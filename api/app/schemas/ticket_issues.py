@@ -25,7 +25,7 @@ class CreateIssuesRequest(BaseModel):
     analysis_html: str = Field(description='Completed REVA analysis HTML, or "" if none')
     description_docx: Attachment | None = Field(
         default=None,
-        description="Consultant file (tasks only): .docx, .pdf, or .txt. When "
+        description="Consultant file (tasks only): .docx, .pdf, .txt, or .md. When "
         "present it is THE basis for the issue split instead of "
         "description/analysis_html. (Field name fixed by the Odoo addon.)",
     )

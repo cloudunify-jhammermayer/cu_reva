@@ -20,7 +20,7 @@ class TicketAnalysisRequest(BaseModel):
     text: str = Field(description="Ticket description text to analyse")
     attachment: Attachment | None = Field(
         default=None,
-        description="Optional .docx/.pdf/.txt file; its text is extracted and "
+        description="Optional .docx/.pdf/.txt/.md file; its text is extracted and "
         "folded into the analysis prompt alongside `text`",
     )
     github_url: str | None = Field(

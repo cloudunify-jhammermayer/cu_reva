@@ -23,6 +23,8 @@ const (
 	viewFeedback // tab 9
 	viewOdoo     // tab 0
 	viewTimesheets
+	viewSupport
+	viewPersonas
 )
 
 // tabKeys maps the number-row switch keys to their tab, so the key handler is a
@@ -39,6 +41,8 @@ var tabKeys = map[string]view{
 	"9": viewFeedback,
 	"0": viewOdoo,
 	"-": viewTimesheets,
+	"=": viewSupport,
+	"p": viewPersonas,
 }
 
 type App struct {
@@ -55,6 +59,8 @@ type App struct {
 	feedback  Feedback
 	odoo      Odoo
 	timesheet Timesheets
+	support   Support
+	personas  Personas
 	width     int
 	height    int
 }
@@ -74,6 +80,8 @@ func NewApp(client api.ClientIface, odooURL string) *App {
 		feedback:  newFeedback(client),
 		odoo:      newOdoo(client),
 		timesheet: newTimesheets(client),
+		support:   newSupport(client),
+		personas:  newPersonas(client),
 	}
 }
 
@@ -90,6 +98,8 @@ func (a *App) Init() tea.Cmd {
 		a.feedback.load(),
 		a.odoo.load(),
 		a.timesheet.load(),
+		a.support.load(),
+		a.personas.load(),
 		tick(),
 	)
 }
@@ -132,6 +142,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.odoo.height = contentH
 		a.timesheet.width = m.Width
 		a.timesheet.height = contentH
+		a.support.width = m.Width
+		a.support.height = contentH
+		a.personas.width = m.Width
+		a.personas.height = contentH
 		return a, nil
 
 	case tea.KeyMsg:
@@ -151,6 +165,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.tickets, cmd = a.tickets.update(msg)
 			case viewOdoo:
 				a.odoo, cmd = a.odoo.update(msg)
+			case viewSupport:
+				a.support, cmd = a.support.update(msg)
 			}
 			return a, cmd
 		}
@@ -217,6 +233,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.timesheet, cmd = a.timesheet.update(msg)
 			return a, cmd
 		}
+		if a.active == viewSupport {
+			var cmd tea.Cmd
+			a.support, cmd = a.support.update(msg)
+			return a, cmd
+		}
+		if a.active == viewPersonas {
+			var cmd tea.Cmd
+			a.personas, cmd = a.personas.update(msg)
+			return a, cmd
+		}
 
 	case tickMsg:
 		var cmd tea.Cmd
@@ -239,7 +265,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.odoo, odooCmd = a.odoo.update(msg)
 		var timesheetCmd tea.Cmd
 		a.timesheet, timesheetCmd = a.timesheet.update(msg)
-		return a, tea.Batch(cmd, findCmd, failCmd, repoCmd, pendCmd, ticketCmd, auditCmd, fbCmd, odooCmd, timesheetCmd, tick())
+		var supportCmd tea.Cmd
+		a.support, supportCmd = a.support.update(msg)
+		var personasCmd tea.Cmd
+		a.personas, personasCmd = a.personas.update(msg)
+		return a, tea.Batch(cmd, findCmd, failCmd, repoCmd, pendCmd, ticketCmd, auditCmd, fbCmd, odooCmd, timesheetCmd, supportCmd, personasCmd, tick())
 
 	case dashboardLoadedMsg:
 		a.dashboard, _ = a.dashboard.update(msg)
@@ -304,6 +334,26 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case timesheetsLoadedMsg:
 		a.timesheet, _ = a.timesheet.update(msg)
 
+	case supportThreadsLoadedMsg:
+		a.support, _ = a.support.update(msg)
+
+	case supportThreadDetailLoadedMsg:
+		a.support, _ = a.support.update(msg)
+
+	case supportTurnRequeuedMsg:
+		a.support, _ = a.support.update(msg)
+
+	case personasLoadedMsg:
+		a.personas, _ = a.personas.update(msg)
+
+	case personaResolvedMsg:
+		a.personas, _ = a.personas.update(msg)
+
+	case personaUpdatedMsg:
+		var cmd tea.Cmd
+		a.personas, cmd = a.personas.update(msg)
+		return a, cmd
+
 	case odooCreatedMsg:
 		var cmd tea.Cmd
 		a.odoo, cmd = a.odoo.update(msg)
@@ -365,6 +415,10 @@ func (a *App) View() string {
 		content = a.odoo.view(a.width, contentH)
 	case viewTimesheets:
 		content = a.timesheet.view(a.width, contentH)
+	case viewSupport:
+		content = a.support.view(a.width, contentH)
+	case viewPersonas:
+		content = a.personas.view(a.width, contentH)
 	}
 
 	// Safety net: no tab may emit more than contentH lines. lipgloss Height() is
@@ -399,6 +453,8 @@ func (a *App) tabBar() string {
 		{"9", "Feedback", 0, viewFeedback},
 		{"0", "Odoo", 0, viewOdoo},
 		{"-", "Timesheets", 0, viewTimesheets},
+		{"=", "Support", 0, viewSupport},
+		{"p", "Personas", 0, viewPersonas},
 	}
 
 	var parts []string
@@ -443,6 +499,8 @@ func (a *App) capturingText() bool {
 		return a.tickets.filtering
 	case viewOdoo:
 		return a.odoo.creating
+	case viewSupport:
+		return a.support.filtering
 	}
 	return false
 }
@@ -452,6 +510,8 @@ func (a *App) clearStatusMsgs() {
 	a.failures.statusMsg = ""
 	a.tickets.statusMsg = ""
 	a.repos.statusMsg = ""
+	a.support.statusMsg = ""
+	a.personas.statusMsg = ""
 }
 
 func (a *App) statusBar() string {
@@ -479,6 +539,10 @@ func (a *App) statusBar() string {
 		hint = "j/k navigate | n=add · ^R=rotate key · D=delete · t=toggle active · r=refresh | q quit"
 	case viewTimesheets:
 		hint = "j/k navigate | r=refresh | q quit"
+	case viewSupport:
+		hint = "j/k·g/G nav | / filter | enter=inspect turns | e=requeue turn | esc=back | r=refresh | q quit"
+	case viewPersonas:
+		hint = "j/k navigate | enter=resolved view | t=toggle active | r=refresh | q quit"
 	default:
 		hint = "1 Dash | 2 Reviews | 3 Findings | 4 Failures | 5 Repos | 6 Pending | 7 Tickets | 8 Audits | q quit"
 	}

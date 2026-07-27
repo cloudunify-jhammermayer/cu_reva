@@ -1,5 +1,49 @@
 # REVA — Work Handoff
 
+## Addendum 2026-07-26 — support answers + shared code grounding
+
+Spec/plan: `docs/superpowers/specs/archive/2026-07-25-support-answers-design.md`
+and `docs/superpowers/plans/archive/2026-07-25-support-answers.md`.
+
+Shipped: `POST /api/v1/support-request` (+ turn GET/requeue, thread drill-down),
+personas (migration 043, master-key API, per-field resolution), support threads
+and turns (migration 044), `SupportAnswerer` + `prompts/support_answer.md`, the
+`reva-support-answer` and `reva-ticket-analysis` skills, and **planner-gated
+code grounding shared by the support and ticket paths** (`needs_repo_code` on
+`TicketKnowledge`; brakes `REVA_TICKET_CODE_GROUNDING` + per-repo
+`code_grounding`). Workers 2 → 6. TUI Support + Personas tabs.
+
+Three pre-existing bugs fixed on the way, found by an adversarial cross-check of
+the plan against the code:
+- ticket-analysis enqueued at 300s, which would SIGKILL an escalated CLI run
+  mid-payment and re-pay on every retry — now derived from `REVIEW_JOB_TIMEOUT`,
+  with `_STALE_PENDING` derived from that.
+- requeue dropped `github_url`, silently downgrading grounding.
+- the main ticket-analysis call never reached `claude_spend`, so the global cap
+  could not see the ticket path's priciest leg. `SupportTurn` also joined
+  `sum_instance_cost_since`.
+
+**Owed:**
+- **Staging validation** — nothing here has run against a live Claude CLI or a
+  real Odoo. Highest-value first run: one support request that escalates
+  (check `grounding_level: code`, the repo lock, and that no internal note text
+  appears in the draft), and one ticket analysis that escalates (check no code
+  identifiers leak into `summary`/`missing_info`).
+- **Watch the planner gate.** If `needs_repo_code` fires indiscriminately,
+  average ticket cost rises ~5-10x. Log the split per path on day one and pull
+  a kill switch rather than weakening the shared planner prompt.
+- **DB connections at 6 workers** — worst case 6 x 15 = 90 against
+  `max_connections=100`, before api and scheduler. A watch item, reasoning in
+  `docker-compose.prod.yml`.
+- **ast-odoo**: contracts synced to `reva_contracts/` and the pin bumped to
+  `db254db9…` on **main** (uncommitted). Its addon tests need an Odoo runtime
+  and were not run here.
+- **Odoo side not built**: the `reva_support_*` fields, the Ask REVA buttons,
+  and the sender for `/api/v1/support-request` are all ast-odoo work.
+
+---
+
+
 **Updated:** 2026-06-14. Resume point.
 **Replaces** the old slice-by-slice handoff (that described the original
 Messages-API design and is now history in git).
@@ -41,11 +85,15 @@ All suites green incl. the real-Postgres integration tier.
 - **Staging validation** (model behavior): one real ticket against a repo with
   addon READMEs — check the new HTML section, `repo docs:N` in the TUI, and the
   second-run `fresh` fast path.
-- **Possible follow-up:** `search_repo_docs` uses **OR-of-terms** ranking
-  (fixed 2026-07-14 after review — a single `plainto_tsquery` ANDs all terms
-  and near-never matched a realistic many-term planner query).
-  `core_knowledge.search_docs` still has the pre-existing AND behavior; decide
-  separately whether the official-docs search should switch too.
+- ~~**Possible follow-up:** `core_knowledge.search_docs` still has the
+  pre-existing AND behavior.~~ **Resolved 2026-07-25:** `search_docs` now
+  matches `search_repo_docs` (OR-of-terms, one `plainto_tsquery` per term,
+  `ts_rank` over the OR'd query; SQLite fallback OR'd too). A single
+  `plainto_tsquery` ANDed all terms and near-never matched a realistic
+  many-term planner query, which silently emptied the *Standard Odoo Coverage*
+  block on most tickets. Covered by `test_search_docs_matches_any_term`
+  (unit) + `test_core_docs_fts_or_of_terms_realistic_planner_query` /
+  `test_core_docs_fts_scopes_to_version` (real-Postgres tier).
 
 ---
 

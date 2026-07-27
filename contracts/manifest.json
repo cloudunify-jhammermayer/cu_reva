@@ -85,6 +85,15 @@
       "auth": "bearer:instance-inbound-key",
       "direction": "odoo->reva",
       "method": "POST",
+      "name": "support-request",
+      "path": "/api/v1/support-request",
+      "sample": "inbound/support-request.sample.json",
+      "schema": "inbound/support-request.schema.json"
+    },
+    {
+      "auth": "bearer:instance-inbound-key",
+      "direction": "odoo->reva",
+      "method": "POST",
       "name": "ticket-analysis",
       "path": "/api/v1/ticket-analysis",
       "sample": "inbound/ticket-analysis.sample.json",
@@ -145,6 +154,6 @@
       "schema": "inbound/error.schema.json"
     }
   ],
-  "contracts_version": "831478b2592de4956665e19ae7cef7f6ce51202f65fa8ed7c84f5ce9934035be",
+  "contracts_version": "db254db9563a58d4b1f405007046a8d2d6546a325710452d143e05772ef9ad1b",
   "generated_from": "reva/odoo_contracts.py"
 }

@@ -14,7 +14,11 @@ from reva.html_guard import ensure_renderable
 from reva.ticket_formatter import format_ticket_html
 from reva.ticket_knowledge import build_ticket_knowledge
 from reva.types import TicketJobParams
-from worker.repo_config import load_repo_config
+from worker.repo_config import (
+    code_grounding_allowed,
+    load_repo_config,
+    resolve_repo_context,
+)
 from worker.runner import build_odoo_client, get_context, instance_budget_exceeded
 
 logger = structlog.get_logger()
@@ -59,6 +63,59 @@ def repo_core_version(ctx, github_url: str | None, analysis_id: int, log) -> str
              "analysis_id": analysis_id},
         )
     return version
+
+
+_TICKET_SKILL = "reva-ticket-analysis"
+
+
+def _try_code_grounded_analysis(ctx, params, knowledge, log):
+    """Run the analysis against the repo clone when the planner asked for code.
+
+    Returns ``(response, result)`` on success, or ``(None, None)`` to fall back
+    to the Messages API path. Every fallback reason is recorded — a silently
+    ungrounded analysis is indistinguishable from a well-grounded one.
+
+    A busy repo lock raises TransientError on purpose: RQ retries the whole
+    job rather than quietly downgrading a ticket the planner said needs code.
+    """
+    from reva.types import TicketAnalysisResult
+
+    repo = resolve_repo_context(ctx.github, params.github_url, log)
+    if repo is None:
+        # No URL, unparseable, or the App isn't installed on it. Project-less
+        # tickets land here too, which is correct: there is nothing to read.
+        if params.github_url:
+            log.warning("ticket_code_grounding_unavailable", github_url=params.github_url)
+            writers.record_ops_event(
+                ctx.db, "ticket_analysis", "warning", "code_grounding_unavailable",
+                {"analysis_id": params.analysis_id, "github_url": params.github_url},
+            )
+        return None, None
+
+    owner, name, token, config = repo
+    if not code_grounding_allowed(config):
+        log.info("ticket_code_grounding_disabled", repo=f"{owner}/{name}")
+        writers.record_ops_event(
+            ctx.db, "ticket_analysis", "info", "code_grounding_disabled",
+            {"analysis_id": params.analysis_id, "repo": f"{owner}/{name}"},
+        )
+        return None, None
+
+    skill_params = {"ticket_text": params.text}
+    if knowledge.blocks:
+        skill_params["retrieved_knowledge"] = "\n".join(
+            block.get("text", "") for block in knowledge.blocks
+        )
+
+    with ctx.runner.repo_lock(owner, name):
+        repo_path = ctx.runner.ensure_repo(owner, name, None, token)
+        response = ctx.runner.review(
+            repo_path=repo_path, skill=_TICKET_SKILL, params=skill_params,
+            odoo=config.odoo,
+        )
+    if response.tool_use_input is None:
+        raise PermanentError(f"{_TICKET_SKILL} produced no analysis JSON")
+    return response, TicketAnalysisResult.model_validate(response.tool_use_input)
 
 
 def run_ticket_analysis(job_params: dict) -> dict:
@@ -139,28 +196,34 @@ def run_ticket_analysis(job_params: dict) -> dict:
                     },
                 )
             extra_blocks = knowledge.blocks or None
-            try:
-                response_obj, result = ctx.ticket_analyzer.analyze_with_response(
-                    params,
-                    extra_system_blocks=extra_blocks,
+            response_obj = result = None
+            if knowledge.needs_repo_code:
+                response_obj, result = _try_code_grounded_analysis(
+                    ctx, params, knowledge, log
                 )
-            except MalformedModelOutput as exc:
-                # Truncated/schema-invalid tool call — usually a one-off
-                # formatting hiccup, not a doomed input. One paid retry before
-                # the consultant sees a failure; a second miss falls through to
-                # the PermanentError handler below.
-                log.warning("ticket_analysis_malformed_output_retry", error=str(exc))
-                writers.record_ops_event(
-                    ctx.db,
-                    "ticket_analysis",
-                    "warning",
-                    "malformed_output_retried",
-                    {"analysis_id": params.analysis_id, "error": str(exc)[:300]},
-                )
-                response_obj, result = ctx.ticket_analyzer.analyze_with_response(
-                    params,
-                    extra_system_blocks=extra_blocks,
-                )
+            if response_obj is None:
+                try:
+                    response_obj, result = ctx.ticket_analyzer.analyze_with_response(
+                        params,
+                        extra_system_blocks=extra_blocks,
+                    )
+                except MalformedModelOutput as exc:
+                    # Truncated/schema-invalid tool call — usually a one-off
+                    # formatting hiccup, not a doomed input. One paid retry before
+                    # the consultant sees a failure; a second miss falls through to
+                    # the PermanentError handler below.
+                    log.warning("ticket_analysis_malformed_output_retry", error=str(exc))
+                    writers.record_ops_event(
+                        ctx.db,
+                        "ticket_analysis",
+                        "warning",
+                        "malformed_output_retried",
+                        {"analysis_id": params.analysis_id, "error": str(exc)[:300]},
+                    )
+                    response_obj, result = ctx.ticket_analyzer.analyze_with_response(
+                        params,
+                        extra_system_blocks=extra_blocks,
+                    )
             html = format_ticket_html(result)
         except TransientError:
             log.warning("ticket_analysis_transient_error", exc_info=True)

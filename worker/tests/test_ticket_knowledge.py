@@ -204,3 +204,52 @@ def test_neither_source_skips_planner(env):
     assert len(fake.calls) == 0  # planner never runs when there's nothing to search
     assert k.blocks == [] and k.planner_cost == 0.0
     assert k.repo_docs_sections is None
+
+
+# ---- needs_repo_code: the code-grounding escalation gate ---------------------
+
+
+def test_needs_repo_code_propagates(env):
+    fake = FakeClaude(tool_input={
+        "worth_checking": True, "terms": ["quotation"], "modules": [],
+        "needs_repo_code": True,
+    })
+    k = build_ticket_knowledge(fake, _PROMPTS, "text", core=env.core, version="19.0")
+    assert k.needs_repo_code is True
+
+
+def test_needs_repo_code_defaults_false_when_absent(env):
+    """An older prompt or a partial tool call must never escalate by accident —
+    escalation costs 10-30x a docs-only answer."""
+    fake = FakeClaude(tool_input=_QUOTE_PLAN)  # no needs_repo_code key
+    k = build_ticket_knowledge(fake, _PROMPTS, "text", core=env.core, version="19.0")
+    assert k.needs_repo_code is False
+
+
+def test_needs_repo_code_survives_not_worth_checking(env):
+    """'The docs won't help, but the code will' is a real case: a question about
+    this project's own customisation. The old contract collapsed
+    worth_checking=False into a bare None and lost the code signal entirely."""
+    fake = FakeClaude(tool_input={
+        "worth_checking": False, "terms": [], "modules": [], "needs_repo_code": True,
+    })
+    k = build_ticket_knowledge(fake, _PROMPTS, "text", core=env.core, version="19.0")
+    assert k.blocks == []          # no docs retrieval, as before
+    assert k.needs_repo_code is True
+
+
+def test_needs_repo_code_false_when_planner_fails(env):
+    from reva.errors import TransientError
+
+    fake = FakeClaude(raise_exc=TransientError("429"))
+    k = build_ticket_knowledge(fake, _PROMPTS, "text", core=env.core, version="19.0")
+    assert k.needs_repo_code is False
+
+
+def test_needs_repo_code_false_when_planner_never_runs(env):
+    """No core and no repo -> the planner is skipped entirely; there is also no
+    repo to escalate against, so the gate must stay shut."""
+    fake = FakeClaude(tool_input={"worth_checking": True, "needs_repo_code": True})
+    k = build_ticket_knowledge(fake, _PROMPTS, "text", core=None, version=None)
+    assert k.needs_repo_code is False
+    assert fake.calls == []

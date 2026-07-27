@@ -1023,6 +1023,151 @@ class RepoDocsSync(Base):
     truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
+# ------------------------------------------------- support_threads / _turns
+
+
+class SupportThread(Base):
+    """One REVA<->consultant Q&A conversation about an Odoo record (migration
+    044). Keyed including field_name so two delivery targets on one record can
+    coexist, matching idx_ticket_analyses_pending."""
+
+    __tablename__ = "support_threads"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    odoo_instance_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("odoo_instances.id")
+    )
+    ticket_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_name: Mapped[str] = mapped_column(Text, nullable=False)
+    field_name: Mapped[str] = mapped_column(Text, nullable=False)
+    github_url: Mapped[str | None] = mapped_column(Text)
+    # The resolved persona as actually applied, so a thread's tone stays
+    # auditable after someone edits the persona rows.
+    persona_snapshot: Mapped[Any | None] = mapped_column(JSON)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="open")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    last_turn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "odoo_instance_id", "ticket_id", "model_name", "field_name",
+            name="uq_support_threads_record",
+        ),
+    )
+
+
+class SupportTurn(Base):
+    """One question/answer round inside a thread (migration 044).
+
+    `odoo_instance_id` is denormalised from the thread so
+    writers.sum_instance_cost_since can sum support spend alongside the other
+    run tables without a join — the per-instance budget gate reads one shape.
+    """
+
+    __tablename__ = "support_turns"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    thread_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("support_threads.id"), nullable=False
+    )
+    odoo_instance_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("odoo_instances.id")
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    job_id: Mapped[str | None] = mapped_column(Text)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer_html: Mapped[str | None] = mapped_column(Text)
+    result_structured: Mapped[Any | None] = mapped_column(JSON)
+    request_kind: Mapped[str | None] = mapped_column(Text)
+    answer_status: Mapped[str | None] = mapped_column(Text)
+    grounding_level: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    error_message: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cache_creation_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost_usd: Mapped[float | None] = mapped_column(Numeric(12, 6))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    callback_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    callback_error: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        UniqueConstraint("thread_id", "seq", name="uq_support_turns_seq"),
+        # One pending turn per thread — backs the submit dedup against a
+        # concurrent-POST race (migration 044).
+        Index(
+            "uq_support_turns_pending",
+            "thread_id",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+            sqlite_where=text("status = 'pending'"),
+        ),
+        Index("idx_support_turns_created_at", "created_at"),
+    )
+
+
+# -------------------------------------------------------------------- personas
+
+
+class Persona(Base):
+    """Tone configuration for support-answer drafts (migration 043).
+
+    Resolved per field as default < repo < the additive persona_context Odoo
+    sends per request, so a repo row may leave any knob NULL to inherit the
+    default. `repo_full_name` is a lowercased "owner/repo" TEXT key rather than
+    an FK — a support request can name a repo REVA has no webhook history for
+    (same reasoning as RepoDocSection).
+    """
+
+    __tablename__ = "personas"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
+    repo_full_name: Mapped[str | None] = mapped_column(Text)
+    language: Mapped[str | None] = mapped_column(Text)
+    formality: Mapped[str | None] = mapped_column(Text)
+    technical_depth: Mapped[str | None] = mapped_column(Text)
+    length: Mapped[str | None] = mapped_column(Text)
+    salutation: Mapped[str | None] = mapped_column(Text)
+    sign_off: Mapped[str | None] = mapped_column(Text)
+    style_notes: Mapped[str | None] = mapped_column(Text)
+    # Separate from style_notes so it renders as a hard constraint, not tone.
+    content_policy: Mapped[str | None] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        # Partial UNIQUE indexes (migration 043): one persona per repo, and at
+        # most one default row for project-less requests to fall back to.
+        Index(
+            "uq_personas_repo",
+            "repo_full_name",
+            unique=True,
+            postgresql_where=text("scope = 'repo'"),
+            sqlite_where=text("scope = 'repo'"),
+        ),
+        Index(
+            "uq_personas_default",
+            "scope",
+            unique=True,
+            postgresql_where=text("scope = 'default'"),
+            sqlite_where=text("scope = 'default'"),
+        ),
+    )
+
+
 # ------------------------------------------------------------- weekly_reports
 
 

@@ -1,7 +1,7 @@
 {
   "$defs": {
     "Attachment": {
-      "description": "A file forwarded by Odoo ({filename, content_base64}). Accepted types are\n.docx / .pdf / .txt \u2014 the filename extension is the authoritative gate (see\nreva.attachment_text). Shared by the ticket-analysis attachment and the\ncreate-issues description_docx; on a create-issues request it is THE basis\nfor the issue split.",
+      "description": "A file forwarded by Odoo ({filename, content_base64}). Accepted types are\n.docx / .pdf / .txt / .md \u2014 the filename extension is the authoritative gate\n(see reva.attachment_text). Shared by the ticket-analysis attachment and the\ncreate-issues description_docx; on a create-issues request it is THE basis\nfor the issue split.",
       "properties": {
         "content_base64": {
           "title": "Content Base64",
@@ -31,7 +31,7 @@
         }
       ],
       "default": null,
-      "description": "Optional .docx/.pdf/.txt file; its text is extracted and folded into the analysis prompt alongside `text`"
+      "description": "Optional .docx/.pdf/.txt/.md file; its text is extracted and folded into the analysis prompt alongside `text`"
     },
     "field_name": {
       "description": "Field on the Odoo record where the result will be written",

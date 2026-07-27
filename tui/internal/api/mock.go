@@ -801,6 +801,224 @@ func (m *MockClient) TicketJourney(odooInstanceID *int, modelName string, ticket
 	}, nil
 }
 
+func (m *MockClient) SupportThreads(limit, offset int) (*SupportThreadPage, error) {
+	now := time.Now()
+	t1 := now.Add(-6 * time.Minute)
+	t2 := now.Add(-90 * time.Minute)
+	intPtr := func(i int) *int { return &i }
+
+	items := []SupportThreadSummary{
+		{
+			ID: 4, OdooInstanceID: intPtr(1), TicketID: 456, ModelName: "helpdesk.ticket",
+			FieldName: "x_reva_answer", GithubURL: "https://github.com/acme/widgets",
+			Status: "open", CreatedAt: now.Add(-8 * time.Minute), LastTurnAt: &t1,
+		},
+		{
+			ID: 3, OdooInstanceID: intPtr(1), TicketID: 123, ModelName: "project.task",
+			FieldName: "x_reva_answer", GithubURL: "https://github.com/acme/odoo-modules",
+			Status: "open", CreatedAt: now.Add(-2 * time.Hour), LastTurnAt: &t2,
+		},
+		{
+			// Project-less ticket (no github_url) — docs-only grounding, same as
+			// the Tickets tab's "(no repo yet)" bucket.
+			ID: 2, OdooInstanceID: intPtr(2), TicketID: 99, ModelName: "helpdesk.ticket",
+			FieldName: "x_reva_answer", GithubURL: "",
+			Status: "open", CreatedAt: now.Add(-40 * time.Minute), LastTurnAt: nil,
+		},
+		{
+			ID: 1, OdooInstanceID: intPtr(1), TicketID: 777, ModelName: "helpdesk.ticket",
+			FieldName: "x_reva_answer", GithubURL: "https://github.com/acme/widgets",
+			Status: "open", CreatedAt: now.Add(-26 * time.Hour), LastTurnAt: &t2,
+		},
+	}
+	n := min(limit, len(items))
+	return &SupportThreadPage{Items: items[:n], Total: len(items)}, nil
+}
+
+// SupportThread returns one thread plus its turns, oldest-first by seq
+// (mirroring the real GET /support-threads/{id}). Thread 4 carries several
+// turns covering the outcomes an operator needs to distinguish at a glance:
+// code-grounded, a failed turn (must stay visible — this is the operator
+// view), and a still-pending one. Any other id 404s, matching the real API.
+func (m *MockClient) SupportThread(threadID int) (*SupportThreadDetail, error) {
+	now := time.Now()
+	strPtr := func(s string) *string { return &s }
+	f64Ptr := func(f float64) *float64 { return &f }
+
+	page, _ := m.SupportThreads(100, 0)
+	var summary *SupportThreadSummary
+	for i := range page.Items {
+		if page.Items[i].ID == threadID {
+			summary = &page.Items[i]
+			break
+		}
+	}
+	if summary == nil {
+		return nil, fmt.Errorf("support thread %d not found", threadID)
+	}
+
+	var turns []SupportTurnDetail
+	switch threadID {
+	case 4:
+		turns = []SupportTurnDetail{
+			{
+				ID: 501, ThreadID: 4, Seq: 1, JobID: strPtr("job-501"),
+				Question:         "Why is the delivery date not updating from the linked sale order?",
+				AnswerHTML:       strPtr("<p>The delivery date is recomputed from...</p>"),
+				RequestKind:      strPtr("answer"),
+				AnswerStatus:     strPtr("answered"),
+				GroundingLevel:   strPtr("code"),
+				Status:           "completed",
+				EstimatedCostUSD: f64Ptr(0.041),
+				CreatedAt:        now.Add(-9 * time.Minute),
+				CompletedAt:      strPtrTime(now.Add(-8 * time.Minute)),
+				CallbackSentAt:   strPtrTime(now.Add(-8 * time.Minute)),
+			},
+			{
+				ID: 506, ThreadID: 4, Seq: 2, JobID: strPtr("job-506"),
+				Question:     "Follow-up: does the same issue affect returns?",
+				RequestKind:  strPtr("answer"),
+				Status:       "failed",
+				ErrorMessage: strPtr("Claude API returned 529 (overloaded). Retry limit exceeded."),
+				CreatedAt:    now.Add(-7 * time.Minute),
+				CompletedAt:  strPtrTime(now.Add(-6*time.Minute - 30*time.Second)),
+			},
+			{
+				ID: 507, ThreadID: 4, Seq: 3, JobID: strPtr("job-507"),
+				Question:  "One more: what about partial returns?",
+				Status:    "pending",
+				CreatedAt: now.Add(-30 * time.Second),
+			},
+		}
+	case 3:
+		turns = []SupportTurnDetail{
+			{
+				ID: 502, ThreadID: 3, Seq: 1, JobID: strPtr("job-502"),
+				Question:         "Can we expose the margin field on the portal view?",
+				AnswerHTML:       strPtr("<p>Partially — the field exists but...</p>"),
+				RequestKind:      strPtr("answer"),
+				AnswerStatus:     strPtr("partial"),
+				GroundingLevel:   strPtr("docs"),
+				Status:           "completed",
+				EstimatedCostUSD: f64Ptr(0.018),
+				CreatedAt:        now.Add(-95 * time.Minute),
+				CompletedAt:      strPtrTime(now.Add(-92 * time.Minute)),
+			},
+		}
+	case 2:
+		turns = []SupportTurnDetail{
+			{
+				ID: 503, ThreadID: 2, Seq: 1, JobID: strPtr("job-503"),
+				Question:         "What plan does ticket #99 belong to?",
+				RequestKind:      strPtr("answer"),
+				AnswerStatus:     strPtr("cannot_answer"),
+				GroundingLevel:   strPtr("none"),
+				Status:           "completed",
+				EstimatedCostUSD: f64Ptr(0.006),
+				CreatedAt:        now.Add(-42 * time.Minute),
+				CompletedAt:      strPtrTime(now.Add(-41 * time.Minute)),
+			},
+		}
+	case 1:
+		turns = []SupportTurnDetail{
+			{
+				ID: 505, ThreadID: 1, Seq: 1, JobID: strPtr("job-505"),
+				Question:         "Why did the callback to Odoo fail?",
+				AnswerHTML:       strPtr("<p>The stock move is voided when...</p>"),
+				RequestKind:      strPtr("answer"),
+				AnswerStatus:     strPtr("answered"),
+				GroundingLevel:   strPtr("code"),
+				Status:           "completed",
+				EstimatedCostUSD: f64Ptr(0.037),
+				CreatedAt:        now.Add(-27 * time.Hour),
+				CompletedAt:      strPtrTime(now.Add(-26*time.Hour - 55*time.Minute)),
+				CallbackError:    strPtr("Odoo write_field timed out"),
+			},
+		}
+	}
+
+	return &SupportThreadDetail{SupportThreadSummary: *summary, Turns: turns}, nil
+}
+
+func strPtrTime(t time.Time) *time.Time { return &t }
+
+func (m *MockClient) RequeueSupportTurn(turnID int) error {
+	return nil
+}
+
+func (m *MockClient) Personas() (*PersonaPage, error) {
+	strPtr := func(s string) *string { return &s }
+	items := []Persona{
+		{
+			ID: 1, Scope: "default",
+			Language: strPtr("auto"), Formality: strPtr("formal"),
+			TechnicalDepth: strPtr("medium"), Length: strPtr("standard"),
+			SignOff: strPtr("— REVA"), Active: true,
+		},
+		{
+			ID: 2, Scope: "repo", RepoFullName: strPtr("acme/widgets"),
+			Formality: strPtr("informal"), TechnicalDepth: strPtr("high"),
+			StyleNotes:    strPtr("This customer's devs prefer terse, code-referenced answers"),
+			ContentPolicy: strPtr("never quote a delivery date"),
+			Active:        true,
+		},
+		{
+			ID: 3, Scope: "repo", RepoFullName: strPtr("acme/legacy-erp"),
+			Length: strPtr("brief"), Active: false,
+		},
+	}
+	return &PersonaPage{Items: items, Total: len(items)}, nil
+}
+
+func (m *MockClient) ResolvedPersona(repoFullName string) (*ResolvedPersona, error) {
+	strPtr := func(s string) *string { return &s }
+	var repo *string
+	if repoFullName != "" {
+		repo = strPtr(repoFullName)
+	}
+	formality, depth, length := "formal", "medium", "standard"
+	var styleNotes, contentPolicy *string
+	if repoFullName == "acme/widgets" {
+		formality = "informal"
+		depth = "high"
+		styleNotes = strPtr("This customer's devs prefer terse, code-referenced answers")
+		contentPolicy = strPtr("never quote a delivery date")
+	}
+	rendered := fmt.Sprintf(
+		"Write in %s language, %s tone, %s technical depth, %s length. Sign off with \"— REVA\".",
+		"auto", formality, depth, length)
+	if styleNotes != nil {
+		rendered += " " + *styleNotes + "."
+	}
+	if contentPolicy != nil {
+		rendered += " Constraint: " + *contentPolicy + "."
+	}
+	return &ResolvedPersona{
+		RepoFullName: repo, Language: strPtr("auto"),
+		Formality: strPtr(formality), TechnicalDepth: strPtr(depth), Length: strPtr(length),
+		SignOff: strPtr("— REVA"), StyleNotes: styleNotes, ContentPolicy: contentPolicy,
+		RenderedBlock: rendered, ResolvedAt: time.Now(),
+	}, nil
+}
+
+func (m *MockClient) CreatePersona(body PersonaBody) (*Persona, error) {
+	return &Persona{
+		ID: 99, Scope: body.Scope, RepoFullName: body.RepoFullName,
+		Language: body.Language, Formality: body.Formality, TechnicalDepth: body.TechnicalDepth,
+		Length: body.Length, Salutation: body.Salutation, SignOff: body.SignOff,
+		StyleNotes: body.StyleNotes, ContentPolicy: body.ContentPolicy, Active: body.Active,
+	}, nil
+}
+
+func (m *MockClient) UpdatePersona(id int, body PersonaBody) (*Persona, error) {
+	return &Persona{
+		ID: id, Scope: body.Scope, RepoFullName: body.RepoFullName,
+		Language: body.Language, Formality: body.Formality, TechnicalDepth: body.TechnicalDepth,
+		Length: body.Length, Salutation: body.Salutation, SignOff: body.SignOff,
+		StyleNotes: body.StyleNotes, ContentPolicy: body.ContentPolicy, Active: body.Active,
+	}, nil
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

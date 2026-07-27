@@ -212,6 +212,54 @@ REVA_API_URL=http://localhost:8080/api/v1 REVA_API_KEY=<key> go run .
 
 Global keys: `1–9` switch tabs · `j`/`k` (or arrows) move · `g`/`G` top/bottom · `Ctrl+D`/`Ctrl+U` half-page · PgUp/PgDn page · `r` refresh · `q` quit. Lists that hit their fetch limit show "showing N of M"; narrow with `/`. The free-flowing panels scroll too — the **Reviews** detail pane with `J`/`K` (or PgUp/PgDn), the **Audits** findings and **Feedback** lists with `j`/`k`/PgUp/PgDn.
 
+## Support answers
+
+Odoo can ask REVA a question about a project — `POST /api/v1/support-request`
+with the question, the ticket's chatter, and optionally a linked repo. REVA
+drafts an answer and writes it to an HTML field on the record.
+
+**It is a draft for a consultant, not a message to the customer.** Every other
+REVA output is staff-facing; this one is written in a customer-facing register,
+so a human reviews and sends it. REVA never posts to the customer directly.
+
+**Two grounding depths, chosen per request.** The core-query planner returns a
+`needs_repo_code` flag alongside its search terms:
+
+| Planner says | Path | Cost |
+|---|---|---|
+| docs suffice | Messages API + `/core` docs + the repo's markdown | cheap, seconds |
+| needs project code | headless CLI (`reva-support-answer`) against the worker clone, under the per-repo lock | ~10–30x, minutes |
+
+The gate is shut on any doubt — planner failure, no linked repo, GitHub App not
+installed, kill switch — and every reason is recorded as an ops event, so an
+ungrounded answer is never mistaken for a well-grounded one. Brakes:
+`REVA_TICKET_CODE_GROUNDING` globally, `code_grounding: false` per repo.
+**Ticket analysis uses the same gate** for the same reason: its output is
+business-level, but the evidence behind *Existing Customizations* and *Standard
+Odoo Coverage* often isn't.
+
+**Personas** set the tone per project (`GET/POST/PATCH /api/v1/personas`,
+master key only — an Odoo instance must not be able to rewrite what REVA says
+to its own customer). Resolution is per field: a `default` row, overlaid by a
+repo row's non-NULL knobs, plus additive `persona_context` from the request that
+never overrides a knob. Knobs are `language`, `formality` (the *Sie/du* axis),
+`technical_depth`, `length`, `salutation`, `sign_off`, free-text `style_notes`,
+and `content_policy` — kept separate so "never quote prices" renders as a hard
+constraint rather than tone advice. `GET /api/v1/personas/resolved?repo_full_name=…`
+shows what a repo actually resolves to, including the exact rendered block.
+
+**Internal chatter never leaks.** Entries marked `visibility: "internal"` are
+given to the model in a separately fenced block that it may use but must never
+quote, paraphrase, or reference — they routinely contain the real answer
+("fixed in 2.3, not deployed yet"), so dropping them would throw away the best
+source while echoing them is the worst failure this feature has.
+
+**When REVA can't answer it says so** — the reason plus what it would need,
+never a hedged draft a consultant has to fact-check from scratch.
+
+Threads and turns are visible in the TUI **Support** tab, including each turn's
+grounding level.
+
 ## Error notifications
 
 REVA posts a Google Chat alert whenever a review fails due to a server or API error. Set `GOOGLE_CHAT_WEBHOOK_URL` in `.env` to enable; leave it empty to disable.

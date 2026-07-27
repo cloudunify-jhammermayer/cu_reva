@@ -44,7 +44,7 @@ def test_prompts_dir_exists():
 
 
 def test_get_version_returns_current_version(builder):
-    assert builder.get_version() == "v2.11"
+    assert builder.get_version() == "v2.12"
 
 
 def test_ticket_issue_type_is_ticket_level():
@@ -145,10 +145,17 @@ def test_intent_check_in_skill_output_contracts():
 
 
 def test_summary_contract_present():
+    from reva.claude_code_runner import _NO_REVIEW_GUIDANCE_SKILLS
+
     guidance = (PROMPTS_DIR / "review_guidance.md").read_text()
     assert "Summary contract" in guidance
-    # every skill's summary placeholder points reviewers at the contract
+    # Every FINDINGS skill's summary placeholder points reviewers at the
+    # contract. Skills that emit a different artifact (a support-answer draft,
+    # a business analysis) never receive review_guidance.md at all, so
+    # requiring the reference would be requiring a dangling pointer.
     for skill in SKILLS_DIR.glob("reva-*.md"):
+        if skill.stem in _NO_REVIEW_GUIDANCE_SKILLS:
+            continue
         assert "Summary contract" in skill.read_text(), skill.name
 
 
@@ -226,3 +233,69 @@ def test_ticket_loop_prompt_guidance_present():
     guidance = (PROMPTS_DIR / "review_guidance.md").read_text()
     assert "ticket_acceptance_criteria" in guidance
     assert (PROMPTS_DIR / "change_note.md").is_file()
+
+
+def test_support_answer_skill_exists_and_is_codegraph_enabled():
+    """The support-answer skill is repo-aware — it explores a whole clone to
+    trace where behaviour comes from — so it belongs in the CodeGraph
+    allowlist alongside full review and audit."""
+    from reva.claude_code_runner import _CODEGRAPH_SKILLS
+
+    assert (SKILLS_DIR / "reva-support-answer.md").is_file()
+    assert "reva-support-answer" in _CODEGRAPH_SKILLS
+
+
+def test_support_answer_skill_states_the_load_bearing_rules():
+    """These three are product safety properties, not prose: never reveal
+    internal notes, no caveated draft on cannot_answer, cite what you read."""
+    body = (SKILLS_DIR / "reva-support-answer.md").read_text().lower()
+    assert "internal" in body and "never quote" in body
+    assert "cannot_answer" in body
+    assert "sources" in body
+
+
+def test_non_review_skills_get_odoo_rules_but_not_findings_governance(tmp_path):
+    """review_guidance.md defines severity/category/confidence and the findings
+    summary contract. A support answer emits none of those, so prepending it is
+    ~3k wasted tokens AND instructions that contradict the skill's own output
+    contract. odoo19.md still applies — the domain doesn't change."""
+    from reva.claude_code_runner import ClaudeCodeRunner
+
+    prompts = tmp_path / "prompts"
+    prompts.mkdir()
+    (prompts / "review_guidance.md").write_text("FINDINGS GOVERNANCE\n")
+    (prompts / "odoo19.md").write_text("ODOO RULES\n")
+    runner = ClaudeCodeRunner(
+        repo_cache_dir=str(tmp_path), api_key="k",
+        skills_dir=str(tmp_path), prompts_dir=str(prompts),
+    )
+
+    review = runner._build_preamble(odoo=True, skill="reva-full-review")
+    assert "FINDINGS GOVERNANCE" in review and "ODOO RULES" in review
+
+    support = runner._build_preamble(odoo=True, skill="reva-support-answer")
+    assert "FINDINGS GOVERNANCE" not in support
+    assert "ODOO RULES" in support
+
+
+def test_both_support_prompts_agree_answer_is_plain_text():
+    """The Messages-API prompt and the CLI skill both feed one formatter that
+    ESCAPES answer. If either tells the model to emit HTML, the consultant
+    sees literal tags. Two producers, one contract — pin it in both."""
+    for path in (PROMPTS_DIR / "support_answer.md",
+                 SKILLS_DIR / "reva-support-answer.md"):
+        # Collapse wrapping — these are prose files; asserting on line breaks
+        # would fail the next time someone reflows a paragraph.
+        body = " ".join(path.read_text().split()).lower()
+        assert "plain text" in body, path.name
+        assert "do not emit html tags" in body, path.name
+
+
+def test_support_prompts_forbid_caveated_draft_on_cannot_answer():
+    """The no-hedged-draft rule is a product decision, not phrasing: a draft a
+    consultant must fact-check from scratch costs more than no draft."""
+    for path in (PROMPTS_DIR / "support_answer.md",
+                 SKILLS_DIR / "reva-support-answer.md"):
+        body = path.read_text().lower()
+        assert "cannot_answer" in body, path.name
+        assert "caveated" in body or "hedged" in body, path.name

@@ -66,8 +66,27 @@ def test_core_paths(db, core_dir):
 
 
 def test_search_docs_like_fallback(db, core_dir):
+    # Membership, not ordering: the SQLite ilike fallback has no ts_rank, so
+    # relevance ordering is a Postgres-only property (covered by the
+    # REVA_TEST_POSTGRES_URL tier in test_pg_integration.py).
     hits = _ck(db, core_dir).search_docs("19.0", ["quotation", "template"])
-    assert hits and hits[0]["title"] == "Quotation templates"
+    assert any(h["title"] == "Quotation templates" for h in hits)
+
+
+def test_search_docs_matches_any_term(db, core_dir):
+    # OR-of-terms, mirroring search_repo_docs: the planner sends up to 13
+    # terms+modules, so demanding every one appear in a single section would
+    # near-never match. "payroll"/"warehouse" are absent from the fixture.
+    hits = _ck(db, core_dir).search_docs(
+        "19.0", ["quotation", "template", "payroll", "warehouse"]
+    )
+    assert any(h["title"] == "Quotation templates" for h in hits)
+
+
+def test_search_docs_empty_terms_returns_empty(db, core_dir):
+    ck = _ck(db, core_dir)
+    assert ck.search_docs("19.0", []) == []
+    assert ck.search_docs("19.0", ["  ", ""]) == []
 
 
 def test_search_registry(db, core_dir):

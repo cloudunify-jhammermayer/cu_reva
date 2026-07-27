@@ -30,8 +30,10 @@ from app.schemas.ticket_analyses import (
     TicketAnalysisStatus,
 )
 from reva.attachment_text import classify_attachment
+from reva.claude_code_runner import REVIEW_JOB_TIMEOUT
 from reva.db import writers
 from reva.db.engine import Database
+from reva.db.writers import PURGED_TICKET_TEXT
 from reva.github_urls import parse_github_repo_url
 from reva.types import TicketJobParams
 
@@ -40,7 +42,13 @@ create_router = APIRouter()  # instance-key gated (see routes/v1/__init__.py)
 shared_router = APIRouter()  # master OR instance key; instance sees only its rows
 logger = structlog.get_logger()
 
-_JOB_TIMEOUT = 300  # seconds
+# Derived from REVIEW_JOB_TIMEOUT, not a local 300s: a ticket analysis can
+# escalate to a headless-CLI run against a repo clone (planner-gated code
+# grounding), which costs lock wait + git + CodeGraph + CLI. At 300s RQ
+# SIGKILLs the work-horse mid-paid-run, usage is never recorded, and _RETRY
+# re-pays twice more. Raising it does NOT weaken the fast path: the Messages
+# API leg is independently bounded by ClaudeClient's own 180s HTTP timeout.
+_JOB_TIMEOUT = REVIEW_JOB_TIMEOUT
 # The runner re-raises TransientError expecting RQ to retry; without retry= a
 # single blip permanently strands the analysis (row stuck pending, Odoo stuck
 # "pending"). The runner resumes idempotently (reuses persisted HTML), so
@@ -50,9 +58,15 @@ _RETRY = Retry(max=3, interval=[30, 120, 300])
 # any base64 attachment) in Redis; requeue rebuilds params from the DB row, so
 # retention buys nothing past debugging. 24h keeps redis noeviction headroom.
 _FAILURE_TTL = 24 * 3600
-# A pending row older than this has no live job (timeout 300s + retry backoff) —
-# let ops requeue it instead of the dedup wedging the ticket forever (H6).
-_STALE_PENDING = timedelta(minutes=30)
+# A pending row older than this has no live job — let ops requeue it instead of
+# the dedup wedging the ticket forever (H6). DERIVED, not hardcoded: it must
+# outlive the worst case a job can still be legitimately running (every attempt
+# burning the full timeout, plus the whole retry backoff), or a stale-requeue
+# starts a second paid run beside a live one. The pending-unique index does not
+# help there — requeue resets the same row.
+_STALE_PENDING = timedelta(
+    seconds=(_RETRY.max + 1) * _JOB_TIMEOUT + sum(_RETRY.intervals)
+) + timedelta(minutes=15)
 
 
 def _enqueue(request: Request, db: Database, analysis_id: int, params: TicketJobParams) -> str:
@@ -233,6 +247,14 @@ def requeue_ticket_analysis(
             status_code=409,
             detail="Only failed, completed, or stale pending analyses can be requeued",
         )
+    if row["input_text"] == PURGED_TICKET_TEXT:
+        # SECU-8: the retention purge replaced the customer text with a
+        # sentinel. Re-analysing it would burn a paid call on placeholder text
+        # and overwrite the real result with nonsense.
+        raise HTTPException(
+            status_code=409,
+            detail="Ticket text was purged by the retention policy; resubmit from Odoo",
+        )
     other_pending = writers.get_pending_ticket_analysis(
         db, row["ticket_id"], row["model_name"], row["field_name"], row["odoo_instance_id"]
     )
@@ -251,6 +273,12 @@ def requeue_ticket_analysis(
         model_name=row["model_name"],
         field_name=row["field_name"],
         text=row["input_text"],
+        # Persisted on the row (migration 038) and MUST be replayed: without it
+        # a requeued analysis silently loses repo-docs grounding, and once code
+        # grounding is planner-gated it can never escalate. The attachment is
+        # deliberately not restorable — the base64 is never persisted (PII), so
+        # a requeue of an attachment-bearing analysis re-runs on the text alone.
+        github_url=row["github_url"],
     )
     writers.reset_ticket_analysis(db, analysis_id)
     job_id = _enqueue(request, db, analysis_id, params)
