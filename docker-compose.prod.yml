@@ -213,11 +213,33 @@ services:
       redis:
         condition: service_started
     deploy:
-      # Two concurrent jobs: a customer-facing ticket analysis no longer queues
-      # behind a 35-min Opus audit. Cross-replica safety is designed in
-      # (advisory repo locks, atomic claims, is_already_posted) and was
-      # validated 2026-06-14. NOTE: resource limits below are PER REPLICA.
-      replicas: 2
+      # Six concurrent jobs (was 2, raised 2026-07-26): planner-gated code
+      # grounding means ticket analyses and support answers can now take the
+      # per-repo lock and run for minutes, so a customer-facing draft must not
+      # queue behind them. Cross-replica safety is designed in (advisory repo
+      # locks, atomic claims, is_already_posted) and was validated 2026-06-14.
+      #
+      # DEPLOYMENT INVARIANT — SINGLE HOST. ClaudeCodeRunner.repo_lock is an
+      # flock on a lock file inside the shared `repo_cache` volume. That
+      # excludes correctly across containers on ONE host only. Spread these
+      # replicas across hosts and the mutual exclusion silently disappears:
+      # two workers would `git reset --hard` the same working tree to
+      # different SHAs while a Claude CLI reads it. If this ever needs to span
+      # hosts, the lock must move to Postgres advisory locks first.
+      #
+      # NOTE: resource limits below are PER REPLICA — 6 x 2 CPU / 1G.
+      #
+      # DB CONNECTIONS: the engine uses SQLAlchemy defaults (pool_size 5 +
+      # max_overflow 10 = 15 per process) and postgres runs at the image
+      # default max_connections=100. Worst case is now 6 x 15 = 90 for workers
+      # alone, before api and scheduler — it fit comfortably at 2 replicas (30)
+      # and does not at 6. In practice each RQ worker runs ONE job at a time so
+      # it holds 1-2 connections, and the pool is a ceiling rather than a
+      # reservation, which is why this is a watch item and not a blocker. If
+      # "too many clients" ever appears, raise postgres max_connections or pin
+      # a smaller pool_size for the worker engine — do NOT also add per-worker
+      # job concurrency, which would make the worst case real.
+      replicas: 6
       resources:
         limits:
           cpus: "2.0"
