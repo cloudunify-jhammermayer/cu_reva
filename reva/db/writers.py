@@ -2865,6 +2865,12 @@ def get_or_create_support_thread(
 
     Keyed including field_name so two delivery targets on one record don't
     collide (mirrors idx_ticket_analyses_pending).
+
+    `github_url` is re-synced from every request, clearing included. Odoo owns
+    the repo link and a consultant can change or remove it between turns — a
+    thread that kept whatever URL it was born with once answered a question
+    about one system out of another system's clone, and `requeue` rebuilds its
+    params from this row, so a stale URL would resurrect the wrong repo.
     """
     with db.session() as s:
         row = s.execute(
@@ -2886,6 +2892,8 @@ def get_or_create_support_thread(
             )
             s.add(row)
             s.flush()
+        elif row.github_url != github_url:
+            row.github_url = github_url
         return row.id
 
 

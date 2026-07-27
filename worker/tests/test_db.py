@@ -1850,3 +1850,21 @@ def test_prior_turns_exclude_undelivered_and_repeated_questions(db):
         exclude_question="Frage C",
     )
     assert [p["question"] for p in prior] == ["Frage A"]
+
+
+def test_thread_github_url_tracks_the_latest_request_including_removal(db):
+    """Odoo owns the repo link. A thread that kept its birth URL answered an
+    rs2 question out of a BMD clone, and requeue replays this row's URL."""
+    key = dict(odoo_instance_id=None, ticket_id=279, model_name="project.task",
+               field_name="reva_support_answer")
+    tid = writers.get_or_create_support_thread(
+        db, github_url="https://github.com/acme/bmd-test/", **key)
+
+    assert writers.get_or_create_support_thread(
+        db, github_url="https://github.com/acme/rs2/", **key) == tid
+    assert writers.get_support_thread(db, tid)["github_url"] == \
+        "https://github.com/acme/rs2/"
+
+    # consultant clears the field in Odoo -> the thread must stop grounding on it
+    writers.get_or_create_support_thread(db, github_url=None, **key)
+    assert writers.get_support_thread(db, tid)["github_url"] is None
