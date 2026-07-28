@@ -309,6 +309,42 @@ def _unwrap_json_list(v: object) -> object:
     return v
 
 
+# Fragments of the XML-style tool-call format Claude uses in agentic harnesses.
+# A model that falls back to it while a tool schema is in force has nowhere to
+# put that text but inside the string field it is currently filling, so the
+# whole "tool call" lands in one field and the rest come back empty — a
+# schema-VALID result that renders as literal `<parameter name=…>` markup in
+# Odoo (analysis 80 / ticket 130, 2026-07-27; the support path saw the same
+# thing in `answer`, prompts CHANGELOG v2.13). Nothing else inspects string
+# content, so this is the only place that can catch it.
+_TOOL_CALL_SYNTAX = (
+    "<parameter name=",
+    "</parameter>",
+    "<invoke name=",
+    "</invoke>",
+    "</antml",
+)
+
+
+def _reject_tool_call_syntax(v: object) -> object:
+    """Refuse a text field that carries tool-call syntax.
+
+    Guards the FIRST free-text field of each model — the one the degeneration
+    has to land in, since every field before it is an enum. Deliberately narrow:
+    tickets legitimately discuss XML views and `<field>` tags, so only the
+    tool-call markers count.
+    """
+    if isinstance(v, str):
+        for marker in _TOOL_CALL_SYNTAX:
+            if marker in v:
+                raise ValueError(
+                    f"contains tool-call syntax ({marker!r}) — the model wrote its "
+                    f"tool call as text instead of calling the tool, so this field "
+                    f"holds the whole output and the others are empty"
+                )
+    return v
+
+
 class SourcedItem(BaseModel):
     text: str
     confidence: Literal["explicit", "inferred", "assumed"] = "inferred"
@@ -400,6 +436,11 @@ class TicketAnalysisResult(BaseModel):
     @classmethod
     def _parse_json_string_list(cls, v: object) -> object:
         return _unwrap_json_list(v)
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def _reject_degenerate_output(cls, v: object) -> object:
+        return _reject_tool_call_syntax(v)
 
 
 class Attachment(BaseModel):
@@ -553,6 +594,9 @@ class SupportAnswerResult(BaseModel):
             # cannot_answer draws a null here — see _make_nullable in
             # support_tool.py for why the schema offers one.
             return ""
+        # Checked before the truncation below, so the marker can't be cut off
+        # the end of an oversized draft and pass.
+        v = _reject_tool_call_syntax(v)
         if isinstance(v, str) and len(v) > 20000:
             return v[:19997] + "..."
         return v

@@ -408,6 +408,44 @@ def test_bad_tool_input_is_malformed_not_permanent():
         answerer.answer(_params(), "## Persona\nFormal.", [])
 
 
+def test_a_draft_carrying_tool_call_syntax_is_rejected():
+    """The degeneration v2.13 documented (`</antml parameter>` in `answer`) is
+    schema-valid: the field is a string and a string is what arrived. Making
+    `answer` nullable removed the trigger it was seen with, but the same text
+    reached a customer-facing draft on the ticket path a week later, so the
+    content itself has to be refused — one retry, then a visible failure."""
+    payload = {
+        "id": "msg_01",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-5",
+        "stop_reason": "tool_use",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "toolu_01",
+                "name": SUPPORT_TOOL_NAME,
+                "input": {
+                    "request_kind": "question",
+                    "answer_status": "answered",
+                    "answer": "Der Rechnungslauf bricht ab, weil …"
+                              '</antml parameter><parameter name="cannot_answer_reason">',
+                    "language": "de",
+                },
+            }
+        ],
+        "usage": {"input_tokens": 10, "output_tokens": 900,
+                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+    }
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=json.dumps(payload).encode())
+
+    answerer = _make_answerer(handler)
+    with pytest.raises(MalformedModelOutput, match="tool-call syntax"):
+        answerer.answer(_params(), "## Persona\nFormal.", [])
+
+
 # ---------------------------------------------------------------------------
 # max_tokens
 # ---------------------------------------------------------------------------

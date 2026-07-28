@@ -247,6 +247,56 @@ def test_analyze_bad_tool_input():
         analyzer.analyze(_params())
 
 
+def test_analyze_rejects_a_summary_carrying_tool_call_syntax():
+    """Real failure (analysis 80 / ticket 130, 2026-07-27): the model wrote its
+    whole tool call in the `<parameter name=…>` syntax, so the summary prose and
+    then EVERY other section landed inside the `summary` string, and the real
+    fields came back empty. Only `summary` is required, so the shape validated —
+    the row was marked completed and the consultant's Odoo tab rendered escaped
+    `<parameter …>` markup. Schema validation cannot see this; only the content
+    check can, and it must land on MalformedModelOutput so the runner's one-shot
+    retry gets a chance before anything reaches Odoo."""
+    degenerate = (
+        "Das Ticket ist eine allgemeine Frage ohne konkretes Problem."
+        '</parameter> <parameter name="missing_info">'
+        '[{"text": "Welche Instanz ist betroffen?", "confidence": "certain"}]</parameter>'
+    )
+    payload = {
+        "id": "msg_01",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-5",
+        "stop_reason": "tool_use",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": "toolu_01",
+                "name": TICKET_TOOL_NAME,
+                "input": {"summary": degenerate, "missing_info": [], "odoo_notes": []},
+            }
+        ],
+        "usage": {"input_tokens": 10, "output_tokens": 900,
+                  "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+    }
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=json.dumps(payload).encode())
+
+    analyzer = _make_analyzer(handler)
+    with pytest.raises(MalformedModelOutput, match="tool-call syntax"):
+        analyzer.analyze(_params())
+
+
+def test_a_summary_that_merely_mentions_xml_still_validates():
+    """The guard keys on tool-call syntax, not on angle brackets: Odoo tickets
+    talk about XML views and `<field>` tags, and a summary quoting one is a
+    normal analysis, not a degenerate tool call."""
+    result = TicketAnalysisResult.model_validate(
+        {"summary": "Der Kunde beschreibt ein Problem mit <field> in der Ansicht."}
+    )
+    assert result.summary.startswith("Der Kunde")
+
+
 # ---------------------------------------------------------------------------
 # format_ticket_html
 # ---------------------------------------------------------------------------
