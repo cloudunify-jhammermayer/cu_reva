@@ -20,6 +20,54 @@ from reva.db.models import (
 _WORKTREES = ("odoo", "enterprise", "documentation")
 _MAX_HINTS = 10
 
+# How many rows per kind to score before taking the top `limit`. The registry
+# had no ordering at all — `.limit(8)` over arbitrary DB order — so the row that
+# answered a question lost its slot to whatever the scan reached first. Bounded
+# because the ILIKE patterns are leading-wildcard (seq scan); 200 over the
+# largest table (~63k fields) is milliseconds.
+_REGISTRY_CANDIDATES = 200
+
+# Real core modules, so they stay searchable — a question about Indian holidays
+# must still find l10n_in — but they must not displace a mainline hit. Probing
+# prod for "optional" returned `l10n_in_is_limited_to_optional_days` and
+# `mail.test.alias.optional` ahead of `sale.order.line.is_optional`.
+_LOW_VALUE_MODULE_RE = re.compile(r"^(l10n_|test_)|_tests?$")
+
+_SEPARATORS_RE = re.compile(r"[._]+")
+
+
+def _matches_word(term: str, text: str | None) -> bool:
+    """True when `term` appears in `text` on word boundaries.
+
+    Substring matching is what let `..._to_optional_days` look as relevant as
+    `is_optional`; requiring boundaries makes "kit" stop matching "kits" too,
+    which is the intent — the planner emits the word it means.
+    """
+    if not term or not text:
+        return False
+    return re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text, re.IGNORECASE) is not None
+
+
+def _registry_score(name: str, label: str | None, module: str, terms: list[str]) -> float:
+    """Rank a registry row against the planner's terms.
+
+    A UI label match outranks a technical-name match because consultants and
+    customers describe features by label ("Optional Line"), not by field name.
+    """
+    # `_` and `.` are word characters, so `is_optional` would never match the
+    # term "optional" without normalising the separators first.
+    spaced_name = _SEPARATORS_RE.sub(" ", name)
+    score = 0.0
+    if any(_matches_word(term, label) for term in terms):
+        score += 2.0
+    if any(_matches_word(term, spaced_name) for term in terms):
+        score += 1.0
+    if _LOW_VALUE_MODULE_RE.search(module or ""):
+        score -= 3.0
+    # Tiebreak toward the canonical short name: `sale.order.line.is_optional`
+    # over `product.template.pos_optional_product_ids`.
+    return score - 0.01 * len(name)
+
 _ADDED_NAME_RE = re.compile(r"^\+\s*_name\s*=\s*[\"']([\w.]+)[\"']")
 _ADDED_INHERIT_RE = re.compile(r"^\+\s*_inherit\s*=\s*[\"']([\w.]+)[\"']")
 _ADDED_FIELD_RE = re.compile(r"^\+\s*(\w+)\s*=\s*fields\.(\w+)\(")
@@ -150,14 +198,14 @@ class CoreKnowledge:
     def search_registry(self, version: str, terms: list[str], limit: int = 8) -> list[dict]:
         """Rank core modules, models and FIELDS against the planner's terms.
 
-        Fields are searched too, and the three kinds are interleaved rather than
-        concatenated. Both matter: a stock field is often the whole answer to
-        "does standard Odoo already do this?", and a generic term like
-        "optional" matches enough module summaries to fill `limit` on its own.
-        Concatenating modules → models → fields under one `output[:limit]` made
-        field rows unreachable in practice — Odoo 19's
-        `sale.order.line.is_optional` sat in this table while a support answer
-        denied the feature existed (ticket 6743, 2026-07-28).
+        Three things matter here, and ticket 6743 (2026-07-28) needed all three.
+        Fields are searched at all — a stock field is often the whole answer to
+        "does standard Odoo already do this?", and this table was queried for
+        modules and models only. The kinds are interleaved rather than
+        concatenated, because a generic term like "optional" matches enough
+        module summaries to fill `limit` on its own. And each kind is RANKED,
+        because `.limit()` over arbitrary DB order gave the decisive row no
+        better than even odds of keeping its slot.
         """
         terms = [term.strip() for term in terms if term.strip()]
         if not terms:
@@ -177,7 +225,7 @@ class CoreKnowledge:
             module_rows = s.execute(
                 select(OdooCoreModule)
                 .where(OdooCoreModule.odoo_version == version, or_(*module_clauses))
-                .limit(limit)
+                .limit(_REGISTRY_CANDIDATES)
             ).scalars()
             for module_row in module_rows:
                 modules_out.append({
@@ -185,6 +233,12 @@ class CoreKnowledge:
                     "name": module_row.module,
                     "module": module_row.module,
                     "summary": module_row.summary or "",
+                    "_score": _registry_score(
+                        module_row.module,
+                        f"{module_row.summary or ''} {module_row.category or ''}",
+                        module_row.module,
+                        terms,
+                    ),
                 })
 
             model_clauses = [
@@ -201,7 +255,7 @@ class CoreKnowledge:
                     OdooCoreModel.kind == "name",
                     or_(*model_clauses),
                 )
-                .limit(limit)
+                .limit(_REGISTRY_CANDIDATES)
             ).scalars()
             for model_row in model_rows:
                 models_out.append({
@@ -209,6 +263,10 @@ class CoreKnowledge:
                     "name": model_row.model,
                     "module": model_row.module,
                     "summary": model_row.description or "",
+                    "_score": _registry_score(
+                        model_row.model, model_row.description,
+                        model_row.module, terms,
+                    ),
                 })
 
             field_clauses = [
@@ -221,7 +279,7 @@ class CoreKnowledge:
             field_rows = s.execute(
                 select(OdooCoreField)
                 .where(OdooCoreField.odoo_version == version, or_(*field_clauses))
-                .limit(limit)
+                .limit(_REGISTRY_CANDIDATES)
             ).scalars()
             for field_row in field_rows:
                 label = f"{field_row.ftype or 'field'}"
@@ -232,13 +290,24 @@ class CoreKnowledge:
                     "name": f"{field_row.model}.{field_row.field}",
                     "module": field_row.module,
                     "summary": f"{label}, module {field_row.module}",
+                    "_score": _registry_score(
+                        f"{field_row.model}.{field_row.field}", field_row.string,
+                        field_row.module, terms,
+                    ),
                 })
 
-        # Round-robin so no kind can starve another out of the `limit`.
+        # Best-first within each kind, then round-robin so no kind can starve
+        # another out of the `limit`. `_score` is internal — strip it before the
+        # hits reach the prompt block.
+        for kind_hits in (fields_out, models_out, modules_out):
+            kind_hits.sort(key=lambda hit: hit["_score"], reverse=True)
         output: list[dict] = []
         for group in zip_longest(fields_out, models_out, modules_out):
             output.extend(hit for hit in group if hit is not None)
-        return output[:limit]
+        return [
+            {key: value for key, value in hit.items() if key != "_score"}
+            for hit in output[:limit]
+        ]
 
     def core_overlap(
         self,
