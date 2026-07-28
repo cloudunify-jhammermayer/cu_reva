@@ -876,19 +876,19 @@ def test_drifted_cli_output_falls_back_instead_of_failing_the_analysis(
     ctx_and_fakes, monkeypatch
 ):
     """The CLI path has no tool schema to constrain the output — the skill file
-    is the whole contract, and on 2026-07-27 two escalations (analyses 77/78,
-    ~$3.80) wrote `missing_info[].question` with `confidence: "high"` and died
-    in validation, leaving the consultant nothing at all. A docs-only analysis
-    is a downgrade, not a failure: fall back, record the paid CLI run in the
-    spend ledger, and make the downgrade visible as an ops event."""
+    is the whole contract. Drift that boundary repair CANNOT fix — here a
+    missing `summary`, which has no default and cannot be invented — must not
+    cost the consultant the whole analysis. A docs-only analysis is a downgrade,
+    not a failure: fall back, record the paid CLI run in the spend ledger, and
+    make the downgrade visible as an ops event."""
     s = ctx_and_fakes
     _needs_code(monkeypatch)
-    drifted = {
-        "summary": "Das Ticket beschreibt einen Freigabeprozess.",
-        "missing_info": [{"question": "Welche Rolle gibt frei?", "confidence": "high"}],
-        "existing_customizations": "Im Projekt gibt es bereits eine Freigabe.",
+    unrepairable = {
+        "missing_info": [{"text": "Welche Rolle gibt frei?", "confidence": "certain"}],
     }
-    code_runner = _FakeCodeRunner(s["analyzer"].result, raw_input=drifted, cost_usd=2.1)
+    code_runner = _FakeCodeRunner(
+        s["analyzer"].result, raw_input=unrepairable, cost_usd=2.1
+    )
     _wire_repo(s, code_runner, _FakeGitHubRepo())
 
     out = run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
@@ -901,6 +901,40 @@ def test_drifted_cli_output_falls_back_instead_of_failing_the_analysis(
         spend = {r.kind: float(r.cost_usd) for r in sess.query(ClaudeSpend).all()}
     assert "code_grounding_malformed_output" in events
     assert spend.get("ticket_analysis_grounding") == pytest.approx(2.1)
+
+
+def test_repairable_cli_drift_keeps_the_code_grounded_analysis(
+    ctx_and_fakes, monkeypatch
+):
+    """The shape that failed as analysis 84 on prod. Falling back would discard
+    a ~$1.70 CLI run and silently downgrade the ticket to docs-only, so the
+    drift is repaired in place and the code-grounded result is what ships."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    drifted = {
+        "summary": "Das Ticket beschreibt einen Einkaufsprozess.",
+        "missing_info": [
+            {"question": "Welche Rolle gibt frei?",
+             "confidence": "high – im Code nicht ableitbar"},
+        ],
+        "existing_customizations": "Im Projekt gibt es bereits eine Freigabe.",
+    }
+    code_runner = _FakeCodeRunner(s["analyzer"].result, raw_input=drifted, cost_usd=1.7)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    params = _make_params(s["db"], github_url=_GH_URL)
+    out = run_ticket_analysis(params)
+
+    assert out["status"] == "completed"
+    assert s["analyzer"].call_count == 0       # no second, cheaper, worse run
+    with s["db"].session() as sess:
+        events = [e.event for e in sess.query(OpsEvent).all()]
+        row = sess.get(TicketAnalysis, params["analysis_id"])
+    assert "code_grounding_malformed_output" not in events
+    missing = row.result_structured["missing_info"]
+    assert missing[0]["text"] == "Welche Rolle gibt frei?"
+    assert missing[0]["confidence"] == "certain"
+    assert "Freigabe" in row.result_structured["existing_customizations"]["notes"]
 
 
 def test_repo_lock_busy_retries_rather_than_downgrading(ctx_and_fakes, monkeypatch):

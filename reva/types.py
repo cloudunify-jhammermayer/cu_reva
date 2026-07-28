@@ -7,6 +7,7 @@ from them in `review_tool.py`.
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Literal, TypedDict
 
@@ -345,6 +346,20 @@ def _reject_tool_call_syntax(v: object) -> object:
     return v
 
 
+# The escalated CLI path has no tool schema to constrain it — the skill file is
+# the whole contract — and the model reliably reaches for a different vocabulary
+# than `missing_info` declares: `question` for the text, and the *estimates*
+# enum (high/medium/low, sometimes German, sometimes with a rationale appended
+# after a dash) for the confidence. All five code-grounded analyses on
+# 2026-07-27/28 died on exactly this and delivered nothing. prompts v2.15 now
+# states the contract; this repairs the run when it is ignored anyway.
+_MISSING_INFO_CONFIDENCE_SYNONYMS = {
+    "high": "certain", "hoch": "certain",
+    "medium": "likely", "mittel": "likely",
+    "low": "possible", "niedrig": "possible",
+}
+
+
 class SourcedItem(BaseModel):
     text: str
     confidence: Literal["explicit", "inferred", "assumed"] = "inferred"
@@ -353,6 +368,31 @@ class SourcedItem(BaseModel):
 class MissingInfoItem(BaseModel):
     text: str
     confidence: Literal["certain", "likely", "possible"] = "likely"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_question_as_text(cls, data: object) -> object:
+        """`question` is what the model calls this field. Only fill `text` when
+        it is genuinely absent — never overwrite a canonical value, and never
+        manufacture one, so a truly empty item still fails."""
+        if isinstance(data, dict) and "text" not in data and "question" in data:
+            data = {**data, "text": data["question"]}
+        return data
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _map_confidence_synonyms(cls, v: object) -> object:
+        if not isinstance(v, str):
+            return v
+        # "hoch — im Projekt eindeutig bestätigt" -> "hoch". Split on the dashes
+        # the model actually used; a hyphen is excluded because it appears
+        # inside words.
+        head = re.split(r"[–—]", v, maxsplit=1)[0].strip().lower()
+        if head in ("certain", "likely", "possible"):
+            return head
+        # Unmappable: fall through to the field default rather than losing the
+        # whole analysis over one word.
+        return _MISSING_INFO_CONFIDENCE_SYNONYMS.get(head, "likely")
 
 
 class CoverageFeature(BaseModel):
@@ -397,6 +437,17 @@ class ExistingCustomizations(BaseModel):
     coverage: Literal["full", "partial", "none", "unknown"] = "unknown"
     features: list[CustomizationFeature] = Field(default_factory=list)
     notes: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_prose_as_notes(cls, data: object) -> object:
+        """Analysis 78 (2026-07-28) returned this whole section as a paragraph
+        of German prose. Keep the paragraph as `notes` and leave `coverage` at
+        `unknown` — prose is not an assessment, and inferring one from it would
+        be inventing content."""
+        if isinstance(data, str):
+            return {"notes": data.strip()} if data.strip() else {}
+        return data
 
     @field_validator("features", mode="before")
     @classmethod
