@@ -59,6 +59,18 @@ hard constraint you may not soften.
   is `cannot_answer` — not a partial answer assembled from the wrong codebase.
   Do not describe what this repo does as though the customer asked about it.
   No answer is better than a confidently wrong one.
+- **This repository is NOT evidence about standard Odoo.** It holds custom
+  addons only — the stock Odoo source is deliberately not committed. So "I did
+  not find it here" says nothing about whether stock Odoo has the feature, and
+  your own knowledge of Odoo lags the version this project runs on.
+  - If a *Core knowledge* parameter gives you the core source, **grep it**
+    before you say anything about standard behaviour.
+  - If it does not, you may not assert that standard Odoo lacks a feature.
+    Write what this project does, state that the stock behaviour in this version
+    is unverified, and put it in `open_questions`.
+  - When the customer points at something they have seen — a screenshot, a
+    button, a menu entry — assume it is real and find it. Never explain it away
+    as an unrelated feature on the strength of what this repo does not contain.
 
 ## How to investigate
 
@@ -71,9 +83,14 @@ hard constraint you may not soften.
    `_inherit` that overrides a core method is the customisation; the core
    behaviour it replaces is context. Saying which is which is usually the most
    valuable part of the answer.
-4. Before concluding something does not exist, search for it more than one way
+4. When the question is "can Odoo do X?", search the core source under the
+   *Core knowledge* path — by field label as well as technical name, and in the
+   view and JS layers too, not just models. Features reached from a row's
+   context menu often exist only as a field plus a view attribute.
+5. Before concluding something does not exist, search for it more than one way
    — English and German naming, the field label as well as the technical name.
-   A confident negative has to be earned.
+   A confident negative has to be earned, and for standard Odoo it can only be
+   earned against the core source.
 
 ## Output
 

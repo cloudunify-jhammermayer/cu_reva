@@ -24,7 +24,7 @@ from reva.html_guard import ensure_renderable
 from reva.persona import render_persona_block, resolve_persona
 from reva.support_answerer import find_code_references
 from reva.support_formatter import format_support_html, format_support_sources_html
-from reva.ticket_knowledge import build_ticket_knowledge
+from reva.ticket_knowledge import build_ticket_knowledge, core_source_param
 from reva.types import SupportAnswerResult, SupportJobParams
 from worker.repo_config import code_grounding_allowed, resolve_repo_context
 from worker.runner import (
@@ -247,6 +247,10 @@ def _produce_answer(ctx, params: SupportJobParams, odoo, log) -> str:
                 skill_params = _skill_params(
                     params, persona_block, prior_turns, knowledge
                 )
+                extra_dirs = None
+                core_source = core_source_param(ctx.core_knowledge, version)
+                if core_source is not None:
+                    extra_dirs, skill_params["core_knowledge"] = core_source
                 # The lock spans clone + run so a concurrent job can't reset the
                 # shared working tree while the CLI is reading it. A busy lock
                 # raises TransientError and RQ retries the whole turn.
@@ -255,6 +259,7 @@ def _produce_answer(ctx, params: SupportJobParams, odoo, log) -> str:
                     response = ctx.runner.review(
                         repo_path=repo_path, skill=_SUPPORT_SKILL,
                         params=skill_params, odoo=config.odoo,
+                        extra_dirs=extra_dirs,
                     )
                 grounding = "code"
 

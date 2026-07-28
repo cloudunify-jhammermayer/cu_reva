@@ -6,13 +6,14 @@ run_ticket_analysis is what RQ calls for each enqueued ticket analysis job.
 from __future__ import annotations
 
 import structlog
+from pydantic import ValidationError
 
 from reva.db import writers
 from reva.errors import MalformedModelOutput, PermanentError, TransientError
 from reva.github_urls import parse_github_repo_url
 from reva.html_guard import ensure_renderable
 from reva.ticket_formatter import format_ticket_html
-from reva.ticket_knowledge import build_ticket_knowledge
+from reva.ticket_knowledge import build_ticket_knowledge, core_source_param
 from reva.types import TicketJobParams
 from worker.repo_config import (
     code_grounding_allowed,
@@ -68,7 +69,7 @@ def repo_core_version(ctx, github_url: str | None, analysis_id: int, log) -> str
 _TICKET_SKILL = "reva-ticket-analysis"
 
 
-def _try_code_grounded_analysis(ctx, params, knowledge, log):
+def _try_code_grounded_analysis(ctx, params, knowledge, log, version=None):
     """Run the analysis against the repo clone when the planner asked for code.
 
     Returns ``(response, result)`` on success, or ``(None, None)`` to fall back
@@ -106,16 +107,39 @@ def _try_code_grounded_analysis(ctx, params, knowledge, log):
         skill_params["retrieved_knowledge"] = "\n".join(
             block.get("text", "") for block in knowledge.blocks
         )
+    extra_dirs = None
+    core_source = core_source_param(ctx.core_knowledge, version)
+    if core_source is not None:
+        extra_dirs, skill_params["core_knowledge"] = core_source
 
     with ctx.runner.repo_lock(owner, name):
         repo_path = ctx.runner.ensure_repo(owner, name, None, token)
         response = ctx.runner.review(
             repo_path=repo_path, skill=_TICKET_SKILL, params=skill_params,
-            odoo=config.odoo,
+            odoo=config.odoo, extra_dirs=extra_dirs,
         )
     if response.tool_use_input is None:
         raise PermanentError(f"{_TICKET_SKILL} produced no analysis JSON")
-    return response, TicketAnalysisResult.model_validate(response.tool_use_input)
+    try:
+        return response, TicketAnalysisResult.model_validate(response.tool_use_input)
+    except ValidationError as exc:
+        # No tool schema constrains this path — the skill file is the whole
+        # contract, and the model can still drift off it (analyses 77/78,
+        # 2026-07-27: `missing_info[].question`, `confidence: "high"`). Re-running
+        # the CLI would re-pay 10-30x and re-take the lock, so fall back to the
+        # docs-only leg: a downgraded analysis beats none. The CLI run was
+        # already paid for, so its spend goes to the ledger the budget cap reads
+        # even though the response is discarded.
+        log.warning("ticket_code_grounding_malformed_output", error=str(exc))
+        writers.record_claude_spend(
+            ctx.db, "ticket_analysis_grounding", response.total_cost_usd
+        )
+        writers.record_ops_event(
+            ctx.db, "ticket_analysis", "warning", "code_grounding_malformed_output",
+            {"analysis_id": params.analysis_id, "repo": f"{owner}/{name}",
+             "error": str(exc)[:300]},
+        )
+        return None, None
 
 
 def run_ticket_analysis(job_params: dict) -> dict:
@@ -199,7 +223,7 @@ def run_ticket_analysis(job_params: dict) -> dict:
             response_obj = result = None
             if knowledge.needs_repo_code:
                 response_obj, result = _try_code_grounded_analysis(
-                    ctx, params, knowledge, log
+                    ctx, params, knowledge, log, version
                 )
             if response_obj is None:
                 try:

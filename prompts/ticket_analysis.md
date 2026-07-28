@@ -66,6 +66,15 @@ Base this section ONLY on the retrieved knowledge block — never on memory. No
 knowledge block, or nothing relevant in it → `coverage: "unknown"` and empty
 features. Name apps/settings/features only — no models, fields, or code.
 
+`"none"` is a positive claim and needs positive evidence: the retrieved block
+showing the closest stock features and none of them fitting. The block holds at
+most a handful of keyword-chosen doc sections, and your own knowledge of Odoo
+lags the version this project runs on, so retrieval missing a feature is the
+expected case — that is `"unknown"`, not `"none"`. Never write in `summary` that
+standard Odoo cannot do something you did not see ruled out. Quoting a
+development estimate for a feature the customer already owns is the most
+expensive mistake this analysis can make.
+
 ### 4. Existing Customizations
 
 When a *Retrieved project documentation* system block is present, assess whether

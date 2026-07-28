@@ -14,7 +14,7 @@ import pytest
 import structlog
 
 from reva.db import Base, Database, create_engine_from_url, writers
-from reva.db.models import OpsEvent, TicketAnalysis
+from reva.db.models import ClaudeSpend, OpsEvent, TicketAnalysis
 from reva.errors import MalformedModelOutput, PermanentError, TransientError
 from reva.ticket_knowledge import TicketKnowledge
 from reva.types import (
@@ -671,9 +671,19 @@ def test_repo_core_version_github_error_degrades(db):
 class _FakeCodeRunner:
     """Stands in for ClaudeCodeRunner on the escalated ticket path."""
 
-    def __init__(self, result: TicketAnalysisResult, lock_busy: bool = False):
+    def __init__(
+        self,
+        result: TicketAnalysisResult,
+        lock_busy: bool = False,
+        raw_input: dict | None = None,
+        cost_usd: float = 0.0,
+    ):
         self.result = result
         self.lock_busy = lock_busy
+        # Bypasses `result` to return exactly what the CLI wrote — the only way
+        # to exercise output that does not match TicketAnalysisResult.
+        self.raw_input = raw_input
+        self.cost_usd = cost_usd
         self.lock_calls: list = []
         self.review_calls: list = []
 
@@ -689,11 +699,14 @@ class _FakeCodeRunner:
         return f"/repos/{owner}/{name}"
 
     def review(self, repo_path, skill, params, model=None, odoo=False, extra_dirs=None):
-        self.review_calls.append({"skill": skill, "params": params})
+        self.review_calls.append({"skill": skill, "params": params,
+                                  "extra_dirs": extra_dirs})
         return ClaudeResponse(
             model="claude-sonnet-5", stop_reason="tool_use",
-            tool_use_input=self.result.model_dump(mode="json"),
+            tool_use_input=self.raw_input if self.raw_input is not None
+            else self.result.model_dump(mode="json"),
             input_tokens=9000, output_tokens=1200,
+            total_cost_usd=self.cost_usd,
         )
 
 
@@ -723,12 +736,32 @@ def _needs_code(monkeypatch, value=True):
     )
 
 
-def _wire_repo(s, code_runner, github):
+class _FakeCoreKnowledge:
+    """Stands in for the operator-provisioned /core worktrees."""
+
+    def __init__(self, version: str = "19.0"):
+        self.version = version
+
+    def resolve(self, requested):
+        return self.version if requested == self.version else None
+
+    def core_paths(self, version):
+        return [f"/core/{version}/odoo", f"/core/{version}/enterprise",
+                f"/core/{version}/documentation"]
+
+    def catalog_path(self, version):
+        return f"/core/{version}/catalog"
+
+
+def _wire_repo(s, code_runner, github, core_knowledge=None):
     """WorkerContext is frozen — swap in the repo-aware collaborators and
     re-register the context."""
     import dataclasses
 
-    ctx = dataclasses.replace(s["ctx"], runner=code_runner, github=github)
+    ctx = dataclasses.replace(
+        s["ctx"], runner=code_runner, github=github,
+        core_knowledge=core_knowledge,
+    )
     set_context(ctx)
     return ctx
 
@@ -748,6 +781,44 @@ def test_code_grounded_analysis_runs_the_skill_under_the_lock(ctx_and_fakes, mon
     assert code_runner.lock_calls == [("acme", "widgets")]
     assert code_runner.review_calls[0]["skill"] == "reva-ticket-analysis"
     assert s["analyzer"].call_count == 0        # the CLI replaced the API call
+
+
+def test_code_grounded_analysis_gets_the_odoo_core_source(ctx_and_fakes, monkeypatch):
+    """The clone holds custom addons only, so Standard Odoo Coverage was judged
+    from model priors — which lag the version the project runs on. Quoting a
+    development estimate for a feature the customer already owns is the
+    expensive failure this prevents (ticket 6743, 2026-07-28)."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo(), _FakeCoreKnowledge())
+
+    run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+
+    call = code_runner.review_calls[0]
+    assert call["extra_dirs"] == [
+        "/core/19.0/odoo", "/core/19.0/enterprise", "/core/19.0/documentation",
+    ]
+    param = call["params"]["core_knowledge"]
+    assert "/core/19.0/odoo" in param
+    assert "/core/19.0/catalog" in param
+
+
+def test_code_grounded_analysis_without_core_knowledge_passes_no_dirs(
+    ctx_and_fakes, monkeypatch
+):
+    """Core knowledge is optional — degrade to the old behaviour, not to an
+    invalid --add-dir."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+
+    call = code_runner.review_calls[0]
+    assert call["extra_dirs"] is None
+    assert "core_knowledge" not in call["params"]
 
 
 def test_project_less_ticket_never_escalates(ctx_and_fakes, monkeypatch):
@@ -799,6 +870,37 @@ def test_per_repo_kill_switch_keeps_the_ticket_on_docs(ctx_and_fakes, monkeypatc
     with s["db"].session() as sess:
         events = [e.event for e in sess.query(OpsEvent).all()]
     assert "code_grounding_disabled" in events
+
+
+def test_drifted_cli_output_falls_back_instead_of_failing_the_analysis(
+    ctx_and_fakes, monkeypatch
+):
+    """The CLI path has no tool schema to constrain the output — the skill file
+    is the whole contract, and on 2026-07-27 two escalations (analyses 77/78,
+    ~$3.80) wrote `missing_info[].question` with `confidence: "high"` and died
+    in validation, leaving the consultant nothing at all. A docs-only analysis
+    is a downgrade, not a failure: fall back, record the paid CLI run in the
+    spend ledger, and make the downgrade visible as an ops event."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    drifted = {
+        "summary": "Das Ticket beschreibt einen Freigabeprozess.",
+        "missing_info": [{"question": "Welche Rolle gibt frei?", "confidence": "high"}],
+        "existing_customizations": "Im Projekt gibt es bereits eine Freigabe.",
+    }
+    code_runner = _FakeCodeRunner(s["analyzer"].result, raw_input=drifted, cost_usd=2.1)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    out = run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+
+    assert out["status"] == "completed"
+    assert code_runner.review_calls != []      # the CLI did run and was paid for
+    assert s["analyzer"].call_count == 1       # …and the Messages API leg covered it
+    with s["db"].session() as sess:
+        events = [e.event for e in sess.query(OpsEvent).all()]
+        spend = {r.kind: float(r.cost_usd) for r in sess.query(ClaudeSpend).all()}
+    assert "code_grounding_malformed_output" in events
+    assert spend.get("ticket_analysis_grounding") == pytest.approx(2.1)
 
 
 def test_repo_lock_busy_retries_rather_than_downgrading(ctx_and_fakes, monkeypatch):

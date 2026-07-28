@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from itertools import zip_longest
 from pathlib import Path
 
 from sqlalchemy import or_, select, text
@@ -147,10 +148,23 @@ class CoreKnowledge:
             ]
 
     def search_registry(self, version: str, terms: list[str], limit: int = 8) -> list[dict]:
+        """Rank core modules, models and FIELDS against the planner's terms.
+
+        Fields are searched too, and the three kinds are interleaved rather than
+        concatenated. Both matter: a stock field is often the whole answer to
+        "does standard Odoo already do this?", and a generic term like
+        "optional" matches enough module summaries to fill `limit` on its own.
+        Concatenating modules → models → fields under one `output[:limit]` made
+        field rows unreachable in practice — Odoo 19's
+        `sale.order.line.is_optional` sat in this table while a support answer
+        denied the feature existed (ticket 6743, 2026-07-28).
+        """
         terms = [term.strip() for term in terms if term.strip()]
         if not terms:
             return []
-        output: list[dict] = []
+        modules_out: list[dict] = []
+        models_out: list[dict] = []
+        fields_out: list[dict] = []
         with self._db.session() as s:
             module_clauses = [
                 or_(
@@ -165,12 +179,12 @@ class CoreKnowledge:
                 .where(OdooCoreModule.odoo_version == version, or_(*module_clauses))
                 .limit(limit)
             ).scalars()
-            for row in module_rows:
-                output.append({
+            for module_row in module_rows:
+                modules_out.append({
                     "kind": "module",
-                    "name": row.module,
-                    "module": row.module,
-                    "summary": row.summary or "",
+                    "name": module_row.module,
+                    "module": module_row.module,
+                    "summary": module_row.summary or "",
                 })
 
             model_clauses = [
@@ -189,13 +203,41 @@ class CoreKnowledge:
                 )
                 .limit(limit)
             ).scalars()
-            for row in model_rows:
-                output.append({
+            for model_row in model_rows:
+                models_out.append({
                     "kind": "model",
-                    "name": row.model,
-                    "module": row.module,
-                    "summary": row.description or "",
+                    "name": model_row.model,
+                    "module": model_row.module,
+                    "summary": model_row.description or "",
                 })
+
+            field_clauses = [
+                or_(
+                    OdooCoreField.field.ilike(f"%{term}%"),
+                    OdooCoreField.string.ilike(f"%{term}%"),
+                )
+                for term in terms
+            ]
+            field_rows = s.execute(
+                select(OdooCoreField)
+                .where(OdooCoreField.odoo_version == version, or_(*field_clauses))
+                .limit(limit)
+            ).scalars()
+            for field_row in field_rows:
+                label = f"{field_row.ftype or 'field'}"
+                if field_row.string:
+                    label += f' "{field_row.string}"'
+                fields_out.append({
+                    "kind": "field",
+                    "name": f"{field_row.model}.{field_row.field}",
+                    "module": field_row.module,
+                    "summary": f"{label}, module {field_row.module}",
+                })
+
+        # Round-robin so no kind can starve another out of the `limit`.
+        output: list[dict] = []
+        for group in zip_longest(fields_out, models_out, modules_out):
+            output.extend(hit for hit in group if hit is not None)
         return output[:limit]
 
     def core_overlap(

@@ -17,6 +17,10 @@ class SaleOrderLine(models.Model):
     _description = "Sales Order Line"
 
     order_id = fields.Many2one("sale.order")
+    # Mirrors the real Odoo 19 sale_management field. Named nowhere in the
+    # module summary or model description, so it is only reachable if
+    # search_registry actually queries fields (ticket 6743).
+    is_optional = fields.Boolean(string="Optional Line")
 
 
 class ResPartner(models.Model):

@@ -6,7 +6,7 @@ the answerer, the Claude Code runner, GitHub, and the Odoo callback.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -82,8 +82,26 @@ class FakeCodeRunner:
         return f"/repos/{owner}/{name}"
 
     def review(self, repo_path, skill, params, model=None, odoo=False, extra_dirs=None):
-        self.review_calls.append({"skill": skill, "params": params, "odoo": odoo})
+        self.review_calls.append({"skill": skill, "params": params, "odoo": odoo,
+                                  "extra_dirs": extra_dirs})
         return _response()
+
+
+@dataclass
+class FakeCoreKnowledge:
+    """Stands in for the operator-provisioned /core worktrees."""
+
+    version: str = "19.0"
+
+    def resolve(self, requested):
+        return self.version if requested == self.version else None
+
+    def core_paths(self, version):
+        return [f"/core/{version}/odoo", f"/core/{version}/enterprise",
+                f"/core/{version}/documentation"]
+
+    def catalog_path(self, version):
+        return f"/core/{version}/catalog"
 
 
 @dataclass
@@ -187,6 +205,12 @@ def _ops(db) -> list[str]:
         return [e.event for e in s.query(OpsEvent).all()]
 
 
+def _with_core(env, core):
+    """WorkerContext is frozen — swap in a rebuilt one and re-register it."""
+    env.ctx = replace(env.ctx, core_knowledge=core)
+    set_context(env.ctx)
+
+
 def _needs_code(env, value: bool):
     env.monkeypatch.setattr(
         "worker.support_runner.build_ticket_knowledge",
@@ -230,6 +254,50 @@ def test_code_path_takes_the_lock_and_runs_the_skill(env):
     assert env.code_runner.review_calls[0]["skill"] == "reva-support-answer"
     assert env.answerer.calls == 0                 # CLI replaces the API call
     assert writers.get_support_turn(env.db, env.turn_id)["grounding_level"] == "code"
+
+
+def test_code_path_gets_the_odoo_core_source(env):
+    """The clone is custom addons only — Odoo.sh repos gitignore `odoo/` and
+    `enterprise/` — so without the /core worktrees the skill answers "does stock
+    Odoo already do this?" from model priors. It denied that Odoo 19's
+    optional-section switch existed and described the 17/18 feature it replaced
+    (ticket 6743, 2026-07-28). Reviews and audits have had these dirs all along.
+    """
+    _with_core(env, FakeCoreKnowledge())
+    _needs_code(env, True)
+    run_support_answer(_params(env))
+
+    call = env.code_runner.review_calls[0]
+    assert call["extra_dirs"] == [
+        "/core/19.0/odoo", "/core/19.0/enterprise", "/core/19.0/documentation",
+    ]
+    # The dirs are useless unless the skill is told they exist and to grep them.
+    param = call["params"]["core_knowledge"]
+    assert "/core/19.0/odoo" in param
+    assert "/core/19.0/catalog" in param
+    assert "custom addons only" in param
+
+
+def test_code_path_without_core_knowledge_passes_no_dirs(env):
+    """Core knowledge is optional (REVA_CORE_KNOWLEDGE_ENABLED=false) and must
+    degrade to the old behaviour, not to an invalid --add-dir."""
+    _needs_code(env, True)
+    run_support_answer(_params(env))
+
+    call = env.code_runner.review_calls[0]
+    assert call["extra_dirs"] is None
+    assert "core_knowledge" not in call["params"]
+
+
+def test_code_path_with_an_unprovisioned_version_passes_no_dirs(env):
+    """A repo asking for a version /core doesn't carry resolves to None."""
+    _with_core(env, FakeCoreKnowledge(version="17.0"))
+    _needs_code(env, True)
+    run_support_answer(_params(env))
+
+    call = env.code_runner.review_calls[0]
+    assert call["extra_dirs"] is None
+    assert "core_knowledge" not in call["params"]
 
 
 def test_no_github_url_never_escalates(env):

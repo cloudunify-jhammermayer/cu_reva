@@ -1,3 +1,51 @@
+## v2.16 — A negative about standard Odoo has to be earned
+
+- All four answer-shaped prompts (`support_answer.md`, `ticket_analysis.md`,
+  `skills/reva-support-answer.md`, `skills/reva-ticket-analysis.md`) may no
+  longer assert that standard Odoo lacks a feature. Ticket 6743 (2026-07-28) was
+  told there is "weder eine Einrichtungsoption noch einen Schalter" for marking
+  BOM components optional, and that Odoo's Optional Products has "keinen
+  fachlichen Bezug zu einer Stückliste" — while Odoo 19 marks a whole quotation
+  section optional from the line's ⋮ menu (`sale.order.line.is_optional`,
+  `sale_management`), and `cu_sale` explodes a Project BOM into exactly such a
+  section. The answer offered to build a feature the customer already owns.
+- Two blind spots produced it, and each prompt now names its own: the CLI skills
+  run against a clone holding **custom addons only** (Odoo.sh repos gitignore
+  `odoo/` and `enterprise/`), and the Messages-API prompts see at most a handful
+  of keyword-picked doc sections. Retrieval missing a feature is the expected
+  case, not evidence of absence. `standard_coverage: "none"` now requires
+  positive evidence; without it the answer is `"unknown"`.
+- The support prompts additionally may not explain away something the customer
+  has seen. The old answer speculated that the screenshot in the mail thread
+  "probably" showed an unrelated feature — it showed the actual feature.
+- The two CLI skills are now told the Odoo core source is mounted and to grep it
+  (`ticket_knowledge.core_source_param`). Before this, `--add-dir /core/<v>` was
+  granted to full reviews and audits only, so the two skills whose whole job is
+  "does stock Odoo already cover this?" were the ones that could not look.
+
+## v2.15 — Ticket analysis: the CLI skill states its own output contract
+
+- `skills/reva-ticket-analysis.md` now writes out the `submit_ticket_analysis`
+  fields, their enums, and the estimate calibration bands. It previously said
+  "matching the `submit_ticket_analysis` schema — the same sections, confidence
+  values … as the standard ticket analysis", which the escalated run cannot see:
+  the headless CLI gets no tool definition and never receives
+  `ticket_analysis.md`. Two paid escalations on 2026-07-27 (analyses 77/78,
+  ~$3.80) invented `missing_info[].question` with `confidence: "high"` and an
+  `existing_customizations` string, and died in Pydantic validation with nothing
+  to show the consultant. `skills/reva-support-answer.md` had listed its fields
+  since v2.12 — this brings the sibling skill in line. Guarded by
+  `test_ticket_analysis_skill_spells_out_the_output_contract`, which reads the
+  required field names straight off the tool schema.
+- The calibration bands ride along for the same reason: they lived only in
+  `ticket_analysis.md`, so a code-grounded analysis was quoting uncalibrated
+  hours.
+- Not a prompt change, but the reason this surfaced: a degenerate tool call
+  written as `<parameter name=…>` text is now refused in `TicketAnalysisResult.
+  summary` and `SupportAnswerResult.answer` (`reva/types.py`). v2.13 removed the
+  trigger it was first seen with; the text itself reached a customer's Odoo
+  ticket on the ticket path a week later, so the content is now checked.
+
 ## v2.14 — Support answers: code is evidence, never output
 
 - Both support prompts: no Python model, field, method, XML view, controller,

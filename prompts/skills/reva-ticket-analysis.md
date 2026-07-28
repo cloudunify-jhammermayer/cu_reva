@@ -48,6 +48,15 @@ analysis could:
    answer in the project. Do not ask the stakeholder a question the repository
    already answers; re-asking erodes trust in the whole list.
 
+**This repository is NOT evidence about standard Odoo.** It holds custom addons
+only — the stock source is deliberately not committed — and your own knowledge
+of Odoo lags the version this project runs on. When a *Core knowledge*
+parameter gives you the core source, grep it before judging coverage. Without
+it, `coverage: "none"` is a claim you cannot support: use `"unknown"`, and never
+write in `summary` that stock Odoo cannot do something. Quoting a customer a
+development estimate for a feature they already own is the most expensive
+mistake this analysis can make.
+
 ## How to investigate
 
 1. Locate the addons: `**/__manifest__.py` under `custom_addons/` or
@@ -55,12 +64,55 @@ analysis could:
 2. Follow the chain from the ticket's subject matter to where the behaviour
    actually lives — an `_inherit` override is the customisation; the core
    behaviour it replaces is the context.
-3. Search more than one way before concluding something does not exist —
+3. For "can Odoo already do this?", search the core source under the *Core
+   knowledge* path — by field label as well as technical name, and in the view
+   and JS layers too, not just models. Features reached from a row's context
+   menu often exist only as a field plus a view attribute.
+4. Search more than one way before concluding something does not exist —
    English and German naming, the label as well as the technical name.
 
 ## Output
 
 Write the analysis as JSON to `output_path`, matching the
-`submit_ticket_analysis` schema — the same sections, confidence values, and
-language rule as the standard ticket analysis (answer in the language the
-ticket is written in). No free-form output outside the JSON file.
+`submit_ticket_analysis` schema below. Answer in the language the ticket is
+written in. No free-form output outside the JSON file.
+
+- `summary` — 2–4 sentences: what the ticket asks for, whether the business
+  requirements are clear, and the most critical gaps.
+- `missing_info` — `[{"text": …, "confidence": "certain"|"likely"|"possible"}]`.
+  `text` is the gap phrased as a **concrete question** to the ticket author (the
+  field is `text`, not `question`). `certain` = the ticket cannot be scoped
+  without it, `likely` = implied but unspecified, `possible` = depends on scope.
+  Never ask what the ticket or the repository already answers.
+- `odoo_notes` — `[{"text": …, "confidence": "explicit"|"inferred"|"assumed"}]`,
+  where the confidence says whether the ticket states it, it follows from
+  context, or you are adding standard practice.
+- `standard_coverage` — `{"coverage": "full"|"partial"|"none"|"unknown",
+  "features": [{"name", "module", "kind": "app"|"setting"|"feature", "how",
+  "reference", "confidence": "high"|"medium"|"low"}], "notes"}`. Does stock Odoo
+  cover this *for this project*, given what the repository already changes?
+- `existing_customizations` — same shape, but each feature carries `addon`
+  instead of `module`: `{"coverage": …, "features": [{"name", "addon", "how",
+  "reference", "confidence"}], "notes"}`. This is the section the repository buys
+  you; ground it in what you actually read.
+- `estimates` — one entry per user story: `[{"story", "kind":
+  "custom_dev"|"configuration"|"mixed", "min_hours", "max_hours", "confidence":
+  "high"|"medium"|"low", "assumptions": […]}]`. Default to ONE story; split only
+  for independently deliverable pieces, and adopt the ticket's own split when it
+  enumerates use cases.
+
+`coverage` is `"unknown"` with empty `features` when you have nothing to base
+the section on. An empty list is the right answer for a section with nothing to
+report — never invent items to fill it.
+
+**Estimate calibration — binding.** `min_hours`/`max_hours` cover
+implementation + developer testing by a mid-level Odoo developer **working
+AI-assisted**, excluding deployment, project management, and customer
+communication. Do not fall back to agency-style numbers: configuration story
+**0.5–2 h**; small customization (field, view tweak, constraint, hard block,
+simple wizard) **1–4 h**; medium (new model or copy mechanism + views + logic)
+**3–8 h**; large (cross-module workflow, status overview, complex computed
+logic) **6–12 h**. Estimate each story's *incremental* effort — the shared
+module scaffolding is priced once, not per story. A typical 5–7-story module
+lands around **15–30 h** in total; a sum far above that means the per-story
+numbers are inflated.

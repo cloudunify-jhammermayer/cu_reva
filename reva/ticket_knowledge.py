@@ -224,6 +224,37 @@ def build_repo_docs_block(
     }, len(hits), None
 
 
+def core_source_param(
+    core: CoreKnowledge | None, version: str | None
+) -> tuple[list[str], str] | None:
+    """Read-only Odoo core worktrees for the two escalated CLI skills.
+
+    Returns ``(extra_dirs, skill_param_text)``, or None when /core carries
+    nothing for this version.
+
+    The clone these skills run against holds custom addons ONLY — Odoo.sh repos
+    gitignore `odoo/` and `enterprise/` — so without this the "does stock Odoo
+    already cover it?" question was answered from model priors alone. That reads
+    as authoritative and is version-blind: a support answer denied Odoo 19's
+    optional-section switch existed and described the Odoo 17/18 feature it
+    replaced (ticket 6743, 2026-07-28). `reviewer.py` has granted the same dirs
+    to full reviews and audits since the core-knowledge layer landed.
+    """
+    if core is None or not version:
+        return None
+    paths = core.core_paths(version)
+    if not paths:
+        return None
+    return paths, (
+        f"Odoo {version} core source is available read-only under "
+        f"{', '.join(paths)} — this is the standard Odoo the project runs on, "
+        f"and the module catalog is at {core.catalog_path(version)}. "
+        "Grep it before you state that standard Odoo does or does not do "
+        "something: your training data lags this version, and the repository "
+        "you are in contains custom addons only."
+    )
+
+
 def build_ticket_knowledge(
     claude: ClaudeClient,
     prompts_dir: str,

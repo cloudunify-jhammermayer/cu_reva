@@ -44,7 +44,7 @@ def test_prompts_dir_exists():
 
 
 def test_get_version_returns_current_version(builder):
-    assert builder.get_version() == "v2.14"
+    assert builder.get_version() == "v2.16"
 
 
 def test_ticket_issue_type_is_ticket_level():
@@ -321,6 +321,81 @@ def test_support_prompts_ask_for_a_null_answer_not_an_empty_one():
         body = " ".join(path.read_text().split())
         assert "`answer` to `null`" in body, path.name
         assert "Leave `answer` empty" not in body, path.name
+
+
+def test_prompts_forbid_unearned_negatives_about_standard_odoo():
+    """The clone holds custom addons only and retrieval returns a handful of
+    keyword-picked doc sections, so "I didn't find it" is the expected case, not
+    evidence. Ticket 6743 (2026-07-28) was told no BOM component could be marked
+    optional and that Optional Products was unrelated — while Odoo 19 covers it
+    via a section switch, documented in REVA's own 19.0 index. All four
+    answer-shaped prompts must refuse the unearned negative."""
+    for path in (PROMPTS_DIR / "support_answer.md",
+                 PROMPTS_DIR / "ticket_analysis.md",
+                 SKILLS_DIR / "reva-support-answer.md",
+                 SKILLS_DIR / "reva-ticket-analysis.md"):
+        body = " ".join(path.read_text().split())
+        # The model's own Odoo knowledge is older than the version it judges.
+        assert "lags the version this project runs on" in body, path.name
+    # The two paths have different blind spots, so they get different reasons.
+    for path in (SKILLS_DIR / "reva-support-answer.md",
+                 SKILLS_DIR / "reva-ticket-analysis.md"):
+        body = " ".join(path.read_text().split())
+        assert "custom addons only" in body, path.name
+    for path in (PROMPTS_DIR / "support_answer.md",
+                 PROMPTS_DIR / "ticket_analysis.md"):
+        body = " ".join(path.read_text().split())
+        assert "expected case" in body, path.name
+
+
+def test_code_grounded_skills_are_told_to_grep_the_core_source():
+    """The /core worktrees are useless unless the skill knows to search them,
+    and `core_source_param` is the only thing that names the path."""
+    for path in (SKILLS_DIR / "reva-support-answer.md",
+                 SKILLS_DIR / "reva-ticket-analysis.md"):
+        body = " ".join(path.read_text().split())
+        assert "Core knowledge" in body, path.name
+        assert "grep" in body.lower(), path.name
+
+
+def test_support_prompts_take_a_customer_sighting_seriously():
+    """The wrong answer did not just miss the feature — it volunteered that the
+    screenshot the customer referenced probably showed an unrelated feature.
+    A thing the customer has seen is evidence; explaining it away is not."""
+    for path in (PROMPTS_DIR / "support_answer.md",
+                 SKILLS_DIR / "reva-support-answer.md"):
+        body = " ".join(path.read_text().split())
+        assert "screenshot" in body, path.name
+        assert "explain it away" in body or "explain them away" in body, path.name
+
+
+def test_ticket_analysis_prompts_reserve_coverage_none_for_positive_evidence():
+    """`coverage: "none"` feeds an estimate. Retrieval coming back empty must
+    land in "unknown", or REVA quotes development hours for stock features."""
+    for path in (PROMPTS_DIR / "ticket_analysis.md",
+                 SKILLS_DIR / "reva-ticket-analysis.md"):
+        body = " ".join(path.read_text().split())
+        assert '"unknown"' in body, path.name
+        assert "expensive mistake" in body, path.name
+
+
+def test_ticket_analysis_skill_spells_out_the_output_contract():
+    """The escalated CLI run sees neither the tool schema nor ticket_analysis.md
+    — this skill file IS the contract. While it only said "matching the
+    `submit_ticket_analysis` schema", the model invented `missing_info[].question`
+    and `confidence: "high"`, and two paid escalations died in validation
+    (analyses 77/78, 2026-07-27). Its sibling reva-support-answer.md lists every
+    field; assert this one does too, and that the enums it cannot guess are
+    written out."""
+    from reva.ticket_tool import build_ticket_tool_schema
+
+    body = (SKILLS_DIR / "reva-ticket-analysis.md").read_text()
+    for name in build_ticket_tool_schema()["input_schema"]["required"]:
+        assert f"`{name}`" in body, name
+    # The two list-item shapes the model got wrong, and the enum it invented.
+    assert "`text`" in body
+    for value in ("certain", "likely", "possible"):
+        assert value in body, value
 
 
 def test_support_prompts_forbid_technical_references_in_the_answer():
