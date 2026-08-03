@@ -1,5 +1,117 @@
 # REVA — Work Handoff
 
+## Addendum 2026-08-03 — golden estimates (requirements + decisions, NOTHING BUILT)
+
+**Status: requirements agreed, spec not written, no code.** This addendum is the
+whole artifact — there is no spec or plan file yet. Resume by writing
+`docs/superpowers/specs/2026-08-03-golden-estimates-design.md`, then Plan 1.
+
+### What it is
+
+REVA estimates in two places — ticket analysis (`prompts/ticket_analysis.md` §5,
+`StoryEstimate` in `reva/types.py:459`, hour range per story) and the issue
+planner (`prompts/ticket_issues.md`, one `estimate_hours` per issue). Both carry
+their **own copy** of the same four calibration bands (config 0.5–2 h, small
+1–4 h, medium 3–8 h, large 6–12 h) plus one anonymous reference example.
+
+The feature: an operator-curated set of **golden estimates** — real closed
+tickets with a written scope and trusted hours — injected into both prompts as
+reference anchors, so estimates are anchored on precedent instead of on frozen
+prose, and traceable to the anchor they came from.
+
+### Decisions locked 2026-08-03
+
+| Question | Decision |
+|---|---|
+| Anchor source | Operator-curated from closed tickets — **not** auto-derived |
+| Storage / management | DB table + `/api/v1` + **TUI CRUD** (not a checked-in file) |
+| Which paths anchor | Ticket analysis **and** issue planner **and** a drift view |
+| Added output detail | `anchor_ref`, anchor-distance `confidence`, `complexity_drivers[]` — **no** phase breakdown |
+| Anchor matching | Claude picks from the injected list; **no** embedding/retrieval system |
+| Authoring flow | Promote a past analysis (prefill from `ticket_analyses`) |
+| No anchor fits | Fall back to today's bands, force low confidence, **say** no comparable was found |
+| Driver taxonomy | **Fixed enum in code** (list still open, see below) |
+| Day-one hours | **Hand-entered** — `ticket_actuals` prefill is a bonus for later |
+| Anchor in Odoo HTML | **Internal only** — stripped from the customer-facing field |
+| Slicing | **Three sequential plans** (drift view is plan 3, in scope) |
+
+### Three findings that shaped this — verify before planning
+
+1. **`ticket_actuals` is empty.** REVA's receiving endpoint shipped (migration
+   040, `api/app/routes/v1/ticket_actuals.py`) but the Odoo-side sender did
+   not — `docs/superpowers/specs/2026-07-15-ticket-actuals-sender-design.md` is
+   still in the open-specs folder and ast-odoo went to reviewed-badge-timesheet
+   instead. So promotion prefill has no data and the drift view renders
+   "0 comparable" until that sender ships. Hence hand-entered hours.
+2. **Anchors can leak across customers.** `reva/ticket_formatter.py` renders the
+   analysis as HTML for an Odoo HTML field; "anchored on H-1234, 8 h" would put
+   another customer's ticket number in front of this one. Hence internal-only.
+3. **The 2026-07-11 wave never shipped.** All 7 plans in
+   `docs/superpowers/plans/` are genuinely open — zero code hits for
+   `get_repo_precision_stats`, `commit_suggestions`, `issue_plans`,
+   `describe_command`, `fix_command`. This work touches `reva/types.py`
+   (`StoryEstimate`) but adds **no** `RepoConfig` key — only a global kill
+   switch — so it does not collide with their four keys. Plans must say so.
+
+### Proposed breakdown (agreed shape, base commit `86abddd`)
+
+- **Plan 1 — golden set + authoring.** Migration 045 + ORM model + writers
+  (create/list/edit/retire; candidates query joining `ticket_analyses` ⟕
+  `ticket_actuals`); `/api/v1/golden-estimates` + `/candidates` (master gate);
+  TUI "Golden" tab with promote/edit/retire + demo fixtures. No model calls —
+  shippable alone.
+- **Plan 2 — anchored estimates.** `StoryEstimate` gains `anchor_ref` /
+  `anchor_confidence` / `complexity_drivers[]` + the fixed enum; anchor-block
+  builder in shared `reva/` (load active, cap, **nonce-fence**, ops events) with
+  `REVA_GOLDEN_ESTIMATES` + `REVA_GOLDEN_ESTIMATE_LIMIT` (default 30); both
+  prompts rewritten onto one shared calibration source; formatter strips the
+  anchor from the Odoo HTML; `contracts/` regen + ast-odoo re-sync.
+- **Plan 3 — calibration view.** Implements the existing
+  `2026-07-15-estimate-drift-stats-design.md` plus by-anchor and by-driver
+  breakdowns; archive that spec on completion.
+
+### Acceptance criteria (from the agreed ticket)
+
+1. Operator can list analysed tickets not yet anchors and promote one, scope and
+   hours prefilled where available.
+2. An anchor cannot be saved without actual hours.
+3. Anchors can be edited and retired; retired stops influencing estimates but
+   stays visible in the calibration view.
+4. The whole set is manageable from the TUI — no DB access needed.
+5. With ≥1 active anchor, every story and issue estimate names its anchor and
+   that anchor's hours.
+6. Confidence reflects anchor distance, not model self-assessment.
+7. Drivers come from the fixed enum; values outside it are rejected.
+8. Both estimating paths share one anchor set and one calibration source.
+9. With no usable anchor, estimates still come out — today's bands, low
+   confidence, explicit "no comparable found".
+10. The feature can be switched off entirely, restoring today's behaviour byte
+    for byte.
+11. Every degradation (anchors unavailable, set capped) logs **and** records an
+    ops event — visible in `GET /api/v1/ops-events` and the TUI Failures tab.
+12. Calibration view shows estimated vs. booked hours, by anchor and by driver.
+13. Nothing customer-facing carries the anchor reference.
+
+**Out of scope:** REVA editing its own bands or opening PRs against the prompts;
+automatic promotion without operator review; anchors for work REVA never
+analysed; phase-level hour splits; changes to the Odoo estimate mirror contract
+(`contracts/inbound/update-issue-estimate.schema.json`) or the board schema.
+
+### Owed before Plan 2 can be written
+
+- **The complexity-driver enum list.** Frozen in code, drift buckets are built
+  on it, so a later change costs a migration. Proposal awaiting Joseph's edit:
+  `data_migration`, `cross_module_workflow`, `new_model`, `report_layout`,
+  `external_integration`, `access_rights`, `wizard_ui`, `computed_logic`,
+  `scheduled_job`, `view_tweak`.
+- **Open question:** are anchors shared across all Odoo instances or scoped per
+  instance? Assumed **shared** (calibration reflects our dev speed, not a
+  customer's) — this sets the table's unique constraint.
+- **Open question:** how many anchors before switching on? Suggested ≥ 8
+  covering all four bands.
+
+---
+
 ## Addendum 2026-07-26 — support answers + shared code grounding
 
 Spec/plan: `docs/superpowers/specs/archive/2026-07-25-support-answers-design.md`
