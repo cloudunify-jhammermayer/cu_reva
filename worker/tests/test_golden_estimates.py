@@ -6,7 +6,9 @@ from reva.golden_estimates import (
     COMPLEXITY_DRIVERS,
     MAX_DRIVERS_PER_STORY,
     GOLDEN_FILENAME,
+    calibration_block,
     load,
+    render,
 )
 
 
@@ -178,3 +180,76 @@ def test_driver_enum_is_the_agreed_ten():
         "scheduled_job",
         "view_tweak",
     )
+
+
+def test_render_includes_bands_and_active_anchor_stories(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID))
+
+    text, degradations = render(golden)
+
+    assert degradations == []
+    assert "0.5–2 h" in text
+    assert "6–12 h" in text
+    assert "`bom-copies#bom-copy-mechanism`" in text
+    assert "Order-bound BoM copy mechanism" in text
+    assert "6 h" in text
+    assert "new_model, computed_logic" in text
+    assert "10 h total" in text
+
+
+def test_render_omits_retired_anchors(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID.replace("active: true", "active: false")))
+
+    text, _ = render(golden)
+
+    assert "bom-copies#bom-copy-mechanism" not in text
+    assert "0.5–2 h" in text
+
+
+def test_render_disabled_is_bands_only(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID))
+
+    text, degradations = render(golden, enabled=False)
+
+    assert "bom-copies" not in text
+    assert "0.5–2 h" in text
+    assert degradations == []
+
+
+def test_render_caps_at_limit_and_degrades(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID))
+
+    text, degradations = render(golden, limit=1)
+
+    assert "bom-copies#bom-copy-mechanism" in text
+    assert "bom-copies#procurement-release" not in text
+    assert [d.reason for d in degradations] == ["anchor_limit_exceeded"]
+
+
+def test_render_lists_the_driver_enum_for_the_model(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID))
+
+    text, _ = render(golden)
+
+    for driver in COMPLEXITY_DRIVERS:
+        assert driver in text
+
+
+def test_render_is_deterministic(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID))
+
+    assert render(golden)[0] == render(golden)[0]
+
+
+def test_calibration_block_loads_and_renders(tmp_path):
+    text, degradations = calibration_block(_write(tmp_path, VALID))
+
+    assert "`bom-copies#procurement-release`" in text
+    assert degradations == []
+
+
+def test_calibration_block_on_missing_file_still_returns_bands(tmp_path):
+    text, degradations = calibration_block(str(tmp_path))
+
+    assert "3–8 h" in text
+    assert [d.reason for d in degradations] == ["file_missing"]

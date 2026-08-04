@@ -248,3 +248,112 @@ def load(prompts_dir: str) -> tuple[GoldenSet, list[Degradation]]:
         ),
         degradations,
     )
+
+
+DEFAULT_ANCHOR_LIMIT = 30
+
+_BAND_ORDER = ("configuration", "small", "medium", "large")
+
+_BAND_LABELS = {
+    "configuration": "configuration / enabling a standard feature",
+    "small": "small customization (new field, view tweak, constraint, hard block, simple wizard)",
+    "medium": "medium customization (new model or copy mechanism + views + business logic)",
+    "large": "large customization (cross-module workflow, status overview, complex computed logic)",
+}
+
+_PREAMBLE = """## Estimate calibration — binding
+
+All figures are for a **mid-level Odoo developer working AI-assisted**, covering
+**implementation + developer testing**. Exclude deployment, project management,
+and customer communication. AI-assisted development is far faster than classic
+agency quoting — never fall back to agency-style numbers. Estimate each story's
+*incremental* effort: shared module scaffolding is priced once, never per story."""
+
+_HOW_TO_USE = """### How to use the anchors
+
+- For each story, pick the **single closest anchor story** and set `anchor_ref`
+  to its backticked id exactly as written above.
+- Anchor the range on that story's hours. Adjust only for differences you can
+  name in `assumptions`.
+- Set `complexity_drivers` from this fixed list, at most 3, choosing what makes
+  the work harder than its size suggests:
+  {drivers}.
+- If **no** anchor story is comparable, set `anchor_ref` to null and fall back
+  to the bands above. That is a correct answer, not a failure — do not force a
+  match.
+- A ticket's stories almost always share one module. Sanity-check the total
+  against the anchors' ticket totals above before submitting."""
+
+
+def _fmt_hours(value: float) -> str:
+    return f"{value:g}"
+
+
+def render(
+    golden: GoldenSet,
+    limit: int = DEFAULT_ANCHOR_LIMIT,
+    enabled: bool = True,
+) -> tuple[str, list[Degradation]]:
+    """Build the calibration block substituted into the estimating prompts.
+
+    `enabled=False` renders bands only, which is today's behaviour. A set with
+    no active anchors renders the same thing, so the feature stays inert until
+    anchors are written.
+    """
+    degradations: list[Degradation] = []
+    parts = [_PREAMBLE, "", "Bands — used only when no anchor below is comparable:", ""]
+    for name in _BAND_ORDER:
+        band = golden.bands.get(name)
+        if band is None:
+            continue
+        parts.append(
+            f"- {_BAND_LABELS[name]}: "
+            f"**{_fmt_hours(band.min_hours)}–{_fmt_hours(band.max_hours)} h**"
+        )
+
+    pairs = golden.active_pairs() if enabled else []
+    if not pairs:
+        return "\n".join(parts), degradations
+
+    if len(pairs) > limit:
+        degradations.append(
+            Degradation(
+                "anchor_limit_exceeded",
+                {"rendered": limit, "available": len(pairs)},
+            )
+        )
+        pairs = pairs[:limit]
+
+    parts += [
+        "",
+        "### Reference anchors — real closed tickets, actual booked hours",
+        "",
+        "Prefer these over the bands. They are what this work actually took.",
+        "",
+    ]
+    current: str | None = None
+    for anchor, story in pairs:
+        if anchor.id != current:
+            current = anchor.id
+            parts.append(
+                f"**{anchor.ticket}** — {_fmt_hours(anchor.total_hours)} h total"
+            )
+        drivers = ", ".join(story.drivers) if story.drivers else "none"
+        parts.append(
+            f"- `{anchor.id}#{story.id}` — {story.scope} — {story.kind} — "
+            f"**{_fmt_hours(story.hours)} h** — drivers: {drivers}"
+        )
+
+    parts += ["", _HOW_TO_USE.format(drivers=", ".join(COMPLEXITY_DRIVERS))]
+    return "\n".join(parts), degradations
+
+
+def calibration_block(
+    prompts_dir: str,
+    limit: int = DEFAULT_ANCHOR_LIMIT,
+    enabled: bool = True,
+) -> tuple[str, list[Degradation]]:
+    """Load the file and render its block. The entry point for every prompt site."""
+    golden, degradations = load(prompts_dir)
+    text, render_degradations = render(golden, limit=limit, enabled=enabled)
+    return text, [*degradations, *render_degradations]
