@@ -1687,6 +1687,7 @@ binding calibration to data."
 ### Task 9: Apply anchors on the ticket-analysis path
 
 **Files:**
+- Create: `worker/worker/golden_support.py`
 - Modify: `worker/worker/ticket_runner.py:104-120` (pass `skill_vars` on the CLI leg), `worker/worker/ticket_runner.py:250-252` (post-process where both legs converge)
 - Test: `worker/tests/test_ticket_runner.py` (extend)
 
@@ -1778,26 +1779,64 @@ and add to the `review(...)` call:
             skill_vars={"ESTIMATE_CALIBRATION": block},
 ```
 
-- [ ] **Step 3b: Add the shared recorder and post-processing**
+- [ ] **Step 3b: Create the shared recorder**
 
-Add near the top of `worker/worker/ticket_runner.py`:
+Both estimating runners need this identically, so it lives in one module rather than being copy-pasted into each — `reva/golden_estimates.py` stays free of any database import, which is what keeps it unit-testable without one.
+
+Create `worker/worker/golden_support.py`:
 
 ```python
-from reva.golden_estimates import Degradation, apply_anchor, calibration_block, load
+"""Shared plumbing for golden-estimate anchoring across the estimating runners.
+
+Lives in the worker package, not in `reva/golden_estimates.py`, so the loader
+stays a pure function with no database dependency.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from reva.db import writers
+from reva.golden_estimates import Degradation
 
 
-def _record_golden_degradations(ctx, degradations: list[Degradation], analysis_id) -> None:
-    """Every anchoring degradation is logged AND ops-evented — a silently
-    unanchored estimate is indistinguishable from a well-anchored one."""
+def record_degradations(
+    db: Any,
+    log: Any,
+    component: str,
+    degradations: list[Degradation],
+    detail: dict,
+) -> None:
+    """Log AND ops-event every anchoring degradation.
+
+    Both halves are mandatory: a silently unanchored estimate is
+    indistinguishable from a well-anchored one.
+    """
     for degradation in degradations:
         log.warning(f"golden_estimates_{degradation.reason}", **degradation.detail)
         writers.record_ops_event(
-            ctx.db,
-            "ticket_analysis",
+            db,
+            component,
             "warning",
             f"golden_estimates_{degradation.reason}",
-            {"analysis_id": analysis_id, **degradation.detail},
+            {**detail, **degradation.detail},
         )
+```
+
+Then in `worker/worker/ticket_runner.py`, import what this task needs:
+
+```python
+from reva.golden_estimates import apply_anchor, calibration_block, load
+from worker.golden_support import record_degradations
+```
+
+and define the local wrapper that fixes this module's component and detail key:
+
+```python
+def _record_golden_degradations(ctx, degradations, analysis_id) -> None:
+    record_degradations(
+        ctx.db, log, "ticket_analysis", degradations, {"analysis_id": analysis_id}
+    )
 ```
 
 Then in `run_ticket_analysis`, immediately before `html = format_ticket_html(result)` (line 250):
@@ -1884,7 +1923,20 @@ Expected: FAIL.
 
 - [ ] **Step 3: Write the implementation**
 
-Add the same `_record_golden_degradations` and `_prompts_dir` helpers to `worker/worker/ticket_issue_runner.py`, with component `"ticket_issues"` and detail key `"run_id"` instead of `"analysis_id"`. This module reaches the prompts directory through `TicketIssuePlanner` (`reva/ticket_issue_planner.py:134` reads `self._prompts_dir`) — read the surrounding code and use the same source rather than duplicating a default. Then, right after the planner returns its plan and before the issues are persisted:
+Import the shared recorder created in Task 9 — do **not** copy its body into this module:
+
+```python
+from reva.golden_estimates import apply_anchor, load
+from worker.golden_support import record_degradations
+
+
+def _record_golden_degradations(ctx, degradations, run_id) -> None:
+    record_degradations(
+        ctx.db, log, "ticket_issues", degradations, {"run_id": run_id}
+    )
+```
+
+The prompts directory is reached differently here: this module goes through `TicketIssuePlanner` (`reva/ticket_issue_planner.py:134` reads `self._prompts_dir`). Read the surrounding code and use the same source rather than duplicating a default — that difference is genuine, unlike the recorder. Then, right after the planner returns its plan and before the issues are persisted:
 
 ```python
     _record_golden_degradations(
