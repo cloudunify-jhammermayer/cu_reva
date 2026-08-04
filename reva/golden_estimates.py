@@ -357,3 +357,48 @@ def calibration_block(
     golden, degradations = load(prompts_dir)
     text, render_degradations = render(golden, limit=limit, enabled=enabled)
     return text, [*degradations, *render_degradations]
+
+
+# Jaccard overlap at or above this counts as the same shape. A guess, tuned on
+# real data later: it is a pure function with a truth table, so moving it is a
+# one-line change.
+_HIGH_OVERLAP = 0.6
+
+Confidence = Literal["high", "medium", "low"]
+
+
+def score(
+    drivers: list[str],
+    kind: str,
+    anchor: GoldenStory | None,
+) -> Confidence:
+    """Derive estimate confidence from distance to the cited anchor story.
+
+    This is what makes "confidence reflects anchor distance, not model
+    self-assessment" true rather than aspirational: the model supplies facts
+    (which anchor, which drivers), and code decides how close they are.
+
+    The band is deliberately NOT part of the formula — band approximates hours,
+    which is the value being predicted, so scoring on it would be circular.
+    """
+    if anchor is None or kind != anchor.kind:
+        return "low"
+
+    story_drivers = set(drivers)
+    anchor_drivers = set(anchor.drivers)
+
+    if not story_drivers and not anchor_drivers:
+        # Identical "nothing unusual" profile. Jaccard is undefined here, so
+        # this case is decided explicitly rather than by dividing by zero.
+        return "high"
+
+    union = story_drivers | anchor_drivers
+    if not union:
+        return "low"
+    overlap = len(story_drivers & anchor_drivers) / len(union)
+
+    if overlap >= _HIGH_OVERLAP:
+        return "high"
+    if overlap > 0:
+        return "medium"
+    return "low"

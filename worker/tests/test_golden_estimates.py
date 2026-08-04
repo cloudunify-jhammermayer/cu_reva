@@ -6,9 +6,11 @@ from reva.golden_estimates import (
     COMPLEXITY_DRIVERS,
     MAX_DRIVERS_PER_STORY,
     GOLDEN_FILENAME,
+    GoldenStory,
     calibration_block,
     load,
     render,
+    score,
 )
 
 
@@ -253,3 +255,62 @@ def test_calibration_block_on_missing_file_still_returns_bands(tmp_path):
 
     assert "3–8 h" in text
     assert [d.reason for d in degradations] == ["file_missing"]
+
+
+def _anchor(kind="custom_dev", drivers=("new_model", "computed_logic")):
+    return GoldenStory(
+        id="a", scope="s", kind=kind, hours=5, drivers=list(drivers)
+    )
+
+
+def test_score_identical_drivers_and_kind_is_high():
+    assert score(["new_model", "computed_logic"], "custom_dev", _anchor()) == "high"
+
+
+def test_score_both_driver_sets_empty_is_high():
+    # An identical "nothing unusual" profile is a genuine match, and Jaccard is
+    # undefined on two empty sets — this case must be spelled out, not divided.
+    assert score([], "custom_dev", _anchor(drivers=())) == "high"
+
+
+def test_score_two_of_three_overlap_is_high():
+    # |A∩B| / |A∪B| = 2/3 = 0.66 >= 0.6
+    assert score(
+        ["new_model", "computed_logic"],
+        "custom_dev",
+        _anchor(drivers=("new_model", "computed_logic", "view_tweak")),
+    ) == "high"
+
+
+def test_score_one_of_three_overlap_is_medium():
+    # 1/3 = 0.33, above zero but below the high threshold
+    assert score(
+        ["new_model"],
+        "custom_dev",
+        _anchor(drivers=("computed_logic", "view_tweak", "new_model")),
+    ) == "medium"
+
+
+def test_score_disjoint_drivers_is_low():
+    assert score(["access_rights"], "custom_dev", _anchor()) == "low"
+
+
+def test_score_kind_mismatch_is_low_even_on_identical_drivers():
+    assert score(
+        ["new_model", "computed_logic"], "configuration", _anchor()
+    ) == "low"
+
+
+def test_score_no_anchor_is_low():
+    assert score(["new_model"], "custom_dev", None) == "low"
+
+
+def test_score_one_side_empty_is_low():
+    assert score([], "custom_dev", _anchor()) == "low"
+    assert score(["new_model"], "custom_dev", _anchor(drivers=())) == "low"
+
+
+def test_score_ignores_driver_order_and_duplicates():
+    assert score(
+        ["computed_logic", "new_model", "new_model"], "custom_dev", _anchor()
+    ) == "high"
