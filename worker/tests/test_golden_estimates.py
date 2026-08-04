@@ -7,11 +7,13 @@ from reva.golden_estimates import (
     MAX_DRIVERS_PER_STORY,
     GOLDEN_FILENAME,
     GoldenStory,
+    apply_anchor,
     calibration_block,
     load,
     render,
     score,
 )
+from reva.types import StoryEstimate, TicketIssueItem
 
 
 def _write(tmp_path, body: str) -> str:
@@ -314,3 +316,90 @@ def test_score_ignores_driver_order_and_duplicates():
     assert score(
         ["computed_logic", "new_model", "new_model"], "custom_dev", _anchor()
     ) == "high"
+
+
+def _estimate(**kwargs):
+    base = dict(story="s", kind="custom_dev", min_hours=1, max_hours=2)
+    return StoryEstimate(**{**base, **kwargs})
+
+
+def test_story_estimate_defaults_are_unanchored():
+    est = _estimate()
+
+    assert est.anchor_ref is None
+    assert est.complexity_drivers == []
+    assert est.anchor_confidence == "low"
+
+
+def test_unknown_drivers_are_dropped_not_fatal():
+    est = _estimate(complexity_drivers=["new_model", "teleportation"])
+
+    assert est.complexity_drivers == ["new_model"]
+
+
+def test_more_than_three_drivers_are_truncated():
+    # Pydantic max_length cannot help here: reva/tool_schema.py strips maxItems
+    # from the Anthropic schema, so the model can return any number.
+    est = _estimate(
+        complexity_drivers=[
+            "new_model", "computed_logic", "view_tweak", "access_rights"
+        ]
+    )
+
+    assert est.complexity_drivers == ["new_model", "computed_logic", "view_tweak"]
+
+
+def test_apply_anchor_resolves_and_scores(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID))
+    est = _estimate(
+        anchor_ref="bom-copies#bom-copy-mechanism",
+        complexity_drivers=["new_model", "computed_logic"],
+        anchor_confidence="high",
+    )
+
+    degradations = apply_anchor(est, golden, score_confidence=True)
+
+    assert degradations == []
+    assert est.anchor_ref == "bom-copies#bom-copy-mechanism"
+    assert est.anchor_confidence == "high"
+
+
+def test_apply_anchor_overwrites_a_model_supplied_confidence(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID))
+    est = _estimate(
+        anchor_ref="bom-copies#procurement-release",
+        complexity_drivers=["access_rights"],
+        anchor_confidence="high",
+    )
+
+    apply_anchor(est, golden, score_confidence=True)
+
+    # Disjoint drivers: the model's "high" is not trusted.
+    assert est.anchor_confidence == "low"
+
+
+def test_apply_anchor_nulls_an_unresolvable_ref_and_degrades(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID))
+    est = _estimate(anchor_ref="ghost#story", complexity_drivers=["new_model"])
+
+    degradations = apply_anchor(est, golden, score_confidence=True)
+
+    assert est.anchor_ref is None
+    assert est.anchor_confidence == "low"
+    assert [d.reason for d in degradations] == ["anchor_ref_unresolved"]
+
+
+def test_apply_anchor_on_an_issue_skips_confidence(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID))
+    issue = TicketIssueItem(
+        title="t",
+        body="b",
+        anchor_ref="bom-copies#bom-copy-mechanism",
+        complexity_drivers=["new_model"],
+    )
+
+    degradations = apply_anchor(issue, golden, score_confidence=False)
+
+    assert degradations == []
+    assert issue.anchor_ref == "bom-copies#bom-copy-mechanism"
+    assert not hasattr(issue, "anchor_confidence")

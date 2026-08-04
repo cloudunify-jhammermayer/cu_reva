@@ -402,3 +402,36 @@ def score(
     if overlap > 0:
         return "medium"
     return "low"
+
+
+def apply_anchor(
+    item: Any,
+    golden: GoldenSet,
+    *,
+    score_confidence: bool,
+) -> list[Degradation]:
+    """Resolve an item's cited anchor and, for stories, derive its confidence.
+
+    Mutates in place. `item` is a `StoryEstimate` (score_confidence=True) or a
+    `TicketIssueItem` (False — an issue has no `kind` to score against).
+
+    Driver sanitizing already happened in the Pydantic validator; this only
+    handles the reference, which needs the loaded set the validator cannot see.
+    """
+    degradations: list[Degradation] = []
+    anchor_story = None
+
+    if item.anchor_ref:
+        anchor_story = golden.resolve(item.anchor_ref)
+        if anchor_story is None:
+            degradations.append(
+                Degradation("anchor_ref_unresolved", {"anchor_ref": item.anchor_ref})
+            )
+            item.anchor_ref = None
+
+    if score_confidence:
+        item.anchor_confidence = score(
+            item.complexity_drivers, item.kind, anchor_story
+        )
+
+    return degradations

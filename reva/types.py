@@ -455,6 +455,26 @@ class ExistingCustomizations(BaseModel):
         return _unwrap_json_list(v)
 
 
+def _clean_drivers(v: object) -> object:
+    """Drop values outside the fixed enum and truncate to the cap.
+
+    Rejecting the *value* rather than the analysis is deliberate: an analysis
+    that reached this point already cost real money, and one bad driver string
+    is not a reason to throw it away. `reva/tool_schema.py` strips `maxItems`
+    from Anthropic schemas, so the cap can only be enforced here.
+    """
+    from reva.golden_estimates import COMPLEXITY_DRIVERS, MAX_DRIVERS_PER_STORY
+
+    v = _unwrap_json_list(v)
+    if not isinstance(v, list):
+        return v
+    seen: list[str] = []
+    for item in v:
+        if item in COMPLEXITY_DRIVERS and item not in seen:
+            seen.append(item)
+    return seen[:MAX_DRIVERS_PER_STORY]
+
+
 class StoryEstimate(BaseModel):
     """Development-time estimate for one user story split out of a ticket."""
 
@@ -464,11 +484,25 @@ class StoryEstimate(BaseModel):
     max_hours: float
     confidence: Literal["high", "medium", "low"] = "medium"
     assumptions: list[str] = Field(default_factory=list)
+    # Anchoring (spec 2026-08-04). Internal only — never rendered into the Odoo
+    # HTML, a GitHub issue body, or the Projects board: an anchor reference
+    # names another customer's ticket.
+    anchor_ref: str | None = None
+    complexity_drivers: list[str] = Field(default_factory=list)
+    # Derived in code from anchor distance and overwritten after every run —
+    # never the model's own judgement. Pruned from the tool schema so the model
+    # is not asked to fill it.
+    anchor_confidence: Literal["high", "medium", "low"] = "low"
 
     @field_validator("assumptions", mode="before")
     @classmethod
     def _parse_json_string_list(cls, v: object) -> object:
         return _unwrap_json_list(v)
+
+    @field_validator("complexity_drivers", mode="before")
+    @classmethod
+    def _clean_complexity_drivers(cls, v: object) -> object:
+        return _clean_drivers(v)
 
 
 class TicketAnalysisResult(BaseModel):
@@ -710,6 +744,11 @@ class TicketIssueItem(BaseModel):
     # numbering guessed the total wrong (ticket 6324: "(1/3)" in a 4-issue
     # plan). Empty on plans persisted before the rollout.
     builds_on: list[int] = Field(default_factory=list)
+    # Anchoring (spec 2026-08-04). No anchor_confidence here: an issue has no
+    # `kind`, so half the scoring inputs do not exist. Issues cite an anchor;
+    # they are not scored. Internal only, same boundary as StoryEstimate.
+    anchor_ref: str | None = None
+    complexity_drivers: list[str] = Field(default_factory=list)
 
     @field_validator("title", mode="before")
     @classmethod
@@ -723,6 +762,11 @@ class TicketIssueItem(BaseModel):
     @classmethod
     def _parse_json_string_list(cls, v: object) -> object:
         return _unwrap_json_list(v)
+
+    @field_validator("complexity_drivers", mode="before")
+    @classmethod
+    def _clean_complexity_drivers(cls, v: object) -> object:
+        return _clean_drivers(v)
 
 
 class TicketIssuePlan(BaseModel):
