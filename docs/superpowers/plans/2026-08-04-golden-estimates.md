@@ -713,7 +713,7 @@ git commit -m "feat(estimates): render the calibration block
 
 Bands plus active anchor stories, with the instructions the model needs to
 cite one. Disabled or anchor-less renders bands only, which is today's
-behaviour byte for byte on the bands themselves."
+behaviour semantically — the same four bands, in one wording rather than three."
 ```
 
 ---
