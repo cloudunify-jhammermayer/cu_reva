@@ -461,13 +461,20 @@ def _clean_drivers(v: object) -> object:
     Rejecting the *value* rather than the analysis is deliberate: an analysis
     that reached this point already cost real money, and one bad driver string
     is not a reason to throw it away. `reva/tool_schema.py` strips `maxItems`
-    from Anthropic schemas, so the cap can only be enforced here.
+    from Anthropic schemas, so the cap can only be enforced here. Anything that
+    isn't a usable list — including a string `_unwrap_json_list` can't parse —
+    becomes an empty list rather than raising: empty is an honest "no drivers
+    claimed", and the escalated-CLI path has no tool schema to constrain this
+    at all.
     """
     from reva.golden_estimates import COMPLEXITY_DRIVERS, MAX_DRIVERS_PER_STORY
 
-    v = _unwrap_json_list(v)
+    try:
+        v = _unwrap_json_list(v)
+    except ValueError:
+        return []
     if not isinstance(v, list):
-        return v
+        return []
     seen: list[str] = []
     for item in v:
         if item in COMPLEXITY_DRIVERS and item not in seen:

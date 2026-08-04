@@ -13,7 +13,7 @@ from reva.golden_estimates import (
     render,
     score,
 )
-from reva.types import StoryEstimate, TicketIssueItem
+from reva.types import StoryEstimate, TicketAnalysisResult, TicketIssueItem
 
 
 def _write(tmp_path, body: str) -> str:
@@ -347,6 +347,45 @@ def test_more_than_three_drivers_are_truncated():
     )
 
     assert est.complexity_drivers == ["new_model", "computed_logic", "view_tweak"]
+
+
+def test_non_list_int_drivers_becomes_empty_not_fatal():
+    # Reachable via the escalated-CLI path, which has no tool schema
+    # constraining the model's output at all.
+    est = _estimate(complexity_drivers=5)
+
+    assert est.complexity_drivers == []
+
+
+def test_none_drivers_becomes_empty_not_fatal():
+    est = _estimate(complexity_drivers=None)
+
+    assert est.complexity_drivers == []
+
+
+def test_comma_joined_string_drivers_becomes_empty_not_fatal():
+    # Not valid JSON, so _unwrap_json_list raises — must be caught, not
+    # salvaged into a single-element list.
+    est = _estimate(complexity_drivers="new_model, computed_logic")
+
+    assert est.complexity_drivers == []
+
+
+def test_bare_word_string_drivers_becomes_empty_not_fatal():
+    est = _estimate(complexity_drivers="new_model")
+
+    assert est.complexity_drivers == []
+
+
+def test_analysis_survives_a_story_with_unparseable_drivers():
+    # The whole point: an analysis that already cost real money must not be
+    # thrown away because one story's complexity_drivers arrived malformed.
+    result = TicketAnalysisResult(
+        summary="s",
+        estimates=[_estimate(complexity_drivers="new_model, computed_logic")],
+    )
+
+    assert result.estimates[0].complexity_drivers == []
 
 
 def test_apply_anchor_resolves_and_scores(tmp_path):
