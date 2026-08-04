@@ -2,8 +2,6 @@
 
 import textwrap
 
-import pytest
-
 from reva.golden_estimates import (
     COMPLEXITY_DRIVERS,
     MAX_DRIVERS_PER_STORY,
@@ -69,6 +67,26 @@ def test_malformed_yaml_falls_back_to_default_bands(tmp_path):
     assert golden.anchors == []
     assert golden.bands["configuration"].min_hours == 0.5
     assert [d.reason for d in degradations] == ["file_unreadable"]
+
+
+def test_empty_file_is_malformed(tmp_path):
+    golden, degradations = load(_write(tmp_path, ""))
+
+    assert golden.anchors == []
+    assert golden.bands["large"].max_hours == 12
+    assert [d.reason for d in degradations] == ["file_malformed"]
+
+
+def test_malformed_bands_section_falls_back_to_default_bands(tmp_path):
+    body = """
+        version: 1
+        bands: [oops]
+    """
+    golden, degradations = load(_write(tmp_path, body))
+
+    assert golden.anchors == []
+    assert golden.bands["large"].max_hours == 12
+    assert [d.reason for d in degradations] == ["bands_invalid"]
 
 
 def test_invalid_anchor_is_dropped_and_the_rest_load(tmp_path):
