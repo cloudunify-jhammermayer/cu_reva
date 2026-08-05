@@ -43,10 +43,13 @@ def build_ticket_issue_tool_schema() -> dict[str, Any]:
     # Strict structured output lets Claude omit any non-required field —
     # fields with Pydantic defaults (acceptance_criteria, type) came back
     # missing in production plans. Require every issue field in the tool
-    # schema; the model defaults stay lenient for persisted plans.
+    # schema; the model defaults stay lenient for persisted plans. Except
+    # anchor_ref/complexity_drivers: an unanchored issue is a valid answer,
+    # so those two stay in `properties` (settable) but out of `required`.
     item = input_schema.get("$defs", {}).get("TicketIssueItem")
     if isinstance(item, dict) and "properties" in item:
-        item["required"] = list(item["properties"].keys())
+        _optional = {"anchor_ref", "complexity_drivers"}
+        item["required"] = [k for k in item["properties"] if k not in _optional]
 
     return {
         "name": TICKET_ISSUE_TOOL_NAME,

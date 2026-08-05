@@ -6,6 +6,7 @@ Uses httpx.MockTransport to inject canned Claude responses — no live API calls
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -14,9 +15,11 @@ import pytest
 
 from reva.claude_client import ClaudeClient
 from reva.errors import PermanentError, TransientError
+from reva.golden_estimates import GOLDEN_FILENAME
 from reva.ticket_issue_planner import TicketIssuePlanner
 from reva.ticket_issue_tool import TICKET_ISSUE_TOOL_NAME, build_ticket_issue_tool_schema
 from reva.types import TicketIssueJobParams, TicketIssuePlan
+from tests.conftest import SHIPPED_PROMPTS
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
@@ -308,6 +311,58 @@ def test_tool_schema_exposes_type_enum():
 def test_tool_schema_requires_every_issue_field():
     """Strict structured output lets Claude drop non-required fields — issues
     were created without acceptance_criteria once `strict` shipped. Every
-    TicketIssueItem field must be required in the tool schema."""
+    TicketIssueItem field must be required in the tool schema, except
+    anchor_ref/complexity_drivers — an unanchored issue is a valid answer."""
     item = build_ticket_issue_tool_schema()["input_schema"]["$defs"]["TicketIssueItem"]
-    assert sorted(item["required"]) == sorted(item["properties"].keys())
+    optional = {"anchor_ref", "complexity_drivers"}
+    assert optional <= item["properties"].keys()
+    assert optional.isdisjoint(item["required"])
+    assert sorted(item["required"]) == sorted(item["properties"].keys() - optional)
+
+
+# ---------------------------------------------------------------------------
+# golden-estimates calibration block
+# ---------------------------------------------------------------------------
+
+
+def test_issue_system_prompt_substitutes_the_calibration_block(tmp_path):
+    (tmp_path / "ticket_issues.md").write_text("# Plan\n\n{{ESTIMATE_CALIBRATION}}\n")
+    (tmp_path / GOLDEN_FILENAME).write_text(
+        "version: 1\n"
+        "bands:\n"
+        "  configuration: {min_hours: 0.5, max_hours: 2}\n"
+        "  small: {min_hours: 1, max_hours: 4}\n"
+        "  medium: {min_hours: 3, max_hours: 8}\n"
+        "  large: {min_hours: 6, max_hours: 12}\n"
+        "anchors: []\n"
+    )
+    planner = TicketIssuePlanner(
+        claude=ClaudeClient(api_key="test-key"), prompts_dir=str(tmp_path)
+    )
+
+    text = planner._build_system()[0]["text"]
+
+    assert "{{ESTIMATE_CALIBRATION}}" not in text
+    assert "1–4 h" in text
+    assert planner.last_golden_degradations == []
+
+
+def test_issue_system_prompt_records_a_degradation_when_the_file_is_missing(tmp_path):
+    (tmp_path / "ticket_issues.md").write_text("{{ESTIMATE_CALIBRATION}}")
+    planner = TicketIssuePlanner(
+        claude=ClaudeClient(api_key="test-key"), prompts_dir=str(tmp_path)
+    )
+
+    text = planner._build_system()[0]["text"]
+
+    assert "3–8 h" in text  # bands still render from the code defaults
+    assert [d.reason for d in planner.last_golden_degradations] == ["file_missing"]
+
+
+def test_shipped_issue_prompt_has_the_placeholder_and_no_hardcoded_bands():
+    with open(os.path.join(SHIPPED_PROMPTS, "ticket_issues.md")) as f:
+        text = f.read()
+
+    assert "{{ESTIMATE_CALIBRATION}}" in text
+    assert "0.5–2 h" not in text
+    assert "6–12 h" not in text
