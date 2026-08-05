@@ -83,6 +83,11 @@ class TicketAnalysisSummary(BaseModel):
     # Dev-time estimate summed over result_structured.estimates (null when absent).
     estimate_hours_min: float | None = None
     estimate_hours_max: float | None = None
+    # Internal only: the golden anchor the first story estimate was based on.
+    # Never rendered into anything customer-facing — an anchor names another
+    # customer's ticket.
+    estimate_anchor_ref: str | None = None
+    estimate_anchor_confidence: str | None = None
     odoo_instance_id: int | None = None
     # How many customer-repo doc sections grounded this analysis (null = not
     # attempted / legacy row; 0 = attempted, nothing injected).

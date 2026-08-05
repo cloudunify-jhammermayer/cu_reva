@@ -484,6 +484,24 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 	return t, nil
 }
 
+// analysisMeta renders the estimate-hours and golden-anchor portion of an
+// analysis's meta line (joined by the same "  " separator the caller uses for
+// the rest of the line). Returns "" when the analysis has neither.
+func analysisMeta(a api.TicketAnalysisSummary) string {
+	var parts []string
+	if a.EstimateHoursMin != nil && a.EstimateHoursMax != nil {
+		parts = append(parts, fmt.Sprintf("est. %g–%gh", *a.EstimateHoursMin, *a.EstimateHoursMax))
+	}
+	if a.EstimateAnchorRef != nil && *a.EstimateAnchorRef != "" {
+		anchor := fmt.Sprintf("anchor %s", *a.EstimateAnchorRef)
+		if a.EstimateAnchorConfidence != nil && *a.EstimateAnchorConfidence != "" {
+			anchor += fmt.Sprintf(" (%s)", *a.EstimateAnchorConfidence)
+		}
+		parts = append(parts, anchor)
+	}
+	return strings.Join(parts, "  ")
+}
+
 func (t Tickets) view(w, h int) string {
 	if t.detail {
 		return t.detailView(w, h)
@@ -622,8 +640,8 @@ func (t Tickets) view(w, h int) string {
 			if a.InputTokens != nil && a.OutputTokens != nil {
 				meta = append(meta, fmt.Sprintf("tokens:%d in / %d out", *a.InputTokens, *a.OutputTokens))
 			}
-			if a.EstimateHoursMin != nil && a.EstimateHoursMax != nil {
-				meta = append(meta, fmt.Sprintf("est. %g–%gh", *a.EstimateHoursMin, *a.EstimateHoursMax))
+			if em := analysisMeta(*a); em != "" {
+				meta = append(meta, em)
 			}
 			if a.RepoDocsSectionsUsed != nil && *a.RepoDocsSectionsUsed > 0 {
 				meta = append(meta, fmt.Sprintf("repo docs:%d", *a.RepoDocsSectionsUsed))

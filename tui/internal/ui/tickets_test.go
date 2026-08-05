@@ -79,6 +79,36 @@ func ticketsWithData() Tickets {
 	return t
 }
 
+func TestAnalysisRowShowsAnchor(t *testing.T) {
+	ref := "bom-copies#bom-copy-mechanism"
+	conf := "high"
+	min, max := 3.0, 5.0
+	a := api.TicketAnalysisSummary{
+		EstimateHoursMin:         &min,
+		EstimateHoursMax:         &max,
+		EstimateAnchorRef:        &ref,
+		EstimateAnchorConfidence: &conf,
+	}
+
+	got := analysisMeta(a)
+
+	if !strings.Contains(got, "est. 3–5h") {
+		t.Fatalf("estimate missing: %q", got)
+	}
+	if !strings.Contains(got, "anchor bom-copies#bom-copy-mechanism (high)") {
+		t.Fatalf("anchor missing: %q", got)
+	}
+}
+
+func TestAnalysisRowOmitsAnchorWhenAbsent(t *testing.T) {
+	min, max := 1.0, 2.0
+	a := api.TicketAnalysisSummary{EstimateHoursMin: &min, EstimateHoursMax: &max}
+
+	if strings.Contains(analysisMeta(a), "anchor") {
+		t.Fatalf("unanchored row should not mention an anchor")
+	}
+}
+
 func TestIssueRunsMappedLatestPerRecord(t *testing.T) {
 	tab := newTickets(&api.MockClient{}, "")
 	newer := api.TicketIssueRunSummary{

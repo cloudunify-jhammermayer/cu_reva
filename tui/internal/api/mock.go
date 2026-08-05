@@ -535,6 +535,7 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 			EstimatedCostUSD: f64Ptr(0.0032), CreatedAt: now.Add(-2 * time.Minute), CompletedAt: &t1,
 			CallbackSentAt:   &t1,
 			EstimateHoursMin: f64Ptr(12), EstimateHoursMax: f64Ptr(20),
+			EstimateAnchorRef: strPtr("bom-copies#bom-copy-mechanism"), EstimateAnchorConfidence: strPtr("high"),
 			RepoDocsSectionsUsed: intPtr(4),
 		},
 		{

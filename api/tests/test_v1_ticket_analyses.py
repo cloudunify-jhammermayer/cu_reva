@@ -203,6 +203,73 @@ def test_list_serializes_callback_and_estimate_fields(client_db_queue):
     assert item["estimate_hours_max"] == 10.0
 
 
+def test_list_flattens_the_first_estimate_anchor(client_db_queue):
+    """The first story's golden-anchor reference/confidence are flattened onto
+    the list payload, mirroring how estimate hours are summed (Task 9 writes
+    result_structured["estimates"][*]["anchor_ref"/"anchor_confidence"])."""
+    from reva.db.models import TicketAnalysis
+
+    client, db, _, headers = client_db_queue
+    with db.session() as s:
+        s.add(TicketAnalysis(
+            odoo_instance_id=None, ticket_id=9, model_name="helpdesk.ticket",
+            field_name="x", input_text="t", status="completed",
+            result_structured={
+                "summary": "s",
+                "estimates": [
+                    {
+                        "story": "one", "kind": "custom_dev",
+                        "min_hours": 3, "max_hours": 5,
+                        "anchor_ref": "bom-copies#bom-copy-mechanism",
+                        "anchor_confidence": "high",
+                    }
+                ],
+            },
+        ))
+
+    item = client.get("/api/v1/ticket-analyses").json()["items"][0]
+    assert item["estimate_anchor_ref"] == "bom-copies#bom-copy-mechanism"
+    assert item["estimate_anchor_confidence"] == "high"
+
+
+def test_list_anchor_fields_are_null_for_unanchored_analyses(client_db_queue):
+    """A story with no comparable anchor writes no anchor_ref at all."""
+    from reva.db.models import TicketAnalysis
+
+    client, db, _, headers = client_db_queue
+    with db.session() as s:
+        s.add(TicketAnalysis(
+            odoo_instance_id=None, ticket_id=10, model_name="helpdesk.ticket",
+            field_name="x", input_text="t", status="completed",
+            result_structured={
+                "summary": "s",
+                "estimates": [
+                    {"story": "one", "kind": "custom_dev", "min_hours": 1, "max_hours": 2}
+                ],
+            },
+        ))
+
+    item = client.get("/api/v1/ticket-analyses").json()["items"][0]
+    assert item["estimate_anchor_ref"] is None
+    assert item["estimate_anchor_confidence"] is None
+
+
+def test_list_anchor_fields_null_when_no_estimates_key(client_db_queue):
+    """Legacy rows predate the estimates field entirely — must not raise."""
+    from reva.db.models import TicketAnalysis
+
+    client, db, _, headers = client_db_queue
+    with db.session() as s:
+        s.add(TicketAnalysis(
+            odoo_instance_id=None, ticket_id=11, model_name="helpdesk.ticket",
+            field_name="x", input_text="t", status="completed",
+        ))
+
+    item = client.get("/api/v1/ticket-analyses").json()["items"][0]
+    assert item["estimate_anchor_ref"] is None
+    assert item["estimate_anchor_confidence"] is None
+
+
 def test_list_estimate_sums_null_when_absent(client_db_queue):
     from reva.db.models import TicketAnalysis
 

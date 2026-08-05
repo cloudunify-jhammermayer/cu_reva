@@ -30,6 +30,7 @@ def list_ticket_analyses(
         items = []
         for r in rows:
             est_min, est_max = _estimate_sums(r.result_structured)
+            anchor_ref, anchor_confidence = _first_anchor(r.result_structured)
             items.append(
                 {
                     "id": r.id,
@@ -51,11 +52,28 @@ def list_ticket_analyses(
                     "callback_error": r.callback_error,
                     "estimate_hours_min": est_min,
                     "estimate_hours_max": est_max,
+                    "estimate_anchor_ref": anchor_ref,
+                    "estimate_anchor_confidence": anchor_confidence,
                     "odoo_instance_id": r.odoo_instance_id,
                     "repo_docs_sections_used": r.repo_docs_sections_used,
                 }
             )
     return items, total
+
+
+def _first_anchor(structured: object) -> tuple[str | None, str | None]:
+    """First story's golden-anchor ref/confidence, matching how _estimate_sums
+    collapses the estimates list for the list view. Internal only — never
+    forward this into a customer-facing payload."""
+    if not isinstance(structured, dict):
+        return None, None
+    estimates = structured.get("estimates")
+    if not isinstance(estimates, list) or not estimates:
+        return None, None
+    first = estimates[0]
+    if not isinstance(first, dict):
+        return None, None
+    return first.get("anchor_ref"), first.get("anchor_confidence")
 
 
 def _estimate_sums(structured: object) -> tuple[float | None, float | None]:

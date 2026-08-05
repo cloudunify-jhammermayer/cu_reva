@@ -246,6 +246,12 @@ type TicketAnalysisSummary struct {
 	CallbackError    *string    `json:"callback_error"`
 	EstimateHoursMin *float64   `json:"estimate_hours_min"`
 	EstimateHoursMax *float64   `json:"estimate_hours_max"`
+	// EstimateAnchorRef/EstimateAnchorConfidence identify the golden anchor the
+	// first story estimate was based on; nil when nothing comparable was found
+	// or the row predates anchoring. Internal only — an anchor names another
+	// customer's ticket, so this must never reach anything customer-facing.
+	EstimateAnchorRef        *string `json:"estimate_anchor_ref"`
+	EstimateAnchorConfidence *string `json:"estimate_anchor_confidence"`
 	// RepoDocsSectionsUsed is how many customer-repo doc sections grounded the
 	// analysis; nil for legacy/not-attempted rows, 0 when nothing was injected.
 	RepoDocsSectionsUsed *int `json:"repo_docs_sections_used"`
