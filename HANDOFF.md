@@ -21,9 +21,11 @@ result — see the spec's "Reversed decisions" section for the full reasoning.
 
 **Not validated.** Every test in the implementation is a unit test: no live
 Claude CLI run, no real Odoo. `prompts/golden_estimates.yml` ships with **zero
-anchors**, so the feature is inert — bands-only output, byte-for-byte what
-shipped before — until an operator hand-writes the first anchor into that
-file. The highest-value first live check is one ticket analysis that escalates
+anchors**, so the feature is inert — bands-only output, **semantically** what
+shipped before (the same four bands, in one shared wording rather than three
+hand-maintained copies; byte-identity was amended away during design, see the
+spec's acceptance criterion 7) — until an operator hand-writes the first anchor
+into that file. The highest-value first live check is one ticket analysis that escalates
 to the CLI path, confirming the model cites a real `anchor_ref`, the derived
 `anchor_confidence` looks sane, and no anchor text reaches the Odoo HTML.
 

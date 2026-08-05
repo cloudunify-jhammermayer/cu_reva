@@ -34,7 +34,7 @@ The ticket may be written in German or English. **Every part of every issue — 
 - `acceptance_criteria` — verifiable pass/fail conditions for **this** issue, one sentence each, in English. **Never empty.** Carry over EVERY acceptance criterion from the ticket/analysis that belongs to this issue (translated where needed) — do not drop or summarize them away. Only when the ticket states none, derive them from the ticket text yourself.
 - `builds_on` — the 1-based positions (in your returned array) of the earlier issues this one builds on; `[]` when it stands alone.
 - `estimate_hours` — the development time for **this** issue in hours (a single number), covering **implementation + developer testing** by a **mid-level Odoo developer working AI-assisted**. **Exclude** deployment, project management, and customer communication. **Give the lower end** — the optimistic-but-realistic figure, not a padded one. Estimate each issue's **incremental** effort assuming shared scaffolding (module, base models, security) already exists — never price scaffolding more than once. Calibration is below; return a number at the **low end** of the matching band or anchor (e.g. a small customization → `1.5`, not `4`).
-- `anchor_ref` — the id of the anchor story this estimate is based on, exactly as written in the calibration block, or null when none is comparable.
+- `anchor_ref` — the id of the anchor story this estimate is based on, copied from the calibration block without the backticks that surround it there, or null when none is comparable.
 - `complexity_drivers` — at most 3 values from the fixed list in the calibration block, naming what makes this harder than its size suggests.
 
 {{ESTIMATE_CALIBRATION}}

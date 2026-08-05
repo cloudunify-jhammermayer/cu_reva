@@ -1,7 +1,7 @@
 # Golden estimates — the single calibration source for every REVA development
 # estimate. Rendered into prompts/ticket_analysis.md, prompts/ticket_issues.md,
 # and prompts/skills/reva-ticket-analysis.md. See
-# docs/superpowers/specs/2026-08-04-golden-estimates-design.md.
+# docs/superpowers/specs/archive/2026-08-04-golden-estimates-design.md.
 #
 # Anchors are real closed tickets with hours you trust. REVA never writes here.
 # Hand-edit, commit, deploy. An empty `anchors:` list is valid and means the
@@ -33,7 +33,7 @@ bands:
 # anchors:
 #   - id: bom-copies
 #     ticket: "BoM copies + procurement release"
-#     total_hours: 22
+#     total_hours: 10          # within 25% of the story hours below (6 + 4)
 #     active: true
 #     stories:
 #       - id: bom-copy-mechanism
@@ -41,4 +41,9 @@ bands:
 #         kind: custom_dev
 #         hours: 6
 #         drivers: [new_model, computed_logic]
+#       - id: procurement-release
+#         scope: "Selective procurement release"
+#         kind: custom_dev
+#         hours: 4
+#         drivers: [cross_module_workflow]
 anchors: []

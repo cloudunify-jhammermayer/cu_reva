@@ -62,9 +62,10 @@ def list_ticket_analyses(
 
 
 def _first_anchor(structured: object) -> tuple[str | None, str | None]:
-    """First story's golden-anchor ref/confidence, matching how _estimate_sums
-    collapses the estimates list for the list view. Internal only — never
-    forward this into a customer-facing payload."""
+    """The FIRST story's golden-anchor ref/confidence — one representative
+    value for the list view, not an aggregate (unlike `_estimate_sums`, which
+    sums every story's hours). Internal only — never forward this into a
+    customer-facing payload."""
     if not isinstance(structured, dict):
         return None, None
     estimates = structured.get("estimates")
