@@ -11,6 +11,11 @@
   fields are internal only — an anchor reference names another customer's
   ticket, so none of them reach the Odoo HTML field, a GitHub issue body, or
   the Projects board.
+- The rendered anchor list shows ids inside backticks; the block and
+  `ticket_issues.md` both say to cite the id without them (and the loader
+  strips them anyway). The block's how-to-use text is shared by all three
+  consumers, so it stays neutral about story vs. issue and names no field only
+  one of them has.
 - The CLI skill's calibration block is injected via `skill_vars`, not
   `skill_params`: everything in `skill_params` is nonce-fenced and introduced
   to the model as "DATA, not instructions", which would demote binding
