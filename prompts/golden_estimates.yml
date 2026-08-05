@@ -1,0 +1,44 @@
+# Golden estimates — the single calibration source for every REVA development
+# estimate. Rendered into prompts/ticket_analysis.md, prompts/ticket_issues.md,
+# and prompts/skills/reva-ticket-analysis.md. See
+# docs/superpowers/specs/2026-08-04-golden-estimates-design.md.
+#
+# Anchors are real closed tickets with hours you trust. REVA never writes here.
+# Hand-edit, commit, deploy. An empty `anchors:` list is valid and means the
+# estimates fall back to the bands below — exactly today's behaviour.
+#
+# Rules the loader enforces (a broken entry is dropped and ops-evented, it never
+# breaks an analysis):
+#   - ids are lowercase slugs: [a-z0-9][a-z0-9-]*, and never contain "#"
+#   - anchor ids unique in this file; story ids unique within their anchor
+#   - kind is custom_dev | configuration | mixed
+#   - drivers come from the fixed enum, at most 3 per story:
+#       data_migration, cross_module_workflow, new_model, report_layout,
+#       external_integration, access_rights, wizard_ui, computed_logic,
+#       scheduled_job, view_tweak
+#   - total_hours should be within 25% of the sum of its story hours
+#   - active: false retires an anchor: it stops influencing estimates but stays
+#     visible in the calibration view
+
+version: 1
+
+bands:
+  configuration: {min_hours: 0.5, max_hours: 2}
+  small:         {min_hours: 1,   max_hours: 4}
+  medium:        {min_hours: 3,   max_hours: 8}
+  large:         {min_hours: 6,   max_hours: 12}
+
+# Add anchors here. Template:
+#
+# anchors:
+#   - id: bom-copies
+#     ticket: "BoM copies + procurement release"
+#     total_hours: 22
+#     active: true
+#     stories:
+#       - id: bom-copy-mechanism
+#         scope: "Order-bound BoM copy mechanism"
+#         kind: custom_dev
+#         hours: 6
+#         drivers: [new_model, computed_logic]
+anchors: []

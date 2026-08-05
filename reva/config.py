@@ -31,6 +31,22 @@ TICKET_CODE_GROUNDING = os.environ.get(
     "REVA_TICKET_CODE_GROUNDING", "true"
 ).strip().lower() not in ("false", "0", "no")
 
+# Global kill switch for golden-estimate anchoring (spec 2026-08-04). Default
+# on: the feature is self-gating, because a file with no anchors renders a
+# bands-only block, which is today's behaviour. Off forces bands-only even when
+# anchors exist.
+GOLDEN_ESTIMATES = os.environ.get(
+    "REVA_GOLDEN_ESTIMATES", "true"
+).strip().lower() not in ("false", "0", "no")
+
+# Maximum anchor *stories* rendered into a prompt. Overflow is dropped in file
+# order and recorded as an ops event — a silent truncation would read as full
+# coverage.
+try:
+    GOLDEN_ESTIMATE_LIMIT = int(os.environ.get("REVA_GOLDEN_ESTIMATE_LIMIT", "30"))
+except ValueError:
+    GOLDEN_ESTIMATE_LIMIT = 30
+
 
 def env_or_file(name: str, default: str | None = None) -> str | None:
     """Return env var `name`, or the stripped contents of the file at `{name}_FILE`.

@@ -2,8 +2,10 @@
 
 import textwrap
 
+import reva.config as reva_config
 from reva.golden_estimates import (
     COMPLEXITY_DRIVERS,
+    DEFAULT_BANDS,
     MAX_DRIVERS_PER_STORY,
     GOLDEN_FILENAME,
     GoldenStory,
@@ -14,6 +16,8 @@ from reva.golden_estimates import (
     score,
 )
 from reva.types import StoryEstimate, TicketAnalysisResult, TicketIssueItem
+
+from tests.conftest import SHIPPED_PROMPTS
 
 
 def _write(tmp_path, body: str) -> str:
@@ -442,3 +446,23 @@ def test_apply_anchor_on_an_issue_skips_confidence(tmp_path):
     assert degradations == []
     assert issue.anchor_ref == "bom-copies#bom-copy-mechanism"
     assert not hasattr(issue, "anchor_confidence")
+
+
+def test_shipped_file_loads_cleanly():
+    """The file that actually ships must parse with zero degradations."""
+    golden, degradations = load(SHIPPED_PROMPTS)
+
+    assert degradations == []
+    assert set(golden.bands) == set(DEFAULT_BANDS)
+
+
+def test_shipped_file_matches_the_bands_in_code():
+    golden, _ = load(SHIPPED_PROMPTS)
+
+    for name, (lo, hi) in DEFAULT_BANDS.items():
+        assert (golden.bands[name].min_hours, golden.bands[name].max_hours) == (lo, hi)
+
+
+def test_config_exposes_the_kill_switch_and_limit():
+    assert isinstance(reva_config.GOLDEN_ESTIMATES, bool)
+    assert reva_config.GOLDEN_ESTIMATE_LIMIT == 30
