@@ -20,6 +20,7 @@ from reva.ticket_issue_planner import TicketIssuePlanner
 from reva.ticket_issue_tool import TICKET_ISSUE_TOOL_NAME, build_ticket_issue_tool_schema
 from reva.types import TicketIssueJobParams, TicketIssuePlan
 from tests.conftest import SHIPPED_PROMPTS
+from tests.test_ticket_analyzer import ANCHORED_GOLDEN
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
@@ -345,6 +346,57 @@ def test_issue_system_prompt_substitutes_the_calibration_block(tmp_path):
     assert "{{ESTIMATE_CALIBRATION}}" not in text
     assert "1–4 h" in text
     assert planner.last_golden_degradations == []
+
+
+def _anchored_planner(tmp_path) -> TicketIssuePlanner:
+    (tmp_path / "ticket_issues.md").write_text("{{ESTIMATE_CALIBRATION}}")
+    (tmp_path / GOLDEN_FILENAME).write_text(ANCHORED_GOLDEN)
+    return TicketIssuePlanner(
+        claude=ClaudeClient(api_key="test-key"), prompts_dir=str(tmp_path)
+    )
+
+
+def test_issue_system_prompt_renders_anchors_for_the_planner(tmp_path):
+    """Nothing else renders the ISSUE prompt WITH anchors. The block is shared
+    with the analysis prompt, so it must not tell the planner to justify its
+    adjustment in `assumptions` — TicketIssueItem has no such field, and its
+    tool schema is strict with additionalProperties: false."""
+    text = _anchored_planner(tmp_path)._build_system()[0]["text"]
+
+    assert "`bom-copies#bom-copy-mechanism`" in text
+    assert "Order-bound BoM copy mechanism" in text
+    assert "`assumptions`" not in text
+    assert "For each item you estimate" in text
+
+
+def test_issue_kill_switch_keeps_anchors_out_of_the_system_prompt(
+    tmp_path, monkeypatch
+):
+    """The brake must be wired THROUGH this call site: hardcoding
+    `enabled=True` in ticket_issue_planner.py must fail here."""
+    monkeypatch.setattr("reva.config.GOLDEN_ESTIMATES", False)
+    planner = _anchored_planner(tmp_path)
+
+    text = planner._build_system()[0]["text"]
+
+    assert "bom-copies" not in text
+    assert "Order-bound BoM copy mechanism" not in text
+    assert "Reference anchors" not in text
+    assert "3–8 h" in text  # bands still render
+    assert planner.last_golden_degradations == []
+
+
+def test_issue_anchor_limit_caps_the_system_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr("reva.config.GOLDEN_ESTIMATE_LIMIT", 1)
+    planner = _anchored_planner(tmp_path)
+
+    text = planner._build_system()[0]["text"]
+
+    assert "`bom-copies#bom-copy-mechanism`" in text
+    assert "`bom-copies#procurement-release`" not in text
+    assert [d.reason for d in planner.last_golden_degradations] == [
+        "anchor_limit_exceeded"
+    ]
 
 
 def test_issue_system_prompt_records_a_degradation_when_the_file_is_missing(tmp_path):

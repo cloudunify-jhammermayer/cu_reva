@@ -100,16 +100,13 @@ _PLACEHOLDER_VALUES = {
 
 
 def _prompts_dir(ctx) -> str:
-    """The prompts directory the calibration block was actually rendered from.
+    """The prompts directory the analyzer and CLI runner both read from.
 
-    TicketIssuePlanner is the only reader of this directory in this pipeline
-    (self._prompts_dir, inside _build_system — the same call that populates
-    last_golden_degradations, read right after plan_with_response() below).
-    Reach through it rather than WorkerContext.prompts_dir so the file load()
-    resolves here can never silently diverge from the one the model's
-    calibration block was actually rendered from.
+    Same single source as `ticket_runner.py`: `WorkerContext.prompts_dir` and
+    `TicketIssuePlanner._prompts_dir` are both `settings.prompts_dir`, so
+    reaching through the planner's private attribute bought nothing.
     """
-    return ctx.ticket_issue_planner._prompts_dir
+    return ctx.prompts_dir
 
 
 def _record_golden_degradations(ctx, log, degradations, run_id: int) -> None:

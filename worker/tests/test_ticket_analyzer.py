@@ -330,6 +330,79 @@ def test_system_prompt_substitutes_the_calibration_block(tmp_path):
     assert analyzer.last_golden_degradations == []
 
 
+# Two anchor stories, so a limit of 1 is visible in the rendered block.
+ANCHORED_GOLDEN = """\
+version: 1
+bands:
+  configuration: {min_hours: 0.5, max_hours: 2}
+  small: {min_hours: 1, max_hours: 4}
+  medium: {min_hours: 3, max_hours: 8}
+  large: {min_hours: 6, max_hours: 12}
+anchors:
+  - id: bom-copies
+    ticket: "BoM copies + procurement release"
+    total_hours: 10
+    stories:
+      - id: bom-copy-mechanism
+        scope: "Order-bound BoM copy mechanism"
+        kind: custom_dev
+        hours: 6
+        drivers: [new_model]
+      - id: procurement-release
+        scope: "Selective procurement release"
+        kind: custom_dev
+        hours: 4
+        drivers: [cross_module_workflow]
+"""
+
+
+def _anchored_analyzer(tmp_path) -> TicketAnalyzer:
+    (tmp_path / "ticket_analysis.md").write_text("{{ESTIMATE_CALIBRATION}}")
+    (tmp_path / GOLDEN_FILENAME).write_text(ANCHORED_GOLDEN)
+    return TicketAnalyzer(
+        claude=ClaudeClient(api_key="test-key"), prompts_dir=str(tmp_path)
+    )
+
+
+def test_system_prompt_lists_the_anchors_when_the_switch_is_on(tmp_path):
+    """Positive control for the two brake tests below: with anchors on disk
+    and the defaults in force, the anchor text does reach the prompt."""
+    text = _anchored_analyzer(tmp_path)._build_system()[0]["text"]
+
+    assert "`bom-copies#bom-copy-mechanism`" in text
+    assert "`bom-copies#procurement-release`" in text
+
+
+def test_kill_switch_keeps_anchors_out_of_the_system_prompt(tmp_path, monkeypatch):
+    """The operator's brake must be wired THROUGH this call site: with anchors
+    on disk and REVA_GOLDEN_ESTIMATES off, no anchor text may reach the
+    prompt. Hardcoding `enabled=True` in ticket_analyzer.py must fail here."""
+    monkeypatch.setattr("reva.config.GOLDEN_ESTIMATES", False)
+    analyzer = _anchored_analyzer(tmp_path)
+
+    text = analyzer._build_system()[0]["text"]
+
+    assert "bom-copies" not in text
+    assert "Order-bound BoM copy mechanism" not in text
+    assert "Reference anchors" not in text
+    assert "3–8 h" in text  # bands still render
+    assert analyzer.last_golden_degradations == []
+
+
+def test_anchor_limit_caps_the_system_prompt(tmp_path, monkeypatch):
+    """Same for the limit: hardcoding it in ticket_analyzer.py must fail."""
+    monkeypatch.setattr("reva.config.GOLDEN_ESTIMATE_LIMIT", 1)
+    analyzer = _anchored_analyzer(tmp_path)
+
+    text = analyzer._build_system()[0]["text"]
+
+    assert "`bom-copies#bom-copy-mechanism`" in text
+    assert "`bom-copies#procurement-release`" not in text
+    assert [d.reason for d in analyzer.last_golden_degradations] == [
+        "anchor_limit_exceeded"
+    ]
+
+
 def test_system_prompt_records_a_degradation_when_the_file_is_missing(tmp_path):
     (tmp_path / "ticket_analysis.md").write_text("{{ESTIMATE_CALIBRATION}}")
     analyzer = TicketAnalyzer(

@@ -1017,17 +1017,56 @@ anchors:
 """
 
 
-@pytest.fixture()
-def golden_file(ctx_and_fakes, tmp_path):
-    """Writes a one-anchor prompts/golden_estimates.yml (bom-copies#bom-copy-
-    mechanism, custom_dev, drivers=[new_model, computed_logic]) and points
-    ctx.prompts_dir at it. WorkerContext is frozen, so re-register the ctx."""
-    (tmp_path / "golden_estimates.yml").write_text(_GOLDEN_YAML)
+# A second story, so a limit of 1 is visible in the rendered block.
+_GOLDEN_YAML_TWO_STORIES = _GOLDEN_YAML.replace("total_hours: 6", "total_hours: 10") + """\
+      - id: procurement-release
+        scope: "Selective procurement release"
+        kind: custom_dev
+        hours: 4
+        drivers: [cross_module_workflow]
+"""
+
+# One valid anchor and one the loader must drop (uppercase id is not a slug),
+# so load() degrades on a file that still yields a usable calibration block.
+_GOLDEN_YAML_BROKEN_ENTRY = _GOLDEN_YAML + """\
+  - id: NOT_A_SLUG
+    ticket: "Typo in the operator's file"
+    total_hours: 3
+    stories:
+      - id: only-story
+        scope: "Something"
+        kind: custom_dev
+        hours: 3
+"""
+
+
+def _point_prompts_dir(ctx_and_fakes, tmp_path, body: str) -> None:
+    """Write a calibration file and point ctx.prompts_dir at it. WorkerContext
+    is frozen, so re-register the ctx."""
+    (tmp_path / "golden_estimates.yml").write_text(body)
     import dataclasses
 
     ctx = dataclasses.replace(ctx_and_fakes["ctx"], prompts_dir=str(tmp_path))
     set_context(ctx)
     ctx_and_fakes["ctx"] = ctx
+
+
+@pytest.fixture()
+def golden_file(ctx_and_fakes, tmp_path):
+    """Writes a one-anchor prompts/golden_estimates.yml (bom-copies#bom-copy-
+    mechanism, custom_dev, drivers=[new_model, computed_logic]) and points
+    ctx.prompts_dir at it."""
+    _point_prompts_dir(ctx_and_fakes, tmp_path, _GOLDEN_YAML)
+
+
+@pytest.fixture()
+def golden_file_two_stories(ctx_and_fakes, tmp_path):
+    _point_prompts_dir(ctx_and_fakes, tmp_path, _GOLDEN_YAML_TWO_STORIES)
+
+
+@pytest.fixture()
+def golden_file_with_a_broken_entry(ctx_and_fakes, tmp_path):
+    _point_prompts_dir(ctx_and_fakes, tmp_path, _GOLDEN_YAML_BROKEN_ENTRY)
 
 
 def _analysis_with_estimate(anchor_ref, complexity_drivers, kind="custom_dev"):
@@ -1137,6 +1176,110 @@ def test_code_grounded_analysis_persists_the_resolved_anchor(
     stored = _stored_structured(s, out["analysis_id"])
     assert stored["estimates"][0]["anchor_ref"] == "bom-copies#bom-copy-mechanism"
     assert stored["estimates"][0]["anchor_confidence"] == "high"
+
+
+def test_cli_leg_kill_switch_keeps_anchors_out_of_the_calibration_block(
+    ctx_and_fakes, monkeypatch, golden_file
+):
+    """The escalated-CLI leg renders its own block, so the operator's brake
+    has to be wired through THIS call site too. Hardcoding `enabled=True` in
+    ticket_runner.py must fail here."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    monkeypatch.setattr("reva.config.GOLDEN_ESTIMATES", False)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+
+    block = code_runner.review_calls[0]["skill_vars"]["ESTIMATE_CALIBRATION"]
+    assert "bom-copies" not in block
+    assert "Order-bound BoM copy mechanism" not in block
+    assert "3–8 h" in block  # bands still render
+
+
+def test_cli_leg_caps_the_calibration_block_at_the_configured_limit(
+    ctx_and_fakes, monkeypatch, golden_file_two_stories
+):
+    """Same for the limit — and the overflow degradation must reach the ops
+    log from this leg, not just be returned by render()."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    monkeypatch.setattr("reva.config.GOLDEN_ESTIMATE_LIMIT", 1)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    out = run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+
+    block = code_runner.review_calls[0]["skill_vars"]["ESTIMATE_CALIBRATION"]
+    assert "`bom-copies#bom-copy-mechanism`" in block
+    assert "`bom-copies#procurement-release`" not in block
+    assert _ops_events(s["db"], event="golden_estimates_anchor_limit_exceeded") == [
+        ("ticket_analysis", "golden_estimates_anchor_limit_exceeded",
+         {"analysis_id": out["analysis_id"], "rendered": 1, "available": 2}),
+    ]
+
+
+def test_cli_leg_records_its_own_loader_degradations(
+    ctx_and_fakes, monkeypatch, golden_file_with_a_broken_entry
+):
+    """The CLI leg is the 10-30x path and the ops log is the operator's only
+    visibility into it. Its calibration_block() call is the ONLY thing that
+    can report a broken file here — the analyzer's last_golden_degradations
+    channel is deliberately not read on this leg (it belongs to the
+    Messages-API leg), and the convergence-point load() discards them."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    out = run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+
+    events = _ops_events(s["db"], event="golden_estimates_anchor_invalid")
+    assert len(events) == 1
+    component, _, detail = events[0]
+    assert component == "ticket_analysis"
+    assert detail["analysis_id"] == out["analysis_id"]
+    assert detail["id"] == "NOT_A_SLUG"
+
+
+def test_dropped_complexity_drivers_reach_the_ops_log(ctx_and_fakes, golden_file):
+    """The driver sanitiser runs in a Pydantic validator with no database. Its
+    drops must still be visible: apply_anchor drains them at the convergence
+    point where the caller holds ctx.db."""
+    s = ctx_and_fakes
+    s["analyzer"].result = _analysis_with_estimate(
+        anchor_ref="bom-copies#bom-copy-mechanism",
+        complexity_drivers=["new_model", "teleportation"],
+    )
+    params = _make_params(s["db"])
+
+    out = run_ticket_analysis(params)
+
+    assert _ops_events(s["db"], event="golden_estimates_drivers_dropped") == [
+        ("ticket_analysis", "golden_estimates_drivers_dropped",
+         {"analysis_id": out["analysis_id"], "dropped": ["teleportation"]}),
+    ]
+    stored = _stored_structured(s, out["analysis_id"])
+    assert stored["estimates"][0]["complexity_drivers"] == ["new_model"]
+    assert "dropped_drivers" not in stored["estimates"][0]
+
+
+def test_a_backticked_anchor_ref_still_resolves_end_to_end(ctx_and_fakes, golden_file):
+    """The rendered block lists ids in backticks; a model that copies them
+    "as written" must not have every ref nulled."""
+    s = ctx_and_fakes
+    s["analyzer"].result = _analysis_with_estimate(
+        anchor_ref="`bom-copies#bom-copy-mechanism`",
+        complexity_drivers=["new_model", "computed_logic"],
+    )
+
+    out = run_ticket_analysis(_make_params(s["db"]))
+
+    stored = _stored_structured(s, out["analysis_id"])
+    assert stored["estimates"][0]["anchor_ref"] == "bom-copies#bom-copy-mechanism"
+    assert stored["estimates"][0]["anchor_confidence"] == "high"
+    assert _ops_events(s["db"], event="golden_estimates_anchor_ref_unresolved") == []
 
 
 def test_cli_leg_does_not_report_a_previous_jobs_stale_degradation(

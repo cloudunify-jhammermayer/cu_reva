@@ -31,12 +31,8 @@ class FakePlanner:
     plan: TicketIssuePlan | None = None
     raise_exc: Exception | None = None
     call_count: int = 0
-    # Mirrors the real TicketIssuePlanner's private attribute (ticket_issue_
-    # runner.py's _prompts_dir(ctx) reaches through it) and its
-    # last_golden_degradations channel — same default as WorkerContext.
-    # prompts_dir, so unmodified tests degrade the same way prod would with
-    # no calibration file deployed.
-    _prompts_dir: str = "/app/prompts"
+    # Mirrors the real TicketIssuePlanner's last_golden_degradations channel,
+    # drained by the runner right after plan_with_response().
     last_golden_degradations: list = field(default_factory=list)
 
     def plan_with_response(
@@ -1580,13 +1576,14 @@ anchors:
 @pytest.fixture()
 def golden_file(ctx_and_fakes, tmp_path):
     """Writes a one-anchor prompts/golden_estimates.yml (bom-copies#bom-copy-
-    mechanism) and points the planner's own _prompts_dir at it. Unlike
-    ticket_runner.py's WorkerContext.prompts_dir, this runner reaches the
-    calibration file through TicketIssuePlanner (see _prompts_dir() in
-    ticket_issue_runner.py) — FakePlanner is a plain mutable dataclass, so no
-    WorkerContext replace/re-register is needed."""
+    mechanism) and points ctx.prompts_dir at it — the same source
+    ticket_runner.py reads. WorkerContext is frozen, so re-register the ctx."""
     (tmp_path / "golden_estimates.yml").write_text(_GOLDEN_YAML)
-    ctx_and_fakes["planner"]._prompts_dir = str(tmp_path)
+    import dataclasses
+
+    ctx = dataclasses.replace(ctx_and_fakes["ctx"], prompts_dir=str(tmp_path))
+    set_context(ctx)
+    ctx_and_fakes["ctx"] = ctx
 
 
 def test_issue_plan_keeps_a_valid_anchor_ref(ctx_and_fakes, golden_file):
