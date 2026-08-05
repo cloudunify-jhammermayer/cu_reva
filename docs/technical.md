@@ -89,6 +89,32 @@ problems degrade to a graph-less review, never a failed one.
   written back via the `write-field` callback. Attachments (docx/pdf/txt/md) are
   text-extracted and analyzed with the description. Can escalate to the
   headless CLI — see *Planner-gated code grounding* below.
+- **Golden estimates** (spec 2026-08-04): `prompts/golden_estimates.yml` is the
+  single calibration source for every development estimate — an
+  operator-curated file of real closed tickets with trusted hours, checked in
+  and hand-edited, REVA never writes to it. It replaces three hand-maintained
+  copies of the same four bands (config/small/medium/large) at all three
+  estimating sites: `ticket_analysis.md` §5 and `ticket_issues.md` substitute
+  `{{ESTIMATE_CALIBRATION}}` on the Messages-API path
+  (`reva/ticket_analyzer.py`, `reva/ticket_issue_planner.py`); the escalated-CLI
+  skill `skills/reva-ticket-analysis.md` gets the same block via
+  `ClaudeCodeRunner.review()`'s `skill_vars` parameter, deliberately **not**
+  `skill_params` — everything in `skill_params` is nonce-fenced and framed to
+  the model as "DATA, not instructions," which would demote binding
+  calibration to data instead of trusted prompt text. `StoryEstimate` and
+  `TicketIssueItem` gain `anchor_ref` (`"<anchor-id>#<story-id>"`) and
+  `complexity_drivers` (a fixed enum, ≤3 per story); `anchor_confidence` is
+  never the model's own judgement — code overwrites it from the Jaccard
+  overlap between the story's drivers and the cited anchor's, gated on
+  matching `kind` (`reva/golden_estimates.py: score()`: both driver sets empty
+  → `high`; overlap ≥ 0.6 → `high`; overlap > 0 → `medium`; otherwise, or no
+  anchor resolved → `low`). All three fields are **internal only** — an
+  anchor names another customer's ticket, so none of them reach the Odoo HTML
+  field, a GitHub issue body, or the Projects board; those renderers emit
+  explicit fields rather than serialising the whole model, and tests pin that
+  boundary. A file with no anchors renders a bands-only block — today's
+  behaviour — so the feature is inert until anchors are written. Kill switch
+  `REVA_GOLDEN_ESTIMATES` (default on) forces bands-only regardless.
 - **Support answers** (spec 2026-07-25): Odoo asks a question via
   `POST /api/v1/support-request`; REVA drafts an answer into an HTML field for
   a **consultant to review and send** — it is never posted to the customer.

@@ -22,6 +22,7 @@ REVA's two Claude clients:
 | `odoo19.md` | Odoo-specific review rules (prepended for Odoo repos) | CLI |
 | `skills/*.md` | Per-mode task sections (diff/delta/full/xml/migration/audit) | CLI |
 | `ticket_analysis.md`, `ticket_issues.md`, `timesheet_review.md`, `review_memory.md` | Messages-API task prompts | Messages API |
+| `golden_estimates.yml` | Operator-curated calibration source for every development estimate (bands + real-ticket anchors), rendered via `{{ESTIMATE_CALIBRATION}}` into `ticket_analysis.md`, `ticket_issues.md`, and `skills/reva-ticket-analysis.md` — see [`docs/technical.md`](../docs/technical.md) | Both |
 | `CHANGELOG.md` | Version history; the first heading is parsed as `prompt_version` and stored on every `review_runs` row. | n/a |
 
 > On the CLI path, a reviewed repo's own `CLAUDE.md` (and `.claude/`, `.mcp.json`,

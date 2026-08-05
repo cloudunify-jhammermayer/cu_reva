@@ -1622,6 +1622,26 @@ def test_issue_plan_nulls_a_hallucinated_anchor_and_ops_events(ctx_and_fakes, go
     assert any(e == "golden_estimates_anchor_ref_unresolved" for _, e, _ in events)
 
 
+def test_github_issue_body_never_carries_the_anchor(ctx_and_fakes, golden_file):
+    """AC 9: an anchor names another customer's ticket. It must not appear in
+    a posted GitHub issue body."""
+    s = ctx_and_fakes
+    s["planner"].plan = TicketIssuePlan(issues=[
+        TicketIssueItem(
+            title="Issue 1", body="Body 1", estimate_hours=1.5,
+            anchor_ref="bom-copies#bom-copy-mechanism",
+            complexity_drivers=["new_model"],
+        ),
+    ])
+    params = _make_params(s["db"])
+
+    run_ticket_issues(params)
+
+    for issue in s["github"].created:
+        assert "bom-copies" not in issue["body"]
+        assert "new_model" not in issue["body"]
+
+
 def test_planner_degradations_reach_the_ops_log(ctx_and_fakes):
     """No golden_file fixture: FakePlanner never calls the real _build_system,
     so this simulates what it would have populated — the channel

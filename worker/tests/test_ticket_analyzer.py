@@ -429,3 +429,29 @@ def test_format_html_escapes_html():
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
     assert "&lt;b&gt;" in html
+
+
+def test_odoo_html_never_carries_the_anchor():
+    """AC 9: an anchor names another customer's ticket. It must not appear in
+    the customer-facing Odoo field."""
+    result = TicketAnalysisResult(
+        summary="s",
+        estimates=[
+            StoryEstimate(
+                story="one",
+                kind="custom_dev",
+                min_hours=3,
+                max_hours=5,
+                anchor_ref="bom-copies#bom-copy-mechanism",
+                complexity_drivers=["new_model"],
+                anchor_confidence="high",
+            )
+        ],
+    )
+
+    html = format_ticket_html(result)
+
+    assert "bom-copies" not in html
+    assert "anchor" not in html.lower()
+    assert "new_model" not in html
+    assert "3–5" in html  # the estimate itself still renders

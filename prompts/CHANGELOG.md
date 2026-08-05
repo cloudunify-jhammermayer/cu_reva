@@ -1,3 +1,25 @@
+## v2.17 — Golden estimates: one calibration source, three consumers
+
+- `ticket_analysis.md` §5, `ticket_issues.md`, and `skills/reva-ticket-analysis.md`
+  each lose their hand-maintained copy of the four calibration bands. All three
+  now substitute `{{ESTIMATE_CALIBRATION}}`, rendered from
+  `prompts/golden_estimates.yml` — an operator-curated file of real closed
+  tickets with trusted hours, not auto-derived and never written by REVA.
+- Story and issue estimates gain `anchor_ref` and `complexity_drivers`.
+  `anchor_confidence` is derived in code from anchor distance (never the
+  model's self-assessment) and is not part of any tool schema. All three
+  fields are internal only — an anchor reference names another customer's
+  ticket, so none of them reach the Odoo HTML field, a GitHub issue body, or
+  the Projects board.
+- The CLI skill's calibration block is injected via `skill_vars`, not
+  `skill_params`: everything in `skill_params` is nonce-fenced and introduced
+  to the model as "DATA, not instructions", which would demote binding
+  calibration to data.
+- Ships with zero anchors in `golden_estimates.yml`, so behaviour is
+  unchanged — bands-only, as before — until the operator writes the first
+  one. Kill switch `REVA_GOLDEN_ESTIMATES` (default on) forces bands-only
+  even once anchors exist.
+
 ## v2.16 — A negative about standard Odoo has to be earned
 
 - All four answer-shaped prompts (`support_answer.md`, `ticket_analysis.md`,

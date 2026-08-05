@@ -1,10 +1,31 @@
 # REVA — Work Handoff
 
-## Addendum 2026-08-03 — golden estimates (requirements + decisions, NOTHING BUILT)
+## Addendum 2026-08-03/05 — golden estimates (Plan A shipped, Plan B open)
 
-**Status: requirements agreed, spec not written, no code.** This addendum is the
-whole artifact — there is no spec or plan file yet. Resume by writing
-`docs/superpowers/specs/2026-08-03-golden-estimates-design.md`, then Plan 1.
+**Status: Plan A implemented and merged to main** (spec
+`docs/superpowers/specs/archive/2026-08-04-golden-estimates-design.md`, plan
+`docs/superpowers/plans/archive/2026-08-04-golden-estimates.md`, both archived
+on completion). Plan B — the calibration view — is still open, blocked on the
+same empty `ticket_actuals` table noted below; its spec stays at
+`docs/superpowers/specs/2026-07-15-estimate-drift-stats-design.md`.
+
+**Storage decision reversed during design.** This addendum originally locked a
+DB table + `/api/v1` + TUI CRUD for anchor management (see the decisions table
+below, kept for history). The spec superseded that: `prompts/golden_estimates.yml`
+is a checked-in, hand-authored file instead — REVA never writes to it — which
+made the whole feature **migration-free** (zero new tables, zero new columns;
+`anchor_ref`/`complexity_drivers`/`anchor_confidence` persist into the existing
+`ticket_analyses.result_structured` / `ticket_issue_runs.issues` JSON columns).
+The "TUI CRUD" and "promote a past analysis" rows below did not ship as a
+result — see the spec's "Reversed decisions" section for the full reasoning.
+
+**Not validated.** Every test in the implementation is a unit test: no live
+Claude CLI run, no real Odoo. `prompts/golden_estimates.yml` ships with **zero
+anchors**, so the feature is inert — bands-only output, byte-for-byte what
+shipped before — until an operator hand-writes the first anchor into that
+file. The highest-value first live check is one ticket analysis that escalates
+to the CLI path, confirming the model cites a real `anchor_ref`, the derived
+`anchor_confidence` looks sane, and no anchor text reaches the Odoo HTML.
 
 ### What it is
 
@@ -24,7 +45,7 @@ prose, and traceable to the anchor they came from.
 | Question | Decision |
 |---|---|
 | Anchor source | Operator-curated from closed tickets — **not** auto-derived |
-| Storage / management | DB table + `/api/v1` + **TUI CRUD** (not a checked-in file) |
+| Storage / management | DB table + `/api/v1` + **TUI CRUD** (not a checked-in file) — **reversed during design, see above** |
 | Which paths anchor | Ticket analysis **and** issue planner **and** a drift view |
 | Added output detail | `anchor_ref`, anchor-distance `confidence`, `complexity_drivers[]` — **no** phase breakdown |
 | Anchor matching | Claude picks from the injected list; **no** embedding/retrieval system |
@@ -53,7 +74,13 @@ prose, and traceable to the anchor they came from.
    (`StoryEstimate`) but adds **no** `RepoConfig` key — only a global kill
    switch — so it does not collide with their four keys. Plans must say so.
 
-### Proposed breakdown (agreed shape, base commit `86abddd`)
+### Proposed breakdown (agreed shape, base commit `86abddd`) — superseded
+
+Kept for history; the work actually shipped as a single 12-task plan
+(`docs/superpowers/plans/archive/2026-08-04-golden-estimates.md`), not this
+three-plan split. Plan 1 below (DB table, API, TUI CRUD) did not ship — see
+the storage reversal above. Plan 3 (the calibration view) is the still-open
+Plan B, tracked at `docs/superpowers/specs/2026-07-15-estimate-drift-stats-design.md`.
 
 - **Plan 1 — golden set + authoring.** Migration 045 + ORM model + writers
   (create/list/edit/retire; candidates query joining `ticket_analyses` ⟕
@@ -97,7 +124,13 @@ automatic promotion without operator review; anchors for work REVA never
 analysed; phase-level hour splits; changes to the Odoo estimate mirror contract
 (`contracts/inbound/update-issue-estimate.schema.json`) or the board schema.
 
-### Owed before Plan 2 can be written
+### Owed before Plan 2 can be written — resolved
+
+The driver enum shipped exactly as proposed below. Anchors are shared across
+all Odoo instances (one file, no scoping). The "how many anchors before
+switching on" question turned out moot: the feature is self-gating — a file
+with an empty `anchors:` list renders bands-only, today's behaviour — so it
+ships on with zero anchors and stays inert until the operator writes one.
 
 - **The complexity-driver enum list.** Frozen in code, drift buckets are built
   on it, so a later change costs a migration. Proposal awaiting Joseph's edit:
