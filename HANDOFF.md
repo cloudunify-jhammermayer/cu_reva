@@ -19,15 +19,32 @@ made the whole feature **migration-free** (zero new tables, zero new columns;
 The "TUI CRUD" and "promote a past analysis" rows below did not ship as a
 result — see the spec's "Reversed decisions" section for the full reasoning.
 
-**Not validated.** Every test in the implementation is a unit test: no live
-Claude CLI run, no real Odoo. `prompts/golden_estimates.yml` ships with **zero
-anchors**, so the feature is inert — bands-only output, **semantically** what
-shipped before (the same four bands, in one shared wording rather than three
-hand-maintained copies; byte-identity was amended away during design, see the
-spec's acceptance criterion 7) — until an operator hand-writes the first anchor
-into that file. The highest-value first live check is one ticket analysis that escalates
+**Anchors written and deployed 2026-08-05 (prompts v2.18).** The file no longer
+ships empty: **15 anchors / 30 stories** from real closed AST and BLP tickets,
+with hours supplied by Joseph from booked time. Three consequences worth
+knowing before touching this:
+
+- **The bands were recalibrated down** (config 0.5–2 → 0.5–1.5, small 1–4 → 1–2,
+  medium 3–8 → 2–4, large 6–12 → 4–8), because the actuals showed the old ones
+  overshooting: 120–238 h estimated against 65.5 h booked across the 15 tickets,
+  and every `cross_module_workflow` story — the band's own "large, 6–12 h"
+  example — came in at 2 h. `DEFAULT_BANDS` moves in lockstep with the file;
+  `test_shipped_file_matches_the_bands_in_code` pins the two together.
+- **Anchor hours and bands are booked time with no margin in them.** A **10 %
+  quoting buffer** is applied by the prompt, once, as the last step. Do not pad
+  the file — it would stop being a record of what actually happened.
+- **30 stories against a render limit of 30.** Zero headroom: the next story
+  added silently drops off the end (with an `anchor_limit_exceeded` ops event).
+  `REVA_GOLDEN_ESTIMATE_LIMIT` raises it but is **not** wired into
+  `docker-compose.prod.yml`, so today that needs a compose edit — as do the
+  sibling switches `REVA_GOLDEN_ESTIMATES`, `REVA_TICKET_CODE_GROUNDING` and
+  `REVA_CROSS_BRANCH_REUSE`.
+
+**Still not validated live.** Every test is a unit test: no live Claude CLI run,
+no real Odoo. The highest-value first check is one ticket analysis that escalates
 to the CLI path, confirming the model cites a real `anchor_ref`, the derived
-`anchor_confidence` looks sane, and no anchor text reaches the Odoo HTML.
+`anchor_confidence` looks sane, the 10 % buffer actually lands in the output,
+and no anchor text reaches the Odoo HTML.
 
 ### What it is
 
