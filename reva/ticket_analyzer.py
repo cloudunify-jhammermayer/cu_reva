@@ -10,9 +10,11 @@ from __future__ import annotations
 import os
 import secrets
 
+from reva import config
 from reva.attachment_text import extract_attachment_text
 from reva.claude_client import ClaudeClient
 from reva.errors import MalformedModelOutput, PermanentError
+from reva.golden_estimates import Degradation, calibration_block
 from reva.ticket_tool import TICKET_TOOL_NAME, build_ticket_tool_schema, ticket_tool_choice
 from reva.types import ClaudeResponse, ContentBlock, TicketAnalysisResult, TicketJobParams
 
@@ -28,6 +30,8 @@ class TicketAnalyzer:
     def __init__(self, claude: ClaudeClient, prompts_dir: str) -> None:
         self._claude = claude
         self._prompts_dir = prompts_dir
+        # Drained by the ticket runner, which holds the db to ops-event them.
+        self.last_golden_degradations: list[Degradation] = []
 
     def analyze(
         self,
@@ -126,6 +130,16 @@ class TicketAnalyzer:
         path = os.path.join(self._prompts_dir, "ticket_analysis.md")
         with open(path) as f:
             text = f.read()
+        # The calibration block is REVA's own authored content, substituted into
+        # the trusted prompt body — not passed as a fenced parameter. Its text is
+        # identical for every run within a deploy, so the prompt cache still hits.
+        block, degradations = calibration_block(
+            self._prompts_dir,
+            limit=config.GOLDEN_ESTIMATE_LIMIT,
+            enabled=config.GOLDEN_ESTIMATES,
+        )
+        self.last_golden_degradations = degradations
+        text = text.replace("{{ESTIMATE_CALIBRATION}}", block)
         return [
             {
                 "type": "text",

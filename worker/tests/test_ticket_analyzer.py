@@ -6,6 +6,7 @@ Uses httpx.MockTransport to inject canned Claude responses — no live API calls
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import httpx
@@ -13,6 +14,7 @@ import pytest
 
 from reva.claude_client import ClaudeClient
 from reva.errors import MalformedModelOutput, PermanentError
+from reva.golden_estimates import GOLDEN_FILENAME
 from reva.ticket_analyzer import TicketAnalyzer
 from reva.ticket_formatter import format_ticket_html
 from reva.ticket_tool import TICKET_TOOL_NAME
@@ -24,6 +26,7 @@ from reva.types import (
     TicketAnalysisResult,
     TicketJobParams,
 )
+from tests.conftest import SHIPPED_PROMPTS
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
@@ -295,6 +298,57 @@ def test_a_summary_that_merely_mentions_xml_still_validates():
         {"summary": "Der Kunde beschreibt ein Problem mit <field> in der Ansicht."}
     )
     assert result.summary.startswith("Der Kunde")
+
+
+# ---------------------------------------------------------------------------
+# golden-estimates calibration block
+# ---------------------------------------------------------------------------
+
+
+def test_system_prompt_substitutes_the_calibration_block(tmp_path):
+    (tmp_path / "ticket_analysis.md").write_text(
+        "# Analysis\n\n{{ESTIMATE_CALIBRATION}}\n\n## Rules\n"
+    )
+    (tmp_path / GOLDEN_FILENAME).write_text(
+        "version: 1\n"
+        "bands:\n"
+        "  configuration: {min_hours: 0.5, max_hours: 2}\n"
+        "  small: {min_hours: 1, max_hours: 4}\n"
+        "  medium: {min_hours: 3, max_hours: 8}\n"
+        "  large: {min_hours: 6, max_hours: 12}\n"
+        "anchors: []\n"
+    )
+    analyzer = TicketAnalyzer(
+        claude=ClaudeClient(api_key="test-key"), prompts_dir=str(tmp_path)
+    )
+
+    text = analyzer._build_system()[0]["text"]
+
+    assert "{{ESTIMATE_CALIBRATION}}" not in text
+    assert "Estimate calibration — binding" in text
+    assert "3–8 h" in text
+    assert analyzer.last_golden_degradations == []
+
+
+def test_system_prompt_records_a_degradation_when_the_file_is_missing(tmp_path):
+    (tmp_path / "ticket_analysis.md").write_text("{{ESTIMATE_CALIBRATION}}")
+    analyzer = TicketAnalyzer(
+        claude=ClaudeClient(api_key="test-key"), prompts_dir=str(tmp_path)
+    )
+
+    text = analyzer._build_system()[0]["text"]
+
+    assert "3–8 h" in text  # bands still render from the code defaults
+    assert [d.reason for d in analyzer.last_golden_degradations] == ["file_missing"]
+
+
+def test_shipped_prompt_has_the_placeholder_and_no_hardcoded_bands():
+    with open(os.path.join(SHIPPED_PROMPTS, "ticket_analysis.md")) as f:
+        text = f.read()
+
+    assert "{{ESTIMATE_CALIBRATION}}" in text
+    assert "0.5–2 h" not in text
+    assert "6–12 h" not in text
 
 
 # ---------------------------------------------------------------------------
