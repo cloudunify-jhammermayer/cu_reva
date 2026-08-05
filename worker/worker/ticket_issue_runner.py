@@ -35,8 +35,10 @@ from rq import get_current_job
 from reva.db import writers
 from reva.errors import PermanentError, TransientError
 from reva.github_urls import parse_github_project_url, parse_github_repo_url
+from reva.golden_estimates import apply_anchor, load
 from reva.types import TicketIssueJobParams
 from worker.change_note_delivery import maybe_deliver_change_notes
+from worker.golden_support import record_degradations
 from worker.runner import build_odoo_client, get_context, instance_budget_exceeded
 
 logger = structlog.get_logger()
@@ -95,6 +97,26 @@ _PLACEHOLDER_VALUES = {
     "na",
     "-",
 }
+
+
+def _prompts_dir(ctx) -> str:
+    """The prompts directory the calibration block was actually rendered from.
+
+    TicketIssuePlanner is the only reader of this directory in this pipeline
+    (self._prompts_dir, inside _build_system — the same call that populates
+    last_golden_degradations, read right after plan_with_response() below).
+    Reach through it rather than WorkerContext.prompts_dir so the file load()
+    resolves here can never silently diverge from the one the model's
+    calibration block was actually rendered from.
+    """
+    return ctx.ticket_issue_planner._prompts_dir
+
+
+def _record_golden_degradations(ctx, log, degradations, run_id: int) -> None:
+    """Fix this module's component and detail key for record_degradations."""
+    record_degradations(
+        ctx.db, log, "ticket_issues", degradations, {"run_id": run_id}
+    )
 
 
 def _retries_remaining() -> bool:
@@ -316,6 +338,7 @@ def _normalize_planned_issue(item, params: TicketIssueJobParams) -> dict:
         "acceptance_criteria": item.acceptance_criteria,
         "type": params.issue_type or item.type,
         "estimate_hours": item.estimate_hours,
+        "anchor_ref": item.anchor_ref,
         "number": None,
         "url": None,
         "state": None,
@@ -895,6 +918,32 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
                 _send_failed_callback(ctx, params, error, log)
                 raise PermanentError(error)
             response, plan = ctx.ticket_issue_planner.plan_with_response(params)
+            # This is the only call site of plan_with_response in this module
+            # (unlike ticket_runner.py's two converging legs), so
+            # last_golden_degradations always reflects THIS call — reading it
+            # here can never attribute a previous job's stale value to this
+            # run_id.
+            _record_golden_degradations(
+                ctx, log,
+                getattr(ctx.ticket_issue_planner, "last_golden_degradations", []),
+                params.run_id,
+            )
+            # load()'s degradations are NOT recorded here: they were already
+            # recorded upstream by last_golden_degradations just above, which
+            # TicketIssuePlanner._build_system populates via calibration_block()
+            # — itself calling this same load() internally. Recording them
+            # again here would double-count every load()-level degradation
+            # (file_missing, bands_invalid, anchor_invalid,
+            # anchor_hours_mismatch).
+            golden, _ = load(_prompts_dir(ctx))
+            for item in plan.issues:
+                # score_confidence=False: an issue has no `kind`, so there is
+                # nothing to score against. Issues cite an anchor; they are
+                # not scored.
+                _record_golden_degradations(
+                    ctx, log, apply_anchor(item, golden, score_confidence=False),
+                    params.run_id,
+                )
             # Dependency-first order + system-rendered "Builds on" lines: the
             # line is baked into the persisted body here, so resumes never
             # recompute numbering.
@@ -977,6 +1026,7 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
             "title": title,
             "type": issue_type,
             "estimate_hours": item.get("estimate_hours"),
+            "anchor_ref": item.get("anchor_ref"),
             "number": created["number"],
             "id": created["id"],
             "url": created["url"],

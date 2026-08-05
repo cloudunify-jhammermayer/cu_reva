@@ -12,6 +12,7 @@ import pytest
 
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.errors import PermanentError, TransientError
+from reva.golden_estimates import Degradation
 from reva.types import (
     ClaudeResponse,
     TicketIssueItem,
@@ -30,6 +31,13 @@ class FakePlanner:
     plan: TicketIssuePlan | None = None
     raise_exc: Exception | None = None
     call_count: int = 0
+    # Mirrors the real TicketIssuePlanner's private attribute (ticket_issue_
+    # runner.py's _prompts_dir(ctx) reaches through it) and its
+    # last_golden_degradations channel — same default as WorkerContext.
+    # prompts_dir, so unmodified tests degrade the same way prod would with
+    # no calibration file deployed.
+    _prompts_dir: str = "/app/prompts"
+    last_golden_degradations: list = field(default_factory=list)
 
     def plan_with_response(
         self, params: TicketIssueJobParams
@@ -1543,3 +1551,89 @@ def test_update_issue_estimate_deleted_field_degrades_visibly(ctx_and_fakes):
             {"ticket_id": 123, "number": 102, "project_url": _PROJECT_URL}) in _ops_events(s["db"])
     row = writers.get_ticket_issue_run(s["db"], params["run_id"])
     assert {i["number"]: i["estimate_hours"] for i in row["issues"]} == {102: 2.0, 103: 1.5}
+
+
+# --- golden-estimate anchoring (Task 10) ---------------------------------------
+
+
+_GOLDEN_YAML = """\
+version: 1
+bands:
+  configuration: {min_hours: 0.5, max_hours: 2}
+  small:         {min_hours: 1,   max_hours: 4}
+  medium:        {min_hours: 3,   max_hours: 8}
+  large:         {min_hours: 6,   max_hours: 12}
+anchors:
+  - id: bom-copies
+    ticket: "BoM copies + procurement release"
+    total_hours: 6
+    active: true
+    stories:
+      - id: bom-copy-mechanism
+        scope: "Order-bound BoM copy mechanism"
+        kind: custom_dev
+        hours: 6
+        drivers: [new_model, computed_logic]
+"""
+
+
+@pytest.fixture()
+def golden_file(ctx_and_fakes, tmp_path):
+    """Writes a one-anchor prompts/golden_estimates.yml (bom-copies#bom-copy-
+    mechanism) and points the planner's own _prompts_dir at it. Unlike
+    ticket_runner.py's WorkerContext.prompts_dir, this runner reaches the
+    calibration file through TicketIssuePlanner (see _prompts_dir() in
+    ticket_issue_runner.py) — FakePlanner is a plain mutable dataclass, so no
+    WorkerContext replace/re-register is needed."""
+    (tmp_path / "golden_estimates.yml").write_text(_GOLDEN_YAML)
+    ctx_and_fakes["planner"]._prompts_dir = str(tmp_path)
+
+
+def test_issue_plan_keeps_a_valid_anchor_ref(ctx_and_fakes, golden_file):
+    s = ctx_and_fakes
+    s["planner"].plan = TicketIssuePlan(issues=[
+        TicketIssueItem(
+            title="Issue 1", body="Body 1", estimate_hours=1.5,
+            anchor_ref="bom-copies#bom-copy-mechanism",
+            complexity_drivers=["new_model"],
+        ),
+    ])
+    params = _make_params(s["db"])
+
+    run_ticket_issues(params)
+
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["issues"][0]["anchor_ref"] == "bom-copies#bom-copy-mechanism"
+    assert "anchor_confidence" not in row["issues"][0]
+
+
+def test_issue_plan_nulls_a_hallucinated_anchor_and_ops_events(ctx_and_fakes, golden_file):
+    s = ctx_and_fakes
+    s["planner"].plan = TicketIssuePlan(issues=[
+        TicketIssueItem(title="Issue 1", body="Body 1", anchor_ref="ghost#story"),
+    ])
+    params = _make_params(s["db"])
+
+    run_ticket_issues(params)
+
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["issues"][0]["anchor_ref"] is None
+    events = _ops_events(s["db"])
+    assert any(e == "golden_estimates_anchor_ref_unresolved" for _, e, _ in events)
+
+
+def test_planner_degradations_reach_the_ops_log(ctx_and_fakes):
+    """No golden_file fixture: FakePlanner never calls the real _build_system,
+    so this simulates what it would have populated — the channel
+    getattr(ctx.ticket_issue_planner, "last_golden_degradations", []) drains
+    right after plan_with_response() returns."""
+    s = ctx_and_fakes
+    s["planner"].last_golden_degradations = [
+        Degradation("file_missing", {"path": "/nope"})
+    ]
+    params = _make_params(s["db"])
+
+    run_ticket_issues(params)
+
+    events = _ops_events(s["db"])
+    assert any(e == "golden_estimates_file_missing" for _, e, _ in events)
