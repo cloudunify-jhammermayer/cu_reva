@@ -1114,3 +1114,55 @@ def test_code_grounded_analysis_passes_calibration_block_via_skill_vars(
     call = code_runner.review_calls[0]
     assert "bom-copies#bom-copy-mechanism" in call["skill_vars"]["ESTIMATE_CALIBRATION"]
     assert "ESTIMATE_CALIBRATION" not in call["params"]
+
+
+def test_code_grounded_analysis_persists_the_resolved_anchor(
+    ctx_and_fakes, monkeypatch, golden_file
+):
+    """The CLI leg is the expensive, code-grounded path — it deserves direct
+    coverage of the persisted outcome, not inference from control flow. A
+    valid anchor_ref cited by the escalated-CLI output must survive to the
+    stored row with its confidence computed in code."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    grounded_result = _analysis_with_estimate(
+        anchor_ref="bom-copies#bom-copy-mechanism",
+        complexity_drivers=["new_model", "computed_logic"],
+    )
+    code_runner = _FakeCodeRunner(grounded_result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    out = run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+
+    stored = _stored_structured(s, out["analysis_id"])
+    assert stored["estimates"][0]["anchor_ref"] == "bom-copies#bom-copy-mechanism"
+    assert stored["estimates"][0]["anchor_confidence"] == "high"
+
+
+def test_cli_leg_does_not_report_a_previous_jobs_stale_degradation(
+    ctx_and_fakes, monkeypatch, golden_file
+):
+    """Regression: last_golden_degradations is set only inside
+    TicketAnalyzer._build_system, reached only via analyze_with_response (the
+    Messages-API leg). Workers are long-lived RQ processes, so on a CLI-leg
+    job this attribute still holds whatever an EARLIER job left there. It must
+    not be read at the convergence point and attributed to this job's
+    analysis_id — the CLI leg already records its own calibration_block()
+    degradations inside _try_code_grounded_analysis."""
+    s = ctx_and_fakes
+    # Simulate a stale value a prior Messages-API-leg job left on the shared
+    # TicketAnalyzer singleton (e.g. its calibration file was broken then).
+    s["analyzer"].last_golden_degradations = [
+        Degradation("file_missing", {"path": "/stale-from-a-previous-job"})
+    ]
+    _needs_code(monkeypatch)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+
+    # golden_file is well-formed, so the CLI leg's own calibration_block()
+    # call records nothing — any golden_estimates_* event here can only be
+    # the stale leftover leaking through.
+    golden_events = [e for e in _ops_events(s["db"]) if e[1].startswith("golden_estimates_")]
+    assert golden_events == []

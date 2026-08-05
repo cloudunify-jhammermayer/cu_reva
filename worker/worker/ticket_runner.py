@@ -275,15 +275,29 @@ def run_ticket_analysis(job_params: dict) -> dict:
                         params,
                         extra_system_blocks=extra_blocks,
                     )
+                # Only this leg populates last_golden_degradations (set inside
+                # TicketAnalyzer._build_system, reached only via
+                # analyze_with_response). Read it here, right after the call
+                # that set it — not at the convergence point below, which also
+                # runs for the CLI leg, where this attribute would still hold
+                # whatever a PREVIOUS job left there (workers are long-lived RQ
+                # processes) and get recorded under the wrong analysis_id.
+                _record_golden_degradations(
+                    ctx, log,
+                    getattr(ctx.ticket_analyzer, "last_golden_degradations", []),
+                    params.analysis_id,
+                )
 
             # Both legs converge here. Resolve each cited anchor and derive its
             # confidence in code — the model's own value is never trusted.
-            _record_golden_degradations(
-                ctx, log, getattr(ctx.ticket_analyzer, "last_golden_degradations", []),
-                params.analysis_id,
-            )
-            golden, load_degradations = load(_prompts_dir(ctx))
-            _record_golden_degradations(ctx, log, load_degradations, params.analysis_id)
+            # load()'s degradations are NOT recorded here: they were already
+            # recorded upstream by whichever leg actually ran this job —
+            # calibration_block() inside _try_code_grounded_analysis (CLI leg)
+            # or last_golden_degradations just above (Messages-API leg), both of
+            # which call the same load() internally. Recording them again here
+            # would double-count every load()-level degradation (file_missing,
+            # bands_invalid, anchor_invalid, anchor_hours_mismatch).
+            golden, _ = load(_prompts_dir(ctx))
             for estimate in result.estimates:
                 _record_golden_degradations(
                     ctx, log,
