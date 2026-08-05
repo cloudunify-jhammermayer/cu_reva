@@ -49,10 +49,10 @@ MAX_DRIVERS_PER_STORY = 3
 # Today's bands, kept in code as the fallback when the file is missing or its
 # bands section is unusable. The file is the source of truth when it loads.
 DEFAULT_BANDS: dict[str, tuple[float, float]] = {
-    "configuration": (0.5, 2),
-    "small": (1, 4),
-    "medium": (3, 8),
-    "large": (6, 12),
+    "configuration": (0.5, 1.5),
+    "small": (1, 2),
+    "medium": (2, 4),
+    "large": (4, 8),
 }
 
 # A story's hours may legitimately not sum exactly to the ticket total, but a
@@ -281,11 +281,15 @@ agency quoting — never fall back to agency-style numbers. Estimate each story'
 *incremental* effort: shared module scaffolding is priced once, never per story.
 
 Sanity check before submitting: a typical 5–7-story custom module lands around
-**15–30 h total**; if your sum is far above that, your per-story numbers are
-inflated — revise them. Reference: a real 6-story module (order-bound BoM
-copies, selective procurement release, per-line dropship route override,
-availability status overview, placeholder-article hard block, margin popup)
-took ≈ 15–25 h total."""
+**10–18 h total**; if your sum is far above that, your per-story numbers are
+inflated — revise them. Two real references:
+a 5-story geo-location module took 15 h in total;
+a 4-story approval-workflow ticket took 7 h in total.
+
+Every figure in this section — bands and anchor hours alike — is **actual
+booked time, with no margin in it**. As the last step, after you have chosen
+each item's min and max, add a **10 % buffer** to both. Apply it exactly once,
+at the end; never pad the individual figures on the way there."""
 
 # One shared text for every consumer: the analysis prompt estimates per story,
 # the issue planner per issue. It must therefore stay neutral about the unit
@@ -306,7 +310,10 @@ _HOW_TO_USE = """### How to use the anchors
   to the bands above. That is a correct answer, not a failure — do not force a
   match.
 - A ticket's items almost always share one module. Sanity-check the total
-  against the anchors' ticket totals above before submitting."""
+  against the anchors' ticket totals above before submitting. Compare
+  **before** the 10 % buffer: those totals are booked hours and carry no
+  buffer, so comparing after it would read as a 10 % overshoot and talk you
+  into revising the buffer straight back out."""
 
 
 def _fmt_hours(value: float) -> str:

@@ -1555,10 +1555,10 @@ def test_update_issue_estimate_deleted_field_degrades_visibly(ctx_and_fakes):
 _GOLDEN_YAML = """\
 version: 1
 bands:
-  configuration: {min_hours: 0.5, max_hours: 2}
-  small:         {min_hours: 1,   max_hours: 4}
-  medium:        {min_hours: 3,   max_hours: 8}
-  large:         {min_hours: 6,   max_hours: 12}
+  configuration: {min_hours: 0.5, max_hours: 1.5}
+  small:         {min_hours: 1,   max_hours: 2}
+  medium:        {min_hours: 2,   max_hours: 4}
+  large:         {min_hours: 4,   max_hours: 8}
 anchors:
   - id: bom-copies
     ticket: "BoM copies + procurement release"

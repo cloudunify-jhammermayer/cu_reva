@@ -27,10 +27,10 @@ def _write(tmp_path, body: str) -> str:
 VALID = """
     version: 1
     bands:
-      configuration: {min_hours: 0.5, max_hours: 2}
-      small:         {min_hours: 1,   max_hours: 4}
-      medium:        {min_hours: 3,   max_hours: 8}
-      large:         {min_hours: 6,   max_hours: 12}
+      configuration: {min_hours: 0.5, max_hours: 1.5}
+      small:         {min_hours: 1,   max_hours: 2}
+      medium:        {min_hours: 2,   max_hours: 4}
+      large:         {min_hours: 4,   max_hours: 8}
     anchors:
       - id: bom-copies
         ticket: "BoM copies + procurement release"
@@ -53,10 +53,10 @@ VALID = """
 EMPTY_ANCHORS = """
     version: 1
     bands:
-      configuration: {min_hours: 0.5, max_hours: 2}
-      small:         {min_hours: 1,   max_hours: 4}
-      medium:        {min_hours: 3,   max_hours: 8}
-      large:         {min_hours: 6,   max_hours: 12}
+      configuration: {min_hours: 0.5, max_hours: 1.5}
+      small:         {min_hours: 1,   max_hours: 2}
+      medium:        {min_hours: 2,   max_hours: 4}
+      large:         {min_hours: 4,   max_hours: 8}
     anchors: []
 """
 
@@ -66,7 +66,7 @@ def test_loads_valid_file(tmp_path):
 
     assert degradations == []
     assert len(golden.anchors) == 1
-    assert golden.bands["medium"].min_hours == 3
+    assert golden.bands["medium"].min_hours == 2
     assert [s.id for s in golden.anchors[0].stories] == [
         "bom-copy-mechanism",
         "procurement-release",
@@ -77,7 +77,7 @@ def test_missing_file_falls_back_to_default_bands(tmp_path):
     golden, degradations = load(str(tmp_path))
 
     assert golden.anchors == []
-    assert golden.bands["large"].max_hours == 12
+    assert golden.bands["large"].max_hours == 8
     assert [d.reason for d in degradations] == ["file_missing"]
 
 
@@ -93,7 +93,7 @@ def test_empty_file_is_malformed(tmp_path):
     golden, degradations = load(_write(tmp_path, ""))
 
     assert golden.anchors == []
-    assert golden.bands["large"].max_hours == 12
+    assert golden.bands["large"].max_hours == 8
     assert [d.reason for d in degradations] == ["file_malformed"]
 
 
@@ -105,7 +105,7 @@ def test_malformed_bands_section_falls_back_to_default_bands(tmp_path):
     golden, degradations = load(_write(tmp_path, body))
 
     assert golden.anchors == []
-    assert golden.bands["large"].max_hours == 12
+    assert golden.bands["large"].max_hours == 8
     assert [d.reason for d in degradations] == ["bands_invalid"]
 
 
@@ -218,8 +218,8 @@ def test_render_includes_bands_and_active_anchor_stories(tmp_path):
     text, degradations = render(golden)
 
     assert degradations == []
-    assert "0.5–2 h" in text
-    assert "6–12 h" in text
+    assert "0.5–1.5 h" in text
+    assert "4–8 h" in text
     assert "`bom-copies#bom-copy-mechanism`" in text
     assert "Order-bound BoM copy mechanism" in text
     assert "6 h" in text
@@ -233,7 +233,7 @@ def test_render_omits_retired_anchors(tmp_path):
     text, _ = render(golden)
 
     assert "bom-copies#bom-copy-mechanism" not in text
-    assert "0.5–2 h" in text
+    assert "0.5–1.5 h" in text
 
 
 def test_render_disabled_is_bands_only(tmp_path):
@@ -242,7 +242,7 @@ def test_render_disabled_is_bands_only(tmp_path):
     text, degradations = render(golden, enabled=False)
 
     assert "bom-copies" not in text
-    assert "0.5–2 h" in text
+    assert "0.5–1.5 h" in text
     assert degradations == []
 
 
@@ -287,24 +287,25 @@ def test_render_with_a_zero_limit_is_bands_only(tmp_path):
     assert "Prefer these over the bands" not in text
     assert "How to use the anchors" not in text
     assert "bom-copies" not in text
-    assert "0.5–2 h" in text  # bands still render
+    assert "0.5–1.5 h" in text  # bands still render
     assert [d.reason for d in degradations] == ["anchor_limit_exceeded"]
     assert degradations[0].detail == {"rendered": 0, "available": 2}
 
 
 def test_render_with_no_anchors_still_includes_the_total_sanity_check(tmp_path):
-    """Regression: with `anchors: []` (today's shipped state), `render()` used
-    to return before reaching `_HOW_TO_USE`, silently dropping the total-sanity
-    check and reference example — guidance the live prompt had today. Both are
-    anchor-independent, so they must render unconditionally from `_PREAMBLE`."""
+    """Regression: with `anchors: []`, `render()` used to return before reaching
+    `_HOW_TO_USE`, silently dropping the total-sanity check and reference
+    example — guidance the live prompt had. Both are anchor-independent, so they
+    must render unconditionally from `_PREAMBLE`. The 10% quoting buffer is the
+    third such rule: it applies whether or not any anchor renders."""
     golden, _ = load(_write(tmp_path, EMPTY_ANCHORS))
 
     text, degradations = render(golden)
 
     assert degradations == []
-    assert "15–30 h total" in text
-    assert "15–25 h total" in text
-    assert "margin popup" in text
+    assert "10–18 h total" in text
+    assert "geo-location module took 15 h" in text
+    assert "10 % buffer" in text
 
 
 def test_how_to_use_anchor_sanity_line_only_appears_with_anchors(tmp_path):
@@ -331,7 +332,7 @@ def test_calibration_block_loads_and_renders(tmp_path):
 def test_calibration_block_on_missing_file_still_returns_bands(tmp_path):
     text, degradations = calibration_block(str(tmp_path))
 
-    assert "3–8 h" in text
+    assert "2–4 h" in text
     assert [d.reason for d in degradations] == ["file_missing"]
 
 
@@ -637,14 +638,14 @@ def test_shipped_file_matches_the_bands_in_code():
 
 
 def test_shipped_calibration_block_includes_the_total_sanity_check():
-    """Direct regression for the shipped file: `prompts/golden_estimates.yml`
-    ships with `anchors: []`, so this is the exact call the live prompt makes
-    today. The total-sanity check and reference example must survive it."""
+    """Direct regression for the shipped file — the exact call the live prompt
+    makes. The total-sanity check, the reference example and the 10% quoting
+    buffer are anchor-independent and must survive it."""
     text, degradations = calibration_block(SHIPPED_PROMPTS)
 
     assert degradations == []
-    assert "15–30 h total" in text
-    assert "margin popup" in text
+    assert "10–18 h total" in text
+    assert "10 % buffer" in text
 
 
 def test_how_to_use_text_fits_both_consumers(tmp_path):

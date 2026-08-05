@@ -22,28 +22,256 @@
 
 version: 1
 
+# Set from 28 real non-configuration story actuals (2026-08-05): median 2 h,
+# max 6 h. These are booked hours with no margin — the 10% quoting buffer is
+# added by the prompt, once, at the end. Keep them in step with DEFAULT_BANDS
+# in reva/golden_estimates.py; a test pins the two together.
 bands:
-  configuration: {min_hours: 0.5, max_hours: 2}
-  small:         {min_hours: 1,   max_hours: 4}
-  medium:        {min_hours: 3,   max_hours: 8}
-  large:         {min_hours: 6,   max_hours: 12}
+  configuration: {min_hours: 0.5, max_hours: 1.5}
+  small:         {min_hours: 1,   max_hours: 2}
+  medium:        {min_hours: 2,   max_hours: 4}
+  large:         {min_hours: 4,   max_hours: 8}
 
-# Add anchors here. Template:
-#
-# anchors:
-#   - id: bom-copies
-#     ticket: "BoM copies + procurement release"
-#     total_hours: 10          # within 25% of the story hours below (6 + 4)
-#     active: true
-#     stories:
-#       - id: bom-copy-mechanism
-#         scope: "Order-bound BoM copy mechanism"
-#         kind: custom_dev
-#         hours: 6
-#         drivers: [new_model, computed_logic]
-#       - id: procurement-release
-#         scope: "Selective procurement release"
-#         kind: custom_dev
-#         hours: 4
-#         drivers: [cross_module_workflow]
-anchors: []
+anchors:
+  # ---------------- AST (ast-odoo) ----------------
+
+  - id: ast-6178
+    ticket: "AST 6178 — install third-party first/last-name contact module"
+    total_hours: 0.5
+    active: true
+    stories:
+      - id: install
+        scope: "Install and configure an App-Store module on a test instance"
+        kind: configuration
+        hours: 0.5
+        drivers: []
+
+  - id: ast-6554
+    ticket: "AST 6554 — convert Odoo Studio fields into a module, migrate values"
+    total_hours: 6
+    active: true
+    stories:
+      - id: dev-copy
+        scope: "Stand up a dev copy of production for the conversion"
+        kind: configuration
+        hours: 1
+        drivers: []
+      - id: recreate-fields
+        scope: "Recreate all Studio custom fields as module fields"
+        kind: custom_dev
+        hours: 3
+        drivers: [new_model]
+      - id: migrate-values
+        scope: "Transfer existing Studio field values into the new fields"
+        kind: custom_dev
+        hours: 2
+        drivers: [data_migration]
+
+  - id: ast-6650
+    ticket: "AST 6650 — four multi-stage approval/release processes"
+    total_hours: 7
+    active: true
+    stories:
+      - id: quote-approval
+        scope: "Value-based multi-stage quotation approval before sending"
+        kind: custom_dev
+        hours: 2
+        drivers: [cross_module_workflow, access_rights]
+      - id: rfq-creation
+        scope: "Any employee may raise an RFQ; purchasing owns conversion"
+        kind: mixed
+        hours: 1
+        drivers: [access_rights]
+      - id: po-approval-matrix
+        scope: "Three-tier value-based purchase order approval matrix"
+        kind: custom_dev
+        hours: 2
+        drivers: [cross_module_workflow, access_rights]
+      - id: invoice-check-activity
+        scope: "Automatic review activity for a project's vendor bills"
+        kind: mixed
+        hours: 2
+        drivers: [cross_module_workflow]
+
+  - id: ast-6681
+    ticket: "AST 6681 — two custom label formats (60x40 article, 150x100 colli)"
+    total_hours: 3
+    active: true
+    stories:
+      - id: product-label-60x40
+        scope: "New 60x40mm product label format in the print dialog"
+        kind: custom_dev
+        hours: 1
+        drivers: [report_layout]
+      - id: colli-label-150x100
+        scope: "New 150x100mm package/colli label format"
+        kind: custom_dev
+        hours: 2
+        drivers: [report_layout]
+
+  - id: ast-6698
+    ticket: "AST 6698 — rental duration counted inclusive of both calendar days"
+    total_hours: 4
+    active: true
+    stories:
+      - id: inclusive-calc
+        scope: "Switch duration from exclusive difference to inclusive days"
+        kind: custom_dev
+        hours: 4
+        drivers: [computed_logic]
+
+  - id: ast-6723
+    ticket: "AST 6723 — restricted group cannot edit manufacturing orders"
+    total_hours: 2
+    active: true
+    stories:
+      - id: permission-fix
+        scope: "Diagnose and fix a group's manufacturing-order access error"
+        kind: mixed
+        hours: 2
+        drivers: [access_rights]
+
+  - id: ast-6734
+    ticket: "AST 6734 — AI bulk translation of ~4,000 existing products"
+    total_hours: 2
+    active: true
+    stories:
+      - id: translate-products
+        scope: "One-off AI translation of product names and descriptions"
+        kind: custom_dev
+        hours: 1
+        drivers: [external_integration, data_migration]
+      - id: translate-report-fields
+        scope: "Translate the customer-facing QWEB report text fields"
+        kind: custom_dev
+        hours: 1
+        drivers: [external_integration]
+
+  - id: ast-6755
+    ticket: "AST 6755 — kit-line quote description on the BOM block printout"
+    total_hours: 2
+    active: true
+    stories:
+      - id: kit-line-description
+        scope: "Print the main kit line's quote description above its block"
+        kind: custom_dev
+        hours: 2
+        drivers: [report_layout]
+
+  - id: ast-6757
+    ticket: "AST 6757 — quantity, unit and price per BOM component on printouts"
+    total_hours: 3
+    active: true
+    stories:
+      - id: component-figures
+        scope: "Derive and print qty x ratio, unit, unit price and line total"
+        kind: custom_dev
+        hours: 3
+        drivers: [report_layout, computed_logic]
+
+  - id: ast-6759
+    ticket: "AST 6759 — technical-contact block on sales and purchase printouts"
+    total_hours: 2
+    active: true
+    stories:
+      - id: so-print-phone
+        scope: "Add the phone number to an existing printout contact block"
+        kind: custom_dev
+        hours: 1
+        drivers: [report_layout]
+      - id: po-print-block
+        scope: "New stored technical-contact block on the purchase printout"
+        kind: custom_dev
+        hours: 1
+        drivers: [report_layout, view_tweak]
+
+  - id: ast-6805
+    ticket: "AST 6805 — derive the cost center from the selected profit center"
+    total_hours: 2
+    active: true
+    stories:
+      - id: derive-cost-center
+        scope: "Auto-determine and fill a sales order's cost center"
+        kind: custom_dev
+        hours: 2
+        drivers: [computed_logic, cross_module_workflow]
+  # ---------------- BLP (blp-geoservices) ----------------
+
+  - id: blp-3780
+    ticket: "BLP 3780 — chatter @mention limited to active internal users"
+    total_hours: 3
+    active: true
+    stories:
+      - id: filter-mentions
+        scope: "Restrict log-note mention suggestions to active internal users"
+        kind: custom_dev
+        hours: 3
+        drivers: [view_tweak]
+
+  - id: blp-3922
+    ticket: "BLP 3922 — named geo locations on projects with a map picker"
+    total_hours: 10
+    active: true
+    stories:
+      - id: named-locations
+        scope: "Arbitrary named lat/long locations stored on a project"
+        kind: custom_dev
+        hours: 5
+        drivers: [new_model]
+      - id: map-click-picker
+        scope: "Pick a location by clicking the map and naming it"
+        kind: custom_dev
+        hours: 5
+        drivers: [external_integration]
+
+  - id: blp-4469
+    ticket: "BLP 4469 — project from a chosen template on quote confirmation"
+    total_hours: 4
+    active: true
+    stories:
+      - id: template-on-confirm
+        scope: "Choose a project template on the quote; apply it on confirm"
+        kind: custom_dev
+        hours: 2
+        drivers: [cross_module_workflow]
+      - id: extra-fields
+        scope: "New quote/project fields (label, category, client)"
+        kind: custom_dev
+        hours: 1
+        drivers: [new_model, view_tweak]
+      - id: project-sequence
+        scope: "Consecutive automatic number on every new project"
+        kind: custom_dev
+        hours: 1
+        drivers: [computed_logic]
+
+  - id: blp-6252
+    ticket: "BLP 6252 — named geo locations on quotations with a map view"
+    total_hours: 15
+    active: true
+    stories:
+      - id: quote-locations
+        scope: "Arbitrary named lat/long locations stored on a quotation"
+        kind: custom_dev
+        hours: 1
+        drivers: [new_model]
+      - id: map-overview
+        scope: "Cross-quotation map view showing each quote's first location"
+        kind: custom_dev
+        hours: 6
+        drivers: [external_integration, view_tweak]
+      - id: copy-to-project
+        scope: "Copy quote locations onto the project once, at creation"
+        kind: custom_dev
+        hours: 2
+        drivers: [cross_module_workflow]
+      - id: search-filter
+        scope: "Filter the map view down to a searched quotation number"
+        kind: custom_dev
+        hours: 2
+        drivers: [view_tweak]
+      - id: map-click-picker
+        scope: "Pick a quote location by clicking the map and naming it"
+        kind: custom_dev
+        hours: 4
+        drivers: [external_integration]

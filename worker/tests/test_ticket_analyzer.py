@@ -312,10 +312,10 @@ def test_system_prompt_substitutes_the_calibration_block(tmp_path):
     (tmp_path / GOLDEN_FILENAME).write_text(
         "version: 1\n"
         "bands:\n"
-        "  configuration: {min_hours: 0.5, max_hours: 2}\n"
-        "  small: {min_hours: 1, max_hours: 4}\n"
-        "  medium: {min_hours: 3, max_hours: 8}\n"
-        "  large: {min_hours: 6, max_hours: 12}\n"
+        "  configuration: {min_hours: 0.5, max_hours: 1.5}\n"
+        "  small: {min_hours: 1, max_hours: 2}\n"
+        "  medium: {min_hours: 2, max_hours: 4}\n"
+        "  large: {min_hours: 4, max_hours: 8}\n"
         "anchors: []\n"
     )
     analyzer = TicketAnalyzer(
@@ -326,7 +326,7 @@ def test_system_prompt_substitutes_the_calibration_block(tmp_path):
 
     assert "{{ESTIMATE_CALIBRATION}}" not in text
     assert "Estimate calibration — binding" in text
-    assert "3–8 h" in text
+    assert "2–4 h" in text
     assert analyzer.last_golden_degradations == []
 
 
@@ -334,10 +334,10 @@ def test_system_prompt_substitutes_the_calibration_block(tmp_path):
 ANCHORED_GOLDEN = """\
 version: 1
 bands:
-  configuration: {min_hours: 0.5, max_hours: 2}
-  small: {min_hours: 1, max_hours: 4}
-  medium: {min_hours: 3, max_hours: 8}
-  large: {min_hours: 6, max_hours: 12}
+  configuration: {min_hours: 0.5, max_hours: 1.5}
+  small: {min_hours: 1, max_hours: 2}
+  medium: {min_hours: 2, max_hours: 4}
+  large: {min_hours: 4, max_hours: 8}
 anchors:
   - id: bom-copies
     ticket: "BoM copies + procurement release"
@@ -385,7 +385,7 @@ def test_kill_switch_keeps_anchors_out_of_the_system_prompt(tmp_path, monkeypatc
     assert "bom-copies" not in text
     assert "Order-bound BoM copy mechanism" not in text
     assert "Reference anchors" not in text
-    assert "3–8 h" in text  # bands still render
+    assert "2–4 h" in text  # bands still render
     assert analyzer.last_golden_degradations == []
 
 
@@ -411,7 +411,7 @@ def test_system_prompt_records_a_degradation_when_the_file_is_missing(tmp_path):
 
     text = analyzer._build_system()[0]["text"]
 
-    assert "3–8 h" in text  # bands still render from the code defaults
+    assert "2–4 h" in text  # bands still render from the code defaults
     assert [d.reason for d in analyzer.last_golden_degradations] == ["file_missing"]
 
 
@@ -420,8 +420,8 @@ def test_shipped_prompt_has_the_placeholder_and_no_hardcoded_bands():
         text = f.read()
 
     assert "{{ESTIMATE_CALIBRATION}}" in text
-    assert "0.5–2 h" not in text
-    assert "6–12 h" not in text
+    assert "0.5–1.5 h" not in text
+    assert "4–8 h" not in text
 
 
 # ---------------------------------------------------------------------------

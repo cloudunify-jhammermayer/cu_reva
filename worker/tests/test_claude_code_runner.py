@@ -881,8 +881,8 @@ def test_shipped_ticket_skill_has_the_placeholder_and_no_hardcoded_bands():
         text = f.read()
 
     assert "{{ESTIMATE_CALIBRATION}}" in text
-    assert "0.5–2 h" not in text
-    assert "6–12 h" not in text
+    assert "0.5–1.5 h" not in text
+    assert "4–8 h" not in text
 
 
 # ---- evict_stale_repos ----

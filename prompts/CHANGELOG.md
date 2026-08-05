@@ -1,3 +1,27 @@
+## v2.18 — Golden estimates: first anchors, recalibrated bands, quoting buffer
+
+- `prompts/golden_estimates.yml` gains its first **15 anchors / 30 stories**
+  from real closed AST and BLP tickets. The feature stops being inert: estimates
+  now cite precedent instead of falling back to the bands.
+- **The four bands are recalibrated** against 28 real non-configuration story
+  actuals (median 2 h, max 6 h): configuration 0.5–2 → 0.5–1.5, small 1–4 → 1–2,
+  medium 3–8 → 2–4, large 6–12 → 4–8. The old bands overshot: across the 15
+  anchored tickets REVA estimated 120–238 h against 65.5 h actually booked, and
+  every `cross_module_workflow` story — the "large, 6–12 h" example — came in at
+  2 h. `DEFAULT_BANDS` in `reva/golden_estimates.py` moves in lockstep; a test
+  pins the file and the code together.
+- The total-sanity check drops from "5–7 stories ≈ 15–30 h" to "≈ 10–18 h", and
+  its reference example is replaced by two real ones (a 5-story geo-location
+  module at 15 h, a 4-story approval-workflow ticket at 7 h). The previous
+  example was prose, never backed by booked hours, and contradicted the new
+  scale.
+- **New: a 10 % quoting buffer**, applied once, as the final step. Bands and
+  anchor hours stay *actual booked time with no margin in them* — inflating
+  them would make the anchor file stop being a record of what happened. The
+  how-to-use text therefore says to sanity-check the total against the anchors'
+  ticket totals **before** the buffer, otherwise the comparison reads as a 10 %
+  overshoot and argues the buffer straight back out.
+
 ## v2.17 — Golden estimates: one calibration source, three consumers
 
 - `ticket_analysis.md` §5, `ticket_issues.md`, and `skills/reva-ticket-analysis.md`

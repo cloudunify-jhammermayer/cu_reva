@@ -999,10 +999,10 @@ def test_code_grounded_run_passes_ticket_text_not_the_analysis_prompt(
 _GOLDEN_YAML = """\
 version: 1
 bands:
-  configuration: {min_hours: 0.5, max_hours: 2}
-  small:         {min_hours: 1,   max_hours: 4}
-  medium:        {min_hours: 3,   max_hours: 8}
-  large:         {min_hours: 6,   max_hours: 12}
+  configuration: {min_hours: 0.5, max_hours: 1.5}
+  small:         {min_hours: 1,   max_hours: 2}
+  medium:        {min_hours: 2,   max_hours: 4}
+  large:         {min_hours: 4,   max_hours: 8}
 anchors:
   - id: bom-copies
     ticket: "BoM copies + procurement release"
@@ -1195,7 +1195,7 @@ def test_cli_leg_kill_switch_keeps_anchors_out_of_the_calibration_block(
     block = code_runner.review_calls[0]["skill_vars"]["ESTIMATE_CALIBRATION"]
     assert "bom-copies" not in block
     assert "Order-bound BoM copy mechanism" not in block
-    assert "3–8 h" in block  # bands still render
+    assert "2–4 h" in block  # bands still render
 
 
 def test_cli_leg_caps_the_calibration_block_at_the_configured_limit(
