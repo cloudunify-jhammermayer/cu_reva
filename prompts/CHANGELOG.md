@@ -17,8 +17,9 @@
   calibration to data.
 - Ships with zero anchors in `golden_estimates.yml`, so behaviour is
   unchanged — bands-only, as before — until the operator writes the first
-  one. Kill switch `REVA_GOLDEN_ESTIMATES` (default on) forces bands-only
-  even once anchors exist.
+  one. Kill switch `REVA_GOLDEN_ESTIMATES`: default on lets anchors take
+  effect once written; setting it to `false` forces bands-only even once
+  anchors exist.
 
 ## v2.16 — A negative about standard Odoo has to be earned
 

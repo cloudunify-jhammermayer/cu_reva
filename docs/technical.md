@@ -114,7 +114,9 @@ problems degrade to a graph-less review, never a failed one.
   explicit fields rather than serialising the whole model, and tests pin that
   boundary. A file with no anchors renders a bands-only block — today's
   behaviour — so the feature is inert until anchors are written. Kill switch
-  `REVA_GOLDEN_ESTIMATES` (default on) forces bands-only regardless.
+  `REVA_GOLDEN_ESTIMATES`: the default (`true`) is what lets anchors take
+  effect once written; setting it to `false` forces bands-only even when
+  anchors exist.
 - **Support answers** (spec 2026-07-25): Odoo asks a question via
   `POST /api/v1/support-request`; REVA drafts an answer into an HTML field for
   a **consultant to review and send** — it is never posted to the customer.
