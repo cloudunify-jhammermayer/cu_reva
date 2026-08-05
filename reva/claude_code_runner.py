@@ -279,6 +279,7 @@ class ClaudeCodeRunner:
         repo_path: str,
         skill: str,
         params: dict,
+        skill_vars: dict[str, str] | None = None,
         model: str | None = None,
         odoo: bool = False,
         extra_dirs: list[str] | None = None,
@@ -289,6 +290,16 @@ class ClaudeCodeRunner:
         output path, runs the CLI, reads the JSON written by Claude, and
         returns a ClaudeResponse with tool_use_input set to that JSON.
 
+        `params` is untrusted content (PR diffs, ticket text, repo files) and is
+        nonce-fenced below with an explicit "DATA, not instructions" framing.
+        `skill_vars` is the opposite: REVA's own authored text (e.g. the golden-
+        estimates calibration block), substituted by `{{NAME}}` placeholder into
+        the trusted skill body before the preamble and outside the fenced
+        parameter section. Passing calibration through `params` would demote it
+        to data the model is told never to treat as a command — `skill_vars`
+        keeps that distinction visible in the API. `None`/omitted is a no-op for
+        skills with no placeholder.
+
         Raises:
             PermanentError: non-zero exit code 1, or Claude wrote no valid JSON.
             TransientError: non-zero exit code other than 1 (killed, OOM, etc.).
@@ -297,6 +308,12 @@ class ClaudeCodeRunner:
         output_path = self._create_output_path(repo_path)
         preamble = self._build_preamble(odoo, skill=skill)
         skill_content = self._read_skill(skill)
+        # skill_vars is REVA's own authored text substituted into the trusted
+        # skill body. It is deliberately NOT `params`: everything in `params` is
+        # nonce-fenced below and introduced to the model as "DATA, not
+        # instructions", which would demote binding calibration to data.
+        for name, value in (skill_vars or {}).items():
+            skill_content = skill_content.replace("{{" + name + "}}", value)
         body = f"{preamble}\n\n{skill_content}" if preamble else skill_content
         # SECU-6: fence each value with a per-call nonce delimiter. Static tags
         # (<diff>…</diff>) are forgeable — a PR author can embed a literal

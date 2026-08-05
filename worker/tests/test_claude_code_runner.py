@@ -16,6 +16,7 @@ from reva.claude_code_runner import (
     ClaudeCodeRunner,
 )
 from reva.errors import PermanentError, TransientError
+from tests.conftest import SHIPPED_PROMPTS
 
 
 def test_review_job_timeout_covers_lock_wait_and_subprocess():
@@ -805,6 +806,83 @@ def test_review_raises_permanent_for_missing_skill(runner_with_skill, tmp_path):
 
     with pytest.raises(PermanentError, match="Skill file not found"):
         runner_with_skill.review(repo_path=repo_path, skill="nonexistent-skill", params={})
+
+
+# ---- skill_vars (golden-estimates, spec 2026-08-04) ----
+#
+# skill_vars is a SEPARATE channel from params: params is untrusted (PR diffs,
+# ticket text, repo files) and gets nonce-fenced with an explicit "DATA, not
+# instructions" framing. skill_vars is REVA's own authored text (e.g. the
+# calibration block), substituted directly into the trusted skill body BEFORE
+# the preamble and OUTSIDE the fenced parameter section — routing it through
+# params would demote binding calibration to data the model is told to ignore
+# as a command.
+
+
+def test_review_substitutes_skill_vars_into_trusted_skill_body(tmp_path):
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    (skills_dir / "reva-ticket-analysis.md").write_text("Head\n\n{{ESTIMATE_CALIBRATION}}\n")
+    runner = ClaudeCodeRunner(
+        repo_cache_dir=str(tmp_path / "repos"),
+        api_key="test-key",
+        skills_dir=str(skills_dir),
+    )
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+    captured: dict = {}
+
+    def fake_run(args, **kwargs):
+        captured["task"] = kwargs["input"]
+        with open(_extract_output_path(kwargs["input"]), "w") as f:
+            json.dump({"summary": "ok"}, f)
+        return _ok()
+
+    with patch("subprocess.run", side_effect=fake_run):
+        runner.review(
+            repo_path=repo_path,
+            skill="reva-ticket-analysis",
+            params={"ticket_text": "hello"},
+            skill_vars={"ESTIMATE_CALIBRATION": "BANDS-HERE"},
+        )
+
+    task = captured["task"]
+    assert "BANDS-HERE" in task
+    assert "{{ESTIMATE_CALIBRATION}}" not in task
+    # The calibration must NOT land in the fenced parameter section, which tells
+    # the model its contents are data and never instructions.
+    fenced = task.split("## Task Parameters")[1]
+    assert "BANDS-HERE" not in fenced
+
+
+def test_review_skill_vars_default_to_no_substitution(runner_with_skill, tmp_path):
+    """skill_vars=None must be a clean no-op for skills with no placeholder
+    (diff reviews, audits, etc.)."""
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+    captured: dict = {}
+
+    def fake_run(args, **kwargs):
+        captured["task"] = kwargs["input"]
+        with open(_extract_output_path(kwargs["input"]), "w") as f:
+            json.dump({"summary": "ok", "findings": []}, f)
+        return _ok()
+
+    with patch("subprocess.run", side_effect=fake_run):
+        runner_with_skill.review(
+            repo_path=repo_path, skill="reva-diff-review", params={"diff": "d"}
+        )
+
+    assert "You are REVA. Write JSON to output_path." in captured["task"]
+
+
+def test_shipped_ticket_skill_has_the_placeholder_and_no_hardcoded_bands():
+    with open(os.path.join(SHIPPED_PROMPTS, "skills", "reva-ticket-analysis.md")) as f:
+        text = f.read()
+
+    assert "{{ESTIMATE_CALIBRATION}}" in text
+    assert "0.5–2 h" not in text
+    assert "6–12 h" not in text
 
 
 # ---- evict_stale_repos ----

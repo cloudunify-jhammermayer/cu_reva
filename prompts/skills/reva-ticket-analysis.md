@@ -97,22 +97,15 @@ written in. No free-form output outside the JSON file.
   you; ground it in what you actually read.
 - `estimates` — one entry per user story: `[{"story", "kind":
   "custom_dev"|"configuration"|"mixed", "min_hours", "max_hours", "confidence":
-  "high"|"medium"|"low", "assumptions": […]}]`. Default to ONE story; split only
-  for independently deliverable pieces, and adopt the ticket's own split when it
-  enumerates use cases.
+  "high"|"medium"|"low", "assumptions": […], "anchor_ref", "complexity_drivers":
+  […]}]`. Default to ONE story; split only for independently deliverable pieces,
+  and adopt the ticket's own split when it enumerates use cases. `anchor_ref` is
+  the anchor story id from the calibration block, or null when none is
+  comparable; `complexity_drivers` holds at most 3 values from the fixed list
+  there. Do not return `anchor_confidence` — it is computed, not judged.
 
 `coverage` is `"unknown"` with empty `features` when you have nothing to base
 the section on. An empty list is the right answer for a section with nothing to
 report — never invent items to fill it.
 
-**Estimate calibration — binding.** `min_hours`/`max_hours` cover
-implementation + developer testing by a mid-level Odoo developer **working
-AI-assisted**, excluding deployment, project management, and customer
-communication. Do not fall back to agency-style numbers: configuration story
-**0.5–2 h**; small customization (field, view tweak, constraint, hard block,
-simple wizard) **1–4 h**; medium (new model or copy mechanism + views + logic)
-**3–8 h**; large (cross-module workflow, status overview, complex computed
-logic) **6–12 h**. Estimate each story's *incremental* effort — the shared
-module scaffolding is priced once, not per story. A typical 5–7-story module
-lands around **15–30 h** in total; a sum far above that means the per-story
-numbers are inflated.
+{{ESTIMATE_CALIBRATION}}
