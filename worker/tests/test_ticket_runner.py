@@ -16,11 +16,13 @@ import structlog
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.db.models import ClaudeSpend, OpsEvent, TicketAnalysis
 from reva.errors import MalformedModelOutput, PermanentError, TransientError
+from reva.golden_estimates import Degradation
 from reva.ticket_knowledge import TicketKnowledge
 from reva.types import (
     ClaudeResponse,
     MissingInfoItem,
     SourcedItem,
+    StoryEstimate,
     TicketAnalysisResult,
     TicketJobParams,
 )
@@ -559,9 +561,10 @@ def db():
     return Database(engine)
 
 
-def _ops_events(db):
+def _ops_events(db, event: str | None = None):
     with db.session() as s:
-        return [(e.component, e.event, dict(e.detail)) for e in s.query(OpsEvent).all()]
+        rows = [(e.component, e.event, dict(e.detail)) for e in s.query(OpsEvent).all()]
+    return rows if event is None else [r for r in rows if r[1] == event]
 
 
 def test_repo_core_version_uses_target_repo_config(db):
@@ -698,9 +701,12 @@ class _FakeCodeRunner:
     def ensure_repo(self, owner, name, head_sha, token):
         return f"/repos/{owner}/{name}"
 
-    def review(self, repo_path, skill, params, model=None, odoo=False, extra_dirs=None):
+    def review(
+        self, repo_path, skill, params, skill_vars=None, model=None, odoo=False,
+        extra_dirs=None,
+    ):
         self.review_calls.append({"skill": skill, "params": params,
-                                  "extra_dirs": extra_dirs})
+                                  "extra_dirs": extra_dirs, "skill_vars": skill_vars})
         return ClaudeResponse(
             model="claude-sonnet-5", stop_reason="tool_use",
             tool_use_input=self.raw_input if self.raw_input is not None
@@ -985,3 +991,126 @@ def test_code_grounded_run_passes_ticket_text_not_the_analysis_prompt(
 
     skill_params = code_runner.review_calls[0]["params"]
     assert skill_params["ticket_text"] == "Add a button to the form view."
+
+
+# --- golden-estimate anchoring (Task 9) ---------------------------------------
+
+
+_GOLDEN_YAML = """\
+version: 1
+bands:
+  configuration: {min_hours: 0.5, max_hours: 2}
+  small:         {min_hours: 1,   max_hours: 4}
+  medium:        {min_hours: 3,   max_hours: 8}
+  large:         {min_hours: 6,   max_hours: 12}
+anchors:
+  - id: bom-copies
+    ticket: "BoM copies + procurement release"
+    total_hours: 6
+    active: true
+    stories:
+      - id: bom-copy-mechanism
+        scope: "Order-bound BoM copy mechanism"
+        kind: custom_dev
+        hours: 6
+        drivers: [new_model, computed_logic]
+"""
+
+
+@pytest.fixture()
+def golden_file(ctx_and_fakes, tmp_path):
+    """Writes a one-anchor prompts/golden_estimates.yml (bom-copies#bom-copy-
+    mechanism, custom_dev, drivers=[new_model, computed_logic]) and points
+    ctx.prompts_dir at it. WorkerContext is frozen, so re-register the ctx."""
+    (tmp_path / "golden_estimates.yml").write_text(_GOLDEN_YAML)
+    import dataclasses
+
+    ctx = dataclasses.replace(ctx_and_fakes["ctx"], prompts_dir=str(tmp_path))
+    set_context(ctx)
+    ctx_and_fakes["ctx"] = ctx
+
+
+def _analysis_with_estimate(anchor_ref, complexity_drivers, kind="custom_dev"):
+    return TicketAnalysisResult(
+        summary="Add a button to the form view.",
+        estimates=[
+            StoryEstimate(
+                story="Add a submit button.",
+                kind=kind,
+                min_hours=1,
+                max_hours=2,
+                anchor_ref=anchor_ref,
+                complexity_drivers=complexity_drivers,
+            )
+        ],
+    )
+
+
+def _stored_structured(s, analysis_id):
+    with s["db"].session() as session:
+        return session.get(TicketAnalysis, analysis_id).result_structured
+
+
+def test_analysis_scores_the_cited_anchor(ctx_and_fakes, golden_file):
+    s = ctx_and_fakes
+    s["analyzer"].result = _analysis_with_estimate(
+        anchor_ref="bom-copies#bom-copy-mechanism",
+        complexity_drivers=["new_model", "computed_logic"],
+    )
+    params = _make_params(s["db"])
+
+    out = run_ticket_analysis(params)
+
+    stored = _stored_structured(s, out["analysis_id"])
+    assert stored["estimates"][0]["anchor_confidence"] == "high"
+    assert stored["estimates"][0]["anchor_ref"] == "bom-copies#bom-copy-mechanism"
+
+
+def test_analysis_nulls_a_hallucinated_anchor_and_ops_events(ctx_and_fakes, golden_file):
+    s = ctx_and_fakes
+    s["analyzer"].result = _analysis_with_estimate(
+        anchor_ref="does-not-exist#at-all", complexity_drivers=["new_model"]
+    )
+    params = _make_params(s["db"])
+
+    out = run_ticket_analysis(params)
+
+    stored = _stored_structured(s, out["analysis_id"])
+    assert stored["estimates"][0]["anchor_ref"] is None
+    assert stored["estimates"][0]["anchor_confidence"] == "low"
+    assert _ops_events(s["db"], event="golden_estimates_anchor_ref_unresolved")
+
+
+def test_loader_degradations_reach_the_ops_log(ctx_and_fakes):
+    """No golden_file fixture here: the file is missing (ctx.prompts_dir
+    defaults to a path that doesn't exist in tests), which independently
+    degrades too — this test specifically targets the last_golden_degradations
+    channel the Messages-API leg (TicketAnalyzer) fills in."""
+    s = ctx_and_fakes
+    s["analyzer"].last_golden_degradations = [
+        Degradation("file_missing", {"path": "/nope"})
+    ]
+    params = _make_params(s["db"])
+
+    run_ticket_analysis(params)
+
+    assert _ops_events(s["db"], event="golden_estimates_file_missing")
+
+
+def test_code_grounded_analysis_passes_calibration_block_via_skill_vars(
+    ctx_and_fakes, monkeypatch, golden_file
+):
+    """The calibration block must travel via skill_vars, never skill_params —
+    everything in skill_params is nonce-fenced as untrusted data (SECU-6),
+    which would demote binding calibration to data the model is told to
+    ignore."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+
+    call = code_runner.review_calls[0]
+    assert "bom-copies#bom-copy-mechanism" in call["skill_vars"]["ESTIMATE_CALIBRATION"]
+    assert "ESTIMATE_CALIBRATION" not in call["params"]

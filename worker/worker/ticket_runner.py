@@ -8,13 +8,16 @@ from __future__ import annotations
 import structlog
 from pydantic import ValidationError
 
+from reva import config
 from reva.db import writers
 from reva.errors import MalformedModelOutput, PermanentError, TransientError
 from reva.github_urls import parse_github_repo_url
+from reva.golden_estimates import apply_anchor, calibration_block, load
 from reva.html_guard import ensure_renderable
 from reva.ticket_formatter import format_ticket_html
 from reva.ticket_knowledge import build_ticket_knowledge, core_source_param
 from reva.types import TicketJobParams
+from worker.golden_support import record_degradations
 from worker.repo_config import (
     code_grounding_allowed,
     load_repo_config,
@@ -23,6 +26,15 @@ from worker.repo_config import (
 from worker.runner import build_odoo_client, get_context, instance_budget_exceeded
 
 logger = structlog.get_logger()
+
+
+def _prompts_dir(ctx) -> str:
+    """The prompts directory the analyzer and CLI runner both read from.
+
+    `WorkerContext.prompts_dir` is already how this module reaches it
+    (`build_ticket_knowledge` below); no separate/hardcoded source exists.
+    """
+    return ctx.prompts_dir
 
 
 def repo_core_version(ctx, github_url: str | None, analysis_id: int, log) -> str | None:
@@ -69,6 +81,13 @@ def repo_core_version(ctx, github_url: str | None, analysis_id: int, log) -> str
 _TICKET_SKILL = "reva-ticket-analysis"
 
 
+def _record_golden_degradations(ctx, log, degradations, analysis_id: int) -> None:
+    """Fix this module's component and detail key for record_degradations."""
+    record_degradations(
+        ctx.db, log, "ticket_analysis", degradations, {"analysis_id": analysis_id}
+    )
+
+
 def _try_code_grounded_analysis(ctx, params, knowledge, log, version=None):
     """Run the analysis against the repo clone when the planner asked for code.
 
@@ -93,8 +112,8 @@ def _try_code_grounded_analysis(ctx, params, knowledge, log, version=None):
             )
         return None, None
 
-    owner, name, token, config = repo
-    if not code_grounding_allowed(config):
+    owner, name, token, repo_config = repo
+    if not code_grounding_allowed(repo_config):
         log.info("ticket_code_grounding_disabled", repo=f"{owner}/{name}")
         writers.record_ops_event(
             ctx.db, "ticket_analysis", "info", "code_grounding_disabled",
@@ -112,11 +131,19 @@ def _try_code_grounded_analysis(ctx, params, knowledge, log, version=None):
     if core_source is not None:
         extra_dirs, skill_params["core_knowledge"] = core_source
 
+    block, golden_degradations = calibration_block(
+        _prompts_dir(ctx),
+        limit=config.GOLDEN_ESTIMATE_LIMIT,
+        enabled=config.GOLDEN_ESTIMATES,
+    )
+    _record_golden_degradations(ctx, log, golden_degradations, params.analysis_id)
+
     with ctx.runner.repo_lock(owner, name):
         repo_path = ctx.runner.ensure_repo(owner, name, None, token)
         response = ctx.runner.review(
             repo_path=repo_path, skill=_TICKET_SKILL, params=skill_params,
-            odoo=config.odoo, extra_dirs=extra_dirs,
+            skill_vars={"ESTIMATE_CALIBRATION": block},
+            odoo=repo_config.odoo, extra_dirs=extra_dirs,
         )
     if response.tool_use_input is None:
         raise PermanentError(f"{_TICKET_SKILL} produced no analysis JSON")
@@ -248,6 +275,21 @@ def run_ticket_analysis(job_params: dict) -> dict:
                         params,
                         extra_system_blocks=extra_blocks,
                     )
+
+            # Both legs converge here. Resolve each cited anchor and derive its
+            # confidence in code — the model's own value is never trusted.
+            _record_golden_degradations(
+                ctx, log, getattr(ctx.ticket_analyzer, "last_golden_degradations", []),
+                params.analysis_id,
+            )
+            golden, load_degradations = load(_prompts_dir(ctx))
+            _record_golden_degradations(ctx, log, load_degradations, params.analysis_id)
+            for estimate in result.estimates:
+                _record_golden_degradations(
+                    ctx, log,
+                    apply_anchor(estimate, golden, score_confidence=True),
+                    params.analysis_id,
+                )
             html = format_ticket_html(result)
         except TransientError:
             log.warning("ticket_analysis_transient_error", exc_info=True)
