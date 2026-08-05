@@ -256,7 +256,7 @@ _BAND_ORDER = ("configuration", "small", "medium", "large")
 
 _BAND_LABELS = {
     "configuration": "configuration / enabling a standard feature",
-    "small": "small customization (new field, view tweak, constraint, hard block, simple wizard)",
+    "small": "small customization (new field, view tweak, constraint, visual marking, hard-block on confirm, simple wizard)",
     "medium": "medium customization (new model or copy mechanism + views + business logic)",
     "large": "large customization (cross-module workflow, status overview, complex computed logic)",
 }
@@ -267,7 +267,14 @@ All figures are for a **mid-level Odoo developer working AI-assisted**, covering
 **implementation + developer testing**. Exclude deployment, project management,
 and customer communication. AI-assisted development is far faster than classic
 agency quoting — never fall back to agency-style numbers. Estimate each story's
-*incremental* effort: shared module scaffolding is priced once, never per story."""
+*incremental* effort: shared module scaffolding is priced once, never per story.
+
+Sanity check before submitting: a typical 5–7-story custom module lands around
+**15–30 h total**; if your sum is far above that, your per-story numbers are
+inflated — revise them. Reference: a real 6-story module (order-bound BoM
+copies, selective procurement release, per-line dropship route override,
+availability status overview, placeholder-article hard block, margin popup)
+took ≈ 15–25 h total."""
 
 _HOW_TO_USE = """### How to use the anchors
 

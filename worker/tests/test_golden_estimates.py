@@ -50,6 +50,17 @@ VALID = """
             drivers: [cross_module_workflow]
 """
 
+# The shape the file actually ships in: valid bands, zero anchors.
+EMPTY_ANCHORS = """
+    version: 1
+    bands:
+      configuration: {min_hours: 0.5, max_hours: 2}
+      small:         {min_hours: 1,   max_hours: 4}
+      medium:        {min_hours: 3,   max_hours: 8}
+      large:         {min_hours: 6,   max_hours: 12}
+    anchors: []
+"""
+
 
 def test_loads_valid_file(tmp_path):
     golden, degradations = load(_write(tmp_path, VALID))
@@ -247,6 +258,35 @@ def test_render_is_deterministic(tmp_path):
     golden, _ = load(_write(tmp_path, VALID))
 
     assert render(golden)[0] == render(golden)[0]
+
+
+def test_render_with_no_anchors_still_includes_the_total_sanity_check(tmp_path):
+    """Regression: with `anchors: []` (today's shipped state), `render()` used
+    to return before reaching `_HOW_TO_USE`, silently dropping the total-sanity
+    check and reference example — guidance the live prompt had today. Both are
+    anchor-independent, so they must render unconditionally from `_PREAMBLE`."""
+    golden, _ = load(_write(tmp_path, EMPTY_ANCHORS))
+
+    text, degradations = render(golden)
+
+    assert degradations == []
+    assert "15–30 h total" in text
+    assert "15–25 h total" in text
+    assert "margin popup" in text
+
+
+def test_how_to_use_anchor_sanity_line_only_appears_with_anchors(tmp_path):
+    """The OTHER sanity instruction — 'check the total against the anchors'
+    ticket totals above' — genuinely depends on anchors existing (there is
+    nothing to check the total against otherwise), so unlike the check above
+    it stays gated on `active_pairs()` being non-empty."""
+    empty_golden, _ = load(_write(tmp_path, EMPTY_ANCHORS))
+    empty_text, _ = render(empty_golden)
+    assert "against the anchors' ticket totals above" not in empty_text
+
+    populated_golden, _ = load(_write(tmp_path, VALID))
+    populated_text, _ = render(populated_golden)
+    assert "against the anchors' ticket totals above" in populated_text
 
 
 def test_calibration_block_loads_and_renders(tmp_path):
@@ -461,6 +501,17 @@ def test_shipped_file_matches_the_bands_in_code():
 
     for name, (lo, hi) in DEFAULT_BANDS.items():
         assert (golden.bands[name].min_hours, golden.bands[name].max_hours) == (lo, hi)
+
+
+def test_shipped_calibration_block_includes_the_total_sanity_check():
+    """Direct regression for the shipped file: `prompts/golden_estimates.yml`
+    ships with `anchors: []`, so this is the exact call the live prompt makes
+    today. The total-sanity check and reference example must survive it."""
+    text, degradations = calibration_block(SHIPPED_PROMPTS)
+
+    assert degradations == []
+    assert "15–30 h total" in text
+    assert "margin popup" in text
 
 
 def test_config_exposes_the_kill_switch_and_limit():
