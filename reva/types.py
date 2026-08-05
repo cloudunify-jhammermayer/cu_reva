@@ -455,8 +455,15 @@ class ExistingCustomizations(BaseModel):
         return _unwrap_json_list(v)
 
 
-def _clean_drivers(v: object) -> object:
+def _clean_drivers(v: object) -> tuple[list[str], list[str]]:
     """Drop values outside the fixed enum and truncate to the cap.
+
+    Returns `(kept, dropped)`. `dropped` is everything this threw away, so the
+    degradation is visible: a validator holds no database and cannot record an
+    ops event, so the caller parks it on the model and
+    `golden_estimates.apply_anchor` — which the callers already reach with
+    `ctx.db` in hand — turns it into one. A silently unanchored estimate must
+    not be indistinguishable from a well-anchored one.
 
     Rejecting the *value* rather than the analysis is deliberate: an analysis
     that reached this point already cost real money, and one bad driver string
@@ -469,17 +476,35 @@ def _clean_drivers(v: object) -> object:
     """
     from reva.golden_estimates import COMPLEXITY_DRIVERS, MAX_DRIVERS_PER_STORY
 
+    if v is None:
+        return [], []
     try:
-        v = _unwrap_json_list(v)
+        parsed = _unwrap_json_list(v)
     except ValueError:
-        return []
-    if not isinstance(v, list):
-        return []
-    seen: list[str] = []
-    for item in v:
-        if item in COMPLEXITY_DRIVERS and item not in seen:
-            seen.append(item)
-    return seen[:MAX_DRIVERS_PER_STORY]
+        return [], [str(v)[:100]]
+    if not isinstance(parsed, list):
+        return [], [str(parsed)[:100]]
+    kept: list[str] = []
+    dropped: list[str] = []
+    for item in parsed:
+        if item in COMPLEXITY_DRIVERS:
+            if item not in kept:
+                kept.append(item)
+        else:
+            dropped.append(str(item)[:100])
+    dropped += kept[MAX_DRIVERS_PER_STORY:]
+    return kept[:MAX_DRIVERS_PER_STORY], dropped
+
+
+def _sanitise_drivers(data: object) -> object:
+    """`model_validator(mode="before")` body shared by the two estimating
+    models: clean `complexity_drivers` and park what was lost on
+    `dropped_drivers`. Always written, so a model that returns the field itself
+    cannot fabricate or suppress the degradation."""
+    if isinstance(data, dict):
+        kept, dropped = _clean_drivers(data.get("complexity_drivers"))
+        return {**data, "complexity_drivers": kept, "dropped_drivers": dropped}
+    return data
 
 
 class StoryEstimate(BaseModel):
@@ -500,16 +525,21 @@ class StoryEstimate(BaseModel):
     # never the model's own judgement. Pruned from the tool schema so the model
     # is not asked to fill it.
     anchor_confidence: Literal["high", "medium", "low"] = "low"
+    # Bookkeeping, not output: what the driver sanitiser threw away, drained by
+    # golden_estimates.apply_anchor into an ops event. Excluded from every dump
+    # and pruned from the tool schema, so it never persists and is never asked
+    # for.
+    dropped_drivers: list[str] = Field(default_factory=list, exclude=True)
 
     @field_validator("assumptions", mode="before")
     @classmethod
     def _parse_json_string_list(cls, v: object) -> object:
         return _unwrap_json_list(v)
 
-    @field_validator("complexity_drivers", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def _clean_complexity_drivers(cls, v: object) -> object:
-        return _clean_drivers(v)
+    def _clean_complexity_drivers(cls, data: object) -> object:
+        return _sanitise_drivers(data)
 
 
 class TicketAnalysisResult(BaseModel):
@@ -756,6 +786,8 @@ class TicketIssueItem(BaseModel):
     # they are not scored. Internal only, same boundary as StoryEstimate.
     anchor_ref: str | None = None
     complexity_drivers: list[str] = Field(default_factory=list)
+    # Same bookkeeping field as StoryEstimate — see there.
+    dropped_drivers: list[str] = Field(default_factory=list, exclude=True)
 
     @field_validator("title", mode="before")
     @classmethod
@@ -770,10 +802,10 @@ class TicketIssueItem(BaseModel):
     def _parse_json_string_list(cls, v: object) -> object:
         return _unwrap_json_list(v)
 
-    @field_validator("complexity_drivers", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def _clean_complexity_drivers(cls, v: object) -> object:
-        return _clean_drivers(v)
+    def _clean_complexity_drivers(cls, data: object) -> object:
+        return _sanitise_drivers(data)
 
 
 class TicketIssuePlan(BaseModel):

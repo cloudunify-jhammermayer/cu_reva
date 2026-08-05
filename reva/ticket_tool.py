@@ -52,17 +52,16 @@ def build_ticket_tool_schema() -> dict[str, Any]:
         input_schema["$defs"] = schema["$defs"]
     input_schema = require_no_extra_properties(input_schema)
 
-    # anchor_confidence is computed from anchor distance after the call. Leaving
-    # it in the schema would invite the model to self-assess a field code always
-    # overwrites — wasted tokens and a misleading contract.
+    # Neither field is the model's to fill: anchor_confidence is computed from
+    # anchor distance after the call, dropped_drivers is bookkeeping the
+    # validator writes. Leaving either in the schema would invite the model to
+    # supply a value code always overwrites — wasted tokens and a misleading
+    # contract. Both carry defaults, so Pydantic never lists them in
+    # `required`; dropping the properties is enough.
     story_def = input_schema.get("$defs", {}).get("StoryEstimate")
     if isinstance(story_def, dict):
-        story_def.get("properties", {}).pop("anchor_confidence", None)
-        required = story_def.get("required")
-        if isinstance(required, list) and "anchor_confidence" in required:
-            story_def["required"] = [
-                name for name in required if name != "anchor_confidence"
-            ]
+        for name in ("anchor_confidence", "dropped_drivers"):
+            story_def.get("properties", {}).pop(name, None)
 
     return {
         "name": TICKET_TOOL_NAME,

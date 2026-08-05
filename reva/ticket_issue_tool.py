@@ -46,8 +46,11 @@ def build_ticket_issue_tool_schema() -> dict[str, Any]:
     # schema; the model defaults stay lenient for persisted plans. Except
     # anchor_ref/complexity_drivers: an unanchored issue is a valid answer,
     # so those two stay in `properties` (settable) but out of `required`.
+    # dropped_drivers is bookkeeping the validator writes, never the model's to
+    # fill — drop it before `required` is derived from the properties.
     item = input_schema.get("$defs", {}).get("TicketIssueItem")
     if isinstance(item, dict) and "properties" in item:
+        item["properties"].pop("dropped_drivers", None)
         _optional = {"anchor_ref", "complexity_drivers"}
         item["required"] = [k for k in item["properties"] if k not in _optional]
 

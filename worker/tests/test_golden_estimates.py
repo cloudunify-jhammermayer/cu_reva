@@ -2,7 +2,6 @@
 
 import textwrap
 
-import reva.config as reva_config
 from reva.golden_estimates import (
     COMPLEXITY_DRIVERS,
     DEFAULT_BANDS,
@@ -168,6 +167,18 @@ def test_total_hours_far_from_story_sum_degrades_but_still_loads(tmp_path):
     assert [d.reason for d in degradations] == ["anchor_hours_mismatch"]
 
 
+def test_resolve_tolerates_the_backticks_the_block_renders(tmp_path):
+    """The rendered anchor list wraps every id in backticks, and the prompt
+    tells the model to copy the id from there. A model that brings the
+    formatting along must still resolve — otherwise every ref is nulled and
+    the feature does nothing on its first live day."""
+    golden, _ = load(_write(tmp_path, VALID))
+
+    assert golden.resolve("`bom-copies#procurement-release`") is not None
+    assert golden.resolve("  bom-copies#procurement-release \n") is not None
+    assert golden.resolve("`` ") is None
+
+
 def test_resolve_finds_active_and_retired_stories(tmp_path):
     golden, _ = load(_write(tmp_path, VALID.replace("active: true", "active: false")))
 
@@ -254,10 +265,31 @@ def test_render_lists_the_driver_enum_for_the_model(tmp_path):
         assert driver in text
 
 
-def test_render_is_deterministic(tmp_path):
+def test_render_is_deterministic_across_loads(tmp_path):
+    """Two independent loads of the same file must render identical text —
+    nothing in the path may iterate a set or an unordered mapping (the prompt
+    cache hits only on byte-identical system text)."""
+    first, _ = load(_write(tmp_path, VALID))
+    second, _ = load(_write(tmp_path, VALID))
+
+    assert render(first)[0] == render(second)[0]
+
+
+def test_render_with_a_zero_limit_is_bands_only(tmp_path):
+    """REVA_GOLDEN_ESTIMATE_LIMIT=0 reaches here. Emitting the anchor headers
+    and the how-to-use section above an empty list would instruct the model to
+    cite anchors it was never shown."""
     golden, _ = load(_write(tmp_path, VALID))
 
-    assert render(golden)[0] == render(golden)[0]
+    text, degradations = render(golden, limit=0)
+
+    assert "Reference anchors" not in text
+    assert "Prefer these over the bands" not in text
+    assert "How to use the anchors" not in text
+    assert "bom-copies" not in text
+    assert "0.5–2 h" in text  # bands still render
+    assert [d.reason for d in degradations] == ["anchor_limit_exceeded"]
+    assert degradations[0].detail == {"rendered": 0, "available": 2}
 
 
 def test_render_with_no_anchors_still_includes_the_total_sanity_check(tmp_path):
@@ -472,6 +504,107 @@ def test_apply_anchor_nulls_an_unresolvable_ref_and_degrades(tmp_path):
     assert [d.reason for d in degradations] == ["anchor_ref_unresolved"]
 
 
+def test_apply_anchor_normalizes_a_backticked_ref(tmp_path):
+    """The stored ref is the canonical id, not whatever formatting the model
+    copied along with it — the calibration view looks it up by that id."""
+    golden, _ = load(_write(tmp_path, VALID))
+    est = _estimate(
+        anchor_ref="`bom-copies#bom-copy-mechanism`",
+        complexity_drivers=["new_model", "computed_logic"],
+    )
+
+    degradations = apply_anchor(est, golden, score_confidence=True)
+
+    assert degradations == []
+    assert est.anchor_ref == "bom-copies#bom-copy-mechanism"
+    assert est.anchor_confidence == "high"
+
+
+def test_apply_anchor_truncates_a_runaway_ref_in_the_ops_detail(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID))
+    est = _estimate(anchor_ref="x" * 5000)
+
+    degradations = apply_anchor(est, golden, score_confidence=True)
+
+    assert len(degradations[0].detail["anchor_ref"]) == 300
+
+
+def test_dropped_unknown_driver_is_reported_not_swallowed(tmp_path):
+    """The validator has no db, so it parks what it threw away on the item and
+    apply_anchor turns it into a degradation the caller ops-events. A silently
+    unanchored estimate must not look like a well-anchored one."""
+    golden, _ = load(_write(tmp_path, VALID))
+    est = _estimate(complexity_drivers=["new_model", "teleportation"])
+
+    degradations = apply_anchor(est, golden, score_confidence=True)
+
+    assert est.complexity_drivers == ["new_model"]
+    assert [d.reason for d in degradations] == ["drivers_dropped"]
+    assert degradations[0].detail == {"dropped": ["teleportation"]}
+
+
+def test_drivers_truncated_at_the_cap_are_reported(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID))
+    est = _estimate(
+        complexity_drivers=[
+            "new_model", "computed_logic", "view_tweak", "access_rights"
+        ]
+    )
+
+    degradations = apply_anchor(est, golden, score_confidence=True)
+
+    assert [d.reason for d in degradations] == ["drivers_dropped"]
+    assert degradations[0].detail == {"dropped": ["access_rights"]}
+
+
+def test_unparseable_drivers_are_reported(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID))
+    est = _estimate(complexity_drivers="new_model, computed_logic")
+
+    degradations = apply_anchor(est, golden, score_confidence=True)
+
+    assert est.complexity_drivers == []
+    assert [d.reason for d in degradations] == ["drivers_dropped"]
+    assert degradations[0].detail == {"dropped": ["new_model, computed_logic"]}
+
+
+def test_clean_drivers_report_nothing_when_nothing_was_dropped(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID))
+
+    assert apply_anchor(_estimate(), golden, score_confidence=True) == []
+    assert apply_anchor(
+        _estimate(complexity_drivers=["new_model"]), golden, score_confidence=True
+    ) == []
+    assert apply_anchor(
+        _estimate(complexity_drivers=None), golden, score_confidence=True
+    ) == []
+
+
+def test_dropped_drivers_are_bookkeeping_and_never_persist():
+    est = _estimate(complexity_drivers=["teleportation"])
+
+    assert est.dropped_drivers == ["teleportation"]
+    assert "dropped_drivers" not in est.model_dump()
+    assert "dropped_drivers" not in TicketIssueItem(
+        title="t", body="b", complexity_drivers=["teleportation"]
+    ).model_dump()
+
+
+def test_a_model_supplied_dropped_drivers_value_cannot_be_faked():
+    est = _estimate(complexity_drivers=["new_model"], dropped_drivers=["invented"])
+
+    assert est.dropped_drivers == []
+
+
+def test_dropped_drivers_on_an_issue_are_reported_too(tmp_path):
+    golden, _ = load(_write(tmp_path, VALID))
+    issue = TicketIssueItem(title="t", body="b", complexity_drivers=["teleportation"])
+
+    degradations = apply_anchor(issue, golden, score_confidence=False)
+
+    assert [d.reason for d in degradations] == ["drivers_dropped"]
+
+
 def test_apply_anchor_on_an_issue_skips_confidence(tmp_path):
     golden, _ = load(_write(tmp_path, VALID))
     issue = TicketIssueItem(
@@ -514,6 +647,15 @@ def test_shipped_calibration_block_includes_the_total_sanity_check():
     assert "margin popup" in text
 
 
-def test_config_exposes_the_kill_switch_and_limit():
-    assert isinstance(reva_config.GOLDEN_ESTIMATES, bool)
-    assert reva_config.GOLDEN_ESTIMATE_LIMIT == 30
+def test_how_to_use_text_fits_both_consumers(tmp_path):
+    """One renderer feeds both the analysis prompt (stories, which have
+    `assumptions`) and the issue planner (issues, which do NOT — and whose
+    tool schema is strict with additionalProperties: false). The shared text
+    may name neither the unit nor a field only one of them has."""
+    golden, _ = load(_write(tmp_path, VALID))
+
+    text, _ = render(golden)
+
+    assert "`assumptions`" not in text
+    assert "For each item you estimate" in text
+    assert "must never contain backticks" in text

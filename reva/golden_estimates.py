@@ -72,6 +72,11 @@ class Degradation(NamedTuple):
     detail: dict
 
 
+def normalize_ref(anchor_ref: str) -> str:
+    """Strip the formatting the rendered anchor list wraps ids in."""
+    return (anchor_ref or "").strip().strip("`").strip()
+
+
 class Band(BaseModel):
     min_hours: float = Field(gt=0)
     max_hours: float = Field(gt=0)
@@ -143,10 +148,16 @@ class GoldenSet(BaseModel):
 
         Retired anchors stay resolvable on purpose: a historical analysis that
         cited one must still resolve in the calibration view.
+
+        The reference is normalized first: the rendered block lists ids inside
+        backticks, so a model copying one "as written" hands back
+        `` `a#b` ``. That is model output, not a scenario we can assume away —
+        rejecting it would null every ref and make the feature inert.
         """
-        if not anchor_ref or anchor_ref.count("#") != 1:
+        ref = normalize_ref(anchor_ref)
+        if not ref or ref.count("#") != 1:
             return None
-        anchor_id, story_id = anchor_ref.split("#")
+        anchor_id, story_id = ref.split("#")
         for anchor in self.anchors:
             if anchor.id != anchor_id:
                 continue
@@ -258,7 +269,7 @@ _BAND_LABELS = {
     "configuration": "configuration / enabling a standard feature",
     "small": "small customization (new field, view tweak, constraint, visual marking, hard-block on confirm, simple wizard)",
     "medium": "medium customization (new model or copy mechanism + views + business logic)",
-    "large": "large customization (cross-module workflow, status overview, complex computed logic)",
+    "large": "large customization (cross-module workflow, real-time status overview, complex computed logic)",
 }
 
 _PREAMBLE = """## Estimate calibration — binding
@@ -276,19 +287,25 @@ copies, selective procurement release, per-line dropship route override,
 availability status overview, placeholder-article hard block, margin popup)
 took ≈ 15–25 h total."""
 
+# One shared text for every consumer: the analysis prompt estimates per story,
+# the issue planner per issue. It must therefore stay neutral about the unit
+# ("each item you estimate") and must not name a field only one of them has —
+# `TicketIssueItem` has no `assumptions`, and its tool schema is strict.
 _HOW_TO_USE = """### How to use the anchors
 
-- For each story, pick the **single closest anchor story** and set `anchor_ref`
-  to its backticked id exactly as written above.
-- Anchor the range on that story's hours. Adjust only for differences you can
-  name in `assumptions`.
+- For each item you estimate, pick the **single closest anchor story** and copy
+  its id into `anchor_ref`. The ids above are shown inside backticks purely as
+  formatting: the id is the `<anchor>#<story>` text between them, and
+  `anchor_ref` must never contain backticks or spaces.
+- Anchor your hours on that story's hours, adjusting only for differences you
+  can name.
 - Set `complexity_drivers` from this fixed list, at most 3, choosing what makes
   the work harder than its size suggests:
   {drivers}.
 - If **no** anchor story is comparable, set `anchor_ref` to null and fall back
   to the bands above. That is a correct answer, not a failure — do not force a
   match.
-- A ticket's stories almost always share one module. Sanity-check the total
+- A ticket's items almost always share one module. Sanity-check the total
   against the anchors' ticket totals above before submitting."""
 
 
@@ -319,17 +336,20 @@ def render(
         )
 
     pairs = golden.active_pairs() if enabled else []
-    if not pairs:
-        return "\n".join(parts), degradations
-
-    if len(pairs) > limit:
+    if pairs and len(pairs) > limit:
         degradations.append(
             Degradation(
                 "anchor_limit_exceeded",
-                {"rendered": limit, "available": len(pairs)},
+                {"rendered": max(limit, 0), "available": len(pairs)},
             )
         )
-        pairs = pairs[:limit]
+        pairs = pairs[: max(limit, 0)]
+
+    # Nothing to list — off, no active anchors, or a limit of 0. The headers
+    # and the how-to-use section below only make sense above a list, so return
+    # the bands alone rather than instructions pointing at nothing.
+    if not pairs:
+        return "\n".join(parts), degradations
 
     parts += [
         "",
@@ -369,6 +389,11 @@ def calibration_block(
 # Jaccard overlap at or above this counts as the same shape. A guess, tuned on
 # real data later: it is a pure function with a truth table, so moving it is a
 # one-line change.
+#
+# With at most 3 drivers per side the achievable overlaps are exactly
+# {0, 0.2, 0.25, 1/3, 0.5, 2/3, 1} — nothing lands on 0.6, so `>=` and `>` are
+# behaviourally identical here and the boundary itself is untestable. Don't
+# "fix" it; change the threshold instead if the split moves.
 _HIGH_OVERLAP = 0.6
 
 Confidence = Literal["high", "medium", "low"]
@@ -399,10 +424,7 @@ def score(
         # this case is decided explicitly rather than by dividing by zero.
         return "high"
 
-    union = story_drivers | anchor_drivers
-    if not union:
-        return "low"
-    overlap = len(story_drivers & anchor_drivers) / len(union)
+    overlap = len(story_drivers & anchor_drivers) / len(story_drivers | anchor_drivers)
 
     if overlap >= _HIGH_OVERLAP:
         return "high"
@@ -422,19 +444,31 @@ def apply_anchor(
     Mutates in place. `item` is a `StoryEstimate` (score_confidence=True) or a
     `TicketIssueItem` (False — an issue has no `kind` to score against).
 
-    Driver sanitizing already happened in the Pydantic validator; this only
-    handles the reference, which needs the loaded set the validator cannot see.
+    Driver sanitizing already happened in the Pydantic validator, which has no
+    database and cannot ops-event what it threw away — so it parks that on the
+    item (`dropped_drivers`) and this drains it. The reference is handled here
+    too, because it needs the loaded set the validator cannot see.
     """
     degradations: list[Degradation] = []
     anchor_story = None
+
+    dropped = getattr(item, "dropped_drivers", None)
+    if dropped:
+        degradations.append(Degradation("drivers_dropped", {"dropped": dropped}))
 
     if item.anchor_ref:
         anchor_story = golden.resolve(item.anchor_ref)
         if anchor_story is None:
             degradations.append(
-                Degradation("anchor_ref_unresolved", {"anchor_ref": item.anchor_ref})
+                Degradation(
+                    "anchor_ref_unresolved", {"anchor_ref": item.anchor_ref[:300]}
+                )
             )
             item.anchor_ref = None
+        else:
+            # Persist the canonical id, not whatever formatting the model
+            # copied along with it.
+            item.anchor_ref = normalize_ref(item.anchor_ref)
 
     if score_confidence:
         item.anchor_confidence = score(
