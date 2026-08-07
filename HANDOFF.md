@@ -1,5 +1,30 @@
 # REVA — Work Handoff
 
+## Addendum 2026-08-07 — docs site shows the repo-root `docs/` folder
+
+**Status: implemented** (spec
+`docs/superpowers/specs/archive/2026-08-07-docs-site-root-docs-design.md`, plan
+`docs/superpowers/plans/archive/2026-08-07-docs-site-root-docs.md`, both
+archived on completion). `reva/repo_docs.py::in_scope` now covers each repo's
+top-level `docs/` folder in addition to `custom_addons/`; any `superpowers/`
+folder is excluded as a directory segment anywhere in the path.
+
+**Two things to know before deploying.** The scope is shared with
+ticket-analysis / support-answer grounding, so root docs now enter
+`repo_doc_sections` and can be cited in customer-facing answers — the first
+analysis per repo after deploy pays one re-index, forced by
+`repo_docs_sync.scope_version` (migration 045) because a scope change does not
+move the tree SHA that sync staleness keys on. And `docs-ui` is built into the
+nginx image, so the SPA change needs
+`docker compose -f docker-compose.prod.yml build nginx` on top of the api/worker
+redeploy that carries the migration.
+
+**Not live-validated.** Unit-tested (worker + api) and migration-checked on
+real Postgres via `make test-integration`; the docs-ui tree change was
+verified with a Node one-liner against `buildDocTree` and a clean `npm run
+build`, not a manual browser check — that needs the full Docker stack plus a
+live GitHub App token. No prod or staging run yet.
+
 ## Addendum 2026-08-03/05 — golden estimates (Plan A shipped, Plan B open)
 
 **Status: Plan A implemented and merged to main** (spec

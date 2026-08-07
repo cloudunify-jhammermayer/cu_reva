@@ -1,7 +1,7 @@
 # Docs site shows the repo-root `docs/` folder — Design
 
 - **Date:** 2026-08-07
-- **Status:** open — not implemented.
+- **Status:** implemented 2026-08-07 (migration 045). Unit-tested; not live-validated.
 - **Context:** requested by Joseph 2026-08-07. The consultant docs browser
   (`docs-ui` SPA at `/docs`, backed by `/repo-docs`) shows a repo's Markdown
   only under `custom_addons/` / `custom-addons/` — `reva/repo_docs.py::in_scope`
