@@ -87,6 +87,7 @@ def _ops(db, event=None):
         ("docs/nested/deep/guide.md", True),
         ("docs/superpowers/specs/x-design.md", False),       # agent bookkeeping
         ("docs/superpowers/plans/y.md", False),
+        ("docs/SUPERPOWERS/plans/y.md", False),               # case-insensitive segment
         ("custom_addons/cu_sale/docs/superpowers/z.md", False),  # segment anywhere
         ("docs/superpowers.md", True),                       # a FILE, not the folder
         ("custom_addons/cu_sale/CLAUDE.md", False),          # excluded basename

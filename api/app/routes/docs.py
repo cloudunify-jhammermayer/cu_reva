@@ -4,13 +4,16 @@ Pulls Markdown (and doc-embedded images) live from each repo's default branch
 via the GitHub Contents/Trees API — the api service has no repo cache on disk,
 and live reads are always the default-branch truth.
 
-Authentication is handled at the edge: Cloudflare Access gates
-`reva.dev.cloudunify.org/*` before requests reach the origin, so this surface
-carries no app-layer auth (and stays separate from /api/v1's machine API key).
-
-Any consultant past Cloudflare Access can browse the docs of every registered
-repo; there is no per-repo authorization (that matches the goal — one internal
-docs site across all repos).
+This router carries no app-layer auth of its own (and stays separate from
+/api/v1's machine API key) — it assumes a Cloudflare Access application gates
+`/docs` and `/repo-docs` at the edge before requests reach the origin. As of
+this writing that Access app has not actually been created
+(`docs/ops-debt-runbook-2026-07.md` item 4), so in the current deployment
+either path is reachable by anyone with the hostname; nothing in this file
+enforces the assumption. Once the Access app exists, any consultant past it
+can browse the docs of every registered repo — there is no per-repo
+authorization, which matches the goal of one internal docs site across all
+repos, but does mean the edge gate is the only gate.
 """
 
 from __future__ import annotations

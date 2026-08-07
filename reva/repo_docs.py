@@ -59,13 +59,14 @@ def in_scope(path: str) -> bool:
     `startswith` is anchored, so "docs/" matches only the repo-root folder —
     `custom_addons/cu_x/docs/*.md` keeps matching through its own prefix.
     `EXCLUDED_SEGMENTS` is checked against directory segments only (the last
-    segment is the filename), so `docs/superpowers.md` is a doc while
-    `docs/superpowers/spec.md` is not.
+    segment is the filename), case-insensitively, so `docs/superpowers.md` is
+    a doc while `docs/superpowers/spec.md` and `docs/SUPERPOWERS/spec.md` are
+    not.
     """
     return (
         path.lower().endswith(DOC_EXTENSIONS)
         and path.startswith(SCOPE_PREFIXES)
-        and not any(seg in EXCLUDED_SEGMENTS for seg in path.split("/")[:-1])
+        and not any(seg.lower() in EXCLUDED_SEGMENTS for seg in path.split("/")[:-1])
         and not path.endswith(tuple("/" + b for b in EXCLUDED_BASENAMES))
     )
 

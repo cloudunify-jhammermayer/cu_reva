@@ -87,9 +87,10 @@ in their repository — already cover or touch this request. Fill
   documented touches it), `"unknown"` (no project-docs block was provided, or it
   doesn't answer).
 - `features[]`: each documented customization that applies — `name`, `addon`
-  (the custom addon the docs attribute it to), `how` (what it does and how it
-  relates to the request, e.g. "extends the existing quotation PDF layout"),
-  `reference` (the retrieved doc path/anchor), `confidence`.
+  (the custom addon the docs attribute it to; leave empty when the section
+  comes from a repo-level doc rather than an addon's own), `how` (what it does
+  and how it relates to the request, e.g. "extends the existing quotation PDF
+  layout"), `reference` (the retrieved doc path/anchor), `confidence`.
 - `notes`: one or two sentences for the consultant (e.g. whether extending an
   existing customization is cheaper than building new).
 

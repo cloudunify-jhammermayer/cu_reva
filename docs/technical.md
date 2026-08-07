@@ -154,15 +154,16 @@ problems degrade to a graph-less review, never a failed one.
   terms from the ticket; those terms retrieve (a) sections of the official
   **Odoo docs + core registry** (operator-provisioned `/core` worktrees,
   version-matched to the instance) backing the *Standard Odoo Coverage* output
-  section, and (b) sections of the **customer repo's own custom-addon markdown
-  docs** backing the *Existing Customizations* section (spec 2026-07-14). Repo
-  docs are indexed lazily into Postgres (`repo_doc_sections`, FTS-ranked;
+  section, and (b) sections of the **customer repo's own markdown docs — its
+  custom addons plus its repo-root `docs/` folder** backing the *Existing
+  Customizations* section (spec 2026-07-14; widened to the repo-root folder
+  2026-08-07). Repo docs are indexed lazily into Postgres (`repo_doc_sections`, FTS-ranked;
   `reva/repo_docs.py`): at analysis time the worker resolves the repo's
   **default branch** from `TicketJobParams.github_url`, compares the git-tree
   SHA against the stored sync state (`repo_docs_sync`) and re-indexes only on
   change — the common case is two GitHub API calls and zero file fetches.
   Concurrent syncs of one repo are serialized by a per-repo advisory lock
-  (loser skips and reads the current index); caps: 50 files, 2 000-char
+  (loser skips and reads the current index); caps: 200 files, 2 000-char
   sections, 8 injected. Both retrieval blocks are reference-data-framed; the
   repo-docs block is additionally **nonce-fenced** (repo-authored content).
   Every degradation (invalid URL, uninstalled app, sync/search failure) falls
