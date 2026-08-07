@@ -1,6 +1,7 @@
 // Turn the flat list of doc paths from /tree into a nested folder hierarchy.
-// The backend already scopes to custom_addons/, so we strip that leading
-// segment and surface the addon folders at the top level.
+// The backend scopes to custom_addons/ plus the repo-root docs/ folder; we strip
+// the custom_addons segment so addon folders surface at the top level, and keep
+// the repo's own docs/ folder there under its own name.
 
 const SCOPE_PREFIXES = ['custom_addons', 'custom-addons']
 
@@ -20,7 +21,14 @@ export function buildDocTree(entries) {
     }
     node.files.push({ name: segs[segs.length - 1], path: e.path })
   }
-  return toNodes(root)
+  return docsFirst(toNodes(root))
+}
+
+// The repo's own docs/ folder is the natural entry point, but addons are named
+// cu_* and sort ahead of it — hoist it to the top of the root listing.
+function docsFirst(nodes) {
+  const i = nodes.findIndex((n) => n.type === 'dir' && n.name === 'docs')
+  return i <= 0 ? nodes : [nodes[i], ...nodes.slice(0, i), ...nodes.slice(i + 1)]
 }
 
 function toNodes(node) {

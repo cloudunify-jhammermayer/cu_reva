@@ -58,7 +58,9 @@ complete an SSO login, and the TUI authenticates to `/api` with a Bearer key.
 
 ## Features
 
-- Scrollable sidebar of all enabled repos; expand a repo to lazy-load its `.md` tree.
+- Scrollable sidebar of all enabled repos; expand a repo to lazy-load its `.md`
+  tree — the repo-root `docs/` folder first, then each `custom_addons/` addon.
+  `CLAUDE.md` and any `superpowers/` folder are never listed.
 - Filter box — typing loads every repo's tree and filters paths across all of them.
 - Markdown rendered with `markdown-it`, **sanitized with DOMPurify**, code
   highlighted with `highlight.js`.
