@@ -35,8 +35,9 @@ from reva.db.engine import Database
 from reva.db.repo_lookup import get_repo_meta
 from reva.errors import PermanentError, TransientError
 # Markdown served as text through /file; the doc scope (DOC_EXTENSIONS +
-# in_scope) is shared with ticket-analysis retrieval — one definition of "the
-# repo's docs" (reva/repo_docs.py).
+# in_scope — custom addons plus the repo-root docs/ folder) is shared with
+# ticket-analysis retrieval — one definition of "the repo's docs"
+# (reva/repo_docs.py).
 from reva.repo_docs import DOC_EXTENSIONS, in_scope
 
 router = APIRouter()

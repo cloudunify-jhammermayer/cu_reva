@@ -82,11 +82,19 @@ def _ops(db, event=None):
         ("custom-addons/cu_sale/README.md", True),          # hyphen variant
         ("custom_addons/cu_sale/docs/guide.markdown", True),
         ("custom_addons/cu_sale/README.MD", True),           # case-insensitive ext
+        ("docs/setup-local.md", True),                       # repo-root docs folder
+        ("docs/nested/deep/guide.md", True),
+        ("docs/superpowers/specs/x-design.md", False),       # agent bookkeeping
+        ("docs/superpowers/plans/y.md", False),
+        ("custom_addons/cu_sale/docs/superpowers/z.md", False),  # segment anywhere
+        ("docs/superpowers.md", True),                       # a FILE, not the folder
         ("custom_addons/cu_sale/CLAUDE.md", False),          # excluded basename
         ("custom_addons/CLAUDE.md", False),
         ("custom_addons/cu_sale/model.py", False),           # not markdown
-        ("docs/README.md", False),                           # not under scope prefix
-        ("README.md", False),                                # top-level
+        ("README.md", False),                                # loose root markdown
+        ("CHANGELOG.md", False),
+        ("docs/notes.txt", False),                           # not markdown
+        ("documentation/guide.md", False),                   # prefix is anchored
         ("custom_addons/cu_sale/notes.txt", False),
     ],
 )
@@ -249,14 +257,22 @@ def test_sync_only_fetches_in_scope_files(db):
     gh = _FakeGitHub(
         tree=_tree("sha1", [
             "custom_addons/a/README.md",
-            "custom_addons/a/model.py",      # not markdown
-            "docs/guide.md",                  # not under scope
-            "custom_addons/a/CLAUDE.md",      # excluded
+            "custom_addons/a/model.py",            # not markdown
+            "docs/guide.md",                       # repo-root docs: in scope
+            "docs/superpowers/specs/x-design.md",  # agent bookkeeping: never
+            "README.md",                           # loose root markdown: out
+            "custom_addons/a/CLAUDE.md",           # excluded basename
         ]),
-        files={"custom_addons/a/README.md": "# H\nb\n"},
+        files={
+            "custom_addons/a/README.md": "# H\nb\n",
+            "docs/guide.md": "# G\nb\n",
+        },
     )
     sync_repo_docs(db, gh, "acme", "widgets")
-    assert [p for p, _ in gh.file_fetches] == ["custom_addons/a/README.md"]
+    assert sorted(p for p, _ in gh.file_fetches) == [
+        "custom_addons/a/README.md",
+        "docs/guide.md",
+    ]
 
 
 def test_sync_truncated_records_ops_event(db):

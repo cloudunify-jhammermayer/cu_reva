@@ -1,5 +1,5 @@
-"""Customer-repo docs retrieval: index each repo's custom-addon markdown docs
-section-level into Postgres and search them for ticket-analysis grounding.
+"""Customer-repo docs retrieval: index each repo's markdown docs section-level
+into Postgres and search them for ticket-analysis grounding.
 
 Scope (`in_scope`) is the single definition of "the repo's docs", shared with
 the consultant docs browser (`api/app/routes/docs.py` imports it from here).
@@ -28,11 +28,14 @@ logger = structlog.get_logger()
 # skip each other's refresh.
 _LOCK_CLASSID = 0x52444F43
 
-# Markdown scope — the consultant docs browser's definition (custom addons only;
-# CLAUDE.md is agent instructions, not docs). docs.py imports these back.
+# Markdown scope — the consultant docs browser's definition. Custom addons plus
+# the repo's own top-level docs/ folder; CLAUDE.md is agent instructions and
+# superpowers/ is agent workflow bookkeeping (specs/plans), neither is docs.
+# docs.py imports these back.
 DOC_EXTENSIONS = (".md", ".markdown")
-SCOPE_PREFIXES = ("custom_addons/", "custom-addons/")
+SCOPE_PREFIXES = ("custom_addons/", "custom-addons/", "docs/")
 EXCLUDED_BASENAMES = ("CLAUDE.md",)
+EXCLUDED_SEGMENTS = ("superpowers",)
 
 _MAX_SECTION_CHARS = 2000  # mirrors reva/odoo_registry
 # 69 in-scope files in the largest customer repo today, and growing. The old
@@ -47,10 +50,18 @@ _FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 
 
 def in_scope(path: str) -> bool:
-    """True for a markdown doc under a custom-addons prefix that isn't CLAUDE.md."""
+    """True for a markdown doc under a scope prefix that isn't excluded.
+
+    `startswith` is anchored, so "docs/" matches only the repo-root folder —
+    `custom_addons/cu_x/docs/*.md` keeps matching through its own prefix.
+    `EXCLUDED_SEGMENTS` is checked against directory segments only (the last
+    segment is the filename), so `docs/superpowers.md` is a doc while
+    `docs/superpowers/spec.md` is not.
+    """
     return (
         path.lower().endswith(DOC_EXTENSIONS)
         and path.startswith(SCOPE_PREFIXES)
+        and not any(seg in EXCLUDED_SEGMENTS for seg in path.split("/")[:-1])
         and not path.endswith(tuple("/" + b for b in EXCLUDED_BASENAMES))
     )
 
