@@ -131,7 +131,7 @@ def test_branches_unknown_repo_404(env):
 
 # --- GET /repo-docs/repos/{id}/tree -------------------------------------------
 
-def test_tree_returns_only_markdown_under_custom_addons(env):
+def test_tree_returns_markdown_in_scope_only(env):
     client, db, _ = env
     rid = _seed_repo(db)
     _use_github(_FakeGitHub(tree={
@@ -141,7 +141,8 @@ def test_tree_returns_only_markdown_under_custom_addons(env):
             {"path": "custom_addons/cu_x/CLAUDE.md", "type": "blob", "size": 4},  # agent file, hidden
             {"path": "custom_addons/cu_x/app.py", "type": "blob", "size": 99},  # not markdown
             {"path": "custom_addons/cu_x/docs", "type": "tree"},                # directory
-            {"path": "docs/architecture.md", "type": "blob", "size": 7},        # out of scope
+            {"path": "docs/architecture.md", "type": "blob", "size": 7},        # repo-root docs
+            {"path": "docs/superpowers/specs/a-design.md", "type": "blob", "size": 7},  # hidden
             {"path": "README.md", "type": "blob", "size": 3},                   # out of scope
         ],
         "truncated": False,
@@ -150,6 +151,7 @@ def test_tree_returns_only_markdown_under_custom_addons(env):
     assert [e["path"] for e in body["entries"]] == [
         "custom_addons/cu_x/README.md",
         "custom_addons/cu_x/docs/consultant.md",
+        "docs/architecture.md",
     ]
     assert body["ref"] == "main"
     assert body["truncated"] is False

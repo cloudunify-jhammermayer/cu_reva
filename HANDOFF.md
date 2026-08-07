@@ -1,5 +1,52 @@
 # REVA — Work Handoff
 
+## Addendum 2026-08-07 — docs site shows the repo-root `docs/` folder
+
+**Status: implemented** (spec
+`docs/superpowers/specs/archive/2026-08-07-docs-site-root-docs-design.md`, plan
+`docs/superpowers/plans/archive/2026-08-07-docs-site-root-docs.md`, both
+archived on completion). `reva/repo_docs.py::in_scope` now covers each repo's
+top-level `docs/` folder in addition to `custom_addons/`; any `superpowers/`
+folder is excluded as a directory segment anywhere in the path.
+
+**Deploy precondition: the Cloudflare Access app must exist first.**
+`docs/ops-debt-runbook-2026-07.md` item 4 records that the Access app gating
+`/docs` and `/repo-docs` was never created — today both are reachable by
+anyone with the hostname. That gap predates this branch, but the branch raises
+the stakes: the browsable (and groundable) surface used to be addon
+documentation only, and is now every registered repo's whole root `docs/`
+tree, which can hold internal runbooks (simulating the widened predicate over
+this very repo's tracked files finds 28 qualifying files, including this
+runbook and `docs/setup-production.md`). **Do not deploy until** the runbook's
+item 4 is done and a fresh incognito hit on `/docs/` and `/repo-docs/` returns
+an Access login. Open question, not yet decided: should `cu_reva` itself
+become an enabled repo in the docs browser now that its own root docs would be
+in scope — raise with Joseph rather than assuming either way.
+
+**Two things to know before deploying.** The scope is shared with
+ticket-analysis / support-answer grounding, so root docs now enter
+`repo_doc_sections` and can be cited in customer-facing answers — the first
+analysis per repo after deploy pays one re-index, forced by
+`repo_docs_sync.scope_version` (migration 045) because a scope change does not
+move the tree SHA that sync staleness keys on. And `docs-ui` is built into the
+nginx image, so the SPA change needs
+`docker compose -f docker-compose.prod.yml build nginx` on top of the api/worker
+redeploy that carries the migration.
+
+**Rollback edge on `scope_version`.** Old (pre-this-branch) code never writes
+the column. Deploy → rollback → a repo's tree moves under the old code → the
+old code re-indexes that repo under the old scope while `scope_version` stays
+at 1 → rolling forward again then sees a matching stamp and skips the
+re-index, leaving that repo's root docs missing from the index until its tree
+moves again. Narrow window, self-healing on the next push; no code change made
+for it.
+
+**Not live-validated.** Unit-tested (worker + api) and migration-checked on
+real Postgres via `make test-integration`; the docs-ui tree change was
+verified with a Node one-liner against `buildDocTree` and a clean `npm run
+build`, not a manual browser check — that needs the full Docker stack plus a
+live GitHub App token. No prod or staging run yet.
+
 ## Addendum 2026-08-03/05 — golden estimates (Plan A shipped, Plan B open)
 
 **Status: Plan A implemented and merged to main** (spec

@@ -63,7 +63,7 @@ Content-Type: application/json
 
 `attachment` is optional (`null`/omitted for text-only tickets). When present it must be a `.docx`, `.pdf`, or `.txt` file; its text is extracted and folded into the prompt alongside `text`. An unsupported extension, bad base64, or content/extension mismatch is rejected with `422` at accept time (`reva/attachment_text.py`).
 
-`github_url` is optional (`null`/`""`/omitted): the record's project repo. It drives dashboard repo grouping (TUI Tickets tab) **and** grounds the analysis in the repo's own custom-addon docs — the worker lazily indexes `custom_addons/**/*.md` from the repo's default branch and injects the sections relevant to the ticket, backing the *Existing Customizations* section (see [Repo-docs grounding](#repo-docs-grounding)). Format-validated at accept time (`422` on a non-`https://github.com/{owner}/{repo}` URL), with no reachability check — a well-formed but uninstalled repo degrades silently to a core-only analysis.
+`github_url` is optional (`null`/`""`/omitted): the record's project repo. It drives dashboard repo grouping (TUI Tickets tab) **and** grounds the analysis in the repo's own docs — the worker lazily indexes `custom_addons/**/*.md` plus the repo-root `docs/**/*.md` from the repo's default branch and injects the sections relevant to the ticket, backing the *Existing Customizations* section (see [Repo-docs grounding](#repo-docs-grounding)). Format-validated at accept time (`422` on a non-`https://github.com/{owner}/{repo}` URL), with no reachability check — a well-formed but uninstalled repo degrades silently to a core-only analysis.
 
 **Response `202 Accepted`:**
 
@@ -216,7 +216,8 @@ Customizations* section in the repo's own documentation:
 - A single core-query planner call derives English search terms from the ticket;
   those same terms drive both the Odoo-core retrieval and the repo-docs retrieval.
 - The repo's default-branch markdown docs under `custom_addons/`/`custom-addons/`
-  (excluding `CLAUDE.md`) are indexed **section-level** into Postgres
+  and the repo-root `docs/` folder (excluding `CLAUDE.md` and any `superpowers/`
+  folder) are indexed **section-level** into Postgres
   (`repo_doc_sections`, full-text searchable). Indexing is **lazy**: at analysis
   time the worker compares the default branch's git-tree SHA against the stored
   one (`repo_docs_sync`) and re-indexes only when it changed — the common case is

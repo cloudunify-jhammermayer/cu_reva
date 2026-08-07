@@ -1,3 +1,17 @@
+## v2.19 — Existing Customizations grounding covers repo-root docs, not just addons
+
+- `existing_customizations.features[].addon` is now documented as optional:
+  `prompts/ticket_analysis.md` §4 says to leave it empty when a feature comes
+  from a repo-level doc rather than an addon's own. The doc scope behind the
+  *Retrieved project documentation* block widened to include each repo's
+  root `docs/` folder (spec `docs/superpowers/specs/archive/2026-08-07-docs-site-root-docs-design.md`),
+  and a root-doc section has no addon to attribute itself to.
+- The block's own provenance sentence (`reva/ticket_knowledge.py::_format_repo_docs_block`)
+  now says the retrieved docs are the customer repo's own — custom-addon docs
+  plus the repo's `docs/` folder — instead of naming only custom-addon
+  documentation, so a root-doc hit isn't discounted as not matching what the
+  block claims to contain.
+
 ## v2.18 — Golden estimates: first anchors, recalibrated bands, quoting buffer
 
 - `prompts/golden_estimates.yml` gains its first **15 anchors / 30 stories**

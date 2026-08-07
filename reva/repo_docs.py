@@ -1,5 +1,5 @@
-"""Customer-repo docs retrieval: index each repo's custom-addon markdown docs
-section-level into Postgres and search them for ticket-analysis grounding.
+"""Customer-repo docs retrieval: index each repo's markdown docs section-level
+into Postgres and search them for ticket-analysis grounding.
 
 Scope (`in_scope`) is the single definition of "the repo's docs", shared with
 the consultant docs browser (`api/app/routes/docs.py` imports it from here).
@@ -28,11 +28,14 @@ logger = structlog.get_logger()
 # skip each other's refresh.
 _LOCK_CLASSID = 0x52444F43
 
-# Markdown scope — the consultant docs browser's definition (custom addons only;
-# CLAUDE.md is agent instructions, not docs). docs.py imports these back.
+# Markdown scope — the consultant docs browser's definition. Custom addons plus
+# the repo's own top-level docs/ folder; CLAUDE.md is agent instructions and
+# superpowers/ is agent workflow bookkeeping (specs/plans), neither is docs.
+# docs.py imports these back.
 DOC_EXTENSIONS = (".md", ".markdown")
-SCOPE_PREFIXES = ("custom_addons/", "custom-addons/")
+SCOPE_PREFIXES = ("custom_addons/", "custom-addons/", "docs/")
 EXCLUDED_BASENAMES = ("CLAUDE.md",)
+EXCLUDED_SEGMENTS = ("superpowers",)
 
 _MAX_SECTION_CHARS = 2000  # mirrors reva/odoo_registry
 # 69 in-scope files in the largest customer repo today, and growing. The old
@@ -42,15 +45,28 @@ _MAX_SECTION_CHARS = 2000  # mirrors reva/odoo_registry
 _MAX_FILES = 200
 _MAX_FILE_CHARS = 100_000
 
+# Bump whenever `in_scope` changes: the tree SHA is unmoved by a scope change,
+# so this stamp is what makes every already-indexed repo re-sync exactly once.
+_SCOPE_VERSION = 1
+
 _ATX_RE = re.compile(r"^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$")
 _FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 
 
 def in_scope(path: str) -> bool:
-    """True for a markdown doc under a custom-addons prefix that isn't CLAUDE.md."""
+    """True for a markdown doc under a scope prefix that isn't excluded.
+
+    `startswith` is anchored, so "docs/" matches only the repo-root folder —
+    `custom_addons/cu_x/docs/*.md` keeps matching through its own prefix.
+    `EXCLUDED_SEGMENTS` is checked against directory segments only (the last
+    segment is the filename), case-insensitively, so `docs/superpowers.md` is
+    a doc while `docs/superpowers/spec.md` and `docs/SUPERPOWERS/spec.md` are
+    not.
+    """
     return (
         path.lower().endswith(DOC_EXTENSIONS)
         and path.startswith(SCOPE_PREFIXES)
+        and not any(seg.lower() in EXCLUDED_SEGMENTS for seg in path.split("/")[:-1])
         and not path.endswith(tuple("/" + b for b in EXCLUDED_BASENAMES))
     )
 
@@ -202,6 +218,17 @@ def _lock_objid(repo_full_name: str) -> int:
     return unsigned - 2**32 if unsigned >= 2**31 else unsigned
 
 
+def _is_current(row: RepoDocsSync | None, tree_sha: str | None) -> bool:
+    """True when the stored index matches both the repo's tree AND the scope
+    that produced it."""
+    return (
+        row is not None
+        and tree_sha is not None
+        and row.tree_sha == tree_sha
+        and row.scope_version == _SCOPE_VERSION
+    )
+
+
 def sync_repo_docs(db: Database, github, owner: str, repo: str) -> dict:
     """Bring a repo's doc-section index up to date with its DEFAULT branch.
 
@@ -231,7 +258,7 @@ def sync_repo_docs(db: Database, github, owner: str, repo: str) -> dict:
     # Fast path (no lock): the indexed SHA already matches.
     with db.session() as s:
         row = s.get(RepoDocsSync, repo_key)
-        if row is not None and tree_sha is not None and row.tree_sha == tree_sha:
+        if _is_current(row, tree_sha):
             return {"status": "fresh", "sections": row.sections, "error": None}
 
     all_paths = sorted(
@@ -273,7 +300,7 @@ def sync_repo_docs(db: Database, github, owner: str, repo: str) -> dict:
 
         # Re-check under the lock: a concurrent sync may have just committed.
         row = s.get(RepoDocsSync, repo_key)
-        if row is not None and tree_sha is not None and row.tree_sha == tree_sha:
+        if _is_current(row, tree_sha):
             return {"status": "fresh", "sections": row.sections, "error": None}
 
         sections: list[DocSection] = []
@@ -308,6 +335,7 @@ def sync_repo_docs(db: Database, github, owner: str, repo: str) -> dict:
             s.add(RepoDocsSync(
                 repo_full_name=repo_key, tree_sha=tree_sha or "",
                 files=len(paths), sections=len(sections), truncated=truncated,
+                scope_version=_SCOPE_VERSION,
             ))
         else:
             row.tree_sha = tree_sha or ""
@@ -315,6 +343,7 @@ def sync_repo_docs(db: Database, github, owner: str, repo: str) -> dict:
             row.files = len(paths)
             row.sections = len(sections)
             row.truncated = truncated
+            row.scope_version = _SCOPE_VERSION
 
     record_caps()  # post-commit
     return {"status": "synced", "sections": len(sections), "error": None}
