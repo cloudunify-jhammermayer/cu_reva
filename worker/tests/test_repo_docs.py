@@ -8,6 +8,7 @@ from reva.db import Base, Database, create_engine_from_url
 from reva.db.models import OpsEvent, RepoDocSection, RepoDocsSync
 from reva.repo_docs import (
     _MAX_FILES,
+    _SCOPE_VERSION,
     doc_priority,
     in_scope,
     search_repo_docs,
@@ -240,6 +241,35 @@ def test_sync_reindexes_on_tree_sha_change(db):
     assert r["status"] == "synced"
     secs = _sections(db, "acme/widgets")
     assert len(secs) == 1 and secs[0].title == "New"  # old rows deleted
+
+
+def test_sync_reindexes_when_scope_version_is_stale(db):
+    """A scope widening does not move the tree SHA, so the version stamp is the
+    only thing that can force the re-index."""
+    gh = _FakeGitHub(
+        tree=_tree("sha1", ["custom_addons/a/README.md", "docs/guide.md"]),
+        files={
+            "custom_addons/a/README.md": "# H\nb\n",
+            "docs/guide.md": "# G\nb\n",
+        },
+    )
+    sync_repo_docs(db, gh, "acme", "widgets")
+    with db.session() as s:
+        assert s.get(RepoDocsSync, "acme/widgets").scope_version == _SCOPE_VERSION
+
+    # Simulate a row indexed under the previous scope: same tree, old version.
+    with db.session() as s:
+        s.get(RepoDocsSync, "acme/widgets").scope_version = _SCOPE_VERSION - 1
+    gh.file_fetches.clear()
+
+    r = sync_repo_docs(db, gh, "acme", "widgets")
+    assert r["status"] == "synced"
+    assert sorted(p for p, _ in gh.file_fetches) == [
+        "custom_addons/a/README.md",
+        "docs/guide.md",
+    ]
+    with db.session() as s:
+        assert s.get(RepoDocsSync, "acme/widgets").scope_version == _SCOPE_VERSION
 
 
 def test_sync_honors_default_branch(db):

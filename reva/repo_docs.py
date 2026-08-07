@@ -45,6 +45,10 @@ _MAX_SECTION_CHARS = 2000  # mirrors reva/odoo_registry
 _MAX_FILES = 200
 _MAX_FILE_CHARS = 100_000
 
+# Bump whenever `in_scope` changes: the tree SHA is unmoved by a scope change,
+# so this stamp is what makes every already-indexed repo re-sync exactly once.
+_SCOPE_VERSION = 1
+
 _ATX_RE = re.compile(r"^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$")
 _FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 
@@ -213,6 +217,17 @@ def _lock_objid(repo_full_name: str) -> int:
     return unsigned - 2**32 if unsigned >= 2**31 else unsigned
 
 
+def _is_current(row: RepoDocsSync | None, tree_sha: str | None) -> bool:
+    """True when the stored index matches both the repo's tree AND the scope
+    that produced it."""
+    return (
+        row is not None
+        and tree_sha is not None
+        and row.tree_sha == tree_sha
+        and row.scope_version == _SCOPE_VERSION
+    )
+
+
 def sync_repo_docs(db: Database, github, owner: str, repo: str) -> dict:
     """Bring a repo's doc-section index up to date with its DEFAULT branch.
 
@@ -242,7 +257,7 @@ def sync_repo_docs(db: Database, github, owner: str, repo: str) -> dict:
     # Fast path (no lock): the indexed SHA already matches.
     with db.session() as s:
         row = s.get(RepoDocsSync, repo_key)
-        if row is not None and tree_sha is not None and row.tree_sha == tree_sha:
+        if _is_current(row, tree_sha):
             return {"status": "fresh", "sections": row.sections, "error": None}
 
     all_paths = sorted(
@@ -284,7 +299,7 @@ def sync_repo_docs(db: Database, github, owner: str, repo: str) -> dict:
 
         # Re-check under the lock: a concurrent sync may have just committed.
         row = s.get(RepoDocsSync, repo_key)
-        if row is not None and tree_sha is not None and row.tree_sha == tree_sha:
+        if _is_current(row, tree_sha):
             return {"status": "fresh", "sections": row.sections, "error": None}
 
         sections: list[DocSection] = []
@@ -319,6 +334,7 @@ def sync_repo_docs(db: Database, github, owner: str, repo: str) -> dict:
             s.add(RepoDocsSync(
                 repo_full_name=repo_key, tree_sha=tree_sha or "",
                 files=len(paths), sections=len(sections), truncated=truncated,
+                scope_version=_SCOPE_VERSION,
             ))
         else:
             row.tree_sha = tree_sha or ""
@@ -326,6 +342,7 @@ def sync_repo_docs(db: Database, github, owner: str, repo: str) -> dict:
             row.files = len(paths)
             row.sections = len(sections)
             row.truncated = truncated
+            row.scope_version = _SCOPE_VERSION
 
     record_caps()  # post-commit
     return {"status": "synced", "sections": len(sections), "error": None}

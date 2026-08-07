@@ -1008,8 +1008,8 @@ class RepoDocSection(Base):
 
 class RepoDocsSync(Base):
     """Sync bookkeeping: one row per repo recording which tree SHA is indexed
-    (migration 039). Drives the lazy staleness check in
-    reva/repo_docs.py::sync_repo_docs."""
+    (migration 039; scope_version migration 045). Drives the lazy staleness
+    check in reva/repo_docs.py::sync_repo_docs."""
 
     __tablename__ = "repo_docs_sync"
 
@@ -1021,6 +1021,7 @@ class RepoDocsSync(Base):
     files: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sections: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    scope_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 # ------------------------------------------------- support_threads / _turns
