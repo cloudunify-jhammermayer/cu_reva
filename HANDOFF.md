@@ -9,19 +9,21 @@ archived on completion). `reva/repo_docs.py::in_scope` now covers each repo's
 top-level `docs/` folder in addition to `custom_addons/`; any `superpowers/`
 folder is excluded as a directory segment anywhere in the path.
 
-**Deploy precondition: the Cloudflare Access app must exist first.**
-`docs/ops-debt-runbook-2026-07.md` item 4 records that the Access app gating
-`/docs` and `/repo-docs` was never created — today both are reachable by
-anyone with the hostname. That gap predates this branch, but the branch raises
-the stakes: the browsable (and groundable) surface used to be addon
-documentation only, and is now every registered repo's whole root `docs/`
-tree, which can hold internal runbooks (simulating the widened predicate over
-this very repo's tracked files finds 28 qualifying files, including this
-runbook and `docs/setup-production.md`). **Do not deploy until** the runbook's
-item 4 is done and a fresh incognito hit on `/docs/` and `/repo-docs/` returns
-an Access login. Open question, not yet decided: should `cu_reva` itself
-become an enabled repo in the docs browser now that its own root docs would be
-in scope — raise with Joseph rather than assuming either way.
+**Deploy precondition: the Cloudflare Access app — SATISFIED, verified
+2026-08-07 before deploying.** The branch raises the stakes on this gate: the
+browsable (and groundable) surface used to be addon documentation only, and is
+now every registered repo's whole root `docs/` tree, which can hold internal
+runbooks. Checked at deploy time — unauthenticated hits on `/docs/` and
+`/repo-docs/repos` both `302` to the Access login, so the gate is real (the
+runbook's item 4, which claimed the app was never created, was stale and is
+now marked done). Also checked: `cu_reva` is **not** a registered repo on
+prod, so this repo's own `docs/` — including that runbook and its prod SSH
+host — is not published by the browser. **Decided by Joseph 2026-08-07:
+`cu_reva` must NOT become an enabled repo in the docs browser** — REVA's own
+docs stay non-public. Registering this repo (e.g. to have REVA review its own
+PRs) would immediately publish 28 of our own files, including that runbook's
+prod SSH host, to everyone past Access. Nothing enforces this in code today;
+it holds only because the repo is unregistered.
 
 **Two things to know before deploying.** The scope is shared with
 ticket-analysis / support-answer grounding, so root docs now enter

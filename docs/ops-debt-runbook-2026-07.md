@@ -50,10 +50,12 @@ ticket analysis and check the run row has no schema-retry error. (Closes the
   staged ticket done → `ticket_actuals` row exists, journey shows
   `actuals_reported`.
 
-## 4. Cloudflare Access on /docs + /repo-docs
+## 4. Cloudflare Access on /docs + /repo-docs — DONE (verified 2026-08-07)
 
-The nginx template assumes an edge Access app that was never created; the
-docs SPA is currently reachable by anyone with the hostname.
+The app exists and gates both prefixes: an unauthenticated request to
+`https://reva.dev.cloudunify.org/docs/` and to `/repo-docs/repos` each
+returns `302` to `cloudunify.cloudflareaccess.com/cdn-cgi/access/login/...`.
+The setup below is kept as the record of what is configured.
 
 Zero Trust dashboard → Access → Applications → Add (self-hosted):
 
