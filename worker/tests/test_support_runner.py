@@ -6,6 +6,8 @@ the answerer, the Claude Code runner, GitHub, and the Odoo callback.
 
 from __future__ import annotations
 
+import base64
+import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -82,7 +84,8 @@ class FakeCodeRunner:
         return f"/repos/{owner}/{name}"
 
     def review(self, repo_path, skill, params, model=None, odoo=False, extra_dirs=None):
-        self.review_calls.append({"skill": skill, "params": params, "odoo": odoo,
+        self.review_calls.append({"repo_path": repo_path, "skill": skill,
+                                  "params": params, "odoo": odoo,
                                   "extra_dirs": extra_dirs})
         return _response()
 
@@ -569,3 +572,80 @@ def test_a_clean_german_answer_does_not_trip_the_detector(env):
 
     run_support_answer(_params(env))
     assert "code_reference_in_answer" not in _ops(env.db)
+
+
+# --- images on the CLI escalation path ---------------------------------------
+
+_PNG_B64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32).decode()
+
+
+def _img(label="Image 1", filename="shot.png", data=_PNG_B64) -> dict:
+    return {"filename": filename, "label": label, "content_base64": data}
+
+
+def test_code_path_stages_images_as_files_for_the_read_tool(env):
+    """The CLI cannot take inline image bytes, so they are written to a temp dir
+    handed over with --add-dir; `Read` is already an allowed tool."""
+    _needs_code(env, True)
+    run_support_answer(_params(env, images=[_img("Image 1"), _img("Image 2")]))
+
+    call = env.code_runner.review_calls[0]
+    assert call["extra_dirs"] is not None and len(call["extra_dirs"]) == 1
+    staged = call["params"]["images"]
+    assert "Image 1: " in staged and "Image 2: " in staged
+    # Named from the validated label, never from the untrusted filename.
+    assert "image-1.png" in staged and "image-2.png" in staged
+
+
+def test_staged_images_live_outside_the_clone(env):
+    """Writing into the working tree would dirty it and cross _scrub_clone."""
+    _needs_code(env, True)
+    run_support_answer(_params(env, images=[_img()]))
+
+    call = env.code_runner.review_calls[0]
+    assert not call["extra_dirs"][0].startswith(call["repo_path"])
+
+
+def test_staged_images_are_cleaned_up_after_the_run(env):
+    _needs_code(env, True)
+    run_support_answer(_params(env, images=[_img()]))
+
+    staged_dir = env.code_runner.review_calls[0]["extra_dirs"][0]
+    assert not os.path.exists(staged_dir)
+
+
+def test_core_dirs_and_image_dir_are_both_passed(env):
+    _with_core(env, FakeCoreKnowledge())
+    _needs_code(env, True)
+    run_support_answer(_params(env, images=[_img()]))
+
+    dirs = env.code_runner.review_calls[0]["extra_dirs"]
+    assert dirs[:3] == [
+        "/core/19.0/odoo", "/core/19.0/enterprise", "/core/19.0/documentation",
+    ]
+    assert len(dirs) == 4
+
+
+def test_code_path_without_images_passes_no_image_param(env):
+    _needs_code(env, True)
+    run_support_answer(_params(env))
+
+    call = env.code_runner.review_calls[0]
+    assert "images" not in call["params"]
+    assert call["extra_dirs"] is None
+
+
+def test_image_staging_failure_degrades_and_records_an_ops_event(env, monkeypatch):
+    """A staging failure must cost the images, not the whole turn — and must be
+    visible (CLAUDE.md: no silent log-and-continue)."""
+    monkeypatch.setattr(
+        "worker.support_runner.tempfile.TemporaryDirectory",
+        lambda **kw: (_ for _ in ()).throw(OSError("no space left on device")),
+    )
+    _needs_code(env, True)
+    run_support_answer(_params(env, images=[_img()]))
+
+    call = env.code_runner.review_calls[0]
+    assert "images" not in call["params"]
+    assert "image_staging_failed" in _ops(env.db)
+    assert writers.get_support_turn(env.db, env.turn_id)["grounding_level"] == "code"

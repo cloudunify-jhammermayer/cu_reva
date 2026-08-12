@@ -255,3 +255,81 @@ def test_thinking_is_forwarded_verbatim_when_passed():
 
     _make_client(handler).review(**_review_args(), thinking={"type": "disabled"})
     assert captured["body"]["thinking"] == {"type": "disabled"}
+
+
+# --- image content blocks -----------------------------------------------------
+
+
+def _capture_body(payload: dict) -> tuple[ClaudeClient, dict]:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=payload)
+
+    return _make_client(handler), captured
+
+
+def test_review_without_images_sends_plain_string_content():
+    """Pins the no-images body shape: every caller that passes no images must
+    keep producing string content, not a one-element block list."""
+    client, captured = _capture_body(_load_fixture("successful_review.json"))
+    client.review(**_review_args())
+
+    assert captured["body"]["messages"] == [
+        {"role": "user", "content": "Review this PR diff."}
+    ]
+
+
+def test_review_with_images_puts_labelled_images_before_the_prompt():
+    client, captured = _capture_body(_load_fixture("successful_review.json"))
+    client.review(
+        **_review_args(),
+        images=[
+            ("Image 1", "image/png", "aGVsbG8="),
+            ("Image 2", "image/jpeg", "d29ybGQ="),
+        ],
+    )
+
+    assert captured["body"]["messages"][0]["content"] == [
+        {"type": "text", "text": "Image 1"},
+        {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": "aGVsbG8="},
+        },
+        {"type": "text", "text": "Image 2"},
+        {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/jpeg", "data": "d29ybGQ="},
+        },
+        {"type": "text", "text": "Review this PR diff."},
+    ]
+
+
+def test_review_with_empty_image_list_matches_the_no_images_body():
+    """An empty list is not "images" — it must not flip the content shape."""
+    client, captured = _capture_body(_load_fixture("successful_review.json"))
+    client.review(**_review_args(), images=[])
+
+    assert captured["body"]["messages"][0]["content"] == "Review this PR diff."
+
+
+def test_images_do_not_disturb_the_cached_system_prefix():
+    """Caching is a prefix match on tools+system; images live in the user turn,
+    so the cached prefix must be untouched by their presence."""
+    client, with_images = _capture_body(_load_fixture("successful_review.json"))
+    client.review(**_review_args(), images=[("Image 1", "image/png", "aGVsbG8=")])
+
+    client2, without = _capture_body(_load_fixture("successful_review.json"))
+    client2.review(**_review_args())
+
+    assert with_images["body"]["system"] == without["body"]["system"]
+    assert with_images["body"]["tools"] == without["body"]["tools"]
+
+
+def test_chat_is_unaffected_by_the_images_parameter():
+    payload = {"content": [{"type": "text", "text": "ok"}], "usage": {}}
+    client, captured = _capture_body(payload)
+
+    assert client.chat(system="s", user="u") == "ok"
+    assert captured["body"]["messages"] == [{"role": "user", "content": "u"}]

@@ -67,6 +67,30 @@
       ],
       "title": "ChatterEntry",
       "type": "object"
+    },
+    "ImageAttachment": {
+      "description": "A raster image forwarded by Odoo \u2014 the screenshots embedded in a ticket's\ndescription. Accepted types are .png / .jpg / .jpeg / .gif / .webp; the\nfilename extension is the authoritative gate and the bytes are verified\nagainst it (see reva.image_attachment).\n\n`label` is load-bearing, not decoration: it is the text block introducing\nthis image in the Claude call AND the marker Odoo left in `question` in its\nplace, so the two only line up if the sender keeps them in step. Pinned to\n\"Image <n>\" \u2014 it sits outside the SECU-5 nonce fence. `filename` never\nreaches the model.",
+      "properties": {
+        "content_base64": {
+          "title": "Content Base64",
+          "type": "string"
+        },
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "filename",
+        "label",
+        "content_base64"
+      ],
+      "title": "ImageAttachment",
+      "type": "object"
     }
   },
   "properties": {
@@ -107,6 +131,14 @@
       "default": null,
       "description": "Repository URL from the record's project (https://github.com/{owner}/{repo}). Odoo requires a linked project, but REVA degrades rather than refusing: without it the answer is grounded in Odoo core knowledge only, with no project-code grounding.",
       "title": "Github Url"
+    },
+    "images": {
+      "description": "Screenshots embedded in the ticket description, in document order. Each `label` (\"Image 1\") must match the [Image N] marker the sender left in `question` where the image was. png/jpeg/gif/webp; max 6 images, 5 MB each, 8 MB total. Defaults to empty, so a sender that does not extract images is unaffected.",
+      "items": {
+        "$ref": "#/$defs/ImageAttachment"
+      },
+      "title": "Images",
+      "type": "array"
     },
     "model_name": {
       "description": "Odoo model name, e.g. \"helpdesk.ticket\" or \"project.task\"",

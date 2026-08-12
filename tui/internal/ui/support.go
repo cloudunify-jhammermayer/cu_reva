@@ -310,11 +310,14 @@ func (s Support) detailView(w, h int) string {
 			lipgloss.Place(w, h-5, lipgloss.Center, lipgloss.Center, styleSubtitle.Render("No turns recorded yet")))
 	}
 
-	colSeq, colStatus, colKind, colAnswer, colGround := 5, 10, 10, 14, 10
+	// Img sits BEFORE Grounding: groundingLabel returns lipgloss-styled text,
+	// whose ANSI escapes count toward a %-*s width, so the styled column has to
+	// stay last and unpadded (as it was before Img existed).
+	colSeq, colStatus, colKind, colAnswer, colImg, colGround := 5, 10, 10, 14, 4, 10
 	hdr := lipgloss.NewStyle().Bold(true).Foreground(colorMuted).Render(
-		fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s",
+		fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s  %-*s  %-*s",
 			colSeq, "Seq", colStatus, "Status", colKind, "Kind",
-			colAnswer, "Answer", colGround, "Grounding"))
+			colAnswer, "Answer", colImg, "Img", colGround, "Grounding"))
 
 	visibleRows := h - 8
 	if visibleRows < 1 {
@@ -335,16 +338,18 @@ func (s Support) detailView(w, h int) string {
 		if turn.AnswerStatus != nil {
 			answer = *turn.AnswerStatus
 		}
-		plain := fmt.Sprintf("  %-*d  %-*s  %-*s  %-*s  %-*s",
+		plain := fmt.Sprintf("  %-*d  %-*s  %-*s  %-*s  %-*s  %-*s",
 			colSeq, turn.Seq, colStatus, turn.Status, colKind, truncate(kind, colKind),
-			colAnswer, truncate(answer, colAnswer), colGround, groundingPlain(turn.GroundingLevel))
+			colAnswer, truncate(answer, colAnswer), colImg, imageCountLabel(turn.ImageCount),
+			colGround, groundingPlain(turn.GroundingLevel))
 		if i == s.turnCursor {
 			rows = append(rows, styleSelected.Width(w-2).Render(plain))
 			continue
 		}
-		colored := fmt.Sprintf("  %-*d  %-*s  %-*s  %-*s  %s",
+		colored := fmt.Sprintf("  %-*d  %-*s  %-*s  %-*s  %-*s  %s",
 			colSeq, turn.Seq, colStatus, turn.Status, colKind, truncate(kind, colKind),
-			colAnswer, truncate(answer, colAnswer), groundingLabel(turn.GroundingLevel))
+			colAnswer, truncate(answer, colAnswer), colImg, imageCountLabel(turn.ImageCount),
+			groundingLabel(turn.GroundingLevel))
 		rows = append(rows, colored)
 	}
 	table := strings.Join(rows, "\n")
@@ -401,6 +406,15 @@ func groundingLabel(level *string) string {
 // groundingPlain is groundingLabel without ANSI wrapping, for the selected row
 // where styleSelected's background would otherwise be broken by embedded
 // color codes (matches Tickets' plainStatusSymbol/statusSymbol split).
+// imageCountLabel renders the screenshot count for a turn. Plain (unstyled) so
+// it can be width-padded like the other text columns.
+func imageCountLabel(n int) string {
+	if n == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%d", n)
+}
+
 func groundingPlain(level *string) string {
 	if level == nil {
 		return "—"

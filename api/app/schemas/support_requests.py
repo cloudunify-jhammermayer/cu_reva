@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-from reva.types import Attachment, ChatterEntry
+from reva.types import Attachment, ChatterEntry, ImageAttachment
 
 
 class SupportRequestBody(BaseModel):
@@ -50,6 +50,14 @@ class SupportRequestBody(BaseModel):
         description="Optional .docx/.pdf/.txt/.md file; its text is extracted "
         "and folded into the prompt alongside `question`",
     )
+    images: list[ImageAttachment] = Field(
+        default_factory=list,
+        description="Screenshots embedded in the ticket description, in document "
+        "order. Each `label` (\"Image 1\") must match the [Image N] marker the "
+        "sender left in `question` where the image was. png/jpeg/gif/webp; max 6 "
+        "images, 5 MB each, 8 MB total. Defaults to empty, so a sender that does "
+        "not extract images is unaffected.",
+    )
 
     @field_validator("github_url", mode="before")
     @classmethod
@@ -75,6 +83,7 @@ class SupportTurnStatus(BaseModel):
     request_kind: str | None
     answer_status: str | None
     grounding_level: str | None
+    image_count: int = 0
     status: str
     error_message: str | None
     estimated_cost_usd: float | None

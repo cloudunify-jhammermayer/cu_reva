@@ -1,5 +1,46 @@
 # REVA — Work Handoff
 
+## Addendum 2026-08-12 — support answers can read the customer's screenshots
+
+**Status: REVA side implemented and deployed. The Odoo side is NOT built —
+that is tomorrow's work, and until it ships this feature does nothing.**
+
+- Spec: `docs/superpowers/specs/2026-08-10-support-answer-images-design.md`
+- REVA plan (done): `docs/superpowers/plans/2026-08-10-support-answer-images.md`
+- **Odoo handoff (start here): `docs/superpowers/plans/2026-08-12-support-answer-images-odoo.md`**
+
+**What prompted it.** Ticket 6891 arrived with two screenshots that *were* the
+question — a kit BOM showing 1.000,00 L of glycol inside a 1 Stück kit. REVA got
+only html2plaintext's `Image [1]` placeholders plus `/web/image/…` footnote URLs
+it cannot fetch, answered `partially_answered`, and asked which product was
+affected — which the first screenshot showed.
+
+**What shipped.** `POST /api/v1/support-request` takes `images: [{filename,
+label, content_base64}]`; `reva/image_attachment.py` gates them (extension
+decides the type, magic bytes verify it; 6 images / 5 MB each / 8 MB total);
+`ClaudeClient.review(images=…)` emits image content blocks laid out
+preamble → labelled images → prompt. The CLI escalation stages images as files
+via `--add-dir` for the already-allowed `Read` tool.
+
+**Two things to know.**
+
+1. **`ast-odoo is retired as of 2026-08-12.`** The Odoo half goes in
+   `../Cloudunify` only. Contracts (`contracts_version 3421e338…`) still need
+   copying into `Cloudunify/reva_contracts/` — that is step 0 of the Odoo plan.
+2. **Requeue drops images** (it rebuilds params from the DB, like `chatter` and
+   `attachment`). `support_turns.image_count` (migration 046) plus a
+   `requeue_lost_images` ops event and a TUI Img column make that visible. The
+   operator fix is re-pressing the Odoo button, not requeue.
+
+**Coverage, stated honestly.** `make test` green (scheduler 37, api 344, worker
+1566), ruff and the Go TUI clean. But every test mocks the Messages API and the
+Claude CLI, so green proves the *request shape*, not that the model reads a
+screenshot. Migration 046 is a single idempotent `ADD COLUMN IF NOT EXISTS`
+applied at startup; no Docker was available locally, so it was not exercised by
+`make test-integration` before deploy. The end-to-end check — re-send 6891 and
+confirm the answer names `[200028]` — is still outstanding and needs the Odoo
+side first.
+
 ## Addendum 2026-08-07 — docs site shows the repo-root `docs/` folder
 
 **Status: implemented** (spec

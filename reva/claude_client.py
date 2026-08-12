@@ -18,6 +18,44 @@ ANTHROPIC_VERSION = "2023-06-01"
 # Prompt caching is GA on the 2023-06-01 version; no beta header required.
 
 
+def _build_user_content(
+    user_prompt: str,
+    images: list[tuple[str, str, str]] | None,
+    images_preamble: str | None = None,
+) -> str | list[dict]:
+    """The user turn's content: a plain string when there are no images.
+
+    With images, the turn becomes a block list laid out images-FIRST, each
+    preceded by its label text block, with the prompt last. Two reasons for that
+    order: it is the documented best-performing layout for the Messages API, and
+    the labels are what let the model tie a block to the [Image N] marker its
+    sender left in the prompt text.
+
+    `images_preamble` is caller-authored text placed ahead of every image — the
+    hook callers use to frame untrusted image bytes before the model reads them.
+    Kept content-free here so the wording lives with the feature that needs it.
+
+    Caching is unaffected — images ride in the user turn, i.e. after the last
+    cache_control breakpoint, which lives in `system`. Image tokens are ordinary
+    input tokens, so usage/cost accounting needs no special case either.
+    """
+    if not images:
+        return user_prompt
+    blocks: list[dict] = []
+    if images_preamble:
+        blocks.append({"type": "text", "text": images_preamble})
+    for label, media_type, data in images:
+        blocks.append({"type": "text", "text": label})
+        blocks.append(
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": media_type, "data": data},
+            }
+        )
+    blocks.append({"type": "text", "text": user_prompt})
+    return blocks
+
+
 class ClaudeClient:
     BASE_URL = "https://api.anthropic.com/v1/messages"
 
@@ -45,6 +83,8 @@ class ClaudeClient:
         model: str | None = None,
         max_tokens: int = 8192,
         thinking: dict | None = None,
+        images: list[tuple[str, str, str]] | None = None,
+        images_preamble: str | None = None,
     ) -> ClaudeResponse:
         """Call the Claude Messages API and return a normalized response.
 
@@ -56,6 +96,11 @@ class ClaudeClient:
         can truncate mid-tool-call. Pass {"type": "disabled"} to spend the whole
         budget on the answer.
 
+        `images` is an optional list of (label, media_type, base64_data) — see
+        _build_user_content for the block layout. Omitting it (the default)
+        produces a body byte-identical to the string-content shape every other
+        caller relies on; a test pins that identity.
+
         Raises:
             TransientError: on 429 / 5xx / network errors (retryable).
             PermanentError: on 4xx other than 429, or malformed responses.
@@ -64,7 +109,12 @@ class ClaudeClient:
             "model": model or self.default_model,
             "max_tokens": max_tokens,
             "system": list(system_blocks),
-            "messages": [{"role": "user", "content": user_prompt}],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": _build_user_content(user_prompt, images, images_preamble),
+                }
+            ],
             "tools": tools,
             "tool_choice": tool_choice,
         }

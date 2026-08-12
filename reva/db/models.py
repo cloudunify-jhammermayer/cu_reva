@@ -1084,6 +1084,9 @@ class SupportTurn(Base):
     request_kind: Mapped[str | None] = mapped_column(Text)
     answer_status: Mapped[str | None] = mapped_column(Text)
     grounding_level: Mapped[str | None] = mapped_column(Text)
+    # Images submitted with the question (migration 046). The bytes are not
+    # stored, so this is what tells an operator a requeued turn answered blind.
+    image_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     error_message: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(Text)

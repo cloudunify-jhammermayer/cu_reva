@@ -576,6 +576,23 @@ class Attachment(BaseModel):
     content_base64: str
 
 
+class ImageAttachment(BaseModel):
+    """A raster image forwarded by Odoo — the screenshots embedded in a ticket's
+    description. Accepted types are .png / .jpg / .jpeg / .gif / .webp; the
+    filename extension is the authoritative gate and the bytes are verified
+    against it (see reva.image_attachment).
+
+    `label` is load-bearing, not decoration: it is the text block introducing
+    this image in the Claude call AND the marker Odoo left in `question` in its
+    place, so the two only line up if the sender keeps them in step. Pinned to
+    "Image <n>" — it sits outside the SECU-5 nonce fence. `filename` never
+    reaches the model."""
+
+    filename: str
+    label: str
+    content_base64: str
+
+
 class TicketJobParams(BaseModel):
     """Inputs handed to the ticket analysis RQ job."""
 
@@ -629,6 +646,11 @@ class SupportJobParams(BaseModel):
     persona_context: str | None = None
     chatter: list[ChatterEntry]
     attachment: Attachment | None = None  # optional .docx/.pdf/.txt/.md, folded into the prompt
+    # Screenshots from the ticket description, already gated by the api route.
+    # Like `attachment` and `chatter`, these are NOT replayed on requeue (the
+    # requeue path rebuilds params from the DB row) — support_turns.image_count
+    # plus a requeue ops event make that loss visible instead of silent.
+    images: list[ImageAttachment] = Field(default_factory=list)
 
 
 class SupportSource(BaseModel):

@@ -40,7 +40,12 @@ from reva.claude_code_runner import REVIEW_JOB_TIMEOUT
 from reva.db import writers
 from reva.db.engine import Database
 from reva.github_urls import parse_github_repo_url
-from reva.types import SupportJobParams
+from reva.image_attachment import (
+    MAX_IMAGES,
+    MAX_TOTAL_IMAGE_BYTES,
+    classify_image,
+)
+from reva.types import ImageAttachment, SupportJobParams
 
 router = APIRouter()
 create_router = APIRouter()  # instance-key gated
@@ -83,6 +88,43 @@ def _enqueue(request: Request, db: Database, turn_id: int, params: SupportJobPar
     return job.id
 
 
+def _assert_images_acceptable(images: list[ImageAttachment]) -> None:
+    """Accept-time image gate: count, per-image type/size, label shape, total
+    budget, and label uniqueness. 422 is the only error channel back to Odoo,
+    so every rejection names the offending image."""
+    if len(images) > MAX_IMAGES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"images: at most {MAX_IMAGES} images per request, got {len(images)}",
+        )
+    seen_labels: set[str] = set()
+    total = 0
+    for image in images:
+        try:
+            _, data = classify_image(image.filename, image.label, image.content_base64)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"images: {exc}",
+            ) from exc
+        # Duplicate labels would make two blocks indistinguishable to the model
+        # AND ambiguous against the [Image N] markers in the question text.
+        if image.label in seen_labels:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"images: duplicate label {image.label!r}",
+            )
+        seen_labels.add(image.label)
+        total += len(data)
+        if total > MAX_TOTAL_IMAGE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"images: total decoded size exceeds {MAX_TOTAL_IMAGE_BYTES} bytes"
+                ),
+            )
+
+
 def _is_stale_pending(row: dict) -> bool:
     created_at = row["created_at"]
     if created_at.tzinfo is None:  # SQLite returns naive datetimes
@@ -113,6 +155,7 @@ def submit_support_request(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"attachment: {exc}",
             ) from exc
+    _assert_images_acceptable(body.images)
     if body.github_url is not None and parse_github_repo_url(body.github_url) is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -138,7 +181,7 @@ def submit_support_request(
 
     try:
         turn_id = writers.record_support_turn_created(
-            db, thread_id, instance.id, body.question
+            db, thread_id, instance.id, body.question, image_count=len(body.images)
         )
     except IntegrityError:
         # Two concurrent POSTs raced past the dedup; the one-pending-turn index
@@ -165,6 +208,7 @@ def submit_support_request(
         persona_context=body.persona_context,
         chatter=body.chatter,
         attachment=body.attachment,
+        images=body.images,
     )
     job_id = _enqueue(request, db, turn_id, params)
     logger.info("support_request_enqueued", turn_id=turn_id, job_id=job_id)
@@ -230,6 +274,19 @@ def requeue_support_turn(
         github_url=thread["github_url"],
         chatter=[],
     )
+    # Images are not stored (they ride in the RQ payload, like `attachment`),
+    # so a requeue re-runs the turn blind. On a ticket whose screenshots ARE the
+    # question that is indistinguishable from a well-grounded answer — say so
+    # rather than letting it pass silently. Re-pressing the Odoo button is the
+    # fix; it resends the images on a fresh turn.
+    if row.get("image_count"):
+        writers.record_ops_event(
+            db, "support_answer", "warning", "requeue_lost_images",
+            {"turn_id": turn_id, "image_count": row["image_count"]},
+        )
+        logger.warning("support_turn_requeue_lost_images", turn_id=turn_id,
+                       image_count=row["image_count"])
+
     writers.reset_support_turn(db, turn_id)
     job_id = _enqueue(request, db, turn_id, params)
     logger.info("support_turn_requeued", turn_id=turn_id, job_id=job_id)

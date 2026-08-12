@@ -470,15 +470,19 @@ type SupportThreadDetail struct {
 // operationally the most important field: how well-grounded the drafted
 // answer was. Served by GET /api/v1/support-turn/{turn_id}.
 type SupportTurnDetail struct {
-	ID               int        `json:"id"`
-	ThreadID         int        `json:"thread_id"`
-	Seq              int        `json:"seq"`
-	JobID            *string    `json:"job_id"`
-	Question         string     `json:"question"`
-	AnswerHTML       *string    `json:"answer_html"`
-	RequestKind      *string    `json:"request_kind"`
-	AnswerStatus     *string    `json:"answer_status"`
-	GroundingLevel   *string    `json:"grounding_level"`
+	ID             int     `json:"id"`
+	ThreadID       int     `json:"thread_id"`
+	Seq            int     `json:"seq"`
+	JobID          *string `json:"job_id"`
+	Question       string  `json:"question"`
+	AnswerHTML     *string `json:"answer_html"`
+	RequestKind    *string `json:"request_kind"`
+	AnswerStatus   *string `json:"answer_status"`
+	GroundingLevel *string `json:"grounding_level"`
+	// ImageCount is how many screenshots the turn was submitted with. The bytes
+	// are not stored, so a requeued turn re-runs image-blind — this column is
+	// how an operator tells that apart from a genuinely well-grounded answer.
+	ImageCount       int        `json:"image_count"`
 	Status           string     `json:"status"`
 	ErrorMessage     *string    `json:"error_message"`
 	EstimatedCostUSD *float64   `json:"estimated_cost_usd"`

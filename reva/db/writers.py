@@ -2844,6 +2844,7 @@ _SUPPORT_TURN_FIELDS = (
     "answer_html", "result_structured", "request_kind", "answer_status",
     "grounding_level", "status", "error_message", "model", "estimated_cost_usd",
     "created_at", "completed_at", "callback_sent_at", "callback_error",
+    "image_count",
 )
 
 
@@ -2922,7 +2923,11 @@ def list_support_threads(db: Database, limit: int = 50) -> list[dict]:
 
 
 def record_support_turn_created(
-    db: Database, thread_id: int, odoo_instance_id: int | None, question: str
+    db: Database,
+    thread_id: int,
+    odoo_instance_id: int | None,
+    question: str,
+    image_count: int = 0,
 ) -> int:
     """Open a pending turn, assigning the next seq in the thread."""
     with db.session() as s:
@@ -2936,6 +2941,7 @@ def record_support_turn_created(
             odoo_instance_id=odoo_instance_id,
             seq=highest + 1,
             question=question,
+            image_count=image_count,
         )
         s.add(row)
         s.flush()
