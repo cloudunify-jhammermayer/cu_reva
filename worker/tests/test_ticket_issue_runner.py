@@ -210,14 +210,27 @@ class FakeOdoo:
 # --- Helpers -----------------------------------------------------------------
 
 
+def _item(**overrides) -> TicketIssueItem:
+    """A complete plan item — one that clears the runner's degenerate-plan
+    guard. Tests override only the field they are actually about."""
+    return TicketIssueItem(
+        **{
+            "title": "Issue",
+            "body": "Body",
+            "acceptance_criteria": ["criterion"],
+            "estimate_hours": 1.5,
+            **overrides,
+        }
+    )
+
+
 def _plan(n: int = 2) -> TicketIssuePlan:
     return TicketIssuePlan(
         issues=[
-            TicketIssueItem(
+            _item(
                 title=f"Issue {i}",
                 body=f"Body {i}",
                 acceptance_criteria=[f"criterion {i}"],
-                estimate_hours=1.5,
             )
             for i in range(1, n + 1)
         ]
@@ -321,7 +334,10 @@ def test_created_callback_carries_estimates_and_total(ctx_and_fakes):
     assert call["total_estimate_hours"] == round(1.5 * len(call["issues"]), 2)
 
 
-def test_placeholder_plan_copies_ticket_into_issue_body(ctx_and_fakes):
+def test_placeholder_plan_is_rejected_instead_of_creating_an_issue(ctx_and_fakes):
+    """A schema-valid but empty plan must never reach GitHub: it used to ship an
+    issue whose body was the raw ticket text and whose estimate was 0, with the
+    run reporting 'completed'."""
     s = ctx_and_fakes
     s["planner"].plan = TicketIssuePlan(issues=[
         TicketIssueItem(title="placeholder", body="placeholder")
@@ -330,16 +346,104 @@ def test_placeholder_plan_copies_ticket_into_issue_body(ctx_and_fakes):
         s["db"],
         name="test",
         description="Customer says the approval button is missing on project tasks.",
-        analysis_html="<h2>Summary</h2><p>Need an approval action.</p>",
     )
 
+    with pytest.raises(TransientError, match="came back empty"):
+        run_ticket_issues(params)
+
+    assert s["github"].created == []
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["status"] == "failed"
+    assert row["issues"] is None          # nothing persisted -> a retry re-plans
+    assert s["odoo"].calls[0]["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    ("item", "defect"),
+    [
+        (
+            {"title": "Add approval", "body": "", "acceptance_criteria": ["ok"],
+             "estimate_hours": 1.5},
+            "empty body",
+        ),
+        (
+            {"title": "Add approval", "body": "**What:** ...",
+             "acceptance_criteria": ["ok"], "estimate_hours": 0.0},
+            "estimate_hours=0.0",
+        ),
+        (
+            {"title": "Add approval", "body": "**What:** ...",
+             "acceptance_criteria": ["placeholder"], "estimate_hours": 1.5},
+            "no acceptance criteria",
+        ),
+        (
+            {"title": "Add approval", "body": "**What:** ...",
+             "acceptance_criteria": [], "estimate_hours": 1.5},
+            "no acceptance criteria",
+        ),
+    ],
+)
+def test_each_degenerate_field_is_rejected_and_ops_evented(ctx_and_fakes, item, defect):
+    s = ctx_and_fakes
+    s["planner"].plan = TicketIssuePlan(issues=[TicketIssueItem(**item)])
+    params = _make_params(s["db"])
+
+    with pytest.raises(TransientError):
+        run_ticket_issues(params)
+
+    events = _ops_events(s["db"])
+    assert [e for e in events if e[1] == "plan_degenerate"], events
+    detail = next(e[2] for e in events if e[1] == "plan_degenerate")
+    assert any(defect in d for d in detail["defects"]), detail
+    assert detail["run_id"] == params["run_id"]
+    assert s["github"].created == []
+
+
+def test_degenerate_plan_records_the_rejected_call_s_spend(ctx_and_fakes):
+    """The call was paid for even though its plan is discarded; record_ticket_
+    issue_plan (which normally books it) is never reached."""
+    from reva.db.models import ClaudeSpend
+
+    s = ctx_and_fakes
+    s["planner"].plan = TicketIssuePlan(issues=[
+        TicketIssueItem(title="Add approval", body="", estimate_hours=1.5)
+    ])
+
+    with pytest.raises(TransientError):
+        run_ticket_issues(_make_params(s["db"]))
+
+    with s["db"].session() as session:
+        rows = session.query(ClaudeSpend).all()
+        assert [r.kind for r in rows] == ["ticket_issues"]
+        assert float(rows[0].cost_usd) > 0
+
+
+def test_degenerate_plan_replans_on_the_rq_retry(ctx_and_fakes, monkeypatch):
+    """Nothing is persisted on rejection, so the rerun plans afresh rather than
+    resuming the empty plan — which is the whole point of failing transient."""
+
+    class _Job:
+        retries_left = 2
+
+    monkeypatch.setattr("worker.ticket_issue_runner.get_current_job", lambda: _Job())
+    s = ctx_and_fakes
+    s["planner"].plan = TicketIssuePlan(issues=[
+        TicketIssueItem(title="Add approval", body="", estimate_hours=0.0)
+    ])
+    params = _make_params(s["db"])
+
+    with pytest.raises(TransientError):
+        run_ticket_issues(params)
+
+    assert writers.get_ticket_issue_run(s["db"], params["run_id"])["status"] == "pending"
+    assert s["odoo"].calls == []
+
+    s["planner"].plan = _plan(1)
     run_ticket_issues(params)
 
-    child = s["github"].created[0]
-    assert child["title"] == "[DEV] 123 - test"
-    assert "placeholder" not in child["body"].lower()
-    assert "Customer says the approval button is missing" in child["body"]
-    assert "Need an approval action" in child["body"]
+    assert s["planner"].call_count == 2
+    assert s["odoo"].calls[-1]["status"] == "created"
+    assert s["odoo"].calls[-1]["total_estimate_hours"] == 1.5
 
 
 def test_github_username_assigns_created_issues(ctx_and_fakes):
@@ -496,7 +600,7 @@ def test_second_run_attaches_to_existing_epic_and_sends_union(ctx_and_fakes):
     assert parent_number == 101
 
     s["planner"].plan = TicketIssuePlan(issues=[
-        TicketIssueItem(title="Adjust layout", body="B", type="CR")])
+        _item(title="Adjust layout", body="B", type="CR")])
     params2 = _make_params(s["db"], issue_type="CR", description="Change the layout")
     run_ticket_issues(params2)
 
@@ -514,7 +618,7 @@ def test_second_run_attaches_to_existing_epic_and_sends_union(ctx_and_fakes):
 def test_single_issue_without_epic_creates_no_parent(ctx_and_fakes):
     s = ctx_and_fakes
     s["planner"].plan = TicketIssuePlan(issues=[
-        TicketIssueItem(title="One thing", body="B")])
+        _item(title="One thing", body="B")])
     params = _make_params(s["db"])
     run_ticket_issues(params)
     assert len(s["github"].created) == 1
@@ -527,7 +631,7 @@ def test_state_sync_sends_union_snapshot(ctx_and_fakes):
     params1 = _make_params(s["db"])
     run_ticket_issues(params1)                       # issues 102, 103
     s["planner"].plan = TicketIssuePlan(issues=[
-        TicketIssueItem(title="Adjust layout", body="B", type="CR")])
+        _item(title="Adjust layout", body="B", type="CR")])
     params2 = _make_params(s["db"], issue_type="CR", description="Change the layout")
     run_ticket_issues(params2)                       # issue 104
     s["odoo"].calls.clear()
@@ -566,7 +670,7 @@ def test_resume_reattaches_only_unattached_children(ctx_and_fakes):
 
 def test_typed_single_issue_title_and_labels(ctx_and_fakes):
     s = ctx_and_fakes
-    s["planner"].plan = TicketIssuePlan(issues=[TicketIssueItem(
+    s["planner"].plan = TicketIssuePlan(issues=[_item(
         title="Adjust delivery slip layout that is way too long for a title",
         body="B", type="FEAT")])
     params = _make_params(s["db"], issue_type="CR", description="Change the layout")
@@ -585,9 +689,9 @@ def test_typed_single_issue_title_and_labels(ctx_and_fakes):
 def test_mixed_types_title_sequence_and_dominant_parent(ctx_and_fakes):
     s = ctx_and_fakes
     s["planner"].plan = TicketIssuePlan(issues=[
-        TicketIssueItem(title="Add report", body="B", type="FEAT"),
-        TicketIssueItem(title="Refactor flow", body="B", type="DEV"),
-        TicketIssueItem(title="Add second report", body="B", type="FEAT"),
+        _item(title="Add report", body="B", type="FEAT"),
+        _item(title="Refactor flow", body="B", type="DEV"),
+        _item(title="Add second report", body="B", type="FEAT"),
     ])
     params = _make_params(s["db"])
 
@@ -609,10 +713,10 @@ def test_builds_on_reorders_dependencies_first_and_renders_line(ctx_and_fakes):
     the Builds-on line itself with the real total."""
     s = ctx_and_fakes
     s["planner"].plan = TicketIssuePlan(issues=[
-        TicketIssueItem(title="Cascading fields", body="Body A"),
-        TicketIssueItem(title="Entitlement field", body="Body B", builds_on=[1, 3]),
-        TicketIssueItem(title="Settings fields", body="Body C"),
-        TicketIssueItem(title="Serial column", body="Body D", builds_on=[1]),
+        _item(title="Cascading fields", body="Body A"),
+        _item(title="Entitlement field", body="Body B", builds_on=[1, 3]),
+        _item(title="Settings fields", body="Body C"),
+        _item(title="Serial column", body="Body D", builds_on=[1]),
     ])
     params = _make_params(s["db"])
 
@@ -636,8 +740,8 @@ def test_builds_on_invalid_refs_are_dropped(ctx_and_fakes):
     no Builds-on line appears, the run completes."""
     s = ctx_and_fakes
     s["planner"].plan = TicketIssuePlan(issues=[
-        TicketIssueItem(title="Issue 1", body="Body 1"),
-        TicketIssueItem(title="Issue 2", body="Body 2", builds_on=[0, 2, 5]),
+        _item(title="Issue 1", body="Body 1"),
+        _item(title="Issue 2", body="Body 2", builds_on=[0, 2, 5]),
     ])
     params = _make_params(s["db"])
 
@@ -656,8 +760,8 @@ def test_builds_on_cycle_never_fails_and_renders_only_backward_refs(ctx_and_fake
     every rendered reference points to an earlier issue."""
     s = ctx_and_fakes
     s["planner"].plan = TicketIssuePlan(issues=[
-        TicketIssueItem(title="Issue 1", body="Body 1", builds_on=[2]),
-        TicketIssueItem(title="Issue 2", body="Body 2", builds_on=[1]),
+        _item(title="Issue 1", body="Body 1", builds_on=[2]),
+        _item(title="Issue 2", body="Body 2", builds_on=[1]),
     ])
     params = _make_params(s["db"])
 
@@ -1589,7 +1693,7 @@ def golden_file(ctx_and_fakes, tmp_path):
 def test_issue_plan_keeps_a_valid_anchor_ref(ctx_and_fakes, golden_file):
     s = ctx_and_fakes
     s["planner"].plan = TicketIssuePlan(issues=[
-        TicketIssueItem(
+        _item(
             title="Issue 1", body="Body 1", estimate_hours=1.5,
             anchor_ref="bom-copies#bom-copy-mechanism",
             complexity_drivers=["new_model"],
@@ -1607,7 +1711,7 @@ def test_issue_plan_keeps_a_valid_anchor_ref(ctx_and_fakes, golden_file):
 def test_issue_plan_nulls_a_hallucinated_anchor_and_ops_events(ctx_and_fakes, golden_file):
     s = ctx_and_fakes
     s["planner"].plan = TicketIssuePlan(issues=[
-        TicketIssueItem(title="Issue 1", body="Body 1", anchor_ref="ghost#story"),
+        _item(title="Issue 1", body="Body 1", anchor_ref="ghost#story"),
     ])
     params = _make_params(s["db"])
 
@@ -1624,7 +1728,7 @@ def test_github_issue_body_never_carries_the_anchor(ctx_and_fakes, golden_file):
     a posted GitHub issue body."""
     s = ctx_and_fakes
     s["planner"].plan = TicketIssuePlan(issues=[
-        TicketIssueItem(
+        _item(
             title="Issue 1", body="Body 1", estimate_hours=1.5,
             anchor_ref="bom-copies#bom-copy-mechanism",
             complexity_drivers=["new_model"],

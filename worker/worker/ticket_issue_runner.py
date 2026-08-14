@@ -32,6 +32,7 @@ from collections import Counter
 import structlog
 from rq import get_current_job
 
+from reva.cost import estimate_cost
 from reva.db import writers
 from reva.errors import PermanentError, TransientError
 from reva.github_urls import parse_github_project_url, parse_github_repo_url
@@ -243,6 +244,84 @@ def _is_placeholder(value: object) -> bool:
     return normalized in _PLACEHOLDER_VALUES
 
 
+def _plan_defects(plan) -> list[str]:
+    """Semantic emptiness the tool schema cannot catch, as one string per issue.
+
+    `strict: true` makes every issue field required (see ticket_issue_tool.py),
+    so a plan validates while carrying a blank body, no acceptance criteria and
+    a 0 estimate. Downstream nothing can recover from that, and nothing
+    complains either: `_normalize_planned_issue` swaps the ticket's own raw
+    (often German) text in for the missing body, an empty criteria list renders
+    no section, and a 0 estimate is falsy — the board's Estimate field is
+    skipped and Odoo's `total_estimate_hours` goes out as None. So the run
+    reports "completed" over an issue no freelancer can work from. Replaying
+    the same input yields a full plan, so the answer is a re-plan, not a
+    repair — see `_reject_degenerate_plan`.
+    """
+    defects: list[str] = []
+    for position, item in enumerate(plan.issues, start=1):
+        where = f"issue {position}"
+        if _is_placeholder(item.title):
+            defects.append(f"{where}: empty title")
+        if _is_placeholder(item.body):
+            defects.append(f"{where}: empty body")
+        # Filter placeholders, not just emptiness: a degenerate plan has been
+        # seen returning the literal ["placeholder"].
+        if not [c for c in item.acceptance_criteria if not _is_placeholder(c)]:
+            defects.append(f"{where}: no acceptance criteria")
+        if not item.estimate_hours or item.estimate_hours <= 0:
+            defects.append(f"{where}: estimate_hours={item.estimate_hours!r}")
+    return defects
+
+
+def _reject_degenerate_plan(ctx, params: TicketIssueJobParams, plan, response, log) -> None:
+    """Ops-event and re-plan a semantically empty plan (see `_plan_defects`).
+
+    TransientError, not Permanent: this is sampling flakiness, so the job rides
+    the RQ retries and re-plans from scratch — nothing is persisted yet, so
+    there is no plan for the rerun to resume. Only the final attempt fails the
+    run and sends the failed callback, which still beats reporting success over
+    a placeholder issue and a null estimate.
+
+    The rejected call was paid for, so its spend goes on the ledger here:
+    `record_ticket_issue_plan` normally carries that and is never reached.
+    """
+    defects = _plan_defects(plan)
+    if not defects:
+        return
+    writers.record_claude_spend(
+        ctx.db,
+        "ticket_issues",
+        estimate_cost(
+            model=response.model,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cache_read_tokens=response.cache_read_tokens,
+            cache_write_tokens=response.cache_creation_tokens,
+        ),
+    )
+    log.warning(
+        "ticket_issues_plan_degenerate",
+        defects=defects,
+        output_tokens=response.output_tokens,
+    )
+    writers.record_ops_event(
+        ctx.db,
+        "ticket_issues",
+        "warning",
+        "plan_degenerate",
+        {
+            "run_id": params.run_id,
+            "ticket_id": params.ticket_id,
+            "output_tokens": response.output_tokens,
+            "defects": defects[:10],
+        },
+    )
+    raise TransientError(
+        f"ticket issue plan came back empty ({'; '.join(defects[:5])})"
+    )
+
+
 def _fallback_issue_title(params: TicketIssueJobParams) -> str:
     title = params.name.strip()
     return title if title and not _is_placeholder(title) else "Clarify ticket requirements"
@@ -322,7 +401,13 @@ def _builds_on_line(deps: list[int], total: int) -> str:
 
 
 def _normalize_planned_issue(item, params: TicketIssueJobParams) -> dict:
-    """Never let an empty/placeholder Claude plan create an empty GitHub issue."""
+    """Never let an empty/placeholder Claude plan create an empty GitHub issue.
+
+    The title/body substitution below is now a backstop only: every fresh plan
+    passes through `_reject_degenerate_plan` first, which re-plans rather than
+    papering over the gap — pasting the ticket's raw text into an issue body was
+    how wenatex_odoo#26 shipped untranslated and unworkable.
+    """
     title = item.title
     body = item.body
     if _is_placeholder(title):
@@ -925,6 +1010,12 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
                 getattr(ctx.ticket_issue_planner, "last_golden_degradations", []),
                 params.run_id,
             )
+            # Before anything reads the plan: a schema-valid but empty plan is
+            # re-planned, never patched over (CORR — a degraded plan must not
+            # be indistinguishable from a good one). Placed after the
+            # calibration degradations so a broken golden file is still
+            # reported on an attempt that throws.
+            _reject_degenerate_plan(ctx, params, plan, response, log)
             # load()'s degradations are NOT recorded here: they were already
             # recorded upstream by last_golden_degradations just above, which
             # TicketIssuePlanner._build_system populates via calibration_block()
