@@ -20,15 +20,16 @@
 | `support_turns.image_count` + requeue ops event + TUI column | ✅ deployed |
 | Skill prompt tells the model to read images | ✅ deployed (prompts v2.20) |
 | **Odoo extracts and sends the images** | ❌ **this document** |
-| Contracts copied into `Cloudunify/reva_contracts/` | ❌ do this first |
+| Contracts copied into `Cloudunify/reva_contracts/` | ✅ done 2026-08-20 (`8f7c2d31d57f…`, supersedes `3421e338…`) |
 
-## Step 0 — sync the contract
+## Step 0 — sync the contract — ✅ DONE 2026-08-20
 
-`contracts/inbound/support-request.{schema,sample}.json` and
-`contracts/manifest.json` in this repo are regenerated (contracts_version
-`3421e338…`) and include `images` + the `ImageAttachment` definition. Copy them
-into `Cloudunify/reva_contracts/inbound/` and bump whatever hash pin the
-Cloudunify contract test uses. **Cloudunify only.**
+`Cloudunify/reva_contracts/` is synced to contracts_version `8f7c2d31d57f…`
+(which supersedes the `3421e338…` this plan was written against) and the pin in
+`cu_reva_connector/tests/test_contracts.py` is bumped. `images` and the
+`ImageAttachment` definition are in place on the Odoo side; the array is
+optional and top-level `required` is unchanged, so nothing there sends them yet.
+Start at "The contract you are filling in".
 
 ## The contract you are filling in
 

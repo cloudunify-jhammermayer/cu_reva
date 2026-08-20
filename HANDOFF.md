@@ -22,10 +22,17 @@ until REVA catches up.
   staleness guard has always enforced a non-zero `analysis_id`, but REVA never
   sent one, so that guard was dead code and the analysis path had the identical
   race.
-- **Owed:** `scripts/sync_contracts.sh <odoo-repo>` into
-  `Cloudunify/reva_contracts/` and a `contracts_version` bump in
-  `cu_reva_connector/tests/test_contracts.py`. New version:
-  `8f7c2d31d57f…`. Nothing is deployed yet.
+- **Contracts synced 2026-08-20** into `Cloudunify/reva_contracts/`, pin bumped
+  to `8f7c2d31d57f…`, 834 Odoo tests green. The new `analysis_id: 456` in
+  `tickets.write-field.sample.json` correctly 409'd an Odoo fixture — the
+  staleness guard firing for the first time; the fixture's `reva_analysis_id`
+  was set to match rather than the field stripped. **Neither side is deployed
+  yet.**
+- **Odoo still owes the support half of the guard:** REVA sends `turn_id`, but
+  `WriteFieldRequest` does not declare it, so Pydantic drops it. Accept it and
+  compare against `reva_support_turn_id`. Confirmed for them: the `202` from
+  `POST /api/v1/support-request` returns `turn_id` (`SupportRequestCreated`) and
+  Odoo already stores it in both submit paths, so the stored id is never 0.
 
 **Request 1 (issue reassignment): SPECCED, not implemented.** Spec:
 `docs/superpowers/specs/2026-08-20-issue-reassignment-design.md`. An override
