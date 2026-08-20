@@ -133,13 +133,14 @@ class FakeOdoo:
 
     def write_field(self, ticket_id, model_name, field_name, html,
                     answer_status="", confidence="", request_kind="",
-                    sources_html=""):
+                    sources_html="", turn_id=0, analysis_id=0):
         if self.raise_exc:
             raise self.raise_exc
         self.written.append({"ticket_id": ticket_id, "field_name": field_name,
                              "html": html, "answer_status": answer_status,
                              "confidence": confidence, "request_kind": request_kind,
-                             "sources_html": sources_html})
+                             "sources_html": sources_html, "turn_id": turn_id,
+                             "analysis_id": analysis_id})
 
 
 @pytest.fixture()
@@ -238,6 +239,15 @@ def test_docs_path_answers_and_delivers(env):
     assert row["grounding_level"] == "docs"
     assert row["answer_status"] == "answered"
     assert row["callback_sent_at"] is not None
+
+
+def test_callback_carries_the_turn_id(env):
+    # Odoo's staleness guard: without the id it cannot tell a superseded turn's
+    # callback from the live one, and the older answer overwrites the newer.
+    run_support_answer(_params(env))
+    assert env.odoo.written[0]["turn_id"] == env.turn_id
+    # The support leg never sends the analysis leg's id.
+    assert env.odoo.written[0]["analysis_id"] == 0
 
 
 def test_persona_block_is_passed_to_the_answerer(env):

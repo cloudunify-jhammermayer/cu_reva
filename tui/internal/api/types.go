@@ -479,6 +479,9 @@ type SupportTurnDetail struct {
 	RequestKind    *string `json:"request_kind"`
 	AnswerStatus   *string `json:"answer_status"`
 	GroundingLevel *string `json:"grounding_level"`
+	// Confidence is the model's own high/medium/low read on the draft, derived
+	// server-side from the turn's structured result. Nil until it completes.
+	Confidence *string `json:"confidence"`
 	// ImageCount is how many screenshots the turn was submitted with. The bytes
 	// are not stored, so a requeued turn re-runs image-blind — this column is
 	// how an operator tells that apart from a genuinely well-grounded answer.

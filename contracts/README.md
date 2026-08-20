@@ -11,5 +11,6 @@ python -m reva.odoo_contracts generate
 ```
 
 The worker test suite fails when this directory is stale. Sync into the
-ast-odoo repo with `scripts/sync_contracts.sh <ast-odoo-path>`; the manifest's
+consuming Odoo repo — `Cloudunify/` since ast-odoo was retired on 2026-08-12 —
+with `scripts/sync_contracts.sh <odoo-repo-path>`; the manifest's
 `contracts_version` is the freshness pin the addon tests assert against.

@@ -201,6 +201,7 @@ def run_support_answer(job_params: dict) -> dict:
             sources_html=format_support_sources_html(
                 SupportAnswerResult.model_validate(structured)
             ) if structured else "",
+            turn_id=params.turn_id,
         )
     except (PermanentError, TransientError) as exc:
         # The turn is already completed; record the delivery failure so the TUI

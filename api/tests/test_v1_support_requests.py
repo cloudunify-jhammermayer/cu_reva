@@ -397,3 +397,90 @@ def test_requeue_without_images_records_no_such_event(client_db_queue):
     events = client.get("/api/v1/ops-events", headers=headers).json()
     names = [e["event"] for e in events.get("items", events)]
     assert "requeue_lost_images" not in names
+
+
+# --- run status for Odoo's Check REVA ------------------------------------------
+# Odoo diagnoses a stuck support turn through this endpoint the way it already
+# does for /ticket-analysis/{id} and /create-issues/{id}. It needs the two
+# values that otherwise exist only inside result_structured or only in the
+# write-field callback.
+
+
+def _complete(db, turn_id: int) -> None:
+    from reva.types import ClaudeResponse
+
+    writers.record_support_turn_completed(
+        db,
+        turn_id,
+        answer_html="<p>Weil der Beleg gesperrt ist.</p>",
+        response=ClaudeResponse(
+            text="", model="claude-sonnet-5", input_tokens=10, output_tokens=20
+        ),
+        result_structured={
+            "request_kind": "question",
+            "answer_status": "answered",
+            "language": "de",
+            "confidence": "high",
+            "sources": [
+                {"kind": "repo_code", "ref": "account/models/account_move.py",
+                 "title": "account.move"},
+            ],
+        },
+        request_kind="question",
+        answer_status="answered",
+        grounding_level="docs",
+    )
+
+
+def test_turn_status_exposes_confidence(client_db_queue):
+    client, db, _, headers = client_db_queue
+    turn_id = _post(client, headers).json()["turn_id"]
+    _complete(db, turn_id)
+
+    body = client.get(f"/api/v1/support-turn/{turn_id}", headers=headers).json()
+    assert body["confidence"] == "high"
+
+
+def test_turn_status_exposes_rendered_sources(client_db_queue):
+    client, db, _, headers = client_db_queue
+    turn_id = _post(client, headers).json()["turn_id"]
+    _complete(db, turn_id)
+
+    body = client.get(f"/api/v1/support-turn/{turn_id}", headers=headers).json()
+    assert "account.move" in body["sources_html"]
+
+
+def test_pending_turn_has_no_confidence_or_sources(client_db_queue):
+    """A turn that has not answered yet must not invent either value — Odoo
+    renders them straight into the consultant's tab."""
+    client, _, _, headers = client_db_queue
+    turn_id = _post(client, headers).json()["turn_id"]
+
+    body = client.get(f"/api/v1/support-turn/{turn_id}", headers=headers).json()
+    assert body["confidence"] is None
+    assert body["sources_html"] == ""
+
+
+def test_unreadable_structured_result_degrades_visibly(client_db_queue):
+    """The thread drill-down fans over every historical turn, so one row whose
+    stored shape no longer validates must not 500 the whole view — but a
+    silently sourceless answer is exactly the degradation the ops log exists
+    for."""
+    from reva.db.models import OpsEvent
+    from reva.types import ClaudeResponse
+
+    client, db, _, headers = client_db_queue
+    turn_id = _post(client, headers).json()["turn_id"]
+    writers.record_support_turn_completed(
+        db, turn_id, answer_html="<p>x</p>",
+        response=ClaudeResponse(text="", model="m", input_tokens=1, output_tokens=1),
+        result_structured={"request_kind": "not-a-kind"},
+        request_kind="question", answer_status="answered", grounding_level="docs",
+    )
+
+    body = client.get(f"/api/v1/support-turn/{turn_id}", headers=headers).json()
+    assert body["confidence"] is None
+    assert body["sources_html"] == ""
+
+    with db.session() as s:
+        assert [e.event for e in s.query(OpsEvent).all()] == ["structured_unreadable"]

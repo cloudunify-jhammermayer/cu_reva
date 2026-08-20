@@ -344,6 +344,7 @@ def run_ticket_analysis(job_params: dict) -> dict:
             model_name=params.model_name,
             field_name=params.field_name,
             html=html,
+            analysis_id=params.analysis_id,
         )
     except (PermanentError, TransientError) as exc:
         # DB row is already completed; record the delivery failure (so the tab

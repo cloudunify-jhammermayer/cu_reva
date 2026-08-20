@@ -1,7 +1,10 @@
 """Support-answer endpoints.
 
 POST /api/v1/support-request            — ask REVA a question (fire-and-forget)
-GET  /api/v1/support-turn/{turn_id}     — poll for status / result
+GET  /api/v1/support-turn/{turn_id}     — poll for status / result (Odoo's
+                                          Check REVA diagnoses a stuck turn
+                                          here, as it does for the analysis and
+                                          create-issues run-status endpoints)
 POST /api/v1/support-turn/{turn_id}/requeue
 GET  /api/v1/support-threads            — dashboard list (master key)
 GET  /api/v1/support-threads/{thread_id} — thread + its turns (drill-down)
@@ -18,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from rq import Retry
+from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 
 from app.dependencies import (
@@ -45,7 +49,8 @@ from reva.image_attachment import (
     MAX_TOTAL_IMAGE_BYTES,
     classify_image,
 )
-from reva.types import ImageAttachment, SupportJobParams
+from reva.support_formatter import format_support_sources_html
+from reva.types import ImageAttachment, SupportAnswerResult, SupportJobParams
 
 router = APIRouter()
 create_router = APIRouter()  # instance-key gated
@@ -123,6 +128,39 @@ def _assert_images_acceptable(images: list[ImageAttachment]) -> None:
                     f"images: total decoded size exceeds {MAX_TOTAL_IMAGE_BYTES} bytes"
                 ),
             )
+
+
+def _with_derived(db: Database, row: dict) -> dict:
+    """Add the two response fields that live inside `result_structured`.
+
+    `confidence` and the rendered source list are what the write-field callback
+    delivers alongside the HTML; a caller diagnosing a turn through this
+    endpoint needs the same values, and re-deriving the rendering on the Odoo
+    side would fork the formatter. A turn that has not answered keeps the
+    schema defaults (None / "") — never an invented "medium".
+    """
+    structured = row.get("result_structured")
+    if not structured:
+        return row
+    try:
+        result = SupportAnswerResult.model_validate(structured)
+    except ValidationError as exc:
+        # A row whose stored shape no longer validates must still be readable:
+        # the thread drill-down fans over every historical turn, so raising
+        # here would take out the whole view over one bad row. Degrading
+        # silently is the other failure — an answer that simply shows no
+        # sources looks like an answer that had none.
+        logger.warning("support_turn_structured_unreadable", turn_id=row.get("id"))
+        writers.record_ops_event(
+            db, "support_answer", "warning", "structured_unreadable",
+            {"turn_id": row.get("id"), "error": str(exc)[:300]},
+        )
+        return row
+    return {
+        **row,
+        "confidence": result.confidence,
+        "sources_html": format_support_sources_html(result),
+    }
 
 
 def _is_stale_pending(row: dict) -> bool:
@@ -228,7 +266,7 @@ def get_support_turn(
     # so ids aren't probeable.
     if row is None or (instance is not None and row["odoo_instance_id"] != instance.id):
         raise HTTPException(status_code=404, detail="Support turn not found")
-    return row
+    return _with_derived(db, row)
 
 
 @shared_router.post(
@@ -317,4 +355,9 @@ def get_support_thread(thread_id: int, db: Database = Depends(get_db)) -> dict:
     thread = writers.get_support_thread(db, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Support thread not found")
-    return {**thread, "turns": writers.list_support_turns(db, thread_id)}
+    return {
+        **thread,
+        "turns": [
+            _with_derived(db, t) for t in writers.list_support_turns(db, thread_id)
+        ],
+    }

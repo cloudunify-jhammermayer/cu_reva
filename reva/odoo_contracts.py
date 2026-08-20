@@ -33,6 +33,13 @@ class WriteFieldPayload(BaseModel):
     request_kind: str = ""
     # Rendered <ul> of the grounding REVA cited; "" when there was none.
     sources_html: str = ""
+    # Correlation ids for Odoo's staleness guard — one per leg, whichever
+    # produced this callback: `turn_id` on the support leg, `analysis_id` on
+    # the analysis leg. 0 means "not sent": Odoo only enforces a non-zero id,
+    # so a REVA that omits one keeps working, and neither leg can reject the
+    # other's callback by matching a foreign id against its own stored value.
+    turn_id: int = 0
+    analysis_id: int = 0
 
 
 class ResetStatusPayload(BaseModel):
@@ -216,7 +223,21 @@ CONTRACTS: list[Contract] = [
             "model_name": "helpdesk.ticket",
             "field_name": "x_reva_analysis",
             "html": "<h2>Summary</h2>",
+            "analysis_id": 456,
         },
+        # The support leg of the same endpoint: its own correlation id, the
+        # metadata split out of the HTML, and analysis_id left at 0.
+        extra_samples=[{
+            "ticket_id": 123,
+            "model_name": "project.task",
+            "field_name": "reva_support_answer",
+            "html": "<p>Der Rechnungslauf …</p>",
+            "answer_status": "answered",
+            "confidence": "high",
+            "request_kind": "question",
+            "sources_html": "<ul><li>account/models/account_move.py</li></ul>",
+            "turn_id": 987,
+        }],
     ),
     Contract(
         name="tickets.reset-status",

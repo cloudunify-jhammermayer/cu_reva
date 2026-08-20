@@ -35,6 +35,9 @@ def test_write_field_wire_shape():
         "confidence": "",
         "request_kind": "",
         "sources_html": "",
+        # Correlation ids; 0 = "not sent" (Odoo only enforces a non-zero id).
+        "turn_id": 0,
+        "analysis_id": 0,
     }
 
 

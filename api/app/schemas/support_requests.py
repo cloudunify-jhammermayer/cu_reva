@@ -83,6 +83,12 @@ class SupportTurnStatus(BaseModel):
     request_kind: str | None
     answer_status: str | None
     grounding_level: str | None
+    # Derived from result_structured rather than stored: Odoo's Check REVA
+    # diagnoses a turn through this endpoint and needs the same two values the
+    # write-field callback delivers, without re-deriving the rendering itself.
+    # Null/"" while the turn has not answered — never a made-up default.
+    confidence: str | None = None
+    sources_html: str = ""
     image_count: int = 0
     status: str
     error_message: str | None

@@ -1,5 +1,10 @@
 {
   "properties": {
+    "analysis_id": {
+      "default": 0,
+      "title": "Analysis Id",
+      "type": "integer"
+    },
     "answer_status": {
       "default": "",
       "title": "Answer Status",
@@ -34,6 +39,11 @@
     },
     "ticket_id": {
       "title": "Ticket Id",
+      "type": "integer"
+    },
+    "turn_id": {
+      "default": 0,
+      "title": "Turn Id",
       "type": "integer"
     }
   },

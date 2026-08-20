@@ -454,3 +454,48 @@ def test_change_summary_disabled_client_permanent():
         OdooCallbackClient(callback_url="", api_key="").change_summary(
             ticket_id=1, model_name="project.task", notes=[],
         )
+
+
+# --- Correlation ids on write-field --------------------------------------------
+# Odoo's staleness guard rejects a callback whose id no longer matches the one
+# the record stored at submit time. Both legs carry their own id: the support
+# leg `turn_id`, the analysis leg `analysis_id`.
+
+
+def test_write_field_carries_turn_id(monkeypatch):
+    captured: dict = {}
+
+    def post(url, *, json, **kwargs):
+        captured["body"] = json
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    _client().write_field(**_kwargs(), turn_id=987)
+    assert captured["body"]["turn_id"] == 987
+
+
+def test_write_field_carries_analysis_id(monkeypatch):
+    captured: dict = {}
+
+    def post(url, *, json, **kwargs):
+        captured["body"] = json
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    _client().write_field(**_kwargs(), analysis_id=456)
+    assert captured["body"]["analysis_id"] == 456
+
+
+def test_write_field_correlation_ids_default_to_zero(monkeypatch):
+    # 0 = "not sent" on the Odoo side: its guard is `if body.analysis_id and
+    # ... != stored`, so a zero never rejects. Callers that have no id omit it.
+    captured: dict = {}
+
+    def post(url, *, json, **kwargs):
+        captured["body"] = json
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    _client().write_field(**_kwargs())
+    assert captured["body"]["turn_id"] == 0
+    assert captured["body"]["analysis_id"] == 0

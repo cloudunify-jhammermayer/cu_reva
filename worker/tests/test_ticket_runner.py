@@ -82,11 +82,13 @@ class FakeOdoo:
             {"ticket_id": ticket_id, "model_name": model_name, "analysis_id": analysis_id}
         )
 
-    def write_field(self, ticket_id, model_name, field_name, html):
+    def write_field(self, ticket_id, model_name, field_name, html,
+                    turn_id=0, analysis_id=0):
         self.call_count += 1
         self.calls.append(
             {"ticket_id": ticket_id, "model_name": model_name,
-             "field_name": field_name, "html": html}
+             "field_name": field_name, "html": html, "turn_id": turn_id,
+             "analysis_id": analysis_id}
         )
         if self.raise_exc:
             raise self.raise_exc
@@ -200,6 +202,17 @@ def test_github_url_persisted_and_runner_unaffected(ctx_and_fakes):
     assert out["status"] == "completed"
     row = writers.get_ticket_analysis(s["db"], out["analysis_id"])
     assert row["github_url"] == "https://github.com/acme/widgets"
+
+
+def test_callback_carries_the_analysis_id(ctx_and_fakes):
+    # Odoo has always enforced a non-zero analysis_id on write-field; until it
+    # is sent, that guard never fires and a superseded run can overwrite a
+    # newer result. The analysis leg never sends the support leg's turn_id.
+    s = ctx_and_fakes
+    params = _make_params(s["db"])
+    run_ticket_analysis(params)
+    assert s["odoo"].calls[0]["analysis_id"] == params["analysis_id"]
+    assert s["odoo"].calls[0]["turn_id"] == 0
 
 
 def test_html_stored_before_odoo_call(ctx_and_fakes):

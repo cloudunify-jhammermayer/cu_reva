@@ -238,3 +238,17 @@ func TestSupportListFitsShortTerminal(t *testing.T) {
 		t.Fatalf("list view is %d lines, want <= 10", lines)
 	}
 }
+
+// TestSupportTurnShowsConfidence: the model's own confidence in a drafted
+// answer rides beside answer_status in the Odoo callback, so an operator
+// judging a draft in the TUI needs it here too. It sits on the selected-turn
+// meta line rather than in a column — the turn table is already six wide.
+func TestSupportTurnShowsConfidence(t *testing.T) {
+	s := supportWithThreads(t)
+	s = supportDetailLoaded(t, s, 4)
+
+	out := s.view(120, 30)
+	if !strings.Contains(out, "confidence:high") {
+		t.Errorf("selected turn meta missing confidence:\n%s", out)
+	}
+}

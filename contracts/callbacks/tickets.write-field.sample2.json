@@ -1,0 +1,11 @@
+{
+  "answer_status": "answered",
+  "confidence": "high",
+  "field_name": "reva_support_answer",
+  "html": "<p>Der Rechnungslauf \u2026</p>",
+  "model_name": "project.task",
+  "request_kind": "question",
+  "sources_html": "<ul><li>account/models/account_move.py</li></ul>",
+  "ticket_id": 123,
+  "turn_id": 987
+}

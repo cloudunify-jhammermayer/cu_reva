@@ -358,6 +358,9 @@ func (s Support) detailView(w, h int) string {
 	if s.turnCursor < len(s.turns) {
 		sel := s.turns[s.turnCursor]
 		var meta2 []string
+		if sel.Confidence != nil && *sel.Confidence != "" {
+			meta2 = append(meta2, "confidence:"+*sel.Confidence)
+		}
 		if sel.EstimatedCostUSD != nil {
 			meta2 = append(meta2, fmt.Sprintf("cost:$%.4f", *sel.EstimatedCostUSD))
 		}

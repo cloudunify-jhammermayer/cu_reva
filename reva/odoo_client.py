@@ -143,12 +143,19 @@ class OdooCallbackClient:
         confidence: str = "",
         request_kind: str = "",
         sources_html: str = "",
+        turn_id: int = 0,
+        analysis_id: int = 0,
     ) -> None:
         """POST the analysis HTML to the Odoo callback endpoint.
 
         The three metadata args are the support path's; ticket analysis leaves
         them empty. They travel beside the HTML rather than inside it because
         the consultant sends the HTML on to the customer unchanged.
+
+        `turn_id`/`analysis_id` are the caller's own correlation id — Odoo
+        rejects a callback whose id no longer matches what the record stored at
+        submit time, which is what stops a superseded run overwriting a newer
+        answer. Each leg sends only its own; the other stays 0.
         """
         self._post(
             "/tickets/write-field",
@@ -161,6 +168,8 @@ class OdooCallbackClient:
                 confidence=confidence,
                 request_kind=request_kind,
                 sources_html=sources_html,
+                turn_id=turn_id,
+                analysis_id=analysis_id,
             ).model_dump(),
         )
         logger.bind(ticket_id=ticket_id, model_name=model_name).info("odoo_callback_ok")

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Vendor the generated Odoo<->REVA contracts into the ast-odoo repo.
-# Usage: scripts/sync_contracts.sh /path/to/ast-odoo
+# Vendor the generated Odoo<->REVA contracts into the consuming Odoo repo
+# (Cloudunify/ since ast-odoo was retired on 2026-08-12).
+# Usage: scripts/sync_contracts.sh /path/to/odoo-repo
 set -euo pipefail
 
-[ $# -eq 1 ] || { echo "usage: $0 <ast-odoo-path>"; exit 2; }
+[ $# -eq 1 ] || { echo "usage: $0 <odoo-repo-path>"; exit 2; }
 
 SRC="$(cd "$(dirname "$0")/.." && pwd)/contracts"
 DEST="$1/reva_contracts"

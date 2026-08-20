@@ -869,6 +869,7 @@ func (m *MockClient) SupportThread(threadID int) (*SupportThreadDetail, error) {
 				RequestKind:      strPtr("answer"),
 				AnswerStatus:     strPtr("answered"),
 				GroundingLevel:   strPtr("code"),
+				Confidence:       strPtr("high"),
 				ImageCount:       2,
 				Status:           "completed",
 				EstimatedCostUSD: f64Ptr(0.041),
