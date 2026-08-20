@@ -1,5 +1,46 @@
 # REVA — Work Handoff
 
+## Addendum 2026-08-20 — the Odoo side's three requests
+
+Source: `Cloudunify/custom_addons/cu_reva_ticket_analysis/docs/reva-side-requests.md`
+(module 19.0.39.0.0). The Odoo half of all three is already shipped and degrades
+until REVA catches up.
+
+**Requests 2 and 3: DONE** (commit `2a6d6bc`, not yet deployed).
+
+- *Support run status* turned out to be ~90% built: `GET
+  /api/v1/support-turn/{turn_id}` already had exactly the auth and 404 semantics
+  the handoff asked for. Only `confidence` and `sources_html` were missing, and
+  they are now derived server-side from `result_structured`. **No new route** —
+  the Odoo side should call `/support-turn/{turn_id}`, and map `answer_html` /
+  `error_message` itself (`/ticket-analysis/{id}` returns `result_html` /
+  `error_message`, so the handoff's proposed `html`/`error` names match neither
+  endpoint).
+- *Turn id on the callback* was half done: the `202` already returned `turn_id`
+  and Odoo already stored it. The gap was the callback, which now carries
+  `turn_id`. **`analysis_id` was added at the same time**: Odoo's write-field
+  staleness guard has always enforced a non-zero `analysis_id`, but REVA never
+  sent one, so that guard was dead code and the analysis path had the identical
+  race.
+- **Owed:** `scripts/sync_contracts.sh <odoo-repo>` into
+  `Cloudunify/reva_contracts/` and a `contracts_version` bump in
+  `cu_reva_connector/tests/test_contracts.py`. New version:
+  `8f7c2d31d57f…`. Nothing is deployed yet.
+
+**Request 1 (issue reassignment): SPECCED, not implemented.** Spec:
+`docs/superpowers/specs/2026-08-20-issue-reassignment-design.md`. An override
+table (`ticket_issue_reassignments`, migration 047) honored by five
+owner-resolution sites; the endpoint deliberately never returns 404, because
+Odoo's wizard reads that as "not shipped yet" and commits the move with a
+warning that would be false.
+
+**One thing the handoff gets wrong, worth knowing before reading it:** it
+attributes mis-filed issues to REVA parsing `cr/1234` from the branch or PR
+title. Branch parsing only feeds the ticket-level PR work-status signal, which
+never creates an issue row. Issue placement comes from the create-issues request
+Odoo itself addressed at a record. The remedy is unchanged, but the reassignment
+endpoint will **not** fix a mistyped branch.
+
 ## Addendum 2026-08-12 — support answers can read the customer's screenshots
 
 **Status: REVA side implemented and deployed. The Odoo side is NOT built —
