@@ -135,6 +135,45 @@ One deliberate divergence from the ticket-analysis runner: **no `reset_status` c
 
 `ticket_issue_runs.description` and `.analysis_html` are customer-authored text and are scrubbed by the scheduler's existing retention pass (same sentinel and cadence as `ticket_analyses.input_text`). The `issues` JSON (titles/numbers/urls — already public on GitHub) is derived data and kept, like `result_html`.
 
+## Reassigning an issue — `POST /api/v1/reassign-issue`
+
+An issue lands on whichever record the create-issues request named. When that
+was the wrong record, moving the `reva.github.issue` row in Odoo is not enough:
+Odoo replaces a record's whole issue set from REVA's union on the next
+callback, so the move is undone. This endpoint corrects REVA's side.
+
+```json
+{
+  "number": 42,
+  "repo": "https://github.com/org/repo",
+  "from": {"ticket_id": 1234, "model_name": "project.task"},
+  "to":   {"ticket_id": 5678, "model_name": "helpdesk.ticket"}
+}
+```
+
+Instance-key gated, synchronous, always `200` on a well-formed body:
+
+| `status` | Meaning |
+| --- | --- |
+| `reassigned` | Override written; later callbacks address `to`. |
+| `cleared` | `to` is already the natural owner; any override was removed. |
+| `unknown_issue` | No run carries the number. The override is still written (a move may land before the issue does) and a warning ops event is recorded. |
+
+**This route never returns 404.** Odoo's Move-to wizard reads `404`/`501` as
+"REVA has not shipped this yet" and commits the move with a warning note saying
+REVA may re-link the issue — which would be false. A malformed body or an
+unparseable `repo` is `422`.
+
+`from` is advisory: it is recorded in the ops event but never enforced. The
+wizard retries a move that already happened, and rejecting a stale `from` would
+break exactly that retry.
+
+Storage is `ticket_issue_reassignments`; the issue plans in
+`ticket_issue_runs.issues` are never rewritten, so deleting a row undoes a move.
+**Any new query that resolves which record owns an issue must consult
+`writers.issue_owner_overrides` / `writers.issues_moved_onto`** — forgetting
+re-creates the bug this endpoint exists to fix.
+
 ## Configuration
 
 No new environment variables.

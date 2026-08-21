@@ -1,6 +1,6 @@
 # Issue Reassignment — Correcting Which Odoo Record Owns a GitHub Issue
 
-**Status: 📐 DESIGNED (2026-08-20). Not implemented.**
+**Status: ✅ IMPLEMENTED (2026-08-20). Not deployed.**
 
 REVA creates GitHub issues against the Odoo record named in the create-issues
 request, and from then on treats that record as the issue's owner: every
