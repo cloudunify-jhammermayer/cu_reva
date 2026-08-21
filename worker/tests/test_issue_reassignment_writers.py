@@ -266,3 +266,32 @@ def test_a_record_whose_only_issues_arrived_by_move_can_be_ready(db):
     assert (5678, "helpdesk.ticket") in keys
     # The source has no issues left at all, so it is not "ready" — it is empty.
     assert (1234, "project.task") not in keys
+
+
+def test_estimate_does_not_reach_another_instances_run_for_the_same_repo_and_number(db):
+    """Fix round 1: natural_issue_owner (used to widen the owners search) must
+    be instance-scoped like every other override consumer. Unscoped, a newer
+    same-repo/same-number run belonging to a DIFFERENT instance could win the
+    "which run is the natural source" lookup over instance A's own true
+    source — losing the real write (owners no longer contains instance A's
+    source) without ever reaching instance B's row (the final query is still
+    instance-filtered), just silently dropping it on the floor."""
+    iid_a, iid_b = _instance(db, "acme"), _instance(db, "other")
+    run_a = _run_with_issues(db, iid_a, 1234, "project.task", [42])
+    writers.record_issue_reassignment(
+        db, odoo_instance_id=iid_a, repo_full_name="acme/widgets", number=42,
+        ticket_id=5678, model_name="helpdesk.ticket",
+    )
+    # A different instance's run for the SAME repo/number, created after A's
+    # true source — a naive unscoped "newest wins" lookup picks this instead.
+    run_b = _run_with_issues(db, iid_b, 9999, "project.task", [42])
+
+    target = writers.update_ticket_issue_estimate(
+        db, iid_a, 5678, "helpdesk.ticket", 42, 3.5
+    )
+
+    assert target is not None
+    stored_a = writers.get_ticket_issue_run(db, run_a)["issues"]
+    assert stored_a[0]["estimate_hours"] == 3.5
+    stored_b = writers.get_ticket_issue_run(db, run_b)["issues"]
+    assert stored_b[0].get("estimate_hours") is None

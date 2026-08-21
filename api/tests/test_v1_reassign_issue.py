@@ -250,3 +250,40 @@ def test_route_requires_an_instance_key(client_db):
         headers={"Authorization": "Bearer master-key"},
     )
     assert r.status_code in (401, 403)
+
+
+def test_a_different_instances_run_cannot_satisfy_the_natural_owner_check(client_db):
+    """Fix round 1: natural_issue_owner must be instance-scoped, matching every
+    other override consumer (_instance_filter). Unscoped, a run belonging to a
+    DIFFERENT instance — here the only run anywhere carrying #42 — could match
+    the "moving to the natural owner" check and silently no-op the caller's
+    move: 200 {"status": "cleared"} with no override written, while the
+    caller's own union never actually gains the issue."""
+    client, db, iid, headers = client_db  # iid = the "test" instance
+
+    other_key = client.post("/api/v1/odoo-instances", json={
+        "name": "other", "callback_url": "", "callback_api_key": "",
+    }).json()["api_key"]
+    assert other_key  # created; id resolved below rather than assumed
+    from reva.db.models import OdooInstance
+    with db.session() as s:
+        other_iid = s.query(OdooInstance).filter_by(name="other").one().id
+    # The OTHER instance owns the only run carrying #42 for acme/widgets — the
+    # calling instance has no run at all.
+    _seed_issue(db, other_iid)  # ticket_id=1234, model_name="project.task"
+
+    # The caller moves #42 onto the very record the other instance's run
+    # happens to name — before the fix this reads as "already there."
+    payload = {
+        "number": 42, "repo": REPO,
+        "from": {"ticket_id": 9999, "model_name": "project.task"},
+        "to": {"ticket_id": 1234, "model_name": "project.task"},
+    }
+    r = client.post("/api/v1/reassign-issue", json=payload, headers=headers)
+
+    assert r.status_code == 200
+    # The caller's own instance carries no run for #42 — unknown, not cleared.
+    assert r.json()["status"] == "unknown_issue"
+    # And the override must actually redirect the CALLER's own union.
+    union = writers.get_ticket_issue_union(db, iid, 1234, "project.task")
+    assert [i["number"] for i in union] == [42]

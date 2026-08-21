@@ -277,7 +277,7 @@ def reassign_issue(
         )
     repo_full_name = f"{parsed[0]}/{parsed[1]}".lower()
 
-    natural = writers.natural_issue_owner(db, repo_full_name, body.number)
+    natural = writers.natural_issue_owner(db, instance.id, repo_full_name, body.number)
     detail = {
         "number": body.number,
         "repo": repo_full_name,

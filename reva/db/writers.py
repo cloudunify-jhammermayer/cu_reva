@@ -2399,7 +2399,7 @@ def update_ticket_issue_estimate(
     ):
         if moved_number != number:
             continue
-        source = natural_issue_owner(db, repo_full_name, number)
+        source = natural_issue_owner(db, odoo_instance_id, repo_full_name, number)
         if source is not None and source not in owners:
             owners.append(source)
 
@@ -2530,11 +2530,20 @@ def _issue_item_from_runs(
 
 
 def natural_issue_owner(
-    db: Database, repo_full_name: str, number: int
+    db: Database, odoo_instance_id: int | None, repo_full_name: str, number: int
 ) -> tuple[int, str] | None:
     """(ticket_id, model_name) of the newest run carrying `number` — the issue's
     owner BEFORE any override. None when no run carries it, which is how the
-    reassign endpoint tells "unknown issue" from "known issue moved"."""
+    reassign endpoint tells "unknown issue" from "known issue moved".
+
+    Instance-scoped (fix round 1): an override can only ever address records
+    in the caller's own instance, so a run belonging to a different instance
+    — or a legacy NULL-instance run — must never answer this. Unfiltered, a
+    same-numbered issue owned by another instance could satisfy the "moving
+    back to the natural owner" check and get a caller's override silently
+    cleared, or feed a coincidentally-matching (ticket_id, model_name) into a
+    same-instance query elsewhere (update_ticket_issue_estimate's widened
+    owners list)."""
     from sqlalchemy.orm import load_only
 
     with db.session() as s:
@@ -2542,6 +2551,7 @@ def natural_issue_owner(
             select(TicketIssueRun)
             .where(
                 TicketIssueRun.repo_full_name == repo_full_name.lower(),
+                _instance_filter(odoo_instance_id),
                 TicketIssueRun.issues.is_not(None),
             )
             .options(load_only(
