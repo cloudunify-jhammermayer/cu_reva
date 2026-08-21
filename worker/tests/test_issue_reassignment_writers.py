@@ -193,3 +193,76 @@ def test_union_is_unchanged_when_nothing_was_moved(db):
     _run_with_issues(db, iid, 1234, "project.task", [42, 43])
     union = writers.get_ticket_issue_union(db, iid, 1234, "project.task")
     assert [i["number"] for i in union] == [42, 43]
+
+
+def test_state_sync_notifies_the_target_not_the_source(db):
+    """The whole point: the issue closes, and the record that hears about it is
+    the one it was moved to."""
+    iid = _instance(db)
+    _run_with_issues(db, iid, 1234, "project.task", [42])
+    writers.record_issue_reassignment(
+        db, odoo_instance_id=iid, repo_full_name="acme/widgets", number=42,
+        ticket_id=5678, model_name="helpdesk.ticket",
+    )
+    affected = writers.update_ticket_issue_state(
+        db, "acme", "widgets", 42, "closed", "2026-08-20T10:00:00Z"
+    )
+    assert [(a["ticket_id"], a["model_name"]) for a in affected] == [
+        (5678, "helpdesk.ticket")
+    ]
+
+
+def test_state_sync_still_writes_state_into_the_source_run(db):
+    """State is a fact about the issue, and the plan still lives on the source's
+    run — the write must not follow the notification."""
+    iid = _instance(db)
+    run_id = _run_with_issues(db, iid, 1234, "project.task", [42])
+    writers.record_issue_reassignment(
+        db, odoo_instance_id=iid, repo_full_name="acme/widgets", number=42,
+        ticket_id=5678, model_name="helpdesk.ticket",
+    )
+    writers.update_ticket_issue_state(db, "acme", "widgets", 42, "closed", None)
+    stored = writers.get_ticket_issue_run(db, run_id)["issues"]
+    assert stored[0]["state"] == "closed"
+
+
+def test_state_sync_unaffected_without_an_override(db):
+    iid = _instance(db)
+    _run_with_issues(db, iid, 1234, "project.task", [42])
+    affected = writers.update_ticket_issue_state(db, "acme", "widgets", 42, "closed", None)
+    assert [(a["ticket_id"], a["model_name"]) for a in affected] == [
+        (1234, "project.task")
+    ]
+
+
+def test_estimate_addressed_at_the_target_reaches_the_source_run(db):
+    """Odoo sends the estimate from the record the issue now sits on, but the
+    run holding the issue belongs to the record it came from."""
+    iid = _instance(db)
+    run_id = _run_with_issues(db, iid, 1234, "project.task", [42])
+    writers.record_issue_reassignment(
+        db, odoo_instance_id=iid, repo_full_name="acme/widgets", number=42,
+        ticket_id=5678, model_name="helpdesk.ticket",
+    )
+    target = writers.update_ticket_issue_estimate(
+        db, iid, 5678, "helpdesk.ticket", 42, 3.5
+    )
+    assert target is not None
+    stored = writers.get_ticket_issue_run(db, run_id)["issues"]
+    assert stored[0]["estimate_hours"] == 3.5
+
+
+def test_a_record_whose_only_issues_arrived_by_move_can_be_ready(db):
+    iid = _instance(db)
+    _run_with_issues(db, iid, 1234, "project.task", [42])
+    writers.record_issue_reassignment(
+        db, odoo_instance_id=iid, repo_full_name="acme/widgets", number=42,
+        ticket_id=5678, model_name="helpdesk.ticket",
+    )
+    writers.update_ticket_issue_state(db, "acme", "widgets", 42, "closed", None)
+
+    ready = writers.list_ready_tickets(db, limit=10)
+    keys = {(t["ticket_id"], t["model_name"]) for t in ready}
+    assert (5678, "helpdesk.ticket") in keys
+    # The source has no issues left at all, so it is not "ready" — it is empty.
+    assert (1234, "project.task") not in keys

@@ -20,7 +20,7 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import case, delete, func, select, text, update
+from sqlalchemy import and_, case, delete, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from reva.cost import estimate_cost
@@ -2345,7 +2345,27 @@ def update_ticket_issue_state(
                 "odoo_instance_id": row.odoo_instance_id,
                 "issues": items,
             })
-    return list(affected.values())
+
+    # Reassignment (spec 2026-08-20): the per-issue state writes above are
+    # unchanged — state is a fact about the issue, and the plan lives on
+    # whichever run created it. Only WHO WE TELL changes. The source is
+    # deliberately not notified: its union no longer carries the issue, so
+    # nothing about it changed.
+    redirected: dict[tuple[int, str], dict] = {}
+    for record in affected.values():
+        override_owner = issue_owner_overrides(
+            db, record["odoo_instance_id"], target, [number]
+        ).get(number)
+        ticket_id, model_name = override_owner or (
+            record["ticket_id"], record["model_name"]
+        )
+        redirected.setdefault((ticket_id, model_name), {
+            "ticket_id": ticket_id,
+            "model_name": model_name,
+            "odoo_instance_id": record["odoo_instance_id"],
+            "issues": record["issues"],
+        })
+    return list(redirected.values())
 
 
 def _instance_filter(odoo_instance_id: int | None):
@@ -2369,13 +2389,29 @@ def update_ticket_issue_estimate(
     issue was never placed, or None when no run carries the issue at all."""
     from sqlalchemy.orm import load_only
 
+    # Reassignment (spec 2026-08-20): Odoo addresses the estimate at the record
+    # the issue sits on NOW, but the run holding the issue still belongs to the
+    # record it came from. Widen the search to that run's record for issues an
+    # override moved onto this one.
+    owners: list[tuple[int, str]] = [(ticket_id, model_name)]
+    for repo_full_name, moved_number in issues_moved_onto(
+        db, odoo_instance_id, ticket_id, model_name
+    ):
+        if moved_number != number:
+            continue
+        source = natural_issue_owner(db, repo_full_name, number)
+        if source is not None and source not in owners:
+            owners.append(source)
+
     target: dict | None = None
     with db.session() as s:
         rows = s.execute(
             select(TicketIssueRun)
             .where(
-                TicketIssueRun.ticket_id == ticket_id,
-                TicketIssueRun.model_name == model_name,
+                or_(*[
+                    and_(TicketIssueRun.ticket_id == t, TicketIssueRun.model_name == m)
+                    for t, m in owners
+                ]),
                 _instance_filter(odoo_instance_id),
                 TicketIssueRun.issues.is_not(None),
             )
@@ -2490,6 +2526,35 @@ def _issue_item_from_runs(
             for item in row.issues or []:
                 if item.get("number") == number:
                     return _union_item(item)
+    return None
+
+
+def natural_issue_owner(
+    db: Database, repo_full_name: str, number: int
+) -> tuple[int, str] | None:
+    """(ticket_id, model_name) of the newest run carrying `number` — the issue's
+    owner BEFORE any override. None when no run carries it, which is how the
+    reassign endpoint tells "unknown issue" from "known issue moved"."""
+    from sqlalchemy.orm import load_only
+
+    with db.session() as s:
+        rows = s.execute(
+            select(TicketIssueRun)
+            .where(
+                TicketIssueRun.repo_full_name == repo_full_name.lower(),
+                TicketIssueRun.issues.is_not(None),
+            )
+            .options(load_only(
+                TicketIssueRun.ticket_id,
+                TicketIssueRun.model_name,
+                TicketIssueRun.issues,
+                TicketIssueRun.created_at,
+            ))
+            .order_by(TicketIssueRun.created_at.desc(), TicketIssueRun.id.desc())
+        ).scalars().all()
+        for row in rows:
+            if any(i.get("number") == number for i in (row.issues or [])):
+                return row.ticket_id, row.model_name
     return None
 
 
@@ -2627,6 +2692,27 @@ def list_ready_tickets(db: Database, limit: int = 10) -> list[dict]:
                 "repo_full_name": row.repo_full_name,
                 "name": row.name,
             })
+
+    # Reassignment (spec 2026-08-20): candidates come from run rows, so a record
+    # whose only issues arrived by a move would never be considered ready.
+    with db.session() as s:
+        moved = s.execute(
+            select(
+                TicketIssueReassignment.odoo_instance_id,
+                TicketIssueReassignment.ticket_id,
+                TicketIssueReassignment.model_name,
+                TicketIssueReassignment.repo_full_name,
+            ).distinct()
+        ).all()
+    for row in moved:
+        key = (row.odoo_instance_id, row.ticket_id, row.model_name)
+        candidates.setdefault(key, {
+            "odoo_instance_id": row.odoo_instance_id,
+            "ticket_id": row.ticket_id,
+            "model_name": row.model_name,
+            "repo_full_name": row.repo_full_name,
+            "name": "",
+        })
 
     ready: list[dict] = []
     for (odoo_instance_id, ticket_id, model_name), meta in candidates.items():

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import select
 
+from reva.db import writers
 from reva.db.engine import Database
 from reva.db.models import OdooInstance, TicketAnalysis, TicketIssueRun
 
@@ -52,15 +53,27 @@ def resolve_pr_tickets(db: Database, repo_full_name: str, issue_numbers: list[in
             if row.odoo_instance_id is None:
                 continue
             numbers = {item.get("number") for item in (row.issues or [])}
-            if not numbers.intersection(wanted):
+            matched = numbers.intersection(wanted)
+            if not matched:
                 continue
-            key = (row.odoo_instance_id, row.ticket_id, row.model_name)
-            out.setdefault(key, TicketRef(
-                odoo_instance_id=row.odoo_instance_id,
-                ticket_id=row.ticket_id,
-                model_name=row.model_name,
-                run_id=row.id,
-            ))
+            # Reassignment (spec 2026-08-20): an issue an operator moved is
+            # owned by the override's record, not the run's. The run_id stays
+            # the run that holds the plan — change_note_runner reads the ticket
+            # name off it.
+            overrides = writers.issue_owner_overrides(
+                db, row.odoo_instance_id, repo, sorted(n for n in matched if n)
+            )
+            for number in sorted(n for n in matched if n):
+                ticket_id, model_name = overrides.get(
+                    number, (row.ticket_id, row.model_name)
+                )
+                key = (row.odoo_instance_id, ticket_id, model_name)
+                out.setdefault(key, TicketRef(
+                    odoo_instance_id=row.odoo_instance_id,
+                    ticket_id=ticket_id,
+                    model_name=model_name,
+                    run_id=row.id,
+                ))
     return list(out.values())
 
 
