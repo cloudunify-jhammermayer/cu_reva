@@ -112,3 +112,84 @@ def test_issues_moved_onto_lists_the_target_side(db):
     assert writers.issues_moved_onto(db, iid, 5678, "helpdesk.ticket") == [
         ("acme/widgets", 42)
     ]
+
+
+def _run_with_issues(db: Database, instance_id: int, ticket_id: int,
+                     model_name: str, numbers: list[int]) -> int:
+    """A completed create-issues run owning `numbers` on acme/widgets."""
+    from reva.types import TicketIssueJobParams
+
+    run_id = writers.record_ticket_issue_run_created(db, TicketIssueJobParams(
+        run_id=0, odoo_instance_id=instance_id, ticket_id=ticket_id,
+        model_name=model_name, github_url="https://github.com/acme/widgets",
+        name="Ticket name", description="d", analysis_html="",
+        priority="1", ticket_url="https://odoo.example/web#id=1",
+    ))
+    writers.update_ticket_issue_progress(db, run_id, [
+        {"title": f"Issue {n}", "number": n,
+         "url": f"https://github.com/acme/widgets/issues/{n}", "state": "open"}
+        for n in numbers
+    ])
+    return run_id
+
+
+def test_union_drops_an_issue_moved_away(db):
+    iid = _instance(db)
+    _run_with_issues(db, iid, 1234, "project.task", [42, 43])
+    writers.record_issue_reassignment(
+        db, odoo_instance_id=iid, repo_full_name="acme/widgets", number=42,
+        ticket_id=5678, model_name="helpdesk.ticket",
+    )
+    union = writers.get_ticket_issue_union(db, iid, 1234, "project.task")
+    assert [i["number"] for i in union] == [43]
+
+
+def test_union_adds_an_issue_moved_on(db):
+    iid = _instance(db)
+    _run_with_issues(db, iid, 1234, "project.task", [42, 43])
+    writers.record_issue_reassignment(
+        db, odoo_instance_id=iid, repo_full_name="acme/widgets", number=42,
+        ticket_id=5678, model_name="helpdesk.ticket",
+    )
+    union = writers.get_ticket_issue_union(db, iid, 5678, "helpdesk.ticket")
+    assert [i["number"] for i in union] == [42]
+    # The item travels intact — Odoo re-renders its links from this payload.
+    assert union[0]["title"] == "Issue 42"
+    assert union[0]["url"] == "https://github.com/acme/widgets/issues/42"
+    assert union[0]["state"] == "open"
+
+
+def test_union_for_a_target_with_no_runs_at_all(db):
+    """The case a naive implementation drops: the record the issue moved onto
+    has never had a create-issues run, so there is nothing to read it off."""
+    iid = _instance(db)
+    _run_with_issues(db, iid, 1234, "project.task", [42])
+    writers.record_issue_reassignment(
+        db, odoo_instance_id=iid, repo_full_name="acme/widgets", number=42,
+        ticket_id=5678, model_name="helpdesk.ticket",
+    )
+    union = writers.get_ticket_issue_union(db, iid, 5678, "helpdesk.ticket")
+    assert [i["number"] for i in union] == [42]
+
+
+def test_union_reflects_state_written_after_the_move(db):
+    """State sync writes into the SOURCE's run row, because that is where the
+    issue plan still lives. The target's union must show it."""
+    iid = _instance(db)
+    _run_with_issues(db, iid, 1234, "project.task", [42])
+    writers.record_issue_reassignment(
+        db, odoo_instance_id=iid, repo_full_name="acme/widgets", number=42,
+        ticket_id=5678, model_name="helpdesk.ticket",
+    )
+    writers.update_ticket_issue_state(db, "acme", "widgets", 42, "closed",
+                                      "2026-08-20T10:00:00Z")
+    union = writers.get_ticket_issue_union(db, iid, 5678, "helpdesk.ticket")
+    assert union[0]["state"] == "closed"
+    assert union[0]["complete_date"] == "2026-08-20"
+
+
+def test_union_is_unchanged_when_nothing_was_moved(db):
+    iid = _instance(db)
+    _run_with_issues(db, iid, 1234, "project.task", [42, 43])
+    union = writers.get_ticket_issue_union(db, iid, 1234, "project.task")
+    assert [i["number"] for i in union] == [42, 43]

@@ -2414,6 +2414,85 @@ def update_ticket_issue_estimate(
     return target
 
 
+def _union_item(item: dict) -> dict:
+    """Project a stored plan item onto the documented union shape."""
+    return {
+        "number": item.get("number"),
+        "title": item.get("title", ""),
+        "url": item.get("url"),
+        "state": item.get("state") or "open",
+        "plan_date": item.get("plan_date"),
+        "complete_date": item.get("complete_date"),
+        "estimate_hours": item.get("estimate_hours"),
+    }
+
+
+def _overrides_away(
+    db: Database,
+    odoo_instance_id: int | None,
+    ticket_id: int,
+    model_name: str,
+    numbers: list[int],
+) -> set[int]:
+    """Of `numbers` (all carried by this record's runs), those an override has
+    moved to a DIFFERENT record. An override pointing back at this record is
+    not a move and must not drop the issue."""
+    if odoo_instance_id is None:
+        return set()
+    repos = _repos_for_record(db, odoo_instance_id, ticket_id, model_name)
+    moved: set[int] = set()
+    for repo in repos:
+        for number, owner in issue_owner_overrides(
+            db, odoo_instance_id, repo, numbers
+        ).items():
+            if owner != (ticket_id, model_name):
+                moved.add(number)
+    return moved
+
+
+def _repos_for_record(
+    db: Database, odoo_instance_id: int | None, ticket_id: int, model_name: str
+) -> list[str]:
+    """Distinct lowercased repos this record has runs for."""
+    with db.session() as s:
+        rows = s.execute(
+            select(TicketIssueRun.repo_full_name)
+            .where(
+                TicketIssueRun.ticket_id == ticket_id,
+                TicketIssueRun.model_name == model_name,
+                _instance_filter(odoo_instance_id),
+                TicketIssueRun.repo_full_name.is_not(None),
+            )
+            .distinct()
+        ).all()
+        return [r.repo_full_name for r in rows]
+
+
+def _issue_item_from_runs(
+    db: Database, repo_full_name: str, number: int
+) -> dict | None:
+    """The newest run's copy of issue `number` on `repo_full_name`, in union
+    shape. None when no run carries it — a reassignment may name an issue REVA
+    does not know yet, and that must not fabricate an entry."""
+    from sqlalchemy.orm import load_only
+
+    with db.session() as s:
+        rows = s.execute(
+            select(TicketIssueRun)
+            .where(
+                TicketIssueRun.repo_full_name == repo_full_name.lower(),
+                TicketIssueRun.issues.is_not(None),
+            )
+            .options(load_only(TicketIssueRun.issues, TicketIssueRun.created_at))
+            .order_by(TicketIssueRun.created_at.desc(), TicketIssueRun.id.desc())
+        ).scalars().all()
+        for row in rows:
+            for item in row.issues or []:
+                if item.get("number") == number:
+                    return _union_item(item)
+    return None
+
+
 def get_ticket_issue_union(
     db: Database, odoo_instance_id: int | None, ticket_id: int, model_name: str
 ) -> list[dict]:
@@ -2423,7 +2502,14 @@ def get_ticket_issue_union(
     The Odoo issues-created handler replaces the record's whole issue list
     with the payload — sending only the completing run's issues would wipe
     what earlier requests created (wizard + planner requests accumulate).
-    Parents are excluded (parent_issue column, never in `issues`)."""
+    Parents are excluded (parent_issue column, never in `issues`).
+
+    Reassignment (spec 2026-08-20) moves numbers between records without
+    touching any run: numbers moved AWAY are dropped here, and numbers moved
+    ONTO this record are pulled in from whichever run still holds their plan.
+    That second direction is why this cannot be a pure per-record query — the
+    target may have no run of its own at all.
+    """
     from sqlalchemy.orm import load_only
 
     with db.session() as s:
@@ -2444,16 +2530,27 @@ def get_ticket_issue_union(
                 n = item.get("number")
                 if n is None or n in seen:
                     continue
-                seen[n] = {
-                    "number": n,
-                    "title": item.get("title", ""),
-                    "url": item.get("url"),
-                    "state": item.get("state") or "open",
-                    "plan_date": item.get("plan_date"),
-                    "complete_date": item.get("complete_date"),
-                    "estimate_hours": item.get("estimate_hours"),
-                }
-        return sorted(seen.values(), key=lambda i: i["number"])
+                seen[n] = _union_item(item)
+
+    # Drop what moved away. Computed after the loop so the repo key comes from
+    # the runs themselves rather than being threaded through the query.
+    if seen:
+        moved_away = _overrides_away(db, odoo_instance_id, ticket_id, model_name,
+                                    list(seen))
+        for number in moved_away:
+            seen.pop(number, None)
+
+    # Pull in what moved on, from whichever run still holds the plan.
+    for repo_full_name, number in issues_moved_onto(
+        db, odoo_instance_id, ticket_id, model_name
+    ):
+        if number in seen:
+            continue
+        item = _issue_item_from_runs(db, repo_full_name, number)
+        if item is not None:
+            seen[number] = item
+
+    return sorted(seen.values(), key=lambda i: i["number"])
 
 
 def get_board_items_for_issues(
