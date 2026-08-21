@@ -99,6 +99,41 @@ class IssueEstimateAccepted(BaseModel):
     status: str
 
 
+class RecordRef(BaseModel):
+    """One Odoo record in a reassignment. `model_name` is not constrained to a
+    Literal: REVA stores it as text and Odoo owns the model list."""
+
+    ticket_id: int
+    model_name: str = Field(
+        description='Odoo model name, e.g. "helpdesk.ticket" or "project.task"'
+    )
+
+
+class ReassignIssueRequest(BaseModel):
+    """An operator moved a REVA-created GitHub issue to a different Odoo record
+    (spec 2026-08-20). `from` is advisory — it is recorded for the ops log, but
+    a mismatch is never an error: the Odoo wizard retries a move that already
+    happened, and 409-ing there breaks exactly the case the retry exists for."""
+
+    number: int = Field(description="GitHub issue number being moved")
+    repo: str = Field(description="Repository URL, https://github.com/{owner}/{repo}")
+    from_record: RecordRef = Field(
+        alias="from", description="Where the issue sat before the move"
+    )
+    to: RecordRef = Field(description="The record that owns it now")
+
+
+class ReassignIssueAccepted(BaseModel):
+    """200 body. `status` is diagnostic only — Odoo checks the status code.
+
+    reassigned    — override written
+    cleared       — target is the natural owner; any override was removed
+    unknown_issue — no run carries the number; the override was still written
+    """
+
+    status: str
+
+
 class TicketIssueRef(BaseModel):
     """One planned/created issue in a list view. number/url are null until the
     issue exists on GitHub (a partially-created plan shows both states);

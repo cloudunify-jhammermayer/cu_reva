@@ -187,7 +187,11 @@ def _inbound_models() -> dict[str, type[BaseModel]]:
     from app.schemas.support_requests import SupportRequestBody
     from app.schemas.ticket_actuals import TicketActualsRequest
     from app.schemas.ticket_analyses import TicketAnalysisRequest
-    from app.schemas.ticket_issues import CreateIssuesRequest, UpdateIssueEstimateRequest
+    from app.schemas.ticket_issues import (
+        CreateIssuesRequest,
+        ReassignIssueRequest,
+        UpdateIssueEstimateRequest,
+    )
     from app.schemas.timesheet_reviews import TimesheetReviewRequest
 
     return {
@@ -195,6 +199,7 @@ def _inbound_models() -> dict[str, type[BaseModel]]:
         "ticket-analysis": TicketAnalysisRequest,
         "create-issues": CreateIssuesRequest,
         "update-issue-estimate": UpdateIssueEstimateRequest,
+        "reassign-issue": ReassignIssueRequest,
         "ticket-actuals": TicketActualsRequest,
         "timesheet-review": TimesheetReviewRequest,
     }
@@ -468,6 +473,19 @@ CONTRACTS: list[Contract] = [
             "model_name": "project.task",
             "number": 42,
             "estimate_hours": 5.0,
+        },
+    ),
+    Contract(
+        name="reassign-issue",
+        direction="odoo->reva",
+        method="POST",
+        path="/api/v1/reassign-issue",
+        auth="bearer:instance-inbound-key",
+        sample={
+            "number": 42,
+            "repo": "https://github.com/acme/widgets",
+            "from": {"ticket_id": 1234, "model_name": "project.task"},
+            "to": {"ticket_id": 5678, "model_name": "helpdesk.ticket"},
         },
     ),
     Contract(

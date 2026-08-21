@@ -7,6 +7,7 @@ POST /api/v1/create-issues/{request_id}/requeue  — ops: re-run a failed/comple
                                                    (resumes the persisted plan; the
                                                    callback only lands while Odoo still
                                                    waits on this request_id)
+POST /api/v1/reassign-issue                      — move an issue to another Odoo record
 """
 
 from __future__ import annotations
@@ -31,6 +32,8 @@ from app.queries import ticket_issues as q
 from app.schemas.ticket_issues import (
     CreateIssuesRequest,
     IssueEstimateAccepted,
+    ReassignIssueAccepted,
+    ReassignIssueRequest,
     TicketIssueRunPage,
     TicketIssueRunStatus,
     TicketIssueRunSummary,
@@ -241,6 +244,84 @@ def update_issue_estimate(
         job_id=job.id,
     )
     return {"status": "queued"}
+
+
+@create_router.post(
+    "/reassign-issue",
+    status_code=status.HTTP_200_OK,
+    response_model=ReassignIssueAccepted,
+)
+def reassign_issue(
+    body: ReassignIssueRequest,
+    db: Database = Depends(get_db),
+    instance: ResolvedOdooInstance = Depends(require_odoo_instance),
+) -> dict:
+    """Record that a REVA-created issue now belongs to a different Odoo record.
+
+    **This route must never return 404.** Odoo's Move-to wizard treats 404/501
+    as "REVA has not shipped this endpoint yet" and commits the move anyway,
+    with a warning note saying REVA may re-link the issue. Returning 404 for an
+    issue we simply do not know would make that note a lie. An unknown issue is
+    a 200 that still stores the override — the mapping does not require the
+    issue to exist yet — plus an ops event, because a typo'd number would
+    otherwise be persisted silently.
+
+    `from` is advisory. The wizard retries a move that already happened, so a
+    stale `from` must succeed rather than 409.
+    """
+    parsed = parse_github_repo_url(body.repo)
+    if parsed is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="repo must be an https://github.com/{owner}/{repo} URL",
+        )
+    repo_full_name = f"{parsed[0]}/{parsed[1]}".lower()
+
+    natural = writers.natural_issue_owner(db, repo_full_name, body.number)
+    detail = {
+        "number": body.number,
+        "repo": repo_full_name,
+        "from": [body.from_record.ticket_id, body.from_record.model_name],
+        "to": [body.to.ticket_id, body.to.model_name],
+    }
+
+    if natural == (body.to.ticket_id, body.to.model_name):
+        # Moving back to where the runs already say it belongs. Storing an
+        # identity override would leave a row that means nothing forever.
+        writers.clear_issue_reassignment(
+            db, odoo_instance_id=instance.id,
+            repo_full_name=repo_full_name, number=body.number,
+        )
+        writers.record_ops_event(
+            db, "ticket_issues", "info", "issue_reassigned",
+            {**detail, "result": "cleared"},
+        )
+        logger.info("issue_reassignment_cleared", **detail)
+        return {"status": "cleared"}
+
+    writers.record_issue_reassignment(
+        db,
+        odoo_instance_id=instance.id,
+        repo_full_name=repo_full_name,
+        number=body.number,
+        ticket_id=body.to.ticket_id,
+        model_name=body.to.model_name,
+    )
+    if natural is None:
+        # Stored anyway so a move that lands before the issue does still
+        # redirects — but visible, because a typo'd number looks identical.
+        writers.record_ops_event(
+            db, "ticket_issues", "warning", "reassign_unknown_issue", detail,
+        )
+        logger.warning("issue_reassignment_unknown_issue", **detail)
+        return {"status": "unknown_issue"}
+
+    writers.record_ops_event(
+        db, "ticket_issues", "info", "issue_reassigned",
+        {**detail, "result": "reassigned"},
+    )
+    logger.info("issue_reassigned", **detail)
+    return {"status": "reassigned"}
 
 
 @router.get(
