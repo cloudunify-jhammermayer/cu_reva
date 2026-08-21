@@ -47,6 +47,7 @@ from reva.db.models import (
     ReviewRun,
     TicketActual,
     TicketAnalysis,
+    TicketIssueReassignment,
     TicketIssueRun,
     TimesheetReviewLine,
     TimesheetReviewRun,
@@ -2178,6 +2179,117 @@ def reset_ticket_issue_run(db: Database, run_id: int) -> None:
         row.error_message = None
         row.completed_at = None
         row.job_id = None
+
+
+# ---------------------------------------------- issue-ownership overrides
+# Which Odoo record owns a REVA-created issue is otherwise implicit in
+# ticket_issue_runs.issues. These four functions are the ONLY way that implicit
+# answer gets corrected — every query that resolves an owner must consult them,
+# or a moved issue silently bounces back to the record it was moved off.
+
+
+def record_issue_reassignment(
+    db: Database,
+    *,
+    odoo_instance_id: int,
+    repo_full_name: str,
+    number: int,
+    ticket_id: int,
+    model_name: str,
+) -> None:
+    """Upsert the override for one issue. Last call wins — an issue moved twice
+    ends up owned by the last target, and `from` never enters the key."""
+    repo = repo_full_name.lower()
+    with db.session() as s:
+        row = s.execute(
+            select(TicketIssueReassignment).where(
+                TicketIssueReassignment.odoo_instance_id == odoo_instance_id,
+                TicketIssueReassignment.repo_full_name == repo,
+                TicketIssueReassignment.number == number,
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            s.add(TicketIssueReassignment(
+                odoo_instance_id=odoo_instance_id,
+                repo_full_name=repo,
+                number=number,
+                ticket_id=ticket_id,
+                model_name=model_name,
+            ))
+            return
+        row.ticket_id = ticket_id
+        row.model_name = model_name
+
+
+def clear_issue_reassignment(
+    db: Database, *, odoo_instance_id: int, repo_full_name: str, number: int
+) -> None:
+    """Drop the override, restoring the runs' own answer. Used when an issue is
+    moved back to its natural owner — writing an identity override instead
+    would leave a row that means nothing and has to be read past forever."""
+    repo = repo_full_name.lower()
+    with db.session() as s:
+        s.query(TicketIssueReassignment).filter_by(
+            odoo_instance_id=odoo_instance_id, repo_full_name=repo, number=number
+        ).delete()
+
+
+def issue_owner_overrides(
+    db: Database,
+    odoo_instance_id: int | None,
+    repo_full_name: str,
+    numbers: list[int],
+) -> dict[int, tuple[int, str]]:
+    """{number: (ticket_id, model_name)} for the overridden numbers only.
+
+    A NULL instance is a pre-multi-instance run, which can never carry an
+    override (the endpoint that writes them is instance-gated) — it resolves to
+    nothing rather than matching every row.
+    """
+    if odoo_instance_id is None or not numbers:
+        return {}
+    repo = repo_full_name.lower()
+    with db.session() as s:
+        rows = s.execute(
+            select(
+                TicketIssueReassignment.number,
+                TicketIssueReassignment.ticket_id,
+                TicketIssueReassignment.model_name,
+            ).where(
+                TicketIssueReassignment.odoo_instance_id == odoo_instance_id,
+                TicketIssueReassignment.repo_full_name == repo,
+                TicketIssueReassignment.number.in_(numbers),
+            )
+        ).all()
+        return {r.number: (r.ticket_id, r.model_name) for r in rows}
+
+
+def issues_moved_onto(
+    db: Database, odoo_instance_id: int | None, ticket_id: int, model_name: str
+) -> list[tuple[str, int]]:
+    """[(repo_full_name, number)] moved ONTO this record.
+
+    The direction that cannot be derived from the record's own runs: a target
+    may have no ticket_issue_runs row at all, which is exactly the case a naive
+    implementation drops.
+    """
+    if odoo_instance_id is None:
+        return []
+    with db.session() as s:
+        rows = s.execute(
+            select(
+                TicketIssueReassignment.repo_full_name,
+                TicketIssueReassignment.number,
+            ).where(
+                TicketIssueReassignment.odoo_instance_id == odoo_instance_id,
+                TicketIssueReassignment.ticket_id == ticket_id,
+                TicketIssueReassignment.model_name == model_name,
+            ).order_by(
+                TicketIssueReassignment.repo_full_name,
+                TicketIssueReassignment.number,
+            )
+        ).all()
+        return [(r.repo_full_name, r.number) for r in rows]
 
 
 def update_ticket_issue_state(

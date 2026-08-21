@@ -576,6 +576,50 @@ class TicketIssueRun(Base):
     )
 
 
+class TicketIssueReassignment(Base):
+    """Mirrors db/migrations/047_ticket_issue_reassignments.sql — an operator
+    correction of which Odoo record owns a REVA-created issue (spec
+    2026-08-20).
+
+    Absence is the normal case: ownership is otherwise implicit in
+    `ticket_issue_runs.issues`, and those rows are never rewritten by a move, so
+    deleting one of these rows undoes it. `odoo_instance_id` is NOT NULL even
+    though the runs table allows NULL for legacy rows — the endpoint that writes
+    this is instance-key gated, so every row it can receive has one.
+    """
+
+    __tablename__ = "ticket_issue_reassignments"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    odoo_instance_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("odoo_instances.id"), nullable=False
+    )
+    # Lowercased "owner/repo", matching TicketIssueRun.repo_full_name.
+    repo_full_name: Mapped[str] = mapped_column(Text, nullable=False)
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    ticket_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    model_name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_ticket_issue_reassignments",
+            "odoo_instance_id",
+            "repo_full_name",
+            "number",
+            unique=True,
+        ),
+        Index(
+            "idx_ticket_issue_reassignments_record",
+            "odoo_instance_id",
+            "ticket_id",
+            "model_name",
+        ),
+    )
+
+
 # ------------------------------------------------------------- change_notes
 
 
