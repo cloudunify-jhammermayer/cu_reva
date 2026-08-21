@@ -1,6 +1,6 @@
 # Issue Reassignment — Correcting Which Odoo Record Owns a GitHub Issue
 
-**Status: 📐 DESIGNED (2026-08-20). Not implemented.**
+**Status: ✅ IMPLEMENTED (2026-08-20). Not deployed.**
 
 REVA creates GitHub issues against the Odoo record named in the create-issues
 request, and from then on treats that record as the issue's owner: every
@@ -260,6 +260,16 @@ The behavioural cases that matter, one test each:
   information about. The handoff explicitly asks for this, and the alternative
   (409 on mismatch) makes the wizard fail on exactly the retry it is meant to
   survive.
+- **A change note generated against the source record before a move can
+  become permanently undeliverable.** `maybe_deliver_change_notes`
+  (`worker/worker/change_note_delivery.py:45`) only sends once the RECORD's
+  own union is non-empty and every issue in it is closed. If a move empties
+  the source's union — all its issues get reassigned elsewhere — any note
+  still undelivered for the source has no way left to become ready: the
+  source has no issues left to close. Left as-is: fixing it means either
+  re-targeting undelivered notes onto the record their issues moved to, or
+  switching delivery to a convergence signal that survives a move, and this
+  reassignment endpoint is not the place to redesign that.
 
 ## Prerequisites
 

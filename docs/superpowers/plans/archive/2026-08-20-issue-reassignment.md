@@ -145,9 +145,12 @@ def db() -> Database:
     return Database(engine)
 
 
-def _instance(db: Database) -> int:
+def _instance(db: Database, name: str = "acme") -> int:
+    # key_hash/key_prefix are required keyword args — see the convention in
+    # worker/tests/test_odoo_instance_writers.py.
     return writers.create_odoo_instance(
-        db, name="acme", callback_url="", callback_api_key_enc="enc",
+        db, name=name, key_hash=f"h-{name}", key_prefix=f"reva_odoo_{name[:2]}",
+        callback_url="", callback_api_key_enc="enc",
     )
 
 
@@ -207,9 +210,7 @@ def test_clear_is_a_noop_when_there_is_nothing_to_clear(db):
 
 
 def test_overrides_are_scoped_to_the_instance(db):
-    one, two = _instance(db), writers.create_odoo_instance(
-        db, name="other", callback_url="", callback_api_key_enc="enc",
-    )
+    one, two = _instance(db), _instance(db, name="other")
     writers.record_issue_reassignment(
         db, odoo_instance_id=one, repo_full_name="acme/widgets", number=42,
         ticket_id=5678, model_name="helpdesk.ticket",
@@ -766,7 +767,8 @@ def test_resolve_pr_tickets_follows_a_reassignment():
     Base.metadata.create_all(engine)
     db = Database(engine)
     iid = writers.create_odoo_instance(
-        db, name="acme", callback_url="", callback_api_key_enc="enc",
+        db, name="acme", key_hash="h-acme", key_prefix="reva_odoo_ac",
+        callback_url="", callback_api_key_enc="enc",
     )
     run_id = writers.record_ticket_issue_run_created(db, TicketIssueJobParams(
         run_id=0, odoo_instance_id=iid, ticket_id=1234, model_name="project.task",
@@ -1118,16 +1120,23 @@ def client_db(monkeypatch):
     key = tc.post("/api/v1/odoo-instances", json={
         "name": "test", "callback_url": "", "callback_api_key": "",
     }).json()["api_key"]
-    yield tc, db, {"Authorization": f"Bearer {key}"}
+    # Resolve the id rather than assuming 1 — the seeds and union assertions
+    # below are instance-scoped, and a wrong id fails as "no issues" rather
+    # than as "wrong instance".
+    from reva.db.models import OdooInstance
+    with db.session() as s:
+        instance_id = s.query(OdooInstance).one().id
+    yield tc, db, instance_id, {"Authorization": f"Bearer {key}"}
     app.state.rq_queue = prev
     app.dependency_overrides.clear()
 
 
-def _seed_issue(db: Database, ticket_id: int = 1234,
+def _seed_issue(db: Database, instance_id: int, ticket_id: int = 1234,
                 model_name: str = "project.task") -> None:
-    """A completed run owning issue #42 on acme/widgets for instance 1."""
+    """A completed run owning issue #42 on acme/widgets."""
     run_id = writers.record_ticket_issue_run_created(db, TicketIssueJobParams(
-        run_id=0, odoo_instance_id=1, ticket_id=ticket_id, model_name=model_name,
+        run_id=0, odoo_instance_id=instance_id, ticket_id=ticket_id,
+        model_name=model_name,
         github_url=REPO, name="Ticket name", description="d", analysis_html="",
         priority="1", ticket_url="https://odoo.example/web#id=1",
     ))
@@ -1143,35 +1152,35 @@ def _ops(db: Database) -> list[str]:
 
 
 def test_move_is_accepted_and_redirects_the_union(client_db):
-    client, db, headers = client_db
-    _seed_issue(db)
+    client, db, iid, headers = client_db
+    _seed_issue(db, iid)
 
     r = client.post("/api/v1/reassign-issue", json=PAYLOAD, headers=headers)
 
     assert r.status_code == 200
     assert r.json()["status"] == "reassigned"
-    assert writers.get_ticket_issue_union(db, 1, 1234, "project.task") == []
-    moved = writers.get_ticket_issue_union(db, 1, 5678, "helpdesk.ticket")
+    assert writers.get_ticket_issue_union(db, iid, 1234, "project.task") == []
+    moved = writers.get_ticket_issue_union(db, iid, 5678, "helpdesk.ticket")
     assert [i["number"] for i in moved] == [42]
 
 
 def test_repeating_the_same_move_is_a_noop_200(client_db):
-    client, db, headers = client_db
-    _seed_issue(db)
+    client, db, iid, headers = client_db
+    _seed_issue(db, iid)
     client.post("/api/v1/reassign-issue", json=PAYLOAD, headers=headers)
 
     r = client.post("/api/v1/reassign-issue", json=PAYLOAD, headers=headers)
 
     assert r.status_code == 200
-    moved = writers.get_ticket_issue_union(db, 1, 5678, "helpdesk.ticket")
+    moved = writers.get_ticket_issue_union(db, iid, 5678, "helpdesk.ticket")
     assert [i["number"] for i in moved] == [42]
 
 
 def test_stale_from_still_succeeds(client_db):
     """The Odoo wizard retries a move that already happened; `from` is advisory
     and must never 409."""
-    client, db, headers = client_db
-    _seed_issue(db)
+    client, db, iid, headers = client_db
+    _seed_issue(db, iid)
     client.post("/api/v1/reassign-issue", json=PAYLOAD, headers=headers)
 
     stale = {**PAYLOAD, "from": {"ticket_id": 9999, "model_name": "project.task"}}
@@ -1181,8 +1190,8 @@ def test_stale_from_still_succeeds(client_db):
 
 
 def test_moving_back_to_the_natural_owner_clears_the_override(client_db):
-    client, db, headers = client_db
-    _seed_issue(db)
+    client, db, iid, headers = client_db
+    _seed_issue(db, iid)
     client.post("/api/v1/reassign-issue", json=PAYLOAD, headers=headers)
 
     back = {
@@ -1194,14 +1203,14 @@ def test_moving_back_to_the_natural_owner_clears_the_override(client_db):
 
     assert r.status_code == 200
     assert r.json()["status"] == "cleared"
-    union = writers.get_ticket_issue_union(db, 1, 1234, "project.task")
+    union = writers.get_ticket_issue_union(db, iid, 1234, "project.task")
     assert [i["number"] for i in union] == [42]
 
 
 def test_unknown_issue_is_200_not_404(client_db):
     """404 is reserved for a REVA that lacks the route entirely — returning it
     here makes Odoo post a warning note that is simply false."""
-    client, db, headers = client_db  # no run seeded
+    client, db, iid, headers = client_db  # no run seeded
 
     r = client.post("/api/v1/reassign-issue", json=PAYLOAD, headers=headers)
 
@@ -1210,7 +1219,7 @@ def test_unknown_issue_is_200_not_404(client_db):
 
 
 def test_unknown_issue_records_a_warning_ops_event(client_db):
-    client, db, headers = client_db
+    client, db, iid, headers = client_db
 
     client.post("/api/v1/reassign-issue", json=PAYLOAD, headers=headers)
 
@@ -1218,8 +1227,8 @@ def test_unknown_issue_records_a_warning_ops_event(client_db):
 
 
 def test_accepted_move_records_an_ops_event(client_db):
-    client, db, headers = client_db
-    _seed_issue(db)
+    client, db, iid, headers = client_db
+    _seed_issue(db, iid)
 
     client.post("/api/v1/reassign-issue", json=PAYLOAD, headers=headers)
 
@@ -1227,8 +1236,8 @@ def test_accepted_move_records_an_ops_event(client_db):
 
 
 def test_unparseable_repo_is_422(client_db):
-    client, db, headers = client_db
-    _seed_issue(db)
+    client, db, iid, headers = client_db
+    _seed_issue(db, iid)
 
     r = client.post(
         "/api/v1/reassign-issue",
@@ -1240,7 +1249,7 @@ def test_unparseable_repo_is_422(client_db):
 
 
 def test_missing_from_is_422(client_db):
-    client, db, headers = client_db
+    client, db, iid, headers = client_db
     payload = {k: v for k, v in PAYLOAD.items() if k != "from"}
 
     r = client.post("/api/v1/reassign-issue", json=payload, headers=headers)
@@ -1252,8 +1261,8 @@ def test_estimate_gate_accepts_the_new_owner_after_a_move(client_db):
     """/update-issue-estimate 404s an issue the record does not own. After a
     move the target owns it, so the gate must let it through — and the source
     must stop being accepted for it."""
-    client, db, headers = client_db
-    _seed_issue(db)
+    client, db, iid, headers = client_db
+    _seed_issue(db, iid)
     client.post("/api/v1/reassign-issue", json=PAYLOAD, headers=headers)
 
     accepted = client.post(
@@ -1274,8 +1283,8 @@ def test_estimate_gate_accepts_the_new_owner_after_a_move(client_db):
 
 
 def test_route_requires_an_instance_key(client_db):
-    client, db, headers = client_db
-    _seed_issue(db)
+    client, db, iid, headers = client_db
+    _seed_issue(db, iid)
 
     gated = Settings(
         database_url="sqlite:///:memory:", github_app_id=1,

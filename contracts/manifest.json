@@ -121,6 +121,15 @@
       "auth": "bearer:instance-inbound-key",
       "direction": "odoo->reva",
       "method": "POST",
+      "name": "reassign-issue",
+      "path": "/api/v1/reassign-issue",
+      "sample": "inbound/reassign-issue.sample.json",
+      "schema": "inbound/reassign-issue.schema.json"
+    },
+    {
+      "auth": "bearer:instance-inbound-key",
+      "direction": "odoo->reva",
+      "method": "POST",
       "name": "ticket-actuals",
       "path": "/api/v1/ticket-actuals",
       "sample": "inbound/ticket-actuals.sample.json",
@@ -154,6 +163,6 @@
       "schema": "inbound/error.schema.json"
     }
   ],
-  "contracts_version": "8f7c2d31d57f7850bf70b13ca1f16c60f61f16a9a2fa5d7e7b53ee00f51f7799",
+  "contracts_version": "6b7ab42efc3b215ee037bca2c954f9fd506ac557795e10b87d394dd3004e7577",
   "generated_from": "reva/odoo_contracts.py"
 }

@@ -1,0 +1,53 @@
+{
+  "$defs": {
+    "RecordRef": {
+      "description": "One Odoo record in a reassignment. `model_name` is not constrained to a\nLiteral: REVA stores it as text and Odoo owns the model list.",
+      "properties": {
+        "model_name": {
+          "description": "Odoo model name, e.g. \"helpdesk.ticket\" or \"project.task\"",
+          "title": "Model Name",
+          "type": "string"
+        },
+        "ticket_id": {
+          "title": "Ticket Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ticket_id",
+        "model_name"
+      ],
+      "title": "RecordRef",
+      "type": "object"
+    }
+  },
+  "description": "An operator moved a REVA-created GitHub issue to a different Odoo record\n(spec 2026-08-20). `from` is advisory \u2014 it is recorded for the ops log, but\na mismatch is never an error: the Odoo wizard retries a move that already\nhappened, and 409-ing there breaks exactly the case the retry exists for.",
+  "properties": {
+    "from": {
+      "$ref": "#/$defs/RecordRef",
+      "description": "Where the issue sat before the move"
+    },
+    "number": {
+      "description": "GitHub issue number being moved",
+      "title": "Number",
+      "type": "integer"
+    },
+    "repo": {
+      "description": "Repository URL, https://github.com/{owner}/{repo}",
+      "title": "Repo",
+      "type": "string"
+    },
+    "to": {
+      "$ref": "#/$defs/RecordRef",
+      "description": "The record that owns it now"
+    }
+  },
+  "required": [
+    "number",
+    "repo",
+    "from",
+    "to"
+  ],
+  "title": "ReassignIssueRequest",
+  "type": "object"
+}

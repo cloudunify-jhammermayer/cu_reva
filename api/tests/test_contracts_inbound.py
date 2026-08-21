@@ -5,7 +5,11 @@ from __future__ import annotations
 from app.schemas.support_requests import SupportRequestBody
 from app.schemas.ticket_actuals import TicketActualsRequest
 from app.schemas.ticket_analyses import TicketAnalysisRequest
-from app.schemas.ticket_issues import CreateIssuesRequest, UpdateIssueEstimateRequest
+from app.schemas.ticket_issues import (
+    CreateIssuesRequest,
+    ReassignIssueRequest,
+    UpdateIssueEstimateRequest,
+)
 from app.schemas.timesheet_reviews import TimesheetReviewRequest
 from reva.odoo_contracts import CONTRACTS
 
@@ -14,6 +18,7 @@ _MODELS = {
     "ticket-analysis": TicketAnalysisRequest,
     "create-issues": CreateIssuesRequest,
     "update-issue-estimate": UpdateIssueEstimateRequest,
+    "reassign-issue": ReassignIssueRequest,
     "ticket-actuals": TicketActualsRequest,
     "timesheet-review": TimesheetReviewRequest,
 }

@@ -308,3 +308,39 @@ def test_multiple_non_default_instances_allowed(db: Database) -> None:
 
     assert resolve_ticket_by_id(db, "acme/widgets", 9999) is None
 
+
+
+def test_resolve_pr_tickets_follows_a_reassignment():
+    """A PR closing a moved issue must resolve to the record that owns it now,
+    or the change-summary and work-status callbacks land on the wrong ticket."""
+    from reva.db import Base, Database, create_engine_from_url, writers
+    from reva.ticket_links import resolve_pr_tickets
+    from reva.types import TicketIssueJobParams
+
+    engine = create_engine_from_url("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    db = Database(engine)
+    iid = writers.create_odoo_instance(
+        db, name="acme", key_hash="h-acme", key_prefix="reva_odoo_ac",
+        callback_url="", callback_api_key_enc="enc",
+    )
+    run_id = writers.record_ticket_issue_run_created(db, TicketIssueJobParams(
+        run_id=0, odoo_instance_id=iid, ticket_id=1234, model_name="project.task",
+        github_url="https://github.com/acme/widgets", name="Ticket name",
+        description="d", analysis_html="", priority="1",
+        ticket_url="https://odoo.example/web#id=1",
+    ))
+    writers.update_ticket_issue_progress(db, run_id, [
+        {"title": "Issue 42", "number": 42,
+         "url": "https://github.com/acme/widgets/issues/42", "state": "open"},
+    ])
+    writers.record_issue_reassignment(
+        db, odoo_instance_id=iid, repo_full_name="acme/widgets", number=42,
+        ticket_id=5678, model_name="helpdesk.ticket",
+    )
+
+    refs = resolve_pr_tickets(db, "acme/widgets", [42])
+    assert [(r.ticket_id, r.model_name) for r in refs] == [(5678, "helpdesk.ticket")]
+    # run_id still points at the run holding the plan — change_note_runner reads
+    # the ticket name off it.
+    assert refs[0].run_id == run_id

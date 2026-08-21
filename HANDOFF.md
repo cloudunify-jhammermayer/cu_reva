@@ -34,12 +34,38 @@ until REVA catches up.
   `POST /api/v1/support-request` returns `turn_id` (`SupportRequestCreated`) and
   Odoo already stores it in both submit paths, so the stored id is never 0.
 
-**Request 1 (issue reassignment): SPECCED, not implemented.** Spec:
-`docs/superpowers/specs/2026-08-20-issue-reassignment-design.md`. An override
-table (`ticket_issue_reassignments`, migration 047) honored by five
-owner-resolution sites; the endpoint deliberately never returns 404, because
-Odoo's wizard reads that as "not shipped yet" and commits the move with a
-warning that would be false.
+**Request 1 (issue reassignment): IMPLEMENTED, not deployed** (commits
+`f80b923`..`1bdade3`). Spec:
+`docs/superpowers/specs/archive/2026-08-20-issue-reassignment-design.md`. An
+override table (`ticket_issue_reassignments`, migration 047) honored by five
+owner-resolution sites; `POST /api/v1/reassign-issue` deliberately never
+returns 404, because Odoo's wizard reads that as "not shipped yet" and commits
+the move with a warning that would be false.
+
+- **Owed: the contract re-sync.** Run `scripts/sync_contracts.sh <path to
+  Cloudunify/>` to land the new `reassign-issue` contract in
+  `Cloudunify/reva_contracts/`, then bump the `contracts_version` pin in
+  `cu_reva_connector/tests/test_contracts.py` to
+  `6b7ab42efc3b215ee037bca2c954f9fd506ac557795e10b87d394dd3004e7577`
+  (supersedes `8f7c2d31d57f…`, synced 2026-08-20) — the value
+  `python -m reva.odoo_contracts generate` printed. **Neither side is
+  deployed.**
+- **Coverage, stated honestly: unit tests only.** No live Odoo call was made,
+  and no request from the real Odoo wizard has ever been received. Migration
+  `047`'s raw SQL is not exercised by any test — tests build tables from the
+  ORM models via `create_all`, not from the SQL files — so it is validated
+  only by `make test-integration` against real Postgres, or by the first
+  staging boot. Two SQL constructs this work added — an `or_(and_(...))`
+  predicate and a four-column `.distinct()` — have run only against SQLite,
+  never Postgres. Verified at `1bdade3`: worker 1597 passed / 15 skipped, api
+  360 passed, scheduler 37 passed / 1 skipped, ruff clean.
+- **Design consequence worth knowing before go-live:** for a moved issue, the
+  merged-PR change note is generated from the *source* ticket's name but
+  delivered to the *target* record, because
+  `worker/worker/change_note_runner.py` reads the ticket name off the run
+  that holds the issue plan. This is a deliberate accepted imperfection
+  recorded in the spec, not a bug — but the note text is customer-facing, so
+  whoever deploys this should know.
 
 **One thing the handoff gets wrong, worth knowing before reading it:** it
 attributes mis-filed issues to REVA parsing `cr/1234` from the branch or PR
