@@ -26,16 +26,16 @@ until REVA catches up.
   to `8f7c2d31d57f…`, 834 Odoo tests green. The new `analysis_id: 456` in
   `tickets.write-field.sample.json` correctly 409'd an Odoo fixture — the
   staleness guard firing for the first time; the fixture's `reva_analysis_id`
-  was set to match rather than the field stripped. **Neither side is deployed
-  yet.**
+  was set to match rather than the field stripped. **REVA is DEPLOYED to prod
+  as of 2026-08-21 (585b5b7); the Odoo side is not.**
 - **Odoo still owes the support half of the guard:** REVA sends `turn_id`, but
   `WriteFieldRequest` does not declare it, so Pydantic drops it. Accept it and
   compare against `reva_support_turn_id`. Confirmed for them: the `202` from
   `POST /api/v1/support-request` returns `turn_id` (`SupportRequestCreated`) and
   Odoo already stores it in both submit paths, so the stored id is never 0.
 
-**Request 1 (issue reassignment): IMPLEMENTED, not deployed** (commits
-`f80b923`..`1bdade3`). Spec:
+**Request 1 (issue reassignment): IMPLEMENTED and DEPLOYED 2026-08-21** (commits
+`f80b923`..`c7f2efc`, merged as `585b5b7`). Spec:
 `docs/superpowers/specs/archive/2026-08-20-issue-reassignment-design.md`. An
 override table (`ticket_issue_reassignments`, migration 047) honored by five
 owner-resolution sites; `POST /api/v1/reassign-issue` deliberately never
@@ -48,11 +48,27 @@ the move with a warning that would be false.
   `cu_reva_connector/tests/test_contracts.py` to
   `6b7ab42efc3b215ee037bca2c954f9fd506ac557795e10b87d394dd3004e7577`
   (supersedes `8f7c2d31d57f…`, synced 2026-08-20) — the value
-  `python -m reva.odoo_contracts generate` printed. **Neither side is
-  deployed.**
-- **Coverage, stated honestly: unit tests only.** No live Odoo call was made,
-  and no request from the real Odoo wizard has ever been received. Migration
-  `047`'s raw SQL is not exercised by any test — tests build tables from the
+  `python -m reva.odoo_contracts generate` printed. **REVA is deployed; the
+  Odoo side is not, which is the safe order — the endpoint must exist before
+  the wizard calls it, and the wizard tolerates its absence either way.**
+- **Deploy verification (2026-08-21).** `scripts/deploy.sh` run detached so an
+  interrupted session could not leave a half-restart; exit 0, all services
+  healthy. Migration 047 recorded at version 47 on prod Postgres with both
+  indexes and the FK present. `POST /api/v1/reassign-issue` answers **401**
+  unauthenticated — it exists and is instance-gated, and specifically is not a
+  404. No ops events in the 20 minutes after the deploy. Prod's uncommitted
+  `docker-compose.prod.yml` drift (value-report cadence env passthrough) was
+  stashed before the pull and popped after; it is still uncommitted there.
+- **Coverage before deploy.** Unit: scheduler 37, api 360, worker 1598, ruff
+  clean, TUI green. Integration: `make test-integration` 16 tests on real
+  Postgres 16, whose fixture calls `db.migrate()` — so migration 047's raw SQL
+  DID execute against real Postgres, not only the ORM. Plus a throwaway
+  pre-deploy smoke exercising every new query path (both union directions,
+  cross-instance isolation, the notify redirect, the `or_(and_(...))` estimate
+  filter, the four-column `.distinct()`) on Postgres 16.
+- **Still not covered:** no live Odoo call was made, and no request from the
+  real Odoo wizard has ever been received. Migration
+  `047`'s raw SQL is not exercised by the unit tier — those build tables from the
   ORM models via `create_all`, not from the SQL files — so it is validated
   only by `make test-integration` against real Postgres, or by the first
   staging boot. Two SQL constructs this work added — an `or_(and_(...))`
