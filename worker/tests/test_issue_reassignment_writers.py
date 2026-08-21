@@ -268,6 +268,31 @@ def test_a_record_whose_only_issues_arrived_by_move_can_be_ready(db):
     assert (1234, "project.task") not in keys
 
 
+def test_union_moved_onto_does_not_pull_another_instances_run(db):
+    """Fix round 2: _issue_item_from_runs (the moved-ONTO direction of
+    get_ticket_issue_union) must be instance-scoped like every other override
+    consumer. Instance B owns the only run carrying #42 on acme/widgets;
+    instance A writes an override onto its own record. natural_issue_owner
+    (already instance-scoped) answers None for this case -- the endpoint
+    would report unknown_issue -- so the union must not silently disagree and
+    hand instance A instance B's title/estimate for the same issue number."""
+    iid_a, iid_b = _instance(db, "acme"), _instance(db, "other")
+    run_b = _run_with_issues(db, iid_b, 9999, "project.task", [42])
+    writers.update_ticket_issue_progress(db, run_b, [
+        {"title": "Instance B's secret issue", "number": 42,
+         "url": "https://github.com/acme/widgets/issues/42", "state": "open",
+         "estimate_hours": 99.0},
+    ])
+    writers.record_issue_reassignment(
+        db, odoo_instance_id=iid_a, repo_full_name="acme/widgets", number=42,
+        ticket_id=5678, model_name="helpdesk.ticket",
+    )
+    assert writers.natural_issue_owner(db, iid_a, "acme/widgets", 42) is None
+
+    union = writers.get_ticket_issue_union(db, iid_a, 5678, "helpdesk.ticket")
+    assert union == []
+
+
 def test_estimate_does_not_reach_another_instances_run_for_the_same_repo_and_number(db):
     """Fix round 1: natural_issue_owner (used to widen the owners search) must
     be instance-scoped like every other override consumer. Unscoped, a newer

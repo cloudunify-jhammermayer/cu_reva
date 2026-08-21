@@ -186,6 +186,15 @@ def test_accepted_move_records_an_ops_event(client_db):
     client.post("/api/v1/reassign-issue", json=PAYLOAD, headers=headers)
 
     assert "issue_reassigned" in _ops(db)
+    # "issue_reassigned" is also emitted by the `cleared` branch (moving an
+    # issue back onto its natural owner), so pin the accepted-move branch
+    # specifically by its detail rather than just the event name.
+    with db.session() as s:
+        events = [
+            e.detail for e in s.query(OpsEvent).all()
+            if e.event == "issue_reassigned"
+        ]
+    assert any(d.get("result") == "reassigned" for d in events)
 
 
 def test_unparseable_repo_is_422(client_db):
@@ -284,6 +293,13 @@ def test_a_different_instances_run_cannot_satisfy_the_natural_owner_check(client
     assert r.status_code == 200
     # The caller's own instance carries no run for #42 — unknown, not cleared.
     assert r.json()["status"] == "unknown_issue"
-    # And the override must actually redirect the CALLER's own union.
+    # And the override IS written on the caller's own record...
+    assert writers.issue_owner_overrides(db, iid, "acme/widgets", [42]) == {
+        42: (1234, "project.task")
+    }
+    # ...but round 2 (_issue_item_from_runs instance-scoping) means the
+    # caller's union stays empty until a run in the CALLER's own instance
+    # actually carries #42 — unscoped, this would wrongly pull the other
+    # instance's run data (title/url/estimate) into the caller's union.
     union = writers.get_ticket_issue_union(db, iid, 1234, "project.task")
-    assert [i["number"] for i in union] == [42]
+    assert union == []

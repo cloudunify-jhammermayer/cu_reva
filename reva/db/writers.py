@@ -2298,8 +2298,14 @@ def update_ticket_issue_state(
 ) -> list[dict]:
     """Set `state` on issue `number` of `owner/repo` across all runs that
     carry it (adopted/reconciled runs share issues), and return the affected
-    Odoo records with the NEWEST run's full issue snapshot:
-    [{"ticket_id", "model_name", "issues"}].
+    Odoo records: [{"ticket_id", "model_name", "issues"}].
+
+    For a record redirected by a reassignment override, `issues` here is the
+    SOURCE run's snapshot, not the redirected record's own union — it is not
+    authoritative for a redirected record. The sole caller
+    (worker/worker/ticket_issue_runner.py) re-fetches via
+    get_ticket_issue_union(ticket_id, model_name) before notifying Odoo, so
+    this stale value is never actually sent anywhere.
 
     `complete_date` is stamped from `closed_at` (UTC date, YYYY-MM-DD) when the
     issue closes and cleared to None on reopen — per-issue, alongside `state`.
@@ -2505,11 +2511,18 @@ def _repos_for_record(
 
 
 def _issue_item_from_runs(
-    db: Database, repo_full_name: str, number: int
+    db: Database, odoo_instance_id: int | None, repo_full_name: str, number: int
 ) -> dict | None:
     """The newest run's copy of issue `number` on `repo_full_name`, in union
     shape. None when no run carries it — a reassignment may name an issue REVA
-    does not know yet, and that must not fabricate an entry."""
+    does not know yet, and that must not fabricate an entry.
+
+    Instance-scoped (fix round 2): like every other override consumer, a run
+    belonging to a different instance must never answer this. Unscoped, a
+    same-repo/number run owned by another instance could feed that instance's
+    issue data (title, url, estimate) straight into this instance's union —
+    disagreeing with natural_issue_owner, which is already instance-scoped and
+    would answer "unknown issue" for the very same case."""
     from sqlalchemy.orm import load_only
 
     with db.session() as s:
@@ -2517,6 +2530,7 @@ def _issue_item_from_runs(
             select(TicketIssueRun)
             .where(
                 TicketIssueRun.repo_full_name == repo_full_name.lower(),
+                _instance_filter(odoo_instance_id),
                 TicketIssueRun.issues.is_not(None),
             )
             .options(load_only(TicketIssueRun.issues, TicketIssueRun.created_at))
@@ -2621,7 +2635,7 @@ def get_ticket_issue_union(
     ):
         if number in seen:
             continue
-        item = _issue_item_from_runs(db, repo_full_name, number)
+        item = _issue_item_from_runs(db, odoo_instance_id, repo_full_name, number)
         if item is not None:
             seen[number] = item
 
@@ -2714,13 +2728,13 @@ def list_ready_tickets(db: Database, limit: int = 10) -> list[dict]:
                 TicketIssueReassignment.repo_full_name,
             ).distinct()
         ).all()
-    for row in moved:
-        key = (row.odoo_instance_id, row.ticket_id, row.model_name)
+    for moved_row in moved:
+        key = (moved_row.odoo_instance_id, moved_row.ticket_id, moved_row.model_name)
         candidates.setdefault(key, {
-            "odoo_instance_id": row.odoo_instance_id,
-            "ticket_id": row.ticket_id,
-            "model_name": row.model_name,
-            "repo_full_name": row.repo_full_name,
+            "odoo_instance_id": moved_row.odoo_instance_id,
+            "ticket_id": moved_row.ticket_id,
+            "model_name": moved_row.model_name,
+            "repo_full_name": moved_row.repo_full_name,
             "name": "",
         })
 
