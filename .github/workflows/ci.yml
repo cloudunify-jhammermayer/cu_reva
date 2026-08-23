@@ -16,8 +16,8 @@ jobs:
     name: ruff + mypy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
       - name: Install linters
@@ -36,8 +36,8 @@ jobs:
       matrix:
         service: [worker, api, scheduler]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
       - name: Install deps
@@ -68,8 +68,8 @@ jobs:
           --health-cmd "pg_isready -U review -d reviews"
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
       # Install per service (requirements-dev.txt uses relative `-e ..` / `-r
@@ -94,8 +94,8 @@ jobs:
     name: go (tui)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.26.3"
       - name: Build / vet / test
@@ -106,7 +106,7 @@ jobs:
           go test ./...
       - name: golangci-lint (advisory — not yet gating; see docs/production-readiness-plan.md R9)
         continue-on-error: true
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           working-directory: tui
           version: latest
@@ -119,12 +119,12 @@ jobs:
     name: security scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: gitleaks — secret scan (working tree)
         run: |
           docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:latest \
             dir /repo --no-banner --redact --exit-code 1
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
       - name: semgrep — SAST (Python + Go)
