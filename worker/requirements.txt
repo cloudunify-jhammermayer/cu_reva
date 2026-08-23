@@ -1,8 +1,8 @@
 # Worker-only dependencies. Shared deps (httpx, sqlalchemy, pydantic, etc.)
 # are pulled in transitively by the `reva-shared` package, installed from
 # ../shared (see Dockerfile + dev install).
-rq==2.9.0
-redis==7.4.0
+rq==2.11.0
+redis==8.1.0
 # PDF attachment text extraction (reva.attachment_text._extract_pdf_text);
 # lazy-imported so the api/scheduler images don't need it.
-pypdf==6.13.2
+pypdf==6.16.1
