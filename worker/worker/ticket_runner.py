@@ -18,6 +18,7 @@ from reva.ticket_formatter import format_ticket_html
 from reva.ticket_knowledge import build_ticket_knowledge, core_source_param
 from reva.types import TicketJobParams
 from worker.golden_support import record_degradations
+from worker.image_staging import staged_images
 from worker.repo_config import (
     code_grounding_allowed,
     load_repo_config,
@@ -138,13 +139,19 @@ def _try_code_grounded_analysis(ctx, params, knowledge, log, version=None):
     )
     _record_golden_degradations(ctx, log, golden_degradations, params.analysis_id)
 
-    with ctx.runner.repo_lock(owner, name):
-        repo_path = ctx.runner.ensure_repo(owner, name, None, token)
-        response = ctx.runner.review(
-            repo_path=repo_path, skill=_TICKET_SKILL, params=skill_params,
-            skill_vars={"ESTIMATE_CALIBRATION": block},
-            odoo=repo_config.odoo, extra_dirs=extra_dirs,
-        )
+    with staged_images(
+        ctx, params.images, "ticket_analysis", {"analysis_id": params.analysis_id}
+    ) as (image_dir, image_paths):
+        if image_dir is not None:
+            extra_dirs = (extra_dirs or []) + [image_dir]
+            skill_params["images"] = "\n".join(image_paths)
+        with ctx.runner.repo_lock(owner, name):
+            repo_path = ctx.runner.ensure_repo(owner, name, None, token)
+            response = ctx.runner.review(
+                repo_path=repo_path, skill=_TICKET_SKILL, params=skill_params,
+                skill_vars={"ESTIMATE_CALIBRATION": block},
+                odoo=repo_config.odoo, extra_dirs=extra_dirs,
+            )
     if response.tool_use_input is None:
         raise PermanentError(f"{_TICKET_SKILL} produced no analysis JSON")
     try:

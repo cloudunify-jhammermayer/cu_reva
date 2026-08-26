@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-from reva.types import Attachment
+from reva.types import Attachment, ImageAttachment
 
 
 class TicketAnalysisRequest(BaseModel):
@@ -22,6 +22,14 @@ class TicketAnalysisRequest(BaseModel):
         default=None,
         description="Optional .docx/.pdf/.txt/.md file; its text is extracted and "
         "folded into the analysis prompt alongside `text`",
+    )
+    images: list[ImageAttachment] = Field(
+        default_factory=list,
+        description="Screenshots embedded in the ticket description, in document "
+        "order. Each `label` (\"Image 1\") must match the [Image N] marker the "
+        "sender left in `text` where the image was. png/jpeg/gif/webp; max 6 "
+        "images, 5 MB each, 8 MB total. Defaults to empty, so a sender that does "
+        "not extract images is unaffected.",
     )
     github_url: str | None = Field(
         default=None,
@@ -60,6 +68,7 @@ class TicketAnalysisStatus(BaseModel):
     estimated_cost_usd: float | None
     created_at: datetime
     completed_at: datetime | None
+    image_count: int = 0
 
 
 class TicketAnalysisSummary(BaseModel):
@@ -92,6 +101,9 @@ class TicketAnalysisSummary(BaseModel):
     # How many customer-repo doc sections grounded this analysis (null = not
     # attempted / legacy row; 0 = attempted, nothing injected).
     repo_docs_sections_used: int | None = None
+    # Screenshots submitted with the ticket. The bytes are never stored, so this
+    # is the only signal that a requeued analysis re-ran image-blind.
+    image_count: int = 0
 
 
 class TicketAnalysisPage(BaseModel):

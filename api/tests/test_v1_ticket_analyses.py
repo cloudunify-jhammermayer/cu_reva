@@ -490,3 +490,91 @@ def test_requeue_of_purged_row_is_409(client_db_queue):
     r = client.post(f"/api/v1/ticket-analysis/{aid}/requeue")
     assert r.status_code == 409
     assert len(queue.enqueued) == before
+
+
+# --- images -------------------------------------------------------------------
+#
+# The gate itself is exercised exhaustively on the support path
+# (test_v1_support_requests.py); it is shared code (app/image_gate.py), so what
+# these cover is that this route wires it up, carries the array into the job,
+# and records the count the requeue degradation is read from.
+
+_PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32).decode()
+_JPEG = base64.b64encode(b"\xff\xd8\xff\xe0" + b"\x00" * 32).decode()
+
+
+def _image(label="Image 1", filename="shot.png", data=_PNG):
+    return {"filename": filename, "label": label, "content_base64": data}
+
+
+def test_request_without_images_still_accepted(client_db_queue):
+    """Backward compatibility: today's Odoo sender omits `images` entirely."""
+    client, db, queue, headers = client_db_queue
+    r = client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers)
+    assert r.status_code == 202
+    _, params, _ = queue.enqueued[0]
+    assert params["images"] == []
+    from reva.db import writers
+    assert writers.get_ticket_analysis(db, r.json()["analysis_id"])["image_count"] == 0
+
+
+def test_images_carried_into_the_job_and_counted_on_the_row(client_db_queue):
+    client, db, queue, headers = client_db_queue
+    payload = {**BASE_PAYLOAD, "images": [
+        _image("Image 1"),
+        _image("Image 2", "shot2.jpg", _JPEG),
+    ]}
+    r = client.post("/api/v1/ticket-analysis", json=payload, headers=headers)
+    assert r.status_code == 202
+
+    _, params, _ = queue.enqueued[0]
+    assert [i["label"] for i in params["images"]] == ["Image 1", "Image 2"]
+    from reva.db import writers
+    assert writers.get_ticket_analysis(db, r.json()["analysis_id"])["image_count"] == 2
+
+
+def test_bad_image_is_422_and_nothing_is_enqueued(client_db_queue):
+    """Accept time is ticket-analysis's only error channel to Odoo — a worker
+    failure lands in the DB where the consultant never sees it."""
+    client, _, queue, headers = client_db_queue
+    payload = {**BASE_PAYLOAD, "images": [_image(filename="shot.jpg")]}  # PNG bytes
+    r = client.post("/api/v1/ticket-analysis", json=payload, headers=headers)
+    assert r.status_code == 422
+    assert "does not match" in r.json()["detail"]
+    assert queue.enqueued == []
+
+
+def test_requeue_of_an_image_bearing_analysis_records_the_loss(client_db_queue):
+    """The bytes are never persisted, so a requeue re-analyses blind. On a
+    ticket whose screenshots ARE the requirement that is indistinguishable from
+    a grounded analysis unless the degradation is recorded (CLAUDE.md: no
+    silent log-and-continue)."""
+    from reva.db.models import OpsEvent
+
+    client, db, queue, headers = client_db_queue
+    payload = {**BASE_PAYLOAD, "images": [_image()]}
+    aid = client.post(
+        "/api/v1/ticket-analysis", json=payload, headers=headers
+    ).json()["analysis_id"]
+    _make_requeueable(db, aid)
+
+    assert client.post(f"/api/v1/ticket-analysis/{aid}/requeue").status_code == 202
+    _, params, _ = queue.enqueued[-1]
+    assert params["images"] == []
+    with db.session() as s:
+        events = [e.event for e in s.query(OpsEvent).all()]
+    assert "requeue_lost_images" in events
+
+
+def test_requeue_without_images_records_nothing(client_db_queue):
+    from reva.db.models import OpsEvent
+
+    client, db, queue, headers = client_db_queue
+    aid = client.post(
+        "/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers
+    ).json()["analysis_id"]
+    _make_requeueable(db, aid)
+
+    assert client.post(f"/api/v1/ticket-analysis/{aid}/requeue").status_code == 202
+    with db.session() as s:
+        assert [e.event for e in s.query(OpsEvent).all()] == []

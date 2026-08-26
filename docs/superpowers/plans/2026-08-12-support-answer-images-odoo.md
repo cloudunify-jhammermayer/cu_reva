@@ -1,6 +1,12 @@
 # Images in Support Answers — Odoo side (Cloudunify)
 
-> **Handoff note, written 2026-08-12.** The REVA half is implemented, tested and
+> **DONE 2026-08-26 — implemented, not committed.** Both halves are in place.
+> The Odoo work is in `../Cloudunify` on the `Prod` branch as **uncommitted
+> working-tree changes**, awaiting Joseph's review and commit; the REVA side is
+> committed here. The end-to-end check (re-send ticket 6891) is still owed —
+> see *Verification* below.
+>
+> *Original handoff note, 2026-08-12:* the REVA half is implemented, tested and
 > deployed. This is the remaining half, and it is what actually makes the
 > feature do anything: **REVA is inert until Odoo starts sending images.**
 > Implement in `../Cloudunify` (`custom_addons/cu_reva_ticket_analysis`).
@@ -19,8 +25,9 @@
 | CLI-escalation image staging (`--add-dir` + `Read`) | ✅ deployed |
 | `support_turns.image_count` + requeue ops event + TUI column | ✅ deployed |
 | Skill prompt tells the model to read images | ✅ deployed (prompts v2.20) |
-| **Odoo extracts and sends the images** | ❌ **this document** |
-| Contracts copied into `Cloudunify/reva_contracts/` | ✅ done 2026-08-20 (`8f7c2d31d57f…`, supersedes `3421e338…`) |
+| **Odoo extracts and sends the images** | ✅ 2026-08-26 (`models/reva_images.py`, uncommitted in Cloudunify) |
+| **Ticket analysis takes images too** | ✅ 2026-08-26 — see the addendum below |
+| Contracts copied into `Cloudunify/reva_contracts/` | ✅ re-synced 2026-08-26 (`a70c331492c2…`, supersedes `8f7c2d31d57f…`) |
 
 ## Step 0 — sync the contract — ✅ DONE 2026-08-20
 
@@ -86,6 +93,15 @@ Replace it with an extract-then-flatten pass:
 Apply the same treatment to `_reva_submit_analysis` (`reva_mixin.py:804`), which
 flattens the same `description` the same way and is equally blind today.
 
+> **Resolved 2026-08-26.** This line could not be followed as written when the
+> plan was drafted: `/api/v1/ticket-analysis` had no `images` field — only the
+> support half of the spec shipped in the first pass, despite the spec's title
+> covering both. Rather than settle for marker-only cleanup on that path, the
+> REVA side was extended to match (Joseph's call). Both submit methods now go
+> through one mixin helper, `_reva_description_for_reva`, so the markers and the
+> array can never disagree between them. `action_create_github_issues` still
+> flattens plainly — that contract has no `images` field and is out of scope.
+
 **Failure posture:** matches the existing sender — a broken image is skip-and-log,
 never a failed submit. The button must not start refusing to send because one
 `<img>` had an odd `src`.
@@ -101,13 +117,16 @@ separator, or that repeat byte-identically across tickets.
 
 ## Verification
 
-- Odoo-side unit tests: marker/array alignment; a dropped image leaves no
-  dangling `[Image N]`; a signature logo is filtered; a malformed `src` logs
-  instead of raising; labels come out as `Image 1..N` with no gaps.
-- **End-to-end, and this is the real test:** re-send ticket 6891 with its two
-  screenshots. REVA should name `[200028] IBC Container 1000l mit Glykol pur`
-  and stop asking which product is affected. Until that runs, the feature is
-  unit-tested only.
+- Odoo-side unit tests: **done** — `tests/test_reva_images.py`, 29 tests across
+  three classes (marker/array alignment, no dangling marker, no gaps in the
+  numbering, signature-logo drop, the caps, the resize, both `src` shapes, the
+  attachment-authorisation matrix, and both submit paths). Full addon suite
+  **811 passed / 0 failed** against a live Odoo 19 registry.
+- **Still owed — end-to-end, and this is the real test:** re-send ticket 6891
+  with its two screenshots. REVA should name `[200028] IBC Container 1000l mit
+  Glykol pur` and stop asking which product is affected. Until that runs, the
+  feature is unit-tested only: every test here mocks the HTTP call, so green
+  proves the payload shape, not that the model reads a screenshot.
 
 ## Known REVA-side limitation to keep in mind
 
@@ -123,3 +142,35 @@ button again**, not to requeue. Worth a line in the addon's user-facing help.
 - Files API upload + `file_id` reuse (only worth it if multi-turn image threads
   become common; REVA replays prior turns as text summaries today).
 - Lossless requeue via a `support_turn_images` blob table.
+
+
+## Addendum 2026-08-26 — ticket analysis, and what "not stored" means
+
+**Ticket analysis was brought up to the support path.** `POST
+/api/v1/ticket-analysis` now takes the same `images` array, gated by the same
+accept-time check (extracted to `api/app/image_gate.py` — a cap that drifts
+between two endpoints is a cap that does not exist). `TicketAnalyzer` sends the
+image content blocks behind the same untrusted-data preamble (`IMAGES_PREAMBLE`,
+now shared from `reva/image_attachment.py`), and the planner-gated CLI
+escalation stages them as files through `worker/worker/image_staging.py`, shared
+with `support_runner`. Prompts v2.21 tells both the Messages-API prompt and the
+`reva-ticket-analysis` skill to read them and never raise a `missing_info`
+question a screenshot already answers.
+
+`ticket_analyses.image_count` (migration 048) mirrors `support_turns.image_count`,
+and `requeue_ticket_analysis` emits `requeue_lost_images` for the same reason:
+the requeue rebuilds params from the row, so it re-analyses blind.
+
+**Nothing stores the bytes, by design** (Joseph, 2026-08-26 — space):
+
+- **Odoo** creates no attachments. The screenshots already exist as the mail
+  gateway's inline `ir.attachment` records; they are read, resized in memory,
+  base64'd into the request, and dropped.
+- **`reva.request.log`** already strips them: `summarize_payload`'s
+  `_BASE64_KEYS` contains `content_base64` and it recurses into lists, so each
+  image logs as `{"filename": …, "bytes": N}`. That was incidental before and is
+  load-bearing now (8 MB per send into a permanent table), so
+  `test_request_log_records_the_size_not_the_bytes` pins it.
+- **REVA** persists a count and nothing else. The bytes live in the RQ payload
+  in Redis for the job's lifetime and in the Anthropic request. The deferred
+  `support_turn_images` blob table stays deferred.

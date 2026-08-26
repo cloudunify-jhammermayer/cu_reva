@@ -1,0 +1,11 @@
+-- How many images the analysis was submitted with (spec
+-- 2026-08-10-support-answer-images-design). The bytes themselves are not
+-- stored: they ride in the RQ job payload like the doc attachment does.
+--
+-- The count is what makes the requeue degradation visible, exactly as
+-- support_turns.image_count (migration 046) does for a support turn.
+-- requeue_ticket_analysis rebuilds TicketJobParams from this row and therefore
+-- carries no images, so a requeued analysis reads the ticket blind — on a
+-- ticket whose screenshots ARE the requirement that is indistinguishable from
+-- a well-grounded analysis unless someone can see the original had images.
+ALTER TABLE ticket_analyses ADD COLUMN IF NOT EXISTS image_count INTEGER NOT NULL DEFAULT 0;

@@ -6,6 +6,8 @@ Fakes for TicketAnalyzer and OdooCallbackClient.
 
 from __future__ import annotations
 
+import base64
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -128,7 +130,9 @@ def ctx_and_fakes(monkeypatch):
     return {"ctx": ctx, "db": db, "analyzer": analyzer, "odoo": odoo}
 
 
-def _make_params(db: Database, github_url: str | None = None) -> dict:
+def _make_params(
+    db: Database, github_url: str | None = None, images: list | None = None
+) -> dict:
     params = TicketJobParams(
         analysis_id=0,
         odoo_instance_id=1,
@@ -136,6 +140,7 @@ def _make_params(db: Database, github_url: str | None = None) -> dict:
         model_name="helpdesk.ticket",
         field_name="description",
         text="Add a button to the form view.",
+        images=images or [],
         github_url=github_url,
     )
     analysis_id = writers.record_ticket_analysis_created(db, params)
@@ -147,6 +152,7 @@ def _make_params(db: Database, github_url: str | None = None) -> dict:
         model_name=params.model_name,
         field_name=params.field_name,
         text=params.text,
+        images=params.images,
         github_url=github_url,
     ).model_dump()
 
@@ -718,8 +724,9 @@ class _FakeCodeRunner:
         self, repo_path, skill, params, skill_vars=None, model=None, odoo=False,
         extra_dirs=None,
     ):
-        self.review_calls.append({"skill": skill, "params": params,
-                                  "extra_dirs": extra_dirs, "skill_vars": skill_vars})
+        self.review_calls.append({"repo_path": repo_path, "skill": skill,
+                                  "params": params, "extra_dirs": extra_dirs,
+                                  "skill_vars": skill_vars})
         return ClaudeResponse(
             model="claude-sonnet-5", stop_reason="tool_use",
             tool_use_input=self.raw_input if self.raw_input is not None
@@ -1322,3 +1329,103 @@ def test_cli_leg_does_not_report_a_previous_jobs_stale_degradation(
     # the stale leftover leaking through.
     golden_events = [e for e in _ops_events(s["db"]) if e[1].startswith("golden_estimates_")]
     assert golden_events == []
+
+
+# --- images on the CLI escalation path ---------------------------------------
+#
+# The Messages-API leg is covered in test_ticket_analyzer.py; this is the other
+# half — an analysis the planner escalated, whose images the CLI can only read
+# as files.
+
+_PNG_B64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32).decode()
+
+
+def _img(label="Image 1", filename="shot.png", data=_PNG_B64) -> dict:
+    return {"filename": filename, "label": label, "content_base64": data}
+
+
+def test_code_path_stages_images_as_files_for_the_read_tool(ctx_and_fakes, monkeypatch):
+    """The CLI cannot take inline image bytes, so they are written to a temp dir
+    handed over with --add-dir; `Read` is already an allowed tool."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    run_ticket_analysis(
+        _make_params(s["db"], github_url=_GH_URL, images=[_img("Image 1"), _img("Image 2")])
+    )
+
+    call = code_runner.review_calls[0]
+    assert call["extra_dirs"] is not None and len(call["extra_dirs"]) == 1
+    staged = call["params"]["images"]
+    assert "Image 1: " in staged and "Image 2: " in staged
+    # Named from the validated label, never from the untrusted filename.
+    assert "image-1.png" in staged and "image-2.png" in staged
+
+
+def test_staged_images_live_outside_the_clone_and_are_cleaned_up(
+    ctx_and_fakes, monkeypatch
+):
+    """Writing into the working tree would dirty it and cross _scrub_clone."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL, images=[_img()]))
+
+    call = code_runner.review_calls[0]
+    staged_dir = call["extra_dirs"][0]
+    assert not staged_dir.startswith(call["repo_path"])
+    assert not os.path.exists(staged_dir)
+
+
+def test_core_dirs_and_image_dir_are_both_passed(ctx_and_fakes, monkeypatch):
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo(), _FakeCoreKnowledge())
+
+    run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL, images=[_img()]))
+
+    dirs = code_runner.review_calls[0]["extra_dirs"]
+    assert dirs[:3] == [
+        "/core/19.0/odoo", "/core/19.0/enterprise", "/core/19.0/documentation",
+    ]
+    assert len(dirs) == 4
+
+
+def test_code_path_without_images_passes_no_image_param(ctx_and_fakes, monkeypatch):
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL))
+
+    call = code_runner.review_calls[0]
+    assert "images" not in call["params"]
+    assert call["extra_dirs"] is None
+
+
+def test_image_staging_failure_degrades_and_records_an_ops_event(
+    ctx_and_fakes, monkeypatch
+):
+    """A staging failure must cost the images, not the whole analysis — and must
+    be visible (CLAUDE.md: no silent log-and-continue)."""
+    s = ctx_and_fakes
+    _needs_code(monkeypatch)
+    monkeypatch.setattr(
+        "worker.image_staging.tempfile.TemporaryDirectory",
+        lambda **kw: (_ for _ in ()).throw(OSError("no space left on device")),
+    )
+    code_runner = _FakeCodeRunner(s["analyzer"].result)
+    _wire_repo(s, code_runner, _FakeGitHubRepo())
+
+    out = run_ticket_analysis(_make_params(s["db"], github_url=_GH_URL, images=[_img()]))
+
+    assert out["status"] == "completed"
+    call = code_runner.review_calls[0]
+    assert "images" not in call["params"]
+    assert _ops_events(s["db"], "image_staging_failed")

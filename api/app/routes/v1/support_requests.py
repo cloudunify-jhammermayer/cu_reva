@@ -31,6 +31,7 @@ from app.dependencies import (
     require_master_or_odoo_instance,
     require_odoo_instance,
 )
+from app.image_gate import assert_images_acceptable
 from app.pagination import clamp_limit, clamp_offset
 from app.schemas.support_requests import (
     SupportRequestBody,
@@ -44,13 +45,8 @@ from reva.claude_code_runner import REVIEW_JOB_TIMEOUT
 from reva.db import writers
 from reva.db.engine import Database
 from reva.github_urls import parse_github_repo_url
-from reva.image_attachment import (
-    MAX_IMAGES,
-    MAX_TOTAL_IMAGE_BYTES,
-    classify_image,
-)
 from reva.support_formatter import format_support_sources_html
-from reva.types import ImageAttachment, SupportAnswerResult, SupportJobParams
+from reva.types import SupportAnswerResult, SupportJobParams
 
 router = APIRouter()
 create_router = APIRouter()  # instance-key gated
@@ -91,43 +87,6 @@ def _enqueue(request: Request, db: Database, turn_id: int, params: SupportJobPar
         ) from exc
     writers.attach_support_job_id(db, turn_id, job.id)
     return job.id
-
-
-def _assert_images_acceptable(images: list[ImageAttachment]) -> None:
-    """Accept-time image gate: count, per-image type/size, label shape, total
-    budget, and label uniqueness. 422 is the only error channel back to Odoo,
-    so every rejection names the offending image."""
-    if len(images) > MAX_IMAGES:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"images: at most {MAX_IMAGES} images per request, got {len(images)}",
-        )
-    seen_labels: set[str] = set()
-    total = 0
-    for image in images:
-        try:
-            _, data = classify_image(image.filename, image.label, image.content_base64)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"images: {exc}",
-            ) from exc
-        # Duplicate labels would make two blocks indistinguishable to the model
-        # AND ambiguous against the [Image N] markers in the question text.
-        if image.label in seen_labels:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"images: duplicate label {image.label!r}",
-            )
-        seen_labels.add(image.label)
-        total += len(data)
-        if total > MAX_TOTAL_IMAGE_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=(
-                    f"images: total decoded size exceeds {MAX_TOTAL_IMAGE_BYTES} bytes"
-                ),
-            )
 
 
 def _with_derived(db: Database, row: dict) -> dict:
@@ -193,7 +152,7 @@ def submit_support_request(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"attachment: {exc}",
             ) from exc
-    _assert_images_acceptable(body.images)
+    assert_images_acceptable(body.images)
     if body.github_url is not None and parse_github_repo_url(body.github_url) is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

@@ -546,7 +546,7 @@ def test_no_images_keeps_the_plain_string_user_turn():
 
 
 def test_images_are_sent_as_blocks_behind_the_untrusted_data_preamble():
-    from reva.support_answerer import _IMAGES_PREAMBLE
+    from reva.image_attachment import IMAGES_PREAMBLE
 
     handler, captured = _capture()
     _make_answerer(handler).answer(
@@ -558,7 +558,7 @@ def test_images_are_sent_as_blocks_behind_the_untrusted_data_preamble():
 
     # SECU: the nonce fence wraps text and cannot wrap pixels, so the framing
     # block must come FIRST — before any image the model could read.
-    assert content[0] == {"type": "text", "text": _IMAGES_PREAMBLE}
+    assert content[0] == {"type": "text", "text": IMAGES_PREAMBLE}
     assert content[1] == {"type": "text", "text": "Image 1"}
     assert content[2]["type"] == "image"
     assert content[2]["source"]["media_type"] == "image/png"

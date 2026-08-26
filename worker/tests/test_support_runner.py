@@ -649,7 +649,7 @@ def test_image_staging_failure_degrades_and_records_an_ops_event(env, monkeypatc
     """A staging failure must cost the images, not the whole turn — and must be
     visible (CLAUDE.md: no silent log-and-continue)."""
     monkeypatch.setattr(
-        "worker.support_runner.tempfile.TemporaryDirectory",
+        "worker.image_staging.tempfile.TemporaryDirectory",
         lambda **kw: (_ for _ in ()).throw(OSError("no space left on device")),
     )
     _needs_code(env, True)

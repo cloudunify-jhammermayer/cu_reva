@@ -15,15 +15,9 @@ sent to the customer.
 
 from __future__ import annotations
 
-import base64
-import contextlib
-import os
-import tempfile
-
 import structlog
 
 from reva.db import writers
-from reva.image_attachment import classify_image
 from reva.errors import MalformedModelOutput, PermanentError, TransientError
 from reva.github_urls import parse_github_repo_url
 from reva.html_guard import ensure_renderable
@@ -32,6 +26,7 @@ from reva.support_answerer import find_code_references
 from reva.support_formatter import format_support_html, format_support_sources_html
 from reva.ticket_knowledge import build_ticket_knowledge, core_source_param
 from reva.types import SupportAnswerResult, SupportJobParams
+from worker.image_staging import staged_images
 from worker.repo_config import code_grounding_allowed, resolve_repo_context
 from worker.runner import (
     budget_exceeded,
@@ -43,49 +38,6 @@ from worker.runner import (
 logger = structlog.get_logger()
 
 _SUPPORT_SKILL = "reva-support-answer"
-
-
-@contextlib.contextmanager
-def _staged_images(ctx, params: SupportJobParams):
-    """Yield (extra_dir, paths) for the CLI path, or (None, []) when there is
-    nothing to stage.
-
-    The Messages API takes image bytes inline; the CLI cannot, so the images are
-    written as real files and handed to Claude via --add-dir, where the already
-    allowed `Read` tool picks them up. No new capability is granted.
-
-    Deliberately OUTSIDE the clone: writing into the working tree would dirty it
-    and cross the _scrub_clone boundary (SECU-1). Filenames come from the
-    validated label, never from the untrusted `filename` field.
-
-    A staging failure degrades to a code-grounded but image-blind run rather
-    than failing the turn — logged AND recorded as an ops event.
-    """
-    if not params.images:
-        yield None, []
-        return
-    try:
-        with tempfile.TemporaryDirectory(prefix="reva-support-images-") as tmp:
-            paths = []
-            for image in params.images:
-                media_type, data = classify_image(
-                    image.filename, image.label, image.content_base64
-                )
-                ext = media_type.split("/", 1)[1]
-                safe = image.label.lower().replace(" ", "-")  # "Image 1" -> image-1
-                path = os.path.join(tmp, f"{safe}.{ext}")
-                with open(path, "wb") as fh:
-                    fh.write(data)
-                paths.append(f"{image.label}: {path}")
-            yield tmp, paths
-    except (OSError, ValueError, base64.binascii.Error) as exc:
-        logger.warning("support_image_staging_failed", turn_id=params.turn_id,
-                       error=str(exc))
-        writers.record_ops_event(
-            ctx.db, "support_answer", "warning", "image_staging_failed",
-            {"turn_id": params.turn_id, "error": str(exc)[:300]},
-        )
-        yield None, []
 
 
 def _core_version(ctx, config) -> str | None:
@@ -301,7 +253,10 @@ def _produce_answer(ctx, params: SupportJobParams, odoo, log) -> str:
                 core_source = core_source_param(ctx.core_knowledge, version)
                 if core_source is not None:
                     extra_dirs, skill_params["core_knowledge"] = core_source
-                with _staged_images(ctx, params) as (image_dir, image_paths):
+                with staged_images(
+                    ctx, params.images, "support_answer",
+                    {"turn_id": params.turn_id},
+                ) as (image_dir, image_paths):
                     if image_dir is not None:
                         extra_dirs = (extra_dirs or []) + [image_dir]
                         skill_params["images"] = "\n".join(image_paths)

@@ -255,6 +255,10 @@ type TicketAnalysisSummary struct {
 	// RepoDocsSectionsUsed is how many customer-repo doc sections grounded the
 	// analysis; nil for legacy/not-attempted rows, 0 when nothing was injected.
 	RepoDocsSectionsUsed *int `json:"repo_docs_sections_used"`
+	// ImageCount is how many screenshots the analysis was submitted with. The
+	// bytes are never stored, so a requeue re-runs image-blind — this is the
+	// only signal that it did.
+	ImageCount int `json:"image_count"`
 }
 
 type TicketAnalysisPage struct {
