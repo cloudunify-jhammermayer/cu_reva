@@ -1,5 +1,25 @@
 # REVA — Work Handoff
 
+## Addendum 2026-08-31 — docs site renders `.html` docs
+
+**Status: implemented** (spec
+`docs/superpowers/specs/archive/2026-08-31-docs-site-html-rendering-design.md`,
+plan `docs/superpowers/plans/archive/2026-08-31-docs-site-html-rendering.md`,
+both archived on completion). `reva/repo_docs.py::browser_in_scope` widens the
+docs browser to `.html`/`.htm` inside a `docs/` folder — the repo root's or an
+addon's own. `in_scope` is unchanged, so the ticket-analysis grounding index
+still sees markdown only: no `_SCOPE_VERSION` bump, no re-index, no migration.
+
+The SPA renders HTML through the same DOMPurify-sanitized pipeline as markdown
+(`renderHtml` in `docs-ui/src/markdown.js`), with `<style>` stripped so a doc
+cannot restyle the site. `.html` is deliberately still refused by `/raw` — it is
+never served as a document from our origin.
+
+**Deploy:** nginx must be rebuilt for the SPA change
+(`docker compose -f docker-compose.prod.yml build nginx && … up -d nginx`),
+plus the usual api redeploy for the `/repo-docs` change. Frontend behavior is
+NOT yet verified in a browser — the plan's Task 3 Step 4 check is owed.
+
 ## Addendum 2026-08-20 — the Odoo side's three requests
 
 Source: `Cloudunify/custom_addons/cu_reva_ticket_analysis/docs/reva-side-requests.md`

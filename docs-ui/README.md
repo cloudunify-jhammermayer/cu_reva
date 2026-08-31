@@ -1,8 +1,8 @@
 # reva-docs-ui
 
-A read-only Vue 3 SPA that lets consultants browse the Markdown docs of every
+A read-only Vue 3 SPA that lets consultants browse the docs of every
 repo REVA knows about. It is a pure client of the backend `/repo-docs` surface
-(see `api/app/routes/docs.py`) — list repos, list a repo's `.md` tree, fetch a
+(see `api/app/routes/docs.py`) — list repos, list a repo's doc tree, fetch a
 file, proxy embedded images.
 
 ## How it fits
@@ -58,14 +58,18 @@ complete an SSO login, and the TUI authenticates to `/api` with a Bearer key.
 
 ## Features
 
-- Scrollable sidebar of all enabled repos; expand a repo to lazy-load its `.md`
+- Scrollable sidebar of all enabled repos; expand a repo to lazy-load its doc
   tree — the repo-root `docs/` folder first, then each `custom_addons/` addon.
   `CLAUDE.md` and any `superpowers/` folder are never listed.
 - Filter box — typing loads every repo's tree and filters paths across all of them.
 - Markdown rendered with `markdown-it`, **sanitized with DOMPurify**, code
   highlighted with `highlight.js`.
+- `.html` / `.htm` docs inside a `docs/` folder are rendered through the same
+  sanitized pipeline (no markdown-it step). A doc's `<style>` block is stripped
+  so it cannot restyle the site; inline `style="…"` is kept.
 - Repo-relative links/images rewritten: images through the `/raw` proxy,
-  in-repo `.md` links to in-app navigation, other repo files to GitHub.
+  in-repo `.md` and `.html` links to in-app navigation, other repo files to
+  GitHub.
 - Deep-linkable: the selected doc lives in the URL.
 - **Download PDF** — reformats the current doc for clean light-paper print
   (`@media print`) and opens the browser's print dialog ("Save as PDF").

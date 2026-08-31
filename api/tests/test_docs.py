@@ -131,7 +131,7 @@ def test_branches_unknown_repo_404(env):
 
 # --- GET /repo-docs/repos/{id}/tree -------------------------------------------
 
-def test_tree_returns_markdown_in_scope_only(env):
+def test_tree_returns_docs_in_scope_only(env):
     client, db, _ = env
     rid = _seed_repo(db)
     _use_github(_FakeGitHub(tree={
@@ -144,6 +144,9 @@ def test_tree_returns_markdown_in_scope_only(env):
             {"path": "docs/architecture.md", "type": "blob", "size": 7},        # repo-root docs
             {"path": "docs/superpowers/specs/a-design.md", "type": "blob", "size": 7},  # hidden
             {"path": "README.md", "type": "blob", "size": 3},                   # out of scope
+            {"path": "docs/handbook.html", "type": "blob", "size": 12},          # HTML doc
+            {"path": "custom_addons/cu_x/docs/spec.htm", "type": "blob", "size": 8},
+            {"path": "custom_addons/cu_x/static/description/index.html", "type": "blob", "size": 110},  # manifest stub, hidden
         ],
         "truncated": False,
     }))
@@ -151,7 +154,9 @@ def test_tree_returns_markdown_in_scope_only(env):
     assert [e["path"] for e in body["entries"]] == [
         "custom_addons/cu_x/README.md",
         "custom_addons/cu_x/docs/consultant.md",
+        "custom_addons/cu_x/docs/spec.htm",
         "docs/architecture.md",
+        "docs/handbook.html",
     ]
     assert body["ref"] == "main"
     assert body["truncated"] is False
@@ -202,6 +207,23 @@ def test_file_non_markdown_is_415(env):
     rid = _seed_repo(db)
     _use_github(_FakeGitHub())
     assert client.get(f"/repo-docs/repos/{rid}/file?path=src/app.py").status_code == 415
+
+
+def test_file_returns_html(env):
+    client, db, _ = env
+    rid = _seed_repo(db)
+    _use_github(_FakeGitHub(files={"docs/handbook.html": "<h1>Hello</h1>"}))
+    body = client.get(f"/repo-docs/repos/{rid}/file?path=docs/handbook.html").json()
+    assert body["content"] == "<h1>Hello</h1>"
+
+
+def test_file_html_outside_docs_folder_is_415(env):
+    """The addon manifest stub is not a doc, even though it is HTML."""
+    client, db, _ = env
+    rid = _seed_repo(db)
+    _use_github(_FakeGitHub())
+    path = "custom_addons/cu_x/static/description/index.html"
+    assert client.get(f"/repo-docs/repos/{rid}/file?path={path}").status_code == 415
 
 
 def test_file_path_traversal_is_422(env):
@@ -276,6 +298,15 @@ def test_raw_rejects_non_asset_extension(env):
     rid = _seed_repo(db)
     _use_github(_FakeGitHub())
     assert client.get(f"/repo-docs/repos/{rid}/raw?path=docs/intro.md").status_code == 415
+
+
+def test_raw_refuses_html(env):
+    """SECU: HTML from a customer repo must never be served as bytes from our
+    own origin — /file hands it to the SPA, which sanitizes it."""
+    client, db, _ = env
+    rid = _seed_repo(db)
+    _use_github(_FakeGitHub())
+    assert client.get(f"/repo-docs/repos/{rid}/raw?path=docs/handbook.html").status_code == 415
 
 
 def test_raw_missing_is_404(env):
