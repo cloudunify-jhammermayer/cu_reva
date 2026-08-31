@@ -1,8 +1,8 @@
 """Read-only docs browser surface for consultants (`/repo-docs`).
 
-Pulls Markdown (and doc-embedded images) live from each repo's default branch
-via the GitHub Contents/Trees API — the api service has no repo cache on disk,
-and live reads are always the default-branch truth.
+Pulls doc sources — Markdown and HTML — plus doc-embedded images live from each
+repo's default branch via the GitHub Contents/Trees API — the api service has no
+repo cache on disk, and live reads are always the default-branch truth.
 
 This router carries no app-layer auth of its own (and stays separate from
 /api/v1's machine API key) — it assumes a Cloudflare Access application gates
@@ -37,11 +37,11 @@ from app.schemas.docs import (
 from reva.db.engine import Database
 from reva.db.repo_lookup import get_repo_meta
 from reva.errors import PermanentError, TransientError
-# Markdown served as text through /file; the doc scope (DOC_EXTENSIONS +
-# in_scope — custom addons plus the repo-root docs/ folder) is shared with
-# ticket-analysis retrieval — one definition of "the repo's docs"
-# (reva/repo_docs.py).
-from reva.repo_docs import DOC_EXTENSIONS, in_scope
+# Docs served as text through /file; the browser's doc scope
+# (`browser_in_scope` — markdown under custom addons and the repo-root docs/
+# folder, plus HTML inside any docs/ folder) is deliberately WIDER than the
+# `in_scope` used for ticket-analysis grounding (reva/repo_docs.py).
+from reva.repo_docs import BROWSER_DOC_EXTENSIONS, DOC_EXTENSIONS, browser_in_scope
 
 router = APIRouter()
 
@@ -87,7 +87,7 @@ def _cached_tree(github, repository_id, owner, name, ref, token) -> dict:
         (
             {"path": e["path"], "size": e.get("size")}
             for e in tree.get("tree", [])
-            if e.get("type") == "blob" and in_scope(e["path"])
+            if e.get("type") == "blob" and browser_in_scope(e["path"])
         ),
         key=lambda e: e["path"],
     )
@@ -97,7 +97,7 @@ def _cached_tree(github, repository_id, owner, name, ref, token) -> dict:
 
 
 def _cached_file(github, repository_id, owner, name, path, ref, token) -> str | None:
-    """Markdown text for a file, cached. None on 404 (not cached)."""
+    """Doc source text (Markdown or HTML) for a file, cached. None on 404 (not cached)."""
     key = (repository_id, ref, path)
     hit = file_cache.get(key)
     if hit is not None:
@@ -178,7 +178,7 @@ def doc_tree(
     db: Database = Depends(get_db),
     github=Depends(get_github_client),
 ) -> dict:
-    """All Markdown paths in the repo at `ref` (default: the repo's default
+    """All doc paths in the repo at `ref` (default: the repo's default
     branch), sorted. `truncated` is passed through so the frontend can warn when
     GitHub capped the tree."""
     meta, token = _meta_and_token(db, github, repository_id)
@@ -200,11 +200,17 @@ def doc_file(
     db: Database = Depends(get_db),
     github=Depends(get_github_client),
 ) -> dict:
-    """Raw Markdown text for one file. Returned as JSON data (not HTML) — the
-    frontend renders + sanitizes it (DOMPurify), so no HTML is built here."""
+    """Raw doc source (Markdown or HTML) for one file. Returned as JSON data,
+    never as an HTML response — the frontend renders + sanitizes it (DOMPurify),
+    so no HTML is built or served as a document here."""
     safe = _safe_path(path)
-    if not safe.lower().endswith(DOC_EXTENSIONS):
-        raise HTTPException(status_code=415, detail="Only Markdown files are served as text")
+    # Markdown stays extension-only (unrestricted by folder, as before). HTML is
+    # additionally scope-checked — browser_in_scope keeps a manifest stub like
+    # custom_addons/cu_x/static/description/index.html out even though its
+    # extension matches.
+    is_html = safe.lower().endswith(BROWSER_DOC_EXTENSIONS)
+    if not (safe.lower().endswith(DOC_EXTENSIONS) or (is_html and browser_in_scope(safe))):
+        raise HTTPException(status_code=415, detail="Only doc files are served as text")
     meta, token = _meta_and_token(db, github, repository_id)
     ref = ref or meta["default_branch"]
     try:

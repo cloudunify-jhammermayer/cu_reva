@@ -3,7 +3,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { store } from '../store.js'
 import { route, navigate } from '../location.js'
 import * as api from '../api.js'
-import { renderMarkdown } from '../markdown.js'
+import { renderMarkdown, renderHtml } from '../markdown.js'
 
 const html = ref('')
 const toc = ref([])
@@ -58,7 +58,8 @@ async function load() {
     const r = repo.value
     const useRef = routeRef || r?.default_branch
     const data = await api.getFile(repoId, filePath, useRef)
-    const result = renderMarkdown(data.content, {
+    const render = /\.html?$/i.test(filePath) ? renderHtml : renderMarkdown
+    const result = render(data.content, {
       repoId,
       path: filePath,
       owner: r?.owner,
@@ -128,7 +129,7 @@ function onClick(ev) {
           >{{ t.text }}</a
         >
       </nav>
-      <!-- html is DOMPurify-sanitized in renderMarkdown before it reaches v-html -->
+      <!-- html is DOMPurify-sanitized in renderMarkdown/renderHtml before it reaches v-html -->
       <div class="markdown-body" v-html="html" @click="onClick"></div>
     </template>
   </article>

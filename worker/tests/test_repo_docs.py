@@ -9,6 +9,9 @@ from reva.db.models import OpsEvent, RepoDocSection, RepoDocsSync
 from reva.repo_docs import (
     _MAX_FILES,
     _SCOPE_VERSION,
+    BROWSER_DOC_EXTENSIONS,
+    DOC_EXTENSIONS,
+    browser_in_scope,
     doc_priority,
     in_scope,
     search_repo_docs,
@@ -98,10 +101,51 @@ def _ops(db, event=None):
         ("docs/notes.txt", False),                           # not markdown
         ("documentation/guide.md", False),                   # prefix is anchored
         ("custom_addons/cu_sale/notes.txt", False),
+        ("docs/handbook.html", False),                       # HTML is browser-only
+        ("custom_addons/cu_sale/docs/spec.html", False),
     ],
 )
 def test_in_scope(path, expected):
     assert in_scope(path) is expected
+
+
+# ---- browser_in_scope -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path,expected",
+    [
+        # HTML is accepted only inside a docs/ folder.
+        ("docs/handbook.html", True),                             # repo-root docs
+        ("docs/nested/handbook.html", True),
+        ("custom_addons/cu_sale/docs/spec.html", True),           # an addon's docs
+        ("custom-addons/cu_sale/docs/spec.htm", True),            # hyphen + .htm
+        ("docs/HANDBOOK.HTML", True),                             # case-insensitive ext
+        # The Odoo manifest stub every addon ships — the reason for the docs/ rule.
+        ("custom_addons/cu_sale/static/description/index.html", False),
+        ("custom_addons/cu_sale/README.html", False),             # no docs/ segment
+        ("custom_addons/cu_sale/index.html", False),
+        ("index.html", False),                                    # loose root HTML
+        ("docs/superpowers/plan.html", False),                    # agent bookkeeping
+        ("docs/SUPERPOWERS/plan.html", False),
+        ("custom_addons/cu_sale/docs/superpowers/z.html", False),
+        ("documentation/guide.html", False),                      # prefix is anchored
+        ("custom_addons/cu_sale/docs/app.py", False),             # neither md nor html
+        # Every markdown path in_scope accepts is still accepted here.
+        ("custom_addons/cu_sale/README.md", True),
+        ("docs/setup-local.md", True),
+        ("docs/superpowers/specs/x-design.md", False),
+        ("custom_addons/cu_sale/CLAUDE.md", False),
+    ],
+)
+def test_browser_in_scope(path, expected):
+    assert browser_in_scope(path) is expected
+
+
+def test_browser_doc_extensions_are_html_only():
+    """The grounding scope stays markdown-only; HTML lives in the browser tuple."""
+    assert BROWSER_DOC_EXTENSIONS == (".html", ".htm")
+    assert DOC_EXTENSIONS == (".md", ".markdown")
 
 
 # ---- split_markdown_sections ------------------------------------------------

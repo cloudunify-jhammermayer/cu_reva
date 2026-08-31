@@ -1,10 +1,11 @@
-// Markdown -> { html (sanitized), toc, hasMermaid }.
+// Markdown or HTML -> { html (sanitized), toc, hasMermaid }.
 //
 // - Repo-relative links/images are rewritten so docs render outside their repo
 //   (images -> /raw proxy; *.md links -> in-app nav; other -> GitHub blob).
 // - Headings get GitHub-style slug ids + a click-to-anchor, and feed the TOC.
 // - ```mermaid blocks become <div class="mermaid"> for DocView to render lazily.
 // DOMPurify runs before any rewrite, so doc content can never inject script.
+// <style> is stripped from both markdown- and html-sourced docs.
 
 import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
@@ -26,6 +27,11 @@ const md = new MarkdownIt({
 })
 
 const EXTERNAL = /^([a-z][a-z0-9+.-]*:|\/\/|#)/i
+
+// A doc's <style> block emits GLOBAL css into the SPA's own page and can
+// restyle or overlay it; inline style="…" cannot escape its element, so it
+// stays — it is what keeps an exported table looking like a table.
+const SANITIZE = { USE_PROFILES: { html: true }, FORBID_TAGS: ['style'] }
 
 function dirname(p) {
   const i = p.lastIndexOf('/')
@@ -52,10 +58,11 @@ function slugify(text, seen) {
   return slug
 }
 
-export function renderMarkdown(markdown, { repoId, path, owner, name, branch }) {
+// Shared post-sanitize pipeline: rewrite relative images/links, add heading
+// anchors + TOC, extract mermaid. Operates on the sanitized DOM, so it is
+// identical for markdown-sourced and html-sourced docs.
+function postProcess(clean, { repoId, path, owner, name, branch }) {
   const baseDir = dirname(path)
-  const clean = DOMPurify.sanitize(md.render(markdown || ''), { USE_PROFILES: { html: true } })
-
   const tpl = document.createElement('template')
   tpl.innerHTML = clean
 
@@ -81,7 +88,7 @@ export function renderMarkdown(markdown, { repoId, path, owner, name, branch }) 
     }
     const [relPath, anchor] = href.split('#')
     const resolved = resolvePath(baseDir, relPath)
-    if (/\.(md|markdown)$/i.test(resolved)) {
+    if (/\.(md|markdown|html?)$/i.test(resolved)) {
       const r = branch ? `&ref=${encodeURIComponent(branch)}` : ''
       a.setAttribute('href', `?repo=${repoId}&path=${encodeURIComponent(resolved)}${r}${anchor ? '#' + anchor : ''}`)
       a.setAttribute('data-doc-path', resolved)
@@ -120,4 +127,16 @@ export function renderMarkdown(markdown, { repoId, path, owner, name, branch }) 
   }
 
   return { html: tpl.innerHTML, toc, hasMermaid }
+}
+
+export function renderMarkdown(markdown, ctx) {
+  return postProcess(DOMPurify.sanitize(md.render(markdown || ''), SANITIZE), ctx)
+}
+
+// An HTML doc is the same pipeline minus markdown-it. DOMPurify's html profile
+// drops <script>, event handlers and javascript: URLs, and flattens a
+// standalone document's <html>/<head>/<body> wrapper — so the doc body renders
+// inside .markdown-body and inherits site typography, which is the intent.
+export function renderHtml(source, ctx) {
+  return postProcess(DOMPurify.sanitize(source || '', SANITIZE), ctx)
 }

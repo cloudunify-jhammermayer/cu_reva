@@ -1,8 +1,10 @@
 """Customer-repo docs retrieval: index each repo's markdown docs section-level
 into Postgres and search them for ticket-analysis grounding.
 
-Scope (`in_scope`) is the single definition of "the repo's docs", shared with
-the consultant docs browser (`api/app/routes/docs.py` imports it from here).
+Scope: `in_scope` defines the GROUNDED docs (markdown only) and is what this
+module's sync applies. `browser_in_scope` is the wider surface the consultant
+docs browser serves — the same markdown plus HTML inside a docs/ folder;
+`api/app/routes/docs.py` imports it from here.
 The sync is lazy (see `sync_repo_docs`): it reads from the repo's DEFAULT
 branch via the GitHub API, no clone.
 """
@@ -28,14 +30,23 @@ logger = structlog.get_logger()
 # skip each other's refresh.
 _LOCK_CLASSID = 0x52444F43
 
-# Markdown scope — the consultant docs browser's definition. Custom addons plus
-# the repo's own top-level docs/ folder; CLAUDE.md is agent instructions and
-# superpowers/ is agent workflow bookkeeping (specs/plans), neither is docs.
-# docs.py imports these back.
+# Markdown scope — the GROUNDING definition, applied by this module's sync.
+# Custom addons plus the repo's own top-level docs/ folder; CLAUDE.md is agent
+# instructions and superpowers/ is agent workflow bookkeeping (specs/plans),
+# neither is docs. The docs browser serves a wider scope (`browser_in_scope`
+# below); docs.py imports both.
 DOC_EXTENSIONS = (".md", ".markdown")
 SCOPE_PREFIXES = ("custom_addons/", "custom-addons/", "docs/")
 EXCLUDED_BASENAMES = ("CLAUDE.md",)
 EXCLUDED_SEGMENTS = ("superpowers",)
+
+# HTML is browser-only. The docs SITE renders it; the grounding index must never
+# ingest it — `split_markdown_sections` splits on ATX `#` headings, which an HTML
+# file has none of, so the whole file would land as one stem-titled section of
+# truncated tag soup and out-rank real prose in `search_repo_docs`. Narrower than
+# the markdown scope on purpose: HTML only inside a docs/ folder, which is what
+# keeps every addon's static/description/index.html manifest stub out of the tree.
+BROWSER_DOC_EXTENSIONS = (".html", ".htm")
 
 _MAX_SECTION_CHARS = 2000  # mirrors reva/odoo_registry
 # 69 in-scope files in the largest customer repo today, and growing. The old
@@ -68,6 +79,24 @@ def in_scope(path: str) -> bool:
         and path.startswith(SCOPE_PREFIXES)
         and not any(seg.lower() in EXCLUDED_SEGMENTS for seg in path.split("/")[:-1])
         and not path.endswith(tuple("/" + b for b in EXCLUDED_BASENAMES))
+    )
+
+
+def browser_in_scope(path: str) -> bool:
+    """True for anything the consultant docs browser serves as text.
+
+    Every markdown doc `in_scope` covers, plus HTML that sits inside a `docs/`
+    folder — the repo root's or an addon's own. `in_scope` stays the narrower
+    grounding scope; only `api/app/routes/docs.py` calls this one.
+    """
+    if in_scope(path):
+        return True
+    segments = [seg.lower() for seg in path.split("/")[:-1]]
+    return (
+        path.lower().endswith(BROWSER_DOC_EXTENSIONS)
+        and path.startswith(SCOPE_PREFIXES)
+        and "docs" in segments
+        and not any(seg in EXCLUDED_SEGMENTS for seg in segments)
     )
 
 
