@@ -6,6 +6,9 @@
 //   - `.rl-page` carries the light token set: what Odoo's iframe shows.
 //   - `.markdown-body .rl-page` switches to the dark set matching the docs
 //     site (`--bg-primary #1e1e1e`); the same fragment reads right in both.
+//   - Embedded copies (Odoo's iframe): `html[data-theme="dark"] .rl-page`
+//     switches to dark when the host stamps that on <html>; with no stamp,
+//     `prefers-color-scheme: dark` decides instead.
 // Stripe and pill colours come from the `data-status` attribute, never from
 // inline styles. `npm run build:theme` compiles this file to
 // reva/static/release-log.css, which the worker sends to Odoo verbatim.
@@ -77,6 +80,13 @@
 }
 
 .markdown-body .rl-page { @include rl-dark; }
+
+// Embedded copies (Odoo's iframe): the host stamps data-theme on <html>;
+// without a stamp the browser preference decides.
+html[data-theme="dark"] .rl-page { @include rl-dark; }
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) .rl-page { @include rl-dark; }
+}
 
 // Docs site only (inert inside Odoo's iframe): a release page is laid out for
 // ~1120px of cards, not the 820px reading column every other doc gets, and
@@ -190,7 +200,7 @@
 // (style.css @media print), so the dark tokens must flip back to the light set
 // or the cards print dark on white. One column keeps a card on one page.
 @media print {
-  .rl-page, .markdown-body .rl-page { @include rl-light; background: #fff; }
+  .rl-page, .markdown-body .rl-page, html[data-theme="dark"] .rl-page { @include rl-light; background: #fff; }
   .rl-ticket { grid-template-columns: 6px 1fr; break-inside: avoid; }
   .rl-head { padding-bottom: 0; }
   .rl-col { padding: 10px 14px 0 14px; }

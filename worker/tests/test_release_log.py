@@ -68,6 +68,7 @@ def test_theme_css_is_packaged():
     assert ".rl-page" in css
     # dart-sass unquotes identifier-valued attribute selectors in its output.
     assert ".rl-ticket[data-status=umgesetzt]" in css
+    assert "html[data-theme=dark] .rl-page" in css
     assert "<style" not in css
 
 

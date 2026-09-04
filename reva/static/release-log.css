@@ -87,6 +87,39 @@
   --st-offen: #858b87;
 }
 
+html[data-theme=dark] .rl-page {
+  --rl-ground: #1e1e1e;
+  --rl-panel: #262626;
+  --rl-line: #363636;
+  --rl-line-strong: #4a4a4a;
+  --rl-ink: #e8e9e6;
+  --rl-muted: #a3a8a4;
+  --rl-accent: #5fb3c4;
+  --rl-accent-ink: #86c9d6;
+  --rl-pill-ink: #131414;
+  --st-umgesetzt: #3fae78;
+  --st-weitgehend: #86bf58;
+  --st-teilweise: #d9a441;
+  --st-offen: #858b87;
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) .rl-page {
+    --rl-ground: #1e1e1e;
+    --rl-panel: #262626;
+    --rl-line: #363636;
+    --rl-line-strong: #4a4a4a;
+    --rl-ink: #e8e9e6;
+    --rl-muted: #a3a8a4;
+    --rl-accent: #5fb3c4;
+    --rl-accent-ink: #86c9d6;
+    --rl-pill-ink: #131414;
+    --st-umgesetzt: #3fae78;
+    --st-weitgehend: #86bf58;
+    --st-teilweise: #d9a441;
+    --st-offen: #858b87;
+  }
+}
 .doc:has(.rl-page) {
   max-width: 1260px;
 }
@@ -384,7 +417,7 @@
   }
 }
 @media print {
-  .rl-page, .markdown-body .rl-page {
+  .rl-page, .markdown-body .rl-page, html[data-theme=dark] .rl-page {
     --rl-ground: #fbfbf9;
     --rl-panel: #f1f2ef;
     --rl-line: #dfe2dd;
