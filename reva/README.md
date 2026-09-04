@@ -26,6 +26,7 @@ helpers that more than one process needs.
 | `ticket_formatter.py` | Pure formatting of ticket-analysis results. |
 | `ticket_knowledge.py` | Ticket-path knowledge retrieval: one planner call (`plan_core_queries`) feeds both the Odoo core-knowledge block and the customer-repo docs block (`build_ticket_knowledge`). |
 | `repo_docs.py` | Customer-repo docs index: markdown grounding scope (`in_scope`) plus the wider docs-browser scope (`browser_in_scope`), sectionizer, lazy default-branch sync (`sync_repo_docs`, tree-SHA staleness + per-repo advisory lock), FTS search (`search_repo_docs`). |
+| `release_log.py` | Release-log lookup helpers: release slug (`release_slug`), page path under `docs/releases/`, docs-site deep link (`REVA_DOCS_SITE_URL`) and the packaged theme CSS (`theme_css`, from `static/release-log.css`). |
 | `diff_utils.py` | Diff filtering (reviewable prefixes / excluded extensions / skip paths), line + token estimates, hunk parsing. |
 | `finding_verifier.py` | Asks Claude whether a prior finding is resolved — used by the delta-review resolution pass. |
 | `cost.py` | Token-count → USD pricing table + `estimate_cost`. |

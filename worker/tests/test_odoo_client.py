@@ -6,9 +6,11 @@ Patches reva.odoo_client.httpx.post via monkeypatch — no live network calls.
 from __future__ import annotations
 
 import json
+from typing import Literal
 
 import httpx
 import pytest
+from pydantic import BaseModel
 
 from reva.errors import PermanentError, TransientError
 from reva.odoo_client import OdooCallbackClient
@@ -454,6 +456,83 @@ def test_change_summary_disabled_client_permanent():
         OdooCallbackClient(callback_url="", api_key="").change_summary(
             ticket_id=1, model_name="project.task", notes=[],
         )
+
+
+# --- release_note (release-log lookup, spec 2026-09-04) ------------------------
+
+
+def test_release_note_posts_completed_payload(monkeypatch):
+    seen: dict = {}
+
+    def post(url, **kwargs):
+        seen["url"] = url
+        seen["json"] = kwargs["json"]
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+
+    _client().release_note(
+        release_id=3275, note_id=7, status="completed",
+        url="https://reva.example.com/docs/?repo=1&path=docs/releases/lollipop.html",
+        html='<div class="rl-page"></div>', css=".rl-page{}",
+    )
+
+    assert seen["url"] == "https://odoo.example.com/api/reva/releases/release-note"
+    assert seen["json"] == {
+        "release_id": 3275, "note_id": 7, "status": "completed",
+        "url": "https://reva.example.com/docs/?repo=1&path=docs/releases/lollipop.html",
+        "html": '<div class="rl-page"></div>', "css": ".rl-page{}",
+    }
+    assert "error" not in seen["json"]
+
+
+def test_release_note_failed_payload_and_409_is_permanent(monkeypatch):
+    seen: dict = {}
+
+    def post(url, **kwargs):
+        seen["json"] = kwargs["json"]
+        return httpx.Response(409, text='{"detail":"Stale note_id"}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+
+    with pytest.raises(PermanentError):
+        _client().release_note(
+            release_id=3275, note_id=7, status="failed",
+            error="Kein Release-Log 'docs/releases/lollipop.html' in acme/widgets",
+        )
+    assert seen["json"] == {
+        "release_id": 3275, "note_id": 7, "status": "failed",
+        "error": "Kein Release-Log 'docs/releases/lollipop.html' in acme/widgets",
+    }
+
+
+class _OdooReleaseNoteRequest(BaseModel):
+    """Verbatim copy of the shipped Odoo callback model
+    (Cloudunify/custom_addons/cu_reva_ticket_analysis/routers/release_router.py):
+    `html` is a plain str, so a null would 422 there. Guards the wire shape."""
+
+    release_id: int
+    html: str = ""
+    note_id: int = 0
+    status: Literal["completed", "failed"] = "completed"
+    error: str | None = None
+
+
+def test_release_note_payloads_validate_against_shipped_odoo_model(monkeypatch):
+    seen: list[dict] = []
+
+    def post(url, **kwargs):
+        seen.append(kwargs["json"])
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    client = _client()
+    client.release_note(release_id=1, note_id=2, status="completed", url="https://reva.example.com/docs/?repo=1&path=docs/releases/x.html", html="<div class=\"rl-page\"></div>", css=".rl-page{}")
+    client.release_note(release_id=1, note_id=3, status="failed", error="Kein Release-Log 'docs/releases/x.html' in acme/widgets")
+
+    assert len(seen) == 2
+    for body in seen:
+        _OdooReleaseNoteRequest.model_validate(body)  # must not raise
 
 
 # --- Correlation ids on write-field --------------------------------------------

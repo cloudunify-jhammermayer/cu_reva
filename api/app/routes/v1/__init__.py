@@ -26,6 +26,7 @@ from app.routes.v1 import (
     ops_events,
     pending,
     personas,
+    release_notes,
     repos,
     reviews,
     support_requests,
@@ -51,6 +52,7 @@ _master.include_router(ticket_analyses.router)
 _master.include_router(ticket_issues.router)
 _master.include_router(ticket_journeys.router)
 _master.include_router(timesheet_reviews.router)
+_master.include_router(release_notes.router)
 _master.include_router(value_reports.router)
 _master.include_router(audits.router)
 _master.include_router(odoo_instances.router)
@@ -64,6 +66,7 @@ _instance.include_router(ticket_analyses.create_router)
 _instance.include_router(ticket_issues.create_router)
 _instance.include_router(support_requests.create_router)
 _instance.include_router(timesheet_reviews.create_router)
+_instance.include_router(release_notes.create_router)
 
 # Connection test: accepts master OR instance key, so it sits outside both
 # gates and does its own credential check (see routes/v1/health.py).

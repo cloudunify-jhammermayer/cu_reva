@@ -73,6 +73,16 @@ Both live under the `/api/v1` router, so they share its Bearer auth
 - **`GET /api/v1/timesheet-reviews`** — master-key list endpoint consumed by the
   TUI Timesheets tab. Returns run metadata and counts only; original line
   descriptions are not stored.
+- **`POST /api/v1/release-note`** — instance-key-gated request for a release's
+  log page (spec `docs/superpowers/specs/archive/2026-09-04-release-log-requirements.md`).
+  Creates a pending `release_notes` row and enqueues
+  `worker.release_note_tasks.run_release_note`; the worker looks up
+  `docs/releases/<slug>.html` in the instance's repos and callbacks Odoo at
+  `/releases/release-note` with the docs-site URL, the fragment and the theme
+  CSS. No Claude call.
+- **`GET /api/v1/release-notes`** — master-key list endpoint consumed by the
+  TUI Releases tab: status, source repo/path, URL, error. No page content is
+  stored.
 
 ## Tests
 

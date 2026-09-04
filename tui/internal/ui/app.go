@@ -25,6 +25,7 @@ const (
 	viewTimesheets
 	viewSupport
 	viewPersonas
+	viewReleases
 )
 
 // tabKeys maps the number-row switch keys to their tab, so the key handler is a
@@ -43,6 +44,7 @@ var tabKeys = map[string]view{
 	"-": viewTimesheets,
 	"=": viewSupport,
 	"p": viewPersonas,
+	"w": viewReleases,
 }
 
 type App struct {
@@ -61,6 +63,7 @@ type App struct {
 	timesheet Timesheets
 	support   Support
 	personas  Personas
+	releases  Releases
 	width     int
 	height    int
 }
@@ -82,6 +85,7 @@ func NewApp(client api.ClientIface, odooURL string) *App {
 		timesheet: newTimesheets(client),
 		support:   newSupport(client),
 		personas:  newPersonas(client),
+		releases:  newReleases(client),
 	}
 }
 
@@ -100,6 +104,7 @@ func (a *App) Init() tea.Cmd {
 		a.timesheet.load(),
 		a.support.load(),
 		a.personas.load(),
+		a.releases.load(),
 		tick(),
 	)
 }
@@ -146,6 +151,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.support.height = contentH
 		a.personas.width = m.Width
 		a.personas.height = contentH
+		a.releases.width = m.Width
+		a.releases.height = contentH
 		return a, nil
 
 	case tea.KeyMsg:
@@ -243,6 +250,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.personas, cmd = a.personas.update(msg)
 			return a, cmd
 		}
+		if a.active == viewReleases {
+			var cmd tea.Cmd
+			a.releases, cmd = a.releases.update(msg)
+			return a, cmd
+		}
 
 	case tickMsg:
 		var cmd tea.Cmd
@@ -269,7 +281,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.support, supportCmd = a.support.update(msg)
 		var personasCmd tea.Cmd
 		a.personas, personasCmd = a.personas.update(msg)
-		return a, tea.Batch(cmd, findCmd, failCmd, repoCmd, pendCmd, ticketCmd, auditCmd, fbCmd, odooCmd, timesheetCmd, supportCmd, personasCmd, tick())
+		var releasesCmd tea.Cmd
+		a.releases, releasesCmd = a.releases.update(msg)
+		return a, tea.Batch(cmd, findCmd, failCmd, repoCmd, pendCmd, ticketCmd, auditCmd, fbCmd, odooCmd, timesheetCmd, supportCmd, personasCmd, releasesCmd, tick())
 
 	case dashboardLoadedMsg:
 		a.dashboard, _ = a.dashboard.update(msg)
@@ -336,6 +350,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case supportThreadsLoadedMsg:
 		a.support, _ = a.support.update(msg)
+
+	case releasesLoadedMsg:
+		a.releases, _ = a.releases.update(msg)
 
 	case supportThreadDetailLoadedMsg:
 		a.support, _ = a.support.update(msg)
@@ -419,6 +436,8 @@ func (a *App) View() string {
 		content = a.support.view(a.width, contentH)
 	case viewPersonas:
 		content = a.personas.view(a.width, contentH)
+	case viewReleases:
+		content = a.releases.view(a.width, contentH)
 	}
 
 	// Safety net: no tab may emit more than contentH lines. lipgloss Height() is
@@ -455,6 +474,7 @@ func (a *App) tabBar() string {
 		{"-", "Timesheets", 0, viewTimesheets},
 		{"=", "Support", 0, viewSupport},
 		{"p", "Personas", 0, viewPersonas},
+		{"w", "Releases", 0, viewReleases},
 	}
 
 	var parts []string
@@ -543,6 +563,8 @@ func (a *App) statusBar() string {
 		hint = "j/k·g/G nav | / filter | enter=inspect turns | e=requeue turn | esc=back | r=refresh | q quit"
 	case viewPersonas:
 		hint = "j/k navigate | enter=resolved view | t=toggle active | r=refresh | q quit"
+	case viewReleases:
+		hint = "j/k navigate | r=refresh | q quit"
 	default:
 		hint = "1 Dash | 2 Reviews | 3 Findings | 4 Failures | 5 Repos | 6 Pending | 7 Tickets | 8 Audits | q quit"
 	}

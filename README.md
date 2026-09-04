@@ -133,6 +133,7 @@ Per-repo config (`.claude-review.yml`):
 | `verify_findings` | global | Per-repo override for the second-pass self-critique (see `REVA_VERIFY_HIGH_COST`). |
 | `cross_branch_reuse` | `true` | Allow a promotion PR to reuse an identical prior review's verdict (see below). Global kill switch: `REVA_CROSS_BRANCH_REUSE`. |
 | `odoo` / `custom_instructions` | — | Apply the Odoo guidance / inject repo-specific reviewer instructions. |
+| `odoo_instance` | — | Name of the Odoo instance (as registered in REVA) whose release-log lookups search this repo's `docs/releases/`. Unset: never searched. |
 
 ## Incremental & carried-forward reviews
 
@@ -209,8 +210,9 @@ REVA_API_URL=http://localhost:8080/api/v1 REVA_API_KEY=<key> go run .
 | Feedback | `9` | Per-(repo, category) learning signals (findings / dismissals / fixes) + active `/mute`s |
 | Odoo | `0` | Registered Odoo instances, callback config, per-instance spend, budget, activation, and key rotation |
 | Timesheets | `-` | Odoo timesheet wording review runs from `GET /api/v1/timesheet-reviews`, with line counts, rewrite/human counts, callback state, and errors |
+| Releases | `w` | Odoo release-log lookups from `GET /api/v1/release-notes`: which repo's `docs/releases/<slug>.html` REVA handed to Odoo (source path, docs-site URL) or the German reason it could not |
 
-Global keys: `1–9` switch tabs · `j`/`k` (or arrows) move · `g`/`G` top/bottom · `Ctrl+D`/`Ctrl+U` half-page · PgUp/PgDn page · `r` refresh · `q` quit. Lists that hit their fetch limit show "showing N of M"; narrow with `/`. The free-flowing panels scroll too — the **Reviews** detail pane with `J`/`K` (or PgUp/PgDn), the **Audits** findings and **Feedback** lists with `j`/`k`/PgUp/PgDn.
+Global keys: `1–9`, `0`, `-`, `=`, `p`, `w` switch tabs · `j`/`k` (or arrows) move · `g`/`G` top/bottom · `Ctrl+D`/`Ctrl+U` half-page · PgUp/PgDn page · `r` refresh · `q` quit. Lists that hit their fetch limit show "showing N of M"; narrow with `/`. The free-flowing panels scroll too — the **Reviews** detail pane with `J`/`K` (or PgUp/PgDn), the **Audits** findings and **Feedback** lists with `j`/`k`/PgUp/PgDn.
 
 ## Support answers
 
@@ -329,6 +331,7 @@ Notifications fire on `PermanentError` and unexpected exceptions. Transient erro
 | `REVA_API_RATE_LIMIT_PER_MINUTE` | — | `0` (off) | Per-client (API key / IP) request cap on `/api/v1` over a rolling minute; per-instance, in addition to nginx's limit |
 | `REVA_QUEUE_DEPTH_ALERT` / `REVA_FAILED_JOBS_ALERT` / `REVA_REPO_CACHE_DISK_PCT_ALERT` | — | `50` / `10` / `90` | Scheduler operational-alert thresholds (need `GOOGLE_CHAT_WEBHOOK_URL`) |
 | `REVA_SECRET_KEY` | — | — | Fernet key for encrypting per-instance Odoo callback keys at rest; required to use the Odoo-instances feature |
+| `REVA_DOCS_SITE_URL` | — | _(unset)_ | Public base of the docs site (e.g. `https://reva.dev.cloudunify.org`); the release-log callback links Odoo to `/docs/?repo=<id>&path=docs/releases/<slug>.html` under it. Unset: relative link plus a `docs_site_url_unset` ops event per lookup |
 | `REVA_REPORT_WEEKDAY` | — | `0` | Day to send weekly report (0 = Monday, 6 = Sunday) |
 | `REVA_REPORT_HOUR_UTC` | — | `8` | Hour (UTC) to send weekly report (0–23) |
 | `REVA_TICKET_TEXT_RETENTION_DAYS` | — | `30` | Days before raw customer ticket text is scrubbed from `ticket_analyses` |

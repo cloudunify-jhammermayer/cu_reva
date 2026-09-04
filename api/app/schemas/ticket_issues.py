@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from reva.types import Attachment
+from reva.types import Attachment, ReleaseRef
 
 
 class CreateIssuesRequest(BaseModel):
@@ -50,6 +50,11 @@ class CreateIssuesRequest(BaseModel):
         default=None,
         description="Optional planned date (YYYY-MM-DD) set as the board's "
         "'Plan date' field on every added item.",
+    )
+    release: ReleaseRef | None = Field(
+        default=None,
+        description="Optional Odoo release the record ships in ({id, name, date}); "
+        "its name is written on every created issue.",
     )
 
     @field_validator("issue_type", mode="before")

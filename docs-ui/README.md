@@ -45,6 +45,15 @@ docker compose -f docker-compose.prod.yml up -d nginx
 
 To build just the static assets locally: `npm run build` → `dist/`.
 
+### Release-log theme
+
+`src/release-log.scss` styles the `rl-*` release-log fragments customer repos
+commit under `docs/releases/`. It is bundled into the SPA by `npm run build`
+**and** compiled standalone by `npm run build:theme` into
+`../reva/static/release-log.css`, which the worker sends to Odoo with every
+release-log callback. Run `build:theme` after every SCSS change and commit the
+CSS; the nginx image build does not run it.
+
 ### Cloudflare Access
 
 Create an Access application protecting **both** path prefixes on the prod host,

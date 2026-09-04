@@ -665,6 +665,35 @@ func (m *MockClient) TimesheetReviews(limit int) (*TimesheetReviewPage, error) {
 	return &TimesheetReviewPage{Items: items[:n], Total: len(items)}, nil
 }
 
+func (m *MockClient) ReleaseNotes(limit int) (*ReleaseNotePage, error) {
+	now := time.Now()
+	strPtr := func(s string) *string { return &s }
+	intPtr := func(i int) *int { return &i }
+	done := now.Add(-50 * time.Second)
+	failedAt := now.Add(-19 * time.Minute)
+	items := []ReleaseNoteSummary{
+		{
+			ID: 3, OdooInstanceID: 1, ReleaseID: 3275, ReleaseName: "Lollipop", Slug: "lollipop",
+			Status: "completed", SourceRepoID: intPtr(2),
+			SourcePath:     strPtr("docs/releases/lollipop.html"),
+			URL:            strPtr("https://reva.example.com/docs/?repo=2&path=docs/releases/lollipop.html"),
+			CallbackSentAt: &done, CreatedAt: now.Add(-1 * time.Minute), CompletedAt: &done,
+		},
+		{
+			ID: 2, OdooInstanceID: 1, ReleaseID: 3277, ReleaseName: "Marshmallow", Slug: "marshmallow",
+			Status:    "failed",
+			Error:     strPtr("Kein Release-Log 'docs/releases/marshmallow.html' in acme/widgets"),
+			CreatedAt: now.Add(-20 * time.Minute), CompletedAt: &failedAt,
+		},
+		{
+			ID: 1, OdooInstanceID: 2, ReleaseID: 12, ReleaseName: "Nougat", Slug: "nougat",
+			Status: "pending", CreatedAt: now.Add(-30 * time.Second),
+		},
+	}
+	n := min(limit, len(items))
+	return &ReleaseNotePage{Items: items[:n], Total: len(items)}, nil
+}
+
 func (m *MockClient) Requeue(id int) error {
 	return nil
 }

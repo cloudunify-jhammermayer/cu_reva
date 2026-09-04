@@ -7,6 +7,7 @@ invalid file — a bad config must never fail a run.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol
 
 import structlog
@@ -25,9 +26,19 @@ class FileContentReader(Protocol):
 
 
 def load_repo_config(
-    github: FileContentReader, token: str, owner: str, name: str, ref: str
+    github: FileContentReader,
+    token: str,
+    owner: str,
+    name: str,
+    ref: str,
+    *,
+    on_invalid: Callable[[str], None] | None = None,
 ) -> RepoConfig:
-    """Load .claude-review.yml at ref. Malformed or missing YAML -> empty config."""
+    """Load .claude-review.yml at ref. Malformed or missing YAML -> empty config.
+
+    `on_invalid` lets a caller record its own ops event for a present-but-unusable
+    file; the default keeps today's log-only behaviour for reviews and audits.
+    """
     raw = github.get_file_content(token, owner, name, ".claude-review.yml", ref)
     if not raw:
         return RepoConfig()
@@ -41,8 +52,14 @@ def load_repo_config(
             ref=ref[:8],
             error=str(exc),
         )
+        if on_invalid is not None:
+            on_invalid(str(exc))
+        return RepoConfig()
+    if parsed is None:
         return RepoConfig()
     if not isinstance(parsed, dict):
+        if on_invalid is not None:
+            on_invalid("not a mapping")
         return RepoConfig()
     try:
         return RepoConfig.model_validate(parsed)
@@ -57,6 +74,8 @@ def load_repo_config(
             ref=ref[:8],
             error=str(exc),
         )
+        if on_invalid is not None:
+            on_invalid(str(exc))
         return RepoConfig()
 
 

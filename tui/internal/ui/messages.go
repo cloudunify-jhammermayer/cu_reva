@@ -68,6 +68,10 @@ type timesheetsLoadedMsg struct {
 	data *api.TimesheetReviewPage
 	err  error
 }
+type releasesLoadedMsg struct {
+	data *api.ReleaseNotePage
+	err  error
+}
 type ticketRequeuedMsg struct {
 	id   int
 	kind string // "analysis" or "issues run" — which requeue endpoint was hit

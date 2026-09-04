@@ -206,6 +206,9 @@ def _format_issue_body(item: dict, params: TicketIssueJobParams, marker: str,
         lines += ["", "### Acceptance criteria", ""]
         lines += [f"- [ ] {criterion}" for criterion in item["acceptance_criteria"]]
     lines += ["", f"**Branch:** `{branch}`"]
+    # R4: the release the ticket ships in (Odoo's optional `release` block).
+    if params.release and params.release.name.strip():
+        lines += [f"**Release:** {params.release.name.strip()}"]
     lines += [
         "",
         "---",
@@ -484,6 +487,8 @@ def _format_parent_body(params: TicketIssueJobParams, marker: str, parent_marker
         # Feature-branch convention: the epic's branch is <type>/<ticket-id>;
         # every sub-issue body names the same branch (never issue/<n>).
         lines += ["", f"**Branch:** `{_dominant_type(params, issues).lower()}/{params.ticket_id}`"]
+    if params.release and params.release.name.strip():
+        lines += ["", f"**Release:** {params.release.name.strip()}"]
     lines += [
         "",
         "---",

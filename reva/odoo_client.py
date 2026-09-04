@@ -19,6 +19,7 @@ change, 2026-07-05; the un-namespaced /write-field etc. were removed):
     POST {base}/tickets/issue-work-status — per-issue in_progress/in_review hint
     POST {base}/tickets/change-summary   — consolidated merge summary on ready
     POST {base}/hr/timesheet-results     — timesheet wording review results
+    POST {base}/releases/release-note  — release-log lookup result (url + fragment + theme css)
 
     Authorization: Bearer {api_key}
     Content-Type: application/json
@@ -51,6 +52,7 @@ from reva.odoo_contracts import (
     IssuesCreatedPayload,
     IssueStatePayload,
     IssueWorkStatusPayload,
+    ReleaseNotePayload,
     ResetStatusPayload,
     TicketsReadyPayload,
     TimesheetResultsPayload,
@@ -347,4 +349,36 @@ class OdooCallbackClient:
         self._post("/tickets/change-summary", payload.model_dump())
         logger.bind(ticket_id=ticket_id, model_name=model_name).info(
             "odoo_change_summary_ok"
+        )
+
+    def release_note(
+        self,
+        *,
+        release_id: int,
+        note_id: int,
+        status: str,
+        url: str | None = None,
+        html: str | None = None,
+        css: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Deliver a release-log lookup to the release (spec 2026-09-04, R2).
+        Odoo's `ensure_pending` + note_id guard make retries safe: a stale or
+        replayed delivery answers 409, which `_post` maps to PermanentError.
+        None fields are omitted on the wire: a failed delivery carries only
+        release_id, note_id, status and error, so the shipped Odoo model's
+        `html` default applies; `url`/`css` are optional there (Odoo module
+        19.0.55.0.0, 2026-09-04) and were ignored by older modules."""
+        payload = ReleaseNotePayload(
+            release_id=release_id,
+            note_id=note_id,
+            status=status,  # type: ignore[arg-type]
+            url=url,
+            html=html,
+            css=css,
+            error=error,
+        )
+        self._post("/releases/release-note", payload.model_dump(exclude_none=True))
+        logger.bind(release_id=release_id, note_id=note_id, status=status).info(
+            "odoo_release_note_ok"
         )

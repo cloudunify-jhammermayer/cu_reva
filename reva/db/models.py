@@ -785,6 +785,51 @@ class TimesheetReviewLine(Base):
     )
 
 
+# ----------------------------------------------------------------- release_notes
+
+
+class ReleaseNote(Base):
+    """One Odoo release-log lookup (migration 048). `id` is the note_id Odoo
+    echoes on the callback. No content: the repo page is the source of truth,
+    the row records where it was found and how the exchange ended."""
+
+    __tablename__ = "release_notes"
+
+    id: Mapped[int] = mapped_column(_PK, primary_key=True, autoincrement=True)
+    job_id: Mapped[str | None] = mapped_column(Text)
+    odoo_instance_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("odoo_instances.id"), nullable=False
+    )
+    release_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    release_name: Mapped[str] = mapped_column(Text, nullable=False)
+    slug: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    source_repo_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("repositories.id")
+    )
+    source_path: Mapped[str | None] = mapped_column(Text)
+    url: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    callback_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("idx_release_notes_created", text("created_at DESC")),
+        Index("idx_release_notes_instance_release", "odoo_instance_id", "release_id"),
+        Index(
+            "idx_release_notes_pending",
+            "odoo_instance_id",
+            "release_id",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+            sqlite_where=text("status = 'pending'"),
+        ),
+    )
+
+
 # --------------------------------------------------------------- odoo_instances
 
 

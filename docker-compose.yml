@@ -101,6 +101,8 @@ services:
       REVA_CORE_KNOWLEDGE_ENABLED: ${REVA_CORE_KNOWLEDGE_ENABLED:-false}
       REVA_CORE_VERSIONS: ${REVA_CORE_VERSIONS:-}
       REVA_CORE_KNOWLEDGE_DIR: /core
+      # Public base of the docs site, for the release-log link sent to Odoo.
+      REVA_DOCS_SITE_URL: ${REVA_DOCS_SITE_URL:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

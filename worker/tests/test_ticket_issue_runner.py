@@ -527,6 +527,48 @@ def test_parent_body_summary_prefers_english_plan_summary():
     assert "### Summary" not in body(description="", analysis_html="")
 
 
+def _issue_params(**over) -> TicketIssueJobParams:
+    return TicketIssueJobParams(**{**dict(
+        run_id=1, odoo_instance_id=1, ticket_id=123, model_name="helpdesk.ticket",
+        github_url="https://github.com/acme/widgets", name="Login",
+        description="Wir brauchen eine Login-Seite.", analysis_html="",
+        priority="1", ticket_url="https://odoo.example.com/web#id=123",
+    ), **over})
+
+
+def test_issue_body_names_the_release_after_the_branch():
+    """R4: the release the ticket ships in is named right under the branch;
+    no line at all when the request carries no release or a blank name."""
+    from worker.ticket_issue_runner import _format_issue_body
+
+    item = {"body": "Add the login form.", "acceptance_criteria": ["Form renders"]}
+    release = {"id": 3275, "name": "Lollipop", "date": None}
+
+    with_release = _format_issue_body(item, _issue_params(release=release), "revaticketX", "feat/123")
+    assert "**Branch:** `feat/123`\n**Release:** Lollipop\n" in with_release
+
+    without = _format_issue_body(item, _issue_params(), "revaticketX", "feat/123")
+    assert "Release" not in without
+
+    blank = _format_issue_body(
+        item, _issue_params(release={"id": 3275, "name": "  ", "date": None}), "revaticketX", "feat/123"
+    )
+    assert "Release" not in blank
+
+
+def test_parent_body_names_the_release():
+    from worker.ticket_issue_runner import _format_parent_body
+
+    release = {"id": 3275, "name": "Lollipop", "date": None}
+    body = _format_parent_body(
+        _issue_params(release=release), "revaticketX", "revaticketparentX", plan_summary="Login page"
+    )
+    assert "\n\n**Release:** Lollipop\n\n---\n" in body
+
+    plain = _format_parent_body(_issue_params(), "revaticketX", "revaticketparentX", plan_summary="Login page")
+    assert "Release" not in plain
+
+
 def test_english_plan_summary_persisted_and_used(ctx_and_fakes):
     """The planner's English summary is persisted and rendered in the epic."""
     s = ctx_and_fakes

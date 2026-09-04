@@ -18,6 +18,37 @@
       ],
       "title": "Attachment",
       "type": "object"
+    },
+    "ReleaseRef": {
+      "description": "The Odoo `cu.release` a record ships in. Optional block on the ticket\ncalls (handoff 2026-09-01, leg 3); only `name` is used, on created issues.",
+      "properties": {
+        "date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Date"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "ReleaseRef",
+      "type": "object"
     }
   },
   "description": "Contract 1 payload. The field set is fixed for *required* fields by the\nshipped Odoo addon \u2014 do not add required fields (every real request would\n422). Optional additive fields are fine.",
@@ -126,6 +157,18 @@
       "description": "Odoo priority key, \"0\" (low) \u2026 \"3\" (urgent)",
       "title": "Priority",
       "type": "string"
+    },
+    "release": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReleaseRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional Odoo release the record ships in ({id, name, date}); its name is written on every created issue."
     },
     "ticket_id": {
       "title": "Ticket Id",

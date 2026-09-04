@@ -154,6 +154,24 @@ class ChangeSummaryPayload(BaseModel):
     notes: list[ChangeSummaryNote]
 
 
+class ReleaseNotePayload(BaseModel):
+    """POST {base}/releases/release-note — the release-log lookup result
+    (spec 2026-09-04-release-log-requirements, R2). `url`, `html` and `css` are
+    set on `completed`; `error` on `failed`. Odoo composes html + css into one
+    document and stores the URL as the "In REVA öffnen" link. None fields are
+    omitted on the wire: a failed delivery carries only release_id, note_id,
+    status and error, so the shipped Odoo model's `html: str = ""` default
+    applies; url/css are optional there."""
+
+    release_id: int
+    note_id: int
+    status: Literal["completed", "failed"]
+    url: str | None = None
+    html: str | None = None
+    css: str | None = None
+    error: str | None = None
+
+
 class TimesheetResultPayload(BaseModel):
     line_id: int
     status: str
@@ -184,6 +202,7 @@ def _inbound_models() -> dict[str, type[BaseModel]]:
     api_dir = str(Path(__file__).resolve().parents[1] / "api")
     if api_dir not in sys.path:
         sys.path.insert(0, api_dir)
+    from app.schemas.release_notes import ReleaseNoteRequest
     from app.schemas.support_requests import SupportRequestBody
     from app.schemas.ticket_actuals import TicketActualsRequest
     from app.schemas.ticket_analyses import TicketAnalysisRequest
@@ -202,6 +221,7 @@ def _inbound_models() -> dict[str, type[BaseModel]]:
         "reassign-issue": ReassignIssueRequest,
         "ticket-actuals": TicketActualsRequest,
         "timesheet-review": TimesheetReviewRequest,
+        "release-note": ReleaseNoteRequest,
     }
 
 
@@ -370,6 +390,28 @@ CONTRACTS: list[Contract] = [
         },
     ),
     Contract(
+        name="releases.release-note",
+        direction="reva->odoo",
+        method="POST",
+        path="/releases/release-note",
+        auth="bearer:instance-outbound-key",
+        model=ReleaseNotePayload,
+        sample={
+            "release_id": 3275,
+            "note_id": 12,
+            "status": "completed",
+            "url": "https://reva.example.com/docs/?repo=4&path=docs/releases/lollipop.html",
+            "html": '<div class="rl-page"><header class="rl-masthead"><h1>Lollipop</h1></header></div>',
+            "css": ".rl-page{--rl-ground:#fbfbf9}",
+        },
+        extra_samples=[{
+            "release_id": 3275,
+            "note_id": 13,
+            "status": "failed",
+            "error": "Kein Release-Log 'docs/releases/lollipop.html' in acme/widgets, acme/other",
+        }],
+    ),
+    Contract(
         name="hr.timesheet-results",
         direction="reva->odoo",
         method="POST",
@@ -461,6 +503,22 @@ CONTRACTS: list[Contract] = [
             "github_project_url": "https://github.com/orgs/acme/projects/5",
             "plan_date": "2026-07-15",
         },
+        extra_samples=[{
+            "ticket_id": 42,
+            "model_name": "project.task",
+            "github_url": "https://github.com/acme/widgets",
+            "name": "Login rework",
+            "description": "Please add a login page.",
+            "analysis_html": "",
+            "description_docx": None,
+            "priority": "1",
+            "ticket_url": "https://odoo.example.com/web#id=42",
+            "issue_type": None,
+            "github_username": None,
+            "github_project_url": None,
+            "plan_date": None,
+            "release": {"id": 3275, "name": "Lollipop", "date": "2026-09-30 00:00:00"},
+        }],
     ),
     Contract(
         name="update-issue-estimate",
@@ -518,6 +576,20 @@ CONTRACTS: list[Contract] = [
                 "user_role": "developer",
                 "description": "fixed stupid bug",
             }],
+        },
+    ),
+    Contract(
+        name="release-note",
+        direction="odoo->reva",
+        method="POST",
+        path="/api/v1/release-note",
+        auth="bearer:instance-inbound-key",
+        sample={
+            "release_id": 3275,
+            "name": "Lollipop",
+            "date": "2026-09-30 00:00:00",
+            "model_name": "project.task",
+            "task_ids": [7595, 7620],
         },
     ),
     Contract(
