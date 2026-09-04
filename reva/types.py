@@ -1026,3 +1026,5 @@ class ReleaseNoteJobParams(BaseModel):
     release_id: int
     release_name: str
     slug: str
+    github_url: str | None = None
+    # The project's repository, when Odoo sends it (module 19.0.55.1.0+): the page is read there, no scan.

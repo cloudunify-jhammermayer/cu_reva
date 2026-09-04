@@ -1,8 +1,10 @@
 """Release-log lookup job (spec docs/superpowers/specs/archive/2026-09-04-release-log-requirements.md, R2).
 
-No Claude call and no task material: find `docs/releases/<slug>.html` in the
-repos mapped to the calling Odoo instance and hand Odoo the docs-site URL, the
-fragment and the theme CSS, or a `failed` status with a German reason.
+No Claude call and no task material: find `docs/releases/<slug>.html` — in
+the repository Odoo names via `github_url` when the request carries one, or
+else in the repos mapped to the calling Odoo instance by `odoo_instance` —
+and hand Odoo the docs-site URL, the fragment and the theme CSS, or a
+`failed` status with a German reason.
 
 The row turns `completed` only after Odoo accepted the callback, so an RQ
 retry (TransientError anywhere) repeats the cheap lookup; nothing is stored
@@ -19,6 +21,7 @@ import structlog
 from reva import config, release_log
 from reva.db import writers
 from reva.errors import PermanentError, TransientError
+from reva.github_urls import parse_github_repo_url
 from reva.types import ReleaseNoteJobParams
 from worker.repo_config import load_repo_config
 from worker.runner import build_odoo_client, get_context
@@ -125,6 +128,20 @@ def _fail(ctx, params: ReleaseNoteJobParams, error: str, log) -> NoReturn:
     raise PermanentError(error)
 
 
+def _requested_repo(ctx, github_url: str, log) -> dict | None:
+    """The registered, enabled repo Odoo named in the request, with its token;
+    None when the URL does not parse or the repo is unknown/disabled."""
+    parsed = parse_github_repo_url(github_url)
+    if parsed is None:
+        return None
+    owner, name = parsed
+    for repo in writers.list_enabled_repositories(ctx.db):
+        if repo["owner"].lower() == owner.lower() and repo["name"].lower() == name.lower():
+            token = ctx.github.get_installation_token(repo["installation_id"])
+            return {**repo, "token": token}
+    return None
+
+
 def run_release_note(job_params: dict) -> dict:
     """RQ task entry point for the release-log lookup."""
     ctx = get_context()
@@ -152,7 +169,11 @@ def run_release_note(job_params: dict) -> dict:
 
     try:
         path = release_log.release_log_path(params.slug)
-        mapped, skipped, total = _mapped_repos(ctx, instance["name"], log)
+        if params.github_url:
+            repo = _requested_repo(ctx, params.github_url, log)
+            mapped, skipped, total = ([repo] if repo else []), [], 0
+        else:
+            mapped, skipped, total = _mapped_repos(ctx, instance["name"], log)
         hit = _find_release_log(ctx, params, mapped, log) if mapped else None
     except TransientError:
         log.warning("release_note_transient_error", exc_info=True)
@@ -168,6 +189,12 @@ def run_release_note(job_params: dict) -> dict:
         _fail(
             ctx, params,
             "GitHub-Zugriff fehlgeschlagen für alle Repositories: " + ", ".join(skipped),
+            log,
+        )
+    if params.github_url and not mapped:
+        _fail(
+            ctx, params,
+            f"Repository {params.github_url} ist in REVA nicht registriert oder deaktiviert",
             log,
         )
     if not mapped:

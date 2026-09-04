@@ -1,5 +1,6 @@
 {
   "date": "2026-09-30 00:00:00",
+  "github_url": "https://github.com/acme/widgets",
   "model_name": "project.task",
   "name": "Lollipop",
   "release_id": 3275,

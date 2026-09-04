@@ -21,6 +21,18 @@ class ReleaseNoteRequest(BaseModel):
     )
     model_name: str = "project.task"
     task_ids: list[int] = Field(default_factory=list)
+    github_url: str | None = Field(
+        default=None,
+        description="The release's project repository (https://github.com/{owner}/{repo}); "
+        "when present REVA reads docs/releases/<slug>.html there instead of scanning "
+        "the repos mapped to the instance.",
+    )
+
+    @field_validator("github_url", mode="before")
+    @classmethod
+    def _empty_url_is_none(cls, v: object) -> object:
+        # Odoo sends "" for a project without a repository; treat as unset.
+        return None if v == "" else v
 
     @field_validator("name")
     @classmethod

@@ -58,7 +58,8 @@ Replaces the drafting design. No Claude call, no task material.
 - Job `worker.release_note_tasks.run_release_note` (stable entry via `terminal_on_permanent`, runner in
   `worker/worker/release_note_runner.py`), `Retry(max=3, interval=[30, 120, 300])`, well inside Odoo's 30-minute watchdog.
 - Slug: `name.strip().lower()` with whitespace replaced by `-`; path `docs/releases/<slug>.html`.
-- Repos to search: every enabled `repositories` row whose `.claude-review.yml` on the default branch declares
+- Repos to search: when the request carries `github_url`, the page is read from that registered repo and nothing is
+  scanned; the `odoo_instance` scan below applies to requests without one (older Odoo modules). Every enabled `repositories` row whose `.claude-review.yml` on the default branch declares
   `odoo_instance: <name>` equal to the calling instance's `odoo_instances.name`. `RepoConfig` gains the key; the file is
   fetched live per enabled repo with `worker.repo_config.load_repo_config`, one contents call each, the way reviews and
   audits read it (`repositories.config_cache` is a dead column from migration 001 that nothing writes or reads). Repos

@@ -115,6 +115,7 @@ def submit_release_note(
         release_id=body.release_id,
         release_name=body.name,
         slug=slug,
+        github_url=body.github_url,
     )
     job_id = _enqueue(request, db, note_id, params)
     logger.info("release_note_enqueued", note_id=note_id, job_id=job_id, slug=slug)

@@ -590,6 +590,7 @@ CONTRACTS: list[Contract] = [
             "date": "2026-09-30 00:00:00",
             "model_name": "project.task",
             "task_ids": [7595, 7620],
+            "github_url": "https://github.com/acme/widgets",
         },
     ),
     Contract(

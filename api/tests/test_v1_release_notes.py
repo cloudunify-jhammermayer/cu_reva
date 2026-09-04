@@ -93,12 +93,35 @@ def test_submit_enqueues_lookup(client_db_queue):
         "release_id": 3275,
         "release_name": "Lollipop",
         "slug": "lollipop",
+        "github_url": None,
     }
     assert kwargs["retry"] is not None
     assert kwargs["failure_ttl"] == 24 * 3600
     row = writers.get_release_note(db, body["note_id"])
     assert row["job_id"] == body["job_id"]
     assert row["status"] == "pending"
+
+
+def test_github_url_is_passed_to_the_job(client_db_queue):
+    client, _, queue, headers, _ = client_db_queue
+    payload = {**PAYLOAD, "github_url": "https://github.com/acme/widgets"}
+
+    r = client.post("/api/v1/release-note", json=payload, headers=headers)
+
+    assert r.status_code == 202
+    params = queue.enqueued[0][1]
+    assert params["github_url"] == "https://github.com/acme/widgets"
+
+
+def test_empty_github_url_is_none(client_db_queue):
+    client, _, queue, headers, _ = client_db_queue
+    payload = {**PAYLOAD, "github_url": ""}
+
+    r = client.post("/api/v1/release-note", json=payload, headers=headers)
+
+    assert r.status_code == 202
+    params = queue.enqueued[0][1]
+    assert params["github_url"] is None
 
 
 def test_task_ids_optional_and_date_null(client_db_queue):

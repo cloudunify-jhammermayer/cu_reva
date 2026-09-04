@@ -23,6 +23,10 @@ set `REVA_DOCS_SITE_URL=https://$REVA_DOMAIN` in `.env` or every lookup logs
 `docs_site_url_unset`. Each customer repo needs `odoo_instance: <name>` in its
 `.claude-review.yml` (the name as registered in REVA's Odoo instances).
 
+The request may now carry `github_url`; when present the worker reads the page
+from exactly that registered repo instead of scanning the `odoo_instance`-mapped
+ones (contracts synced, `contracts_version 0ee1578c…`).
+
 **Owed:** visual check of a real `docs/releases/lollipop.html` in the docs
 site (cards, pills, stats, dark theme, print); end-to-end run against the
 Cloudunify test instance (release 3275 "lollipop" once wenatex_odoo commits

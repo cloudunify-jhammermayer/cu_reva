@@ -105,12 +105,15 @@ def _page(github, full_name, slug="lollipop", content=PAGE):
     github.files[(owner, name, f"docs/releases/{slug}.html", "main")] = content
 
 
-def _params(db, name="Lollipop"):
+def _params(db, name="Lollipop", github_url=None):
     note_id = writers.record_release_note_created(
         db, odoo_instance_id=1, release_id=3275, release_name=name, slug=release_slug(name)
     )
-    return {"note_id": note_id, "odoo_instance_id": 1, "release_id": 3275,
-            "release_name": name, "slug": release_slug(name)}
+    params = {"note_id": note_id, "odoo_instance_id": 1, "release_id": 3275,
+              "release_name": name, "slug": release_slug(name)}
+    if github_url is not None:
+        params["github_url"] = github_url
+    return params
 
 
 def _ops_events(db):
@@ -140,6 +143,88 @@ def test_hit_sends_url_fragment_and_css(env):
     assert row["url"] == call["url"]
     assert row["callback_sent_at"] is not None and row["completed_at"] is not None
     assert _ops_events(db) == []
+
+
+def test_github_url_reads_the_named_repo_without_scanning(env):
+    db, gh, odoo = env["db"], env["github"], env["odoo"]
+    _repo(db, 1, "acme/widgets")             # no .claude-review.yml at all
+    _repo(db, 2, "acme/other")
+    _map(gh, "acme/other")
+    _page(gh, "acme/widgets")
+    _page(gh, "acme/other")
+    params = _params(db, github_url="https://github.com/acme/widgets")
+
+    out = run_release_note(params)
+
+    assert out == {"status": "completed", "note_id": params["note_id"]}
+    assert "repo=1" in odoo.calls[0]["url"]
+    assert ("acme", "other", ".claude-review.yml") not in gh.reads
+    assert _ops_events(db) == []
+
+
+def test_github_url_is_case_insensitive_and_tolerates_git_suffix(env):
+    db, gh, odoo = env["db"], env["github"], env["odoo"]
+    _repo(db, 1, "acme/widgets")
+    _page(gh, "acme/widgets")
+    params = _params(db, github_url="https://github.com/ACME/Widgets.git")
+
+    out = run_release_note(params)
+
+    assert out == {"status": "completed", "note_id": params["note_id"]}
+    assert "repo=1" in odoo.calls[0]["url"]
+
+
+def test_unknown_github_url_fails_with_a_german_reason(env):
+    db, odoo = env["db"], env["odoo"]
+    _repo(db, 1, "acme/widgets")
+    params = _params(db, github_url="https://github.com/acme/unknown")
+
+    with pytest.raises(PermanentError):
+        run_release_note(params)
+
+    assert odoo.calls[0]["error"] == (
+        "Repository https://github.com/acme/unknown ist in REVA nicht registriert oder deaktiviert"
+    )
+    row = writers.get_release_note(db, params["note_id"])
+    assert row["status"] == "failed"
+
+
+def test_disabled_repo_counts_as_unknown(env):
+    db, odoo = env["db"], env["odoo"]
+    _repo(db, 1, "acme/widgets", enabled=False)
+    params = _params(db, github_url="https://github.com/acme/widgets")
+
+    with pytest.raises(PermanentError):
+        run_release_note(params)
+
+    assert odoo.calls[0]["error"] == (
+        "Repository https://github.com/acme/widgets ist in REVA nicht registriert oder deaktiviert"
+    )
+
+
+def test_named_repo_without_the_page_fails_naming_it(env):
+    db, odoo = env["db"], env["odoo"]
+    _repo(db, 1, "acme/widgets")
+    params = _params(db, github_url="https://github.com/acme/widgets")
+
+    with pytest.raises(PermanentError):
+        run_release_note(params)
+
+    assert odoo.calls[0]["error"] == "Kein Release-Log 'docs/releases/lollipop.html' in acme/widgets"
+
+
+def test_without_github_url_the_scan_still_applies(env):
+    db, gh, odoo = env["db"], env["github"], env["odoo"]
+    _repo(db, 1, "acme/widgets")
+    _map(gh, "acme/widgets")
+    _page(gh, "acme/widgets")
+    params = _params(db)
+
+    assert "github_url" not in params
+    out = run_release_note(params)
+
+    assert out == {"status": "completed", "note_id": params["note_id"]}
+    assert "repo=1" in odoo.calls[0]["url"]
 
 
 def test_unmapped_and_disabled_repos_are_never_read(env):

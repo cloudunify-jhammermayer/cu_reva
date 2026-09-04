@@ -94,3 +94,13 @@ def test_release_note_job_params_roundtrip():
         note_id=1, odoo_instance_id=1, release_id=3275, release_name="Lollipop", slug="lollipop"
     )
     assert ReleaseNoteJobParams.model_validate(p.model_dump()) == p
+    assert p.github_url is None
+
+
+def test_release_note_job_params_roundtrip_with_github_url():
+    p = ReleaseNoteJobParams(
+        note_id=1, odoo_instance_id=1, release_id=3275, release_name="Lollipop", slug="lollipop",
+        github_url="https://github.com/acme/widgets",
+    )
+    assert ReleaseNoteJobParams.model_validate(p.model_dump()) == p
+    assert p.github_url == "https://github.com/acme/widgets"
