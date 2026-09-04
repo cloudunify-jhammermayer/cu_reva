@@ -1,0 +1,20 @@
+{
+  "analysis_html": "",
+  "description": "Please add a login page.",
+  "description_docx": null,
+  "github_project_url": null,
+  "github_url": "https://github.com/acme/widgets",
+  "github_username": null,
+  "issue_type": null,
+  "model_name": "project.task",
+  "name": "Login rework",
+  "plan_date": null,
+  "priority": "1",
+  "release": {
+    "date": "2026-09-30 00:00:00",
+    "id": 3275,
+    "name": "Lollipop"
+  },
+  "ticket_id": 42,
+  "ticket_url": "https://odoo.example.com/web#id=42"
+}

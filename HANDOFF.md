@@ -1,5 +1,46 @@
 # REVA — Work Handoff
 
+## Addendum 2026-09-04 — release-log lookup for Odoo
+
+**Status: implemented, not deployed** (spec
+`docs/superpowers/specs/archive/2026-09-04-release-log-requirements.md`, plan
+`docs/superpowers/plans/archive/2026-09-04-release-log.md`). REVA no longer
+drafts release notes: `POST /api/v1/release-note` (instance key, 202 with
+`note_id`) enqueues `worker.release_note_tasks.run_release_note`, which reads
+`.claude-review.yml` from every enabled repo, keeps those declaring
+`odoo_instance: <instance name>`, fetches `docs/releases/<slug>.html` from
+their default branch and posts `/releases/release-note` to Odoo with the
+docs-site URL, the fragment and `reva/static/release-log.css`. No Claude call.
+Migration `048_release_notes.sql` (SQL only unit-tested through the ORM model;
+first Postgres run is the staging boot). TUI: **Releases** tab, key `w`.
+Created GitHub issues now carry `**Release:** <name>` when Odoo sends the
+`release` block (create-issues only).
+
+**Deploy:** migration 048 at boot; worker + api images rebuilt (new `reva/`
+package data and modules); nginx rebuilt for the SPA theme
+(`docker compose -f docker-compose.prod.yml build nginx && … up -d nginx`);
+set `REVA_DOCS_SITE_URL=https://$REVA_DOMAIN` in `.env` or every lookup logs
+`docs_site_url_unset`. Each customer repo needs `odoo_instance: <name>` in its
+`.claude-review.yml` (the name as registered in REVA's Odoo instances).
+
+**Owed:** visual check of a real `docs/releases/lollipop.html` in the docs
+site (cards, pills, stats, dark theme, print); end-to-end run against the
+Cloudunify test instance (release 3275 "lollipop" once wenatex_odoo commits
+its release page). Contracts synced to `../Cloudunify` (pin bumped in
+`cu_reva_connector/tests/test_contracts.py`, uncommitted there; carries the
+`reassign-issue` contract owed since 2026-08-21). Odoo side (R3): implemented the same day in
+`../Cloudunify` (module 19.0.55.0.0, staged, uncommitted; spec and plan under
+`Cloudunify/docs/superpowers/`); the customer-repo side and a staging look at
+the rendered page remain.
+
+Hardening after review: failed callbacks omit `url`/`html`/`css` (the shipped
+Odoo model refuses `null` for `html`); release names whose slug carries a path
+separator or a leading dot are 422; a re-submit within 30 minutes echoes the
+pending `note_id`; unreadable or malformed repo configs and unreadable pages
+are skipped with ops events `config_fetch_failed` / `config_parse_failed` /
+`page_fetch_failed`, and a GitHub failure across every repo is reported as
+such.
+
 ## Addendum 2026-08-31 — docs site renders `.html` docs
 
 **Status: implemented** (spec

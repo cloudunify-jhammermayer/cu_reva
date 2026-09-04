@@ -1,0 +1,45 @@
+{
+  "description": "What `cu_release._reva_release_note_payload` sends. Only `release_id`\nand `name` drive the lookup; `date`, `model_name` and `task_ids` are\naccepted so the shipped Odoo payload validates, and ignored.",
+  "properties": {
+    "date": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "\"YYYY-MM-DD HH:MM:SS\" (UTC) or null; not used",
+      "title": "Date"
+    },
+    "model_name": {
+      "default": "project.task",
+      "title": "Model Name",
+      "type": "string"
+    },
+    "name": {
+      "description": "Release name; its slug is the docs/releases/<slug>.html stem",
+      "title": "Name",
+      "type": "string"
+    },
+    "release_id": {
+      "title": "Release Id",
+      "type": "integer"
+    },
+    "task_ids": {
+      "items": {
+        "type": "integer"
+      },
+      "title": "Task Ids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "release_id",
+    "name"
+  ],
+  "title": "ReleaseNoteRequest",
+  "type": "object"
+}

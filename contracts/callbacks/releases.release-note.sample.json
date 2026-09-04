@@ -1,0 +1,8 @@
+{
+  "css": ".rl-page{--rl-ground:#fbfbf9}",
+  "html": "<div class=\"rl-page\"><header class=\"rl-masthead\"><h1>Lollipop</h1></header></div>",
+  "note_id": 12,
+  "release_id": 3275,
+  "status": "completed",
+  "url": "https://reva.example.com/docs/?repo=4&path=docs/releases/lollipop.html"
+}

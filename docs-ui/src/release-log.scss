@@ -1,0 +1,193 @@
+// Release-log theme (spec docs/superpowers/specs/archive/2026-09-04-release-log-requirements.md, R1).
+//
+// Styles the `rl-*` fragment the customer repos' docs generator commits as
+// docs/releases/<name>.html. The fragment carries no <style> (the docs site's
+// sanitizer strips it), so the look lives here, once, for every project:
+//   - `.rl-page` carries the light token set: what Odoo's iframe shows.
+//   - `.markdown-body .rl-page` switches to the dark set matching the docs
+//     site (`--bg-primary #1e1e1e`); the same fragment reads right in both.
+// Stripe and pill colours come from the `data-status` attribute, never from
+// inline styles. `npm run build:theme` compiles this file to
+// reva/static/release-log.css, which the worker sends to Odoo verbatim.
+// Rules are scoped under .rl-* so the site's `.markdown-body` defaults
+// (heading borders, link colour) do not leak into the cards.
+
+@mixin rl-light {
+  --rl-ground: #fbfbf9;
+  --rl-panel: #f1f2ef;
+  --rl-line: #dfe2dd;
+  --rl-line-strong: #c3c8c1;
+  --rl-ink: #1f2422;
+  --rl-muted: #666d69;
+  --rl-accent: #0f4c5c;
+  --rl-accent-ink: #0b3a46;
+  --rl-pill-ink: #ffffff;
+  --st-umgesetzt: #1f7a4d;
+  --st-weitgehend: #5a8f2b;
+  --st-teilweise: #b7791f;
+  --st-offen: #8b918d;
+}
+
+@mixin rl-dark {
+  --rl-ground: #1e1e1e;
+  --rl-panel: #262626;
+  --rl-line: #363636;
+  --rl-line-strong: #4a4a4a;
+  --rl-ink: #e8e9e6;
+  --rl-muted: #a3a8a4;
+  --rl-accent: #5fb3c4;
+  --rl-accent-ink: #86c9d6;
+  --rl-pill-ink: #131414;
+  --st-umgesetzt: #3fae78;
+  --st-weitgehend: #86bf58;
+  --st-teilweise: #d9a441;
+  --st-offen: #858b87;
+}
+
+.rl-page {
+  @include rl-light;
+  background: var(--rl-ground);
+  color: var(--rl-ink);
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 32px 24px 56px;
+
+  h1, h2, h3 { margin: 0; color: var(--rl-ink); border-bottom: 0; padding-bottom: 0; }
+  h1 {
+    font-size: clamp(26px, 3.4vw, 36px); font-weight: 300; line-height: 1.15;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  h1 strong, h1 b { font-weight: 600; }
+  h2 {
+    display: inline-block; font-size: 15px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.05em; padding-bottom: 10px; border-bottom: 3px solid var(--rl-accent);
+  }
+  a { color: var(--rl-accent-ink); }
+  p { margin: 0; }
+  ul { margin: 0; padding-left: 18px; }
+  li { margin: 2px 0; }
+  li em { color: var(--rl-muted); font-style: normal; }
+  code {
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.9em;
+    background: var(--rl-panel); padding: 1px 5px; border-radius: 2px;
+  }
+}
+
+.markdown-body .rl-page { @include rl-dark; }
+
+// Masthead
+.rl-masthead {
+  display: grid; grid-template-columns: 1fr auto; gap: 24px 40px; align-items: end;
+  padding-bottom: 24px; border-bottom: 1px solid var(--rl-line-strong);
+  p { margin: 12px 0 0; max-width: 62ch; color: var(--rl-muted); }
+}
+.rl-eyebrow {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--rl-muted); margin: 0 0 14px;
+  b { color: var(--rl-accent); }
+}
+.rl-meta {
+  display: grid; grid-template-columns: auto auto; gap: 4px 18px; font-size: 14px;
+  color: var(--rl-muted); white-space: nowrap; margin: 0;
+  dt { font-weight: 600; color: var(--rl-ink); }
+  dd { margin: 0; font-variant-numeric: tabular-nums; }
+  a { text-decoration: none; border-bottom: 1px solid transparent; }
+  a:hover, a:focus-visible { border-bottom-color: currentColor; outline: none; }
+}
+
+// Stats
+.rl-stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  border: 1px solid var(--rl-line); margin: 28px 0 44px; background: var(--rl-panel);
+}
+.rl-stat { padding: 16px 18px 14px; border-left: 1px solid var(--rl-line); display: grid; gap: 2px; }
+.rl-stat:first-child { border-left: 0; }
+.rl-stat-num { font-size: 30px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+.rl-stat-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--rl-muted);
+}
+.rl-stat[data-st="umgesetzt"] .rl-stat-num { color: var(--st-umgesetzt); }
+.rl-stat[data-st="weitgehend"] .rl-stat-num { color: var(--st-weitgehend); }
+.rl-stat[data-st="teilweise"] .rl-stat-num { color: var(--st-teilweise); }
+.rl-stat[data-st="offen"] .rl-stat-num { color: var(--st-offen); }
+.rl-stat[data-st="todo"] .rl-stat-num { color: var(--rl-accent); }
+
+// Ticket cards
+.rl-tickets { display: grid; gap: 12px; }
+.rl-ticket {
+  --st: var(--st-offen);
+  display: grid; grid-template-columns: 6px 170px 1fr 1fr; gap: 0 22px;
+  border: 1px solid var(--rl-line); background: var(--rl-ground);
+  h3 { font-size: 15px; font-weight: 600; letter-spacing: 0.01em; grid-column: 1 / -1; }
+  p { font-size: 15px; }
+  ul { font-size: 14.5px; }
+}
+.rl-ticket[data-status="umgesetzt"] { --st: var(--st-umgesetzt); }
+.rl-ticket[data-status="weitgehend"] { --st: var(--st-weitgehend); }
+.rl-ticket[data-status="teilweise"] { --st: var(--st-teilweise); }
+.rl-ticket[data-status="offen"] { --st: var(--st-offen); }
+.rl-stripe { background: var(--st); }
+.rl-head { padding: 16px 0 16px 16px; display: grid; gap: 8px; align-content: start; }
+.rl-id {
+  font-size: 20px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums;
+  small {
+    display: block; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+    color: var(--rl-muted); margin-top: 6px;
+  }
+}
+.rl-pill {
+  justify-self: start; font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; padding: 4px 8px; color: var(--rl-pill-ink); background: var(--st);
+  border-radius: 2px;
+}
+.rl-col { padding: 16px 0; display: grid; gap: 6px; align-content: start; }
+.rl-col:last-child { padding-right: 16px; }
+.rl-label {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--rl-muted);
+}
+.rl-built { display: grid; gap: 6px; }
+.rl-todo ul { color: var(--rl-ink); }
+.rl-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.rl-chip {
+  font-size: 11.5px; font-weight: 600; padding: 3px 7px; background: var(--rl-panel);
+  color: var(--rl-ink); border: 1px solid var(--rl-line); text-decoration: none; border-radius: 2px;
+}
+.rl-chip:hover, .rl-chip:focus-visible { border-color: var(--rl-accent); color: var(--rl-accent-ink); outline: none; }
+
+// Footer notes (Entscheidungen / Nicht in diesem Release); empty when none
+.rl-notes {
+  margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--rl-line-strong);
+  display: grid; grid-template-columns: 1fr 1fr; gap: 24px 40px; font-size: 14.5px; color: var(--rl-muted);
+}
+.rl-notes:empty { display: none; }
+.rl-note {
+  h2 { font-size: 12px; border-bottom-width: 2px; margin-bottom: 8px; }
+  li { margin: 3px 0; }
+  li strong { color: var(--rl-ink); font-weight: 600; }
+}
+
+@media (max-width: 860px) {
+  .rl-masthead { grid-template-columns: 1fr; align-items: start; }
+  .rl-ticket { grid-template-columns: 6px 1fr; }
+  .rl-head { padding-bottom: 0; }
+  .rl-col { padding: 12px 16px 0 16px; }
+  .rl-col:last-child { padding-bottom: 16px; }
+  .rl-notes { grid-template-columns: 1fr; }
+}
+
+// Print / PDF export: the docs site forces a white page on .markdown-body
+// (style.css @media print), so the dark tokens must flip back to the light set
+// or the cards print dark on white. One column keeps a card on one page.
+@media print {
+  .rl-page, .markdown-body .rl-page { @include rl-light; background: #fff; }
+  .rl-ticket { grid-template-columns: 6px 1fr; break-inside: avoid; }
+  .rl-head { padding-bottom: 0; }
+  .rl-col { padding: 10px 14px 0 14px; }
+  .rl-col:last-child { padding-bottom: 14px; }
+  .rl-stats { grid-template-columns: repeat(2, 1fr); }
+  .rl-notes { grid-template-columns: 1fr; }
+  .rl-chip { border-color: #999; }
+}

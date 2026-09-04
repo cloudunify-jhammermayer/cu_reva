@@ -47,6 +47,12 @@ try:
 except ValueError:
     GOLDEN_ESTIMATE_LIMIT = 30
 
+# Public base URL of the docs site (nginx serves the SPA under /docs/), used to
+# build the release-log page link sent to Odoo (spec 2026-09-04-release-log,
+# R2). Empty = unset: the worker still sends a relative link and records an ops
+# event, so a missing value is visible on the first request, not silent.
+DOCS_SITE_URL = os.environ.get("REVA_DOCS_SITE_URL", "").strip().rstrip("/")
+
 
 def env_or_file(name: str, default: str | None = None) -> str | None:
     """Return env var `name`, or the stripped contents of the file at `{name}_FILE`.

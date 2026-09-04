@@ -319,6 +319,29 @@ type TimesheetReviewPage struct {
 	Total int                      `json:"total"`
 }
 
+// ReleaseNoteSummary is one Odoo release-log lookup (GET /release-notes):
+// which repo page REVA handed to Odoo for a release, or why it could not.
+type ReleaseNoteSummary struct {
+	ID             int        `json:"id"`
+	OdooInstanceID int        `json:"odoo_instance_id"`
+	ReleaseID      int        `json:"release_id"`
+	ReleaseName    string     `json:"release_name"`
+	Slug           string     `json:"slug"`
+	Status         string     `json:"status"`
+	SourceRepoID   *int       `json:"source_repo_id"`
+	SourcePath     *string    `json:"source_path"`
+	URL            *string    `json:"url"`
+	Error          *string    `json:"error"`
+	CallbackSentAt *time.Time `json:"callback_sent_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+	CompletedAt    *time.Time `json:"completed_at"`
+}
+
+type ReleaseNotePage struct {
+	Items []ReleaseNoteSummary `json:"items"`
+	Total int                  `json:"total"`
+}
+
 type DashboardMetrics struct {
 	Last24h            PeriodStats         `json:"last_24h"`
 	Last7d             PeriodStats         `json:"last_7d"`

@@ -85,6 +85,8 @@ func loadedApp(t *testing.T) *App {
 	a = apply(t, a, supportThreadsLoadedMsg{data: threads})
 	personas, _ := mc.Personas()
 	a = apply(t, a, personasLoadedMsg{data: personas})
+	rel, _ := mc.ReleaseNotes(100)
+	a = apply(t, a, releasesLoadedMsg{data: rel})
 	return a
 }
 
@@ -100,7 +102,7 @@ func TestNoTabOverflowsTerminal(t *testing.T) {
 	}
 	views := []view{viewDashboard, viewReviews, viewFindings, viewFailures,
 		viewRepos, viewPending, viewTickets, viewAudits, viewFeedback,
-		viewSupport, viewPersonas}
+		viewSupport, viewPersonas, viewReleases}
 
 	for _, sz := range sizes {
 		a := loadedApp(t)
@@ -187,6 +189,8 @@ func viewName(v view) string {
 		return "support"
 	case viewPersonas:
 		return "personas"
+	case viewReleases:
+		return "releases"
 	}
 	return "?"
 }

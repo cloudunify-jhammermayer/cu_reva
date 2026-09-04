@@ -107,6 +107,9 @@ class RepoConfig(BaseModel):
     # on another version (e.g. "17.0"), or to null in .claude-review.yml to
     # disable core-knowledge grounding for this repo.
     odoo_version: str | None = "19.0"
+    # Name of the Odoo instance (odoo_instances.name) whose release-log lookups
+    # search this repo for docs/releases/<slug>.html. Unset: never searched.
+    odoo_instance: str | None = None
 
     @field_validator("odoo_version", mode="before")
     @classmethod
@@ -874,6 +877,16 @@ class ReviewMemoryPlan(BaseModel):
         return _unwrap_json_list(v)
 
 
+class ReleaseRef(BaseModel):
+    """The Odoo `cu.release` a record ships in. Optional block on the ticket
+    calls (handoff 2026-09-01, leg 3); only `name` is used, on created issues."""
+
+    id: int
+    name: str = ""
+    # "YYYY-MM-DD HH:MM:SS" (UTC) or None as Odoo sends it; passed through, never parsed.
+    date: str | None = None
+
+
 class TicketIssueJobParams(BaseModel):
     """Inputs handed to the create-issues RQ job: the Contract 1 payload from
     the Odoo addon (github-issues handoff) plus the ticket_issue_runs row id,
@@ -899,6 +912,8 @@ class TicketIssueJobParams(BaseModel):
     # to, and the planned date set on it. Absent → no Projects interaction.
     github_project_url: str | None = None
     plan_date: date | None = None
+    # Release the ticket ships in (R4): named on every created issue body.
+    release: ReleaseRef | None = None
 
 
 # --- Timesheet wording review types -----------------------------------------
@@ -996,3 +1011,18 @@ class ClaudeResponse(BaseModel):
     # Authoritative cost reported by the Claude Code CLI (`total_cost_usd`).
     # 0.0 on the Messages-API path, where cost is derived from token counts.
     total_cost_usd: float = 0.0
+
+
+# --- Release-log lookup types (spec 2026-09-04) -------------------------------
+
+
+class ReleaseNoteJobParams(BaseModel):
+    """Inputs of the release-log lookup job. `note_id` is the release_notes row
+    id Odoo stores and echoes on the callback; `slug` is derived once in the API
+    (`reva.release_log.release_slug`) so worker and TUI see the same value."""
+
+    note_id: int
+    odoo_instance_id: int
+    release_id: int
+    release_name: str
+    slug: str

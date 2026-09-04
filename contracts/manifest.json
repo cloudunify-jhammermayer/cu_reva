@@ -76,6 +76,15 @@
       "auth": "bearer:instance-outbound-key",
       "direction": "reva->odoo",
       "method": "POST",
+      "name": "releases.release-note",
+      "path": "/releases/release-note",
+      "sample": "callbacks/releases.release-note.sample.json",
+      "schema": "callbacks/releases.release-note.schema.json"
+    },
+    {
+      "auth": "bearer:instance-outbound-key",
+      "direction": "reva->odoo",
+      "method": "POST",
       "name": "hr.timesheet-results",
       "path": "/hr/timesheet-results",
       "sample": "callbacks/hr.timesheet-results.sample.json",
@@ -145,6 +154,15 @@
       "schema": "inbound/timesheet-review.schema.json"
     },
     {
+      "auth": "bearer:instance-inbound-key",
+      "direction": "odoo->reva",
+      "method": "POST",
+      "name": "release-note",
+      "path": "/api/v1/release-note",
+      "sample": "inbound/release-note.sample.json",
+      "schema": "inbound/release-note.schema.json"
+    },
+    {
       "auth": "bearer:any",
       "direction": "odoo->reva",
       "method": "GET",
@@ -163,6 +181,6 @@
       "schema": "inbound/error.schema.json"
     }
   ],
-  "contracts_version": "6b7ab42efc3b215ee037bca2c954f9fd506ac557795e10b87d394dd3004e7577",
+  "contracts_version": "78b13300ea76926c83d1414f9190ac9d63180edc11d217838e6f1f27e75e9fd7",
   "generated_from": "reva/odoo_contracts.py"
 }

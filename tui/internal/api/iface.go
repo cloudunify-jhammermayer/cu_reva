@@ -18,6 +18,7 @@ type ClientIface interface {
 	TicketAnalyses(limit int) (*TicketAnalysisPage, error)
 	TicketIssueRuns(limit int) (*TicketIssueRunPage, error)
 	TimesheetReviews(limit int) (*TimesheetReviewPage, error)
+	ReleaseNotes(limit int) (*ReleaseNotePage, error)
 	RequeueTicket(id int) error
 	RequeueIssueRun(id int) error
 	Learning() ([]LearningStat, error)

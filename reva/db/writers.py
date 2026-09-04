@@ -40,6 +40,7 @@ from reva.db.models import (
     SupportTurn,
     PromptVersion,
     PullRequest,
+    ReleaseNote,
     RepoReviewMemory,
     Repository,
     ReviewFeedback,
@@ -1673,6 +1674,132 @@ def record_timesheet_callback_sent(db: Database, run_id: int) -> None:
             return
         row.callback_sent_at = datetime.now(timezone.utc)
         row.callback_payload = None
+
+
+# --- release_notes writers ------------------------------------------------------
+
+
+def record_release_note_created(
+    db: Database, *, odoo_instance_id: int, release_id: int, release_name: str, slug: str
+) -> int:
+    """Insert a pending release_notes row and return its id (= note_id)."""
+    with db.session() as s:
+        row = ReleaseNote(
+            odoo_instance_id=odoo_instance_id,
+            release_id=release_id,
+            release_name=release_name,
+            slug=slug,
+            status="pending",
+        )
+        s.add(row)
+        s.flush()
+        return row.id
+
+
+def attach_release_note_job_id(db: Database, note_id: int, job_id: str) -> None:
+    """Store the RQ job ID on the row after enqueuing."""
+    with db.session() as s:
+        row = s.get(ReleaseNote, note_id)
+        if row is not None:
+            row.job_id = job_id
+
+
+def get_pending_release_note(db: Database, odoo_instance_id: int, release_id: int) -> dict | None:
+    """Return the pending lookup for (instance, release), or None."""
+    with db.session() as s:
+        row = s.execute(
+            select(ReleaseNote).where(
+                ReleaseNote.odoo_instance_id == odoo_instance_id,
+                ReleaseNote.release_id == release_id,
+                ReleaseNote.status == "pending",
+            )
+        ).scalars().first()
+        if row is None:
+            return None
+        return {"id": row.id, "job_id": row.job_id, "status": row.status, "created_at": row.created_at}
+
+
+def get_release_note(db: Database, note_id: int) -> dict | None:
+    """Return a release_notes row as a dict, or None."""
+    with db.session() as s:
+        row = s.get(ReleaseNote, note_id)
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "job_id": row.job_id,
+            "odoo_instance_id": row.odoo_instance_id,
+            "release_id": row.release_id,
+            "release_name": row.release_name,
+            "slug": row.slug,
+            "status": row.status,
+            "source_repo_id": row.source_repo_id,
+            "source_path": row.source_path,
+            "url": row.url,
+            "error": row.error,
+            "created_at": row.created_at,
+            "completed_at": row.completed_at,
+            "callback_sent_at": row.callback_sent_at,
+        }
+
+
+def record_release_note_completed(
+    db: Database, note_id: int, *, source_repo_id: int, source_path: str, url: str
+) -> None:
+    """Completed means delivered: called after Odoo accepted the callback, so
+    completed_at and callback_sent_at are set together. An RQ retry of a
+    pending row repeats the cheap lookup; nothing has to be stored to resend."""
+    with db.session() as s:
+        row = s.get(ReleaseNote, note_id)
+        if row is None:
+            return
+        now = datetime.now(timezone.utc)
+        row.status = "completed"
+        row.source_repo_id = source_repo_id
+        row.source_path = source_path
+        row.url = url
+        row.completed_at = now
+        row.callback_sent_at = now
+
+
+def record_release_note_failed(db: Database, note_id: int, error: str) -> None:
+    """Mark the lookup failed with the reason Odoo is told (German for the
+    consultant reading the release chatter, see spec R2)."""
+    with db.session() as s:
+        row = s.get(ReleaseNote, note_id)
+        if row is None:
+            return
+        row.status = "failed"
+        row.error = error
+        row.completed_at = datetime.now(timezone.utc)
+
+
+def record_release_note_callback_sent(db: Database, note_id: int) -> None:
+    """The failure callback reached Odoo (best effort; the row is already failed)."""
+    with db.session() as s:
+        row = s.get(ReleaseNote, note_id)
+        if row is not None:
+            row.callback_sent_at = datetime.now(timezone.utc)
+
+
+def list_enabled_repositories(db: Database) -> list[dict]:
+    """Every enabled repo, ascending id: the search order and the tie-break for
+    ambiguous release-log hits (spec R2)."""
+    with db.session() as s:
+        rows = s.execute(
+            select(Repository).where(Repository.enabled.is_(True)).order_by(Repository.id)
+        ).scalars().all()
+        return [
+            {
+                "id": r.id,
+                "owner": r.owner,
+                "name": r.name,
+                "full_name": r.full_name,
+                "default_branch": r.default_branch or "main",
+                "installation_id": r.installation_id,
+            }
+            for r in rows
+        ]
 
 
 # --- ticket_issue_runs writers -------------------------------------------------

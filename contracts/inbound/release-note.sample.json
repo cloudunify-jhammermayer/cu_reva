@@ -1,0 +1,10 @@
+{
+  "date": "2026-09-30 00:00:00",
+  "model_name": "project.task",
+  "name": "Lollipop",
+  "release_id": 3275,
+  "task_ids": [
+    7595,
+    7620
+  ]
+}

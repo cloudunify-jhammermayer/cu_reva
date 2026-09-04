@@ -187,6 +187,9 @@ services:
       REVA_CORE_KNOWLEDGE_DIR: /core
       # Optional rolling 24-hour spend cap (USD); unset = no cap.
       REVA_DAILY_BUDGET_USD: ${REVA_DAILY_BUDGET_USD:-}
+      # Public base of the docs site (https://$REVA_DOMAIN), for the release-log
+      # link sent to Odoo. Unset = relative link + ops event on every lookup.
+      REVA_DOCS_SITE_URL: ${REVA_DOCS_SITE_URL:-}
     volumes:
       - repo_cache:/repos
       - ${REVA_CORE_HOST_DIR:-/srv/reva-core}:/core:ro

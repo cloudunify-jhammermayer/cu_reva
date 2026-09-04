@@ -1,0 +1,76 @@
+{
+  "description": "POST {base}/releases/release-note \u2014 the release-log lookup result\n(spec 2026-09-04-release-log-requirements, R2). `url`, `html` and `css` are\nset on `completed`; `error` on `failed`. Odoo composes html + css into one\ndocument and stores the URL as the \"In REVA \u00f6ffnen\" link. None fields are\nomitted on the wire: a failed delivery carries only release_id, note_id,\nstatus and error, so the shipped Odoo model's `html: str = \"\"` default\napplies; url/css are optional there.",
+  "properties": {
+    "css": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Css"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "html": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Html"
+    },
+    "note_id": {
+      "title": "Note Id",
+      "type": "integer"
+    },
+    "release_id": {
+      "title": "Release Id",
+      "type": "integer"
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "failed"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Url"
+    }
+  },
+  "required": [
+    "release_id",
+    "note_id",
+    "status"
+  ],
+  "title": "ReleaseNotePayload",
+  "type": "object"
+}

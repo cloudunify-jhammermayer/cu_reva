@@ -418,3 +418,4 @@ In production the four secrets below are supplied as **files** under `secrets/`
 | `REVA_DEEP_MODEL` | no | `claude-opus-4-8` | Model for `/deep-review` and all repo audits |
 | `REVA_CODEGRAPH_ENABLED` | no | `false` | When `true`, repo-aware reviews (full/deep) and audits get a pre-indexed CodeGraph exposed via MCP. Requires the `codegraph` binary in the worker image (already pinned in the Dockerfile) |
 | `REVA_CODEGRAPH_INDEX_TIMEOUT` | no | 180 | Seconds bounding the CodeGraph index step |
+| `REVA_DOCS_SITE_URL` | no | — | Public base of the docs site, normally `https://$REVA_DOMAIN`; the worker builds the release-log link Odoo shows from it. Set it, or every lookup records a `docs_site_url_unset` ops event |
