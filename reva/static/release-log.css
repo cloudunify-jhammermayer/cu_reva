@@ -87,9 +87,16 @@
   --st-offen: #858b87;
 }
 
+.doc:has(.rl-page) {
+  max-width: 1260px;
+}
+.doc:has(.rl-page) .toc {
+  display: none;
+}
+
 .rl-masthead {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 24px 40px;
   align-items: end;
   padding-bottom: 24px;
@@ -115,20 +122,22 @@
 
 .rl-meta {
   display: grid;
-  grid-template-columns: auto auto;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 4px 18px;
   font-size: 14px;
   color: var(--rl-muted);
-  white-space: nowrap;
   margin: 0;
+  min-width: 0;
 }
 .rl-meta dt {
   font-weight: 600;
   color: var(--rl-ink);
+  white-space: nowrap;
 }
 .rl-meta dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 .rl-meta a {
   text-decoration: none;
