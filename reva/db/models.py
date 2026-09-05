@@ -636,6 +636,9 @@ class ChangeNote(Base):
     model_name: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     note_html: Mapped[str | None] = mapped_column(Text)
+    # 'claude' (drafted from the diff) or 'release-log' (the ticket's entry in
+    # docs/releases/<name>.md, re-read at delivery; note_html stays "").
+    source: Mapped[str] = mapped_column(Text, nullable=False, default="claude")
     # PR title/url captured at generation time so the batched change-summary
     # (assembled later from the DB) renders each PR ref without a GitHub call.
     pr_title: Mapped[str | None] = mapped_column(Text)

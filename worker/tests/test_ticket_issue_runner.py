@@ -172,10 +172,10 @@ class FakeOdoo:
     summary_raise_exc: Exception | None = None
     calls: list[dict] = field(default_factory=list)
 
-    def change_summary(self, ticket_id, model_name, notes):
+    def change_summary(self, ticket_id, model_name, notes, release_log=None):
         self.calls.append(
             {"summary": True, "ticket_id": ticket_id, "model_name": model_name,
-             "notes": notes}
+             "notes": notes, "release_log": release_log}
         )
         if self.summary_raise_exc:
             raise self.summary_raise_exc

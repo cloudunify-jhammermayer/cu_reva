@@ -338,15 +338,18 @@ class OdooCallbackClient:
         ticket_id: int,
         model_name: str,
         notes: list[dict],
+        release_log: dict | None = None,
     ) -> None:
-        """Post the consolidated merge summary (one note per PR) to the Odoo
-        record. Sent once the ticket is ready and every note is terminal."""
+        """Post the consolidated merge summary to the Odoo record: one note
+        per PR, plus the ticket's release-log entry once when the repo has
+        one. Sent once the ticket is ready and every note is terminal."""
         payload = ChangeSummaryPayload(
             ticket_id=ticket_id,
             model_name=model_name,
             notes=notes,
+            release_log=release_log,
         )
-        self._post("/tickets/change-summary", payload.model_dump())
+        self._post("/tickets/change-summary", payload.model_dump(exclude_none=True))
         logger.bind(ticket_id=ticket_id, model_name=model_name).info(
             "odoo_change_summary_ok"
         )

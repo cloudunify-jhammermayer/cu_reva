@@ -262,6 +262,14 @@ never a hedged draft a consultant has to fact-check from scratch.
 Threads and turns are visible in the TUI **Support** tab, including each turn's
 grounding level.
 
+## Changes-merged notes
+
+When every REVA-created issue for a ticket is closed, REVA posts one "Changes
+merged" note to Odoo summarizing the merged PRs — normally a customer-facing
+note Claude drafts per PR from its diff. A ticket covered by the repository's
+release log (`docs/releases/<name>.md`, `## <ticket> — …`) gets that entry
+(Gebaut and To-do) in the summary instead of a drafted note.
+
 ## Error notifications
 
 REVA posts a Google Chat alert whenever a review fails due to a server or API error. Set `GOOGLE_CHAT_WEBHOOK_URL` in `.env` to enable; leave it empty to disable.

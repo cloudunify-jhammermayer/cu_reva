@@ -181,6 +181,6 @@
       "schema": "inbound/error.schema.json"
     }
   ],
-  "contracts_version": "0ee1578c480f820970e6cd9bf7fb783e009b860713f8a3a295be76b0e7b1ff3b",
+  "contracts_version": "d466f8d9a977da121f5e47fba6db17f408f7a927580212a33a18bfb2c23b22d4",
   "generated_from": "reva/odoo_contracts.py"
 }

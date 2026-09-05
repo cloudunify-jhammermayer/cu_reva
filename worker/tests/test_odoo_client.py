@@ -458,6 +458,29 @@ def test_change_summary_disabled_client_permanent():
         )
 
 
+def test_change_summary_carries_the_release_log_block_only_when_given(monkeypatch):
+    seen: list[dict] = []
+
+    def post(url, **kwargs):
+        seen.append(kwargs["json"])
+        return httpx.Response(200, text='{"ok":true}')
+
+    monkeypatch.setattr("reva.odoo_client.httpx.post", post)
+    notes = [{"pr": {"number": 7, "title": "t", "url": "https://github.com/acme/widgets/pull/7",
+                     "repo": "acme/widgets"}, "note_html": ""}]
+    client = _client()
+    client.change_summary(ticket_id=97, model_name="helpdesk.ticket", notes=notes)
+    client.change_summary(
+        ticket_id=97, model_name="helpdesk.ticket", notes=notes,
+        release_log={"release": "lollipop", "ticket": 97, "title": "Login", "status": "umgesetzt",
+                     "modules": ["cu_auth 19.0.1.0.0"], "html": "<p><strong>Gebaut</strong></p><p>x</p>"},
+    )
+    assert "release_log" not in seen[0]
+    assert seen[0]["notes"][0]["note_html"] == ""
+    assert seen[1]["release_log"]["title"] == "Login"
+    assert seen[1]["release_log"]["modules"] == ["cu_auth 19.0.1.0.0"]
+
+
 # --- release_note (release-log lookup, spec 2026-09-04) ------------------------
 
 

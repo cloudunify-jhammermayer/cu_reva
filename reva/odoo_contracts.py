@@ -145,6 +145,20 @@ class ChangeSummaryNote(BaseModel):
     note_html: str
 
 
+class ReleaseLogEntryPayload(BaseModel):
+    """The ticket's entry in the repo's release log (docs/releases/<name>.md),
+    rendered to simple HTML (p, ul, li, strong, em, code). Sent once per
+    ticket on the change summary when the entry exists; the per-PR notes then
+    carry an empty note_html (spec 2026-09-04-release-log-change-notes)."""
+
+    release: str
+    ticket: int
+    title: str
+    status: str
+    modules: list[str]
+    html: str
+
+
 class ChangeSummaryPayload(BaseModel):
     """One consolidated merge summary delivered when the ticket flips ready —
     every undelivered per-PR change note batched into a single chatter post."""
@@ -152,6 +166,8 @@ class ChangeSummaryPayload(BaseModel):
     ticket_id: int
     model_name: str
     notes: list[ChangeSummaryNote]
+    # Present when the repo's release log covers the ticket; omitted otherwise.
+    release_log: ReleaseLogEntryPayload | None = None
 
 
 class ReleaseNotePayload(BaseModel):
@@ -385,9 +401,32 @@ CONTRACTS: list[Contract] = [
                     "url": "https://github.com/acme/widgets/pull/7",
                     "repo": "acme/widgets",
                 },
+                "note_html": "",
+            }],
+            "release_log": {
+                "release": "lollipop",
+                "ticket": 123,
+                "title": "Login rework",
+                "status": "umgesetzt",
+                "modules": ["cu_auth 19.0.1.0.0"],
+                "html": "<p><strong>Gebaut</strong></p><p>Neue Anmeldung mit Rollenprüfung.</p>"
+                "<p><strong>To-do</strong></p><ul><li>Rollen prüfen <em>(Einstellungen → Benutzer)</em></li></ul>",
+            },
+        },
+        # Legacy shape (pre release-log): plain per-PR note_html, no release_log.
+        extra_samples=[{
+            "ticket_id": 123,
+            "model_name": "helpdesk.ticket",
+            "notes": [{
+                "pr": {
+                    "number": 7,
+                    "title": "Login rework",
+                    "url": "https://github.com/acme/widgets/pull/7",
+                    "repo": "acme/widgets",
+                },
                 "note_html": "<p>Die Änderung wurde gemerged.</p>",
             }],
-        },
+        }],
     ),
     Contract(
         name="releases.release-note",

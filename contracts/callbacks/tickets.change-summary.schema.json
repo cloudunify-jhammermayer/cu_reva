@@ -44,6 +44,48 @@
       ],
       "title": "PrRefPayload",
       "type": "object"
+    },
+    "ReleaseLogEntryPayload": {
+      "description": "The ticket's entry in the repo's release log (docs/releases/<name>.md),\nrendered to simple HTML (p, ul, li, strong, em, code). Sent once per\nticket on the change summary when the entry exists; the per-PR notes then\ncarry an empty note_html (spec 2026-09-04-release-log-change-notes).",
+      "properties": {
+        "html": {
+          "title": "Html",
+          "type": "string"
+        },
+        "modules": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Modules",
+          "type": "array"
+        },
+        "release": {
+          "title": "Release",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "ticket": {
+          "title": "Ticket",
+          "type": "integer"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "release",
+        "ticket",
+        "title",
+        "status",
+        "modules",
+        "html"
+      ],
+      "title": "ReleaseLogEntryPayload",
+      "type": "object"
     }
   },
   "description": "One consolidated merge summary delivered when the ticket flips ready \u2014\nevery undelivered per-PR change note batched into a single chatter post.",
@@ -58,6 +100,17 @@
       },
       "title": "Notes",
       "type": "array"
+    },
+    "release_log": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReleaseLogEntryPayload"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "ticket_id": {
       "title": "Ticket Id",

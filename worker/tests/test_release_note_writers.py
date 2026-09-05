@@ -90,3 +90,25 @@ def test_list_enabled_repositories_orders_by_id_and_skips_disabled(db):
         "default_branch": "develop", "installation_id": 7,
     }
     assert repos[1]["default_branch"] == "main"
+
+
+def test_change_note_source_defaults_to_claude_and_records_release_log(db):
+    note_id, row = writers.get_or_create_change_note(
+        db, "acme/widgets", 7, 97, 1, "helpdesk.ticket", pr_title="t", pr_url="u"
+    )
+    assert row["source"] == "claude"
+    writers.record_change_note_completed(db, note_id, "", 0.0, source="release-log")
+    notes = writers.get_undelivered_change_notes(db, 1, 97, "helpdesk.ticket")
+    # get_undelivered_change_notes does not check readiness; "" is not None, so the row is listed
+    assert [(n["pr_number"], n["source"], n["note_html"]) for n in notes] == [(7, "release-log", "")]
+
+
+def test_get_repository_by_full_name_is_case_insensitive(db):
+    with db.session() as s:
+        s.add(Repository(id=5, github_repository_id=1005, owner="Acme", name="Widgets",
+                         full_name="Acme/Widgets", installation_id=7, enabled=True,
+                         default_branch="dev"))
+    row = writers.get_repository_by_full_name(db, "acme/widgets")
+    assert row == {"id": 5, "owner": "Acme", "name": "Widgets", "full_name": "Acme/Widgets",
+                   "default_branch": "dev", "installation_id": 7, "enabled": True}
+    assert writers.get_repository_by_full_name(db, "acme/other") is None

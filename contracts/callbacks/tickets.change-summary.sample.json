@@ -2,7 +2,7 @@
   "model_name": "helpdesk.ticket",
   "notes": [
     {
-      "note_html": "<p>Die \u00c4nderung wurde gemerged.</p>",
+      "note_html": "",
       "pr": {
         "number": 7,
         "repo": "acme/widgets",
@@ -11,5 +11,15 @@
       }
     }
   ],
+  "release_log": {
+    "html": "<p><strong>Gebaut</strong></p><p>Neue Anmeldung mit Rollenpr\u00fcfung.</p><p><strong>To-do</strong></p><ul><li>Rollen pr\u00fcfen <em>(Einstellungen \u2192 Benutzer)</em></li></ul>",
+    "modules": [
+      "cu_auth 19.0.1.0.0"
+    ],
+    "release": "lollipop",
+    "status": "umgesetzt",
+    "ticket": 123,
+    "title": "Login rework"
+  },
   "ticket_id": 123
 }

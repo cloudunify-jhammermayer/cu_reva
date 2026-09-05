@@ -2018,6 +2018,7 @@ def _change_note_dict(row: ChangeNote) -> dict:
         "model_name": row.model_name,
         "status": row.status,
         "note_html": row.note_html,
+        "source": row.source,
         "pr_title": row.pr_title,
         "pr_url": row.pr_url,
         "error_message": row.error_message,
@@ -2031,7 +2032,7 @@ def _change_note_dict(row: ChangeNote) -> dict:
 
 
 def record_change_note_completed(
-    db: Database, note_id: int, note_html: str, cost: float
+    db: Database, note_id: int, note_html: str, cost: float, source: str = "claude"
 ) -> None:
     with db.session() as s:
         row = s.get(ChangeNote, note_id)
@@ -2039,6 +2040,7 @@ def record_change_note_completed(
             return
         row.status = "completed"
         row.note_html = note_html
+        row.source = source
         row.error_message = None
         row.estimated_cost_usd = cost
         row.completed_at = datetime.now(timezone.utc)
@@ -2100,6 +2102,7 @@ def get_undelivered_change_notes(
                 "pr_title": row.pr_title,
                 "pr_url": row.pr_url,
                 "note_html": row.note_html,
+                "source": row.source,
             }
             for row in rows
         ]
@@ -2116,6 +2119,25 @@ def mark_change_notes_delivered(db: Database, note_ids: list[int]) -> None:
             .where(ChangeNote.id.in_(note_ids))
             .values(delivered_at=datetime.now(timezone.utc))
         )
+
+
+def get_repository_by_full_name(db: Database, full_name: str) -> dict | None:
+    """The registered repo for an `owner/name` (case-insensitive), or None."""
+    with db.session() as s:
+        row = s.execute(
+            select(Repository).where(func.lower(Repository.full_name) == full_name.lower())
+        ).scalars().first()
+        if row is None:
+            return None
+        return {
+            "id": row.id,
+            "owner": row.owner,
+            "name": row.name,
+            "full_name": row.full_name,
+            "default_branch": row.default_branch or "main",
+            "installation_id": row.installation_id,
+            "enabled": row.enabled,
+        }
 
 
 def upsert_value_report(

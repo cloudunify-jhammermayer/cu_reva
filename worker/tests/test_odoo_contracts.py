@@ -166,7 +166,8 @@ def test_change_summary_wire_shape():
             "note_html": "<p>x</p>",
         }],
     )
-    assert payload.model_dump() == {
+    # exclude_none drops release_log when the repo has no entry for the ticket.
+    assert payload.model_dump(exclude_none=True) == {
         "ticket_id": 123,
         "model_name": "helpdesk.ticket",
         "notes": [{

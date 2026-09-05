@@ -10,6 +10,7 @@ from reva.diff_utils import extract_file_paths
 from reva.errors import TransientError
 from reva.ticket_links import parse_closing_refs, resolve_pr_tickets
 from worker.change_note_delivery import maybe_deliver_change_notes
+from worker.release_log_lookup import ReleaseLogLookupError, release_log_block
 from worker.runner import budget_exceeded, build_odoo_client, get_context
 
 logger = structlog.get_logger()
@@ -39,7 +40,20 @@ def run_change_note(job_params: dict) -> dict:
             pr_title=pr["title"], pr_url=pr["url"],
         )
         odoo = build_odoo_client(ctx, ref.odoo_instance_id)
-        if not (row["status"] == "completed" and row["note_html"]):
+        if not (row["status"] == "completed" and row["note_html"] is not None):
+            # The ticket's own release-log entry beats a drafted note: zero cost,
+            # written by the developer, re-read at delivery time.
+            try:
+                block = release_log_block(ctx, repo, ref.ticket_id, logger)  # TransientError -> RQ retry
+            except ReleaseLogLookupError:
+                block = None  # Claude path, as for an uncovered ticket (ops event recorded by the lookup)
+            if block is not None:
+                writers.record_change_note_completed(ctx.db, note_id, "", 0.0, source="release-log")
+                if maybe_deliver_change_notes(
+                    ctx, odoo, ref.odoo_instance_id, ref.ticket_id, ref.model_name, logger
+                ):
+                    delivered += 1
+                continue
             spent = budget_exceeded(ctx)
             if spent is not None:
                 writers.record_change_note_failed(

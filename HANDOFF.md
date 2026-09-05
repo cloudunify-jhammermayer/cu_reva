@@ -1,5 +1,38 @@
 # REVA — Work Handoff
 
+## Addendum 2026-09-04 (evening) — release-log entries replace drafted change notes
+
+**Status: implemented, not deployed** (spec
+`docs/superpowers/specs/archive/2026-09-04-release-log-change-notes-design.md`, plan
+`docs/superpowers/plans/archive/2026-09-04-release-log-change-notes.md`). When a
+merged PR's ticket has an entry in the repo's release log
+(`docs/releases/<name>.md`), REVA no longer has Claude draft a change note for
+it: `worker/worker/change_note_runner.py` now checks the new
+`worker/worker/release_log_lookup.py::release_log_block` (built on the
+parser/renderer added to `reva/release_log.py`) before falling back to the Claude draft;
+a hit records a zero-cost `change_notes` row with `source = "release-log"`
+(migration `049_change_notes_source.sql`, `ChangeNote.source`, default
+`"claude"`). At ticket-ready, `worker/worker/change_note_delivery.py` re-reads
+the entry — so a later edit to the file is what ships — and sends it once as a
+new `release_log` block alongside the per-PR notes on `tickets.change-summary`
+(contracts `d466f8d9…`, synced to `../Cloudunify`). Tickets without a matching
+entry keep today's Claude-drafted notes. The Odoo side is implemented in
+`../Cloudunify` (module `19.0.55.3.0`, staged there) and MUST be installed
+before the REVA worker ships: an older module ignores the `release_log` block
+and, because covered notes carry `note_html: ""`, posts a summary with PR
+links and no text, stamped delivered and never re-sent.
+
+**Deploy:** migration 049 at boot; worker + api + scheduler images rebuilt
+(shared `reva/` changed).
+
+**Owed:** a first live ticket-ready summary against a repo whose release log
+actually covers the merging ticket, to see the `release_log` block render in
+Odoo. The lookup ignores the GitHub tree API's `truncated` flag — same as the
+docs-site lookup, unlikely to matter for these repos' tree sizes. A permanent
+GitHub error during the lookup is the ops event `release_log_lookup_failed`
+(error) — at merge the ticket takes the Claude path, at delivery the summary
+is held for the next ready/note event.
+
 ## Addendum 2026-09-04 — release-log lookup for Odoo
 
 **Status: implemented, not deployed** (spec
