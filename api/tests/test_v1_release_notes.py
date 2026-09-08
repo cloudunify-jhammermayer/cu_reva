@@ -19,9 +19,6 @@ from reva.db.models import ReleaseNote
 PAYLOAD = {
     "release_id": 3275,
     "name": "Lollipop",
-    "date": "2026-09-30 00:00:00",
-    "model_name": "project.task",
-    "task_ids": [7595, 7620],
 }
 
 
@@ -124,15 +121,21 @@ def test_empty_github_url_is_none(client_db_queue):
     assert params["github_url"] is None
 
 
-def test_task_ids_optional_and_date_null(client_db_queue):
+def test_an_older_odoo_payload_with_the_retired_keys_still_validates(client_db_queue):
+    # Deploy order is free in both directions: ReleaseNoteRequest declares no
+    # extra="forbid", so an Odoo that still sends date/model_name/task_ids is
+    # accepted and the three values are ignored rather than 422-ing.
     client, _, queue, headers, _ = client_db_queue
-    payload = {"release_id": 3277, "name": "Marsh Mallow", "date": None,
-               "model_name": "project.task", "task_ids": []}
+    payload = {"release_id": 3277, "name": "Marsh Mallow", "date": "2026-09-30 00:00:00",
+               "model_name": "project.task", "task_ids": [7595, 7620]}
 
     r = client.post("/api/v1/release-note", json=payload, headers=headers)
 
     assert r.status_code == 202
-    assert queue.enqueued[0][1]["slug"] == "marsh-mallow"
+    params = queue.enqueued[0][1]
+    assert params["slug"] == "marsh-mallow"
+    assert "task_ids" not in params
+    assert "date" not in params
 
 
 def test_blank_name_is_422(client_db_queue):

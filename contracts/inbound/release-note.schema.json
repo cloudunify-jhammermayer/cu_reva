@@ -1,19 +1,6 @@
 {
-  "description": "What `cu_release._reva_release_note_payload` sends. Only `release_id`\nand `name` drive the lookup; `date`, `model_name` and `task_ids` are\naccepted so the shipped Odoo payload validates, and ignored.",
+  "description": "What `cu_release._reva_release_note_payload` sends: the release identity\nand the repository the page lives in. No `model_config` on purpose \u2014 pydantic\nignores unknown keys by default, so an Odoo still sending the retired\n`date` / `model_name` / `task_ids` keeps validating.",
   "properties": {
-    "date": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "\"YYYY-MM-DD HH:MM:SS\" (UTC) or null; not used",
-      "title": "Date"
-    },
     "github_url": {
       "anyOf": [
         {
@@ -27,11 +14,6 @@
       "description": "The release's project repository (https://github.com/{owner}/{repo}); when present REVA reads docs/releases/<slug>.html there instead of scanning the repos mapped to the instance.",
       "title": "Github Url"
     },
-    "model_name": {
-      "default": "project.task",
-      "title": "Model Name",
-      "type": "string"
-    },
     "name": {
       "description": "Release name; its slug is the docs/releases/<slug>.html stem",
       "title": "Name",
@@ -40,13 +22,6 @@
     "release_id": {
       "title": "Release Id",
       "type": "integer"
-    },
-    "task_ids": {
-      "items": {
-        "type": "integer"
-      },
-      "title": "Task Ids",
-      "type": "array"
     }
   },
   "required": [

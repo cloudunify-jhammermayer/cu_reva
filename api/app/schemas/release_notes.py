@@ -10,17 +10,13 @@ from reva.release_log import is_safe_slug, release_slug
 
 
 class ReleaseNoteRequest(BaseModel):
-    """What `cu_release._reva_release_note_payload` sends. Only `release_id`
-    and `name` drive the lookup; `date`, `model_name` and `task_ids` are
-    accepted so the shipped Odoo payload validates, and ignored."""
+    """What `cu_release._reva_release_note_payload` sends: the release identity
+    and the repository the page lives in. No `model_config` on purpose — pydantic
+    ignores unknown keys by default, so an Odoo still sending the retired
+    `date` / `model_name` / `task_ids` keeps validating."""
 
     release_id: int
     name: str = Field(description="Release name; its slug is the docs/releases/<slug>.html stem")
-    date: str | None = Field(
-        default=None, description='"YYYY-MM-DD HH:MM:SS" (UTC) or null; not used'
-    )
-    model_name: str = "project.task"
-    task_ids: list[int] = Field(default_factory=list)
     github_url: str | None = Field(
         default=None,
         description="The release's project repository (https://github.com/{owner}/{repo}); "

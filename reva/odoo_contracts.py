@@ -103,13 +103,6 @@ class PrRefPayload(BaseModel):
     repo: str
 
 
-class ChangeNotePayload(BaseModel):
-    ticket_id: int
-    model_name: str
-    pr: PrRefPayload
-    note_html: str
-
-
 class IssueWorkStatusItem(BaseModel):
     """Per-issue work-status hint. Odoo upserts by number (existing records
     only); `work_status` is a last-signal-wins display flag, not a state."""
@@ -341,25 +334,6 @@ CONTRACTS: list[Contract] = [
             "ticket_id": 123,
             "model_name": "helpdesk.ticket",
             "issues": [{**_ISSUE_SAMPLE, "state": "closed", "complete_date": "2026-07-09"}],
-        },
-    ),
-    Contract(
-        name="tickets.change-note",
-        direction="reva->odoo",
-        method="POST",
-        path="/tickets/change-note",
-        auth="bearer:instance-outbound-key",
-        model=ChangeNotePayload,
-        sample={
-            "ticket_id": 123,
-            "model_name": "helpdesk.ticket",
-            "pr": {
-                "number": 7,
-                "title": "Login rework",
-                "url": "https://github.com/acme/widgets/pull/7",
-                "repo": "acme/widgets",
-            },
-            "note_html": "<p>Die Änderung wurde gemerged.</p>",
         },
     ),
     Contract(
@@ -626,9 +600,6 @@ CONTRACTS: list[Contract] = [
         sample={
             "release_id": 3275,
             "name": "Lollipop",
-            "date": "2026-09-30 00:00:00",
-            "model_name": "project.task",
-            "task_ids": [7595, 7620],
             "github_url": "https://github.com/acme/widgets",
         },
     ),
