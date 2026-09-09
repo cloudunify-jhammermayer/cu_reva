@@ -233,3 +233,18 @@ def test_projection_keys_match_contract_models():
 
     assert set(_ISSUE_KEYS) == set(IssueRefPayload.model_fields)
     assert set(_TIMESHEET_RESULT_KEYS) == set(TimesheetResultPayload.model_fields)
+
+
+def test_the_retired_change_note_contract_is_gone():
+    # The per-PR /tickets/change-note leg was replaced by the batched
+    # /tickets/change-summary in Odoo 19.0.19.0.0 (2026-07-13) and the client
+    # had no callers left; the Odoo receiver went with module 19.0.56.0.0.
+    assert "tickets.change-note" not in {contract.name for contract in CONTRACTS}
+
+
+def test_the_release_note_contract_carries_only_the_lookup_keys():
+    # REVA looks the page up from github_url + name; date/model_name/task_ids
+    # were drafting-era fields it never read, and task_ids put the release's
+    # whole task-id list into every request-log row on the Odoo side.
+    by_name = {contract.name: contract for contract in CONTRACTS}
+    assert set(by_name["release-note"].sample) == {"release_id", "name", "github_url"}
