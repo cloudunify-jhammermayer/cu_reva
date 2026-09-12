@@ -56,6 +56,7 @@ def list_ticket_analyses(
                     "estimate_anchor_confidence": anchor_confidence,
                     "odoo_instance_id": r.odoo_instance_id,
                     "repo_docs_sections_used": r.repo_docs_sections_used,
+                    "image_count": r.image_count,
                 }
             )
     return items, total

@@ -646,6 +646,11 @@ func (t Tickets) view(w, h int) string {
 			if a.RepoDocsSectionsUsed != nil && *a.RepoDocsSectionsUsed > 0 {
 				meta = append(meta, fmt.Sprintf("repo docs:%d", *a.RepoDocsSectionsUsed))
 			}
+			// Only when there were images: the requeue drops them, so this is
+			// what tells an operator a re-run analysed the ticket blind.
+			if a.ImageCount > 0 {
+				meta = append(meta, fmt.Sprintf("images:%d", a.ImageCount))
+			}
 			extras = append(extras, styleSubtitle.Render("  "+strings.Join(meta, "  ")))
 			if a.ErrorMessage != nil && *a.ErrorMessage != "" {
 				extras = append(extras, styleStatusFailed.Render(truncate("  analysis error: "+*a.ErrorMessage, w-2)))

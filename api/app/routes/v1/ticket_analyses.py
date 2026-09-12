@@ -20,6 +20,7 @@ from app.dependencies import (
     require_master_or_odoo_instance,
     require_odoo_instance,
 )
+from app.image_gate import assert_images_acceptable
 from app.pagination import clamp_limit, clamp_offset
 from app.queries import ticket_analyses as q
 from app.schemas.ticket_analyses import (
@@ -124,6 +125,7 @@ def submit_ticket_analysis(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"attachment: {exc}",
             ) from exc
+    assert_images_acceptable(body.images)
     if body.github_url is not None and parse_github_repo_url(body.github_url) is None:
         # Format-only check, matching create-issues: reject garbage at accept
         # time (Odoo shows the error) but no reachability probe — a well-formed
@@ -153,6 +155,7 @@ def submit_ticket_analysis(
         field_name=body.field_name,
         text=body.text,
         attachment=body.attachment,
+        images=body.images,
         github_url=body.github_url,
     )
     try:
@@ -178,6 +181,7 @@ def submit_ticket_analysis(
         field_name=body.field_name,
         text=body.text,
         attachment=body.attachment,
+        images=body.images,
         github_url=body.github_url,
     )
     job_id = _enqueue(request, db, analysis_id, params)
@@ -275,11 +279,25 @@ def requeue_ticket_analysis(
         text=row["input_text"],
         # Persisted on the row (migration 038) and MUST be replayed: without it
         # a requeued analysis silently loses repo-docs grounding, and once code
-        # grounding is planner-gated it can never escalate. The attachment is
-        # deliberately not restorable — the base64 is never persisted (PII), so
-        # a requeue of an attachment-bearing analysis re-runs on the text alone.
+        # grounding is planner-gated it can never escalate. The attachment and
+        # the images are deliberately not restorable — the base64 is never
+        # persisted (PII/space), so a requeue re-runs on the text alone; the
+        # image_count check below is what makes that loss visible.
         github_url=row["github_url"],
     )
+    # Images are not stored either (they ride in the RQ payload, like the
+    # attachment), so a requeue re-analyses the ticket blind. On a ticket whose
+    # screenshots ARE the requirement that is indistinguishable from a
+    # well-grounded analysis — say so rather than letting it pass silently.
+    # Re-pressing the Odoo button is the fix; it resends the images.
+    if row.get("image_count"):
+        writers.record_ops_event(
+            db, "ticket_analysis", "warning", "requeue_lost_images",
+            {"analysis_id": analysis_id, "image_count": row["image_count"]},
+        )
+        logger.warning("ticket_analysis_requeue_lost_images", analysis_id=analysis_id,
+                       image_count=row["image_count"])
+
     writers.reset_ticket_analysis(db, analysis_id)
     job_id = _enqueue(request, db, analysis_id, params)
 

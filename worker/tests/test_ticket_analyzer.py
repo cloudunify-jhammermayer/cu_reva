@@ -5,6 +5,7 @@ Uses httpx.MockTransport to inject canned Claude responses — no live API calls
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -15,11 +16,13 @@ import pytest
 from reva.claude_client import ClaudeClient
 from reva.errors import MalformedModelOutput, PermanentError
 from reva.golden_estimates import GOLDEN_FILENAME
+from reva.image_attachment import IMAGES_PREAMBLE
 from reva.ticket_analyzer import TicketAnalyzer
 from reva.ticket_formatter import format_ticket_html
 from reva.ticket_tool import TICKET_TOOL_NAME
 from reva.types import (
     Attachment,
+    ImageAttachment,
     MissingInfoItem,
     SourcedItem,
     StoryEstimate,
@@ -528,3 +531,75 @@ def test_odoo_html_never_carries_the_anchor():
     assert "anchor" not in html.lower()
     assert "new_model" not in html
     assert "3–5" in html  # the estimate itself still renders
+
+
+# ---------------------------------------------------------------------------
+# images
+# ---------------------------------------------------------------------------
+
+_PNG_B64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32).decode()
+_JPEG_B64 = base64.b64encode(b"\xff\xd8\xff\xe0" + b"\x00" * 32).decode()
+
+
+def _image(label="Image 1", filename="shot.png", data=_PNG_B64) -> ImageAttachment:
+    return ImageAttachment(filename=filename, label=label, content_base64=data)
+
+
+def _capture():
+    """Return (handler, captured) where captured['body'] holds the decoded
+    request JSON after the call."""
+    captured: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(req.content)
+        return httpx.Response(200, content=_fixture_response())
+
+    return handler, captured
+
+
+def test_no_images_keeps_the_plain_string_user_turn():
+    """Every existing sender omits `images`; their request body must not change
+    shape at all (a block list would also move the prompt-cache boundary)."""
+    handler, captured = _capture()
+    _make_analyzer(handler).analyze(_params())
+    assert isinstance(captured["body"]["messages"][0]["content"], str)
+
+
+def test_images_are_sent_as_blocks_behind_the_untrusted_data_preamble():
+    handler, captured = _capture()
+    params = _params()
+    params.images = [_image("Image 1"), _image("Image 2", "b.jpg", _JPEG_B64)]
+    _make_analyzer(handler).analyze(params)
+    content = captured["body"]["messages"][0]["content"]
+
+    # SECU: the nonce fence wraps text and cannot wrap pixels, so the framing
+    # block must come FIRST — before any image the model could read.
+    assert content[0] == {"type": "text", "text": IMAGES_PREAMBLE}
+    assert content[1] == {"type": "text", "text": "Image 1"}
+    assert content[2]["type"] == "image"
+    assert content[2]["source"]["media_type"] == "image/png"
+    assert content[3] == {"type": "text", "text": "Image 2"}
+    assert content[4]["source"]["media_type"] == "image/jpeg"
+    # ...and the ticket text is last.
+    assert "Knopf" in content[-1]["text"]
+
+
+def test_prompt_explains_the_image_markers_only_when_images_are_present():
+    handler, captured = _capture()
+    params = _params()
+    params.images = [_image()]
+    _make_analyzer(handler).analyze(params)
+    assert "[Image N]" in captured["body"]["messages"][0]["content"][-1]["text"]
+
+    handler2, captured2 = _capture()
+    _make_analyzer(handler2).analyze(_params())
+    assert "[Image N]" not in captured2["body"]["messages"][0]["content"]
+
+
+def test_corrupt_image_bytes_are_permanent_not_transient():
+    """The api route already gated these, so a failure here is corruption in
+    transit — retrying cannot fix it."""
+    params = _params()
+    params.images = [_image(data=base64.b64encode(b"not a png").decode())]
+    with pytest.raises(PermanentError, match="analysis 1"):
+        _make_analyzer(_ok_handler).analyze(params)

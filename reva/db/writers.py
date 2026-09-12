@@ -1253,6 +1253,7 @@ def record_ticket_analysis_created(db: Database, params: TicketJobParams) -> int
             field_name=params.field_name,
             github_url=params.github_url,
             input_text=params.text,
+            image_count=len(params.images),
             status="pending",
         )
         s.add(row)
@@ -1495,6 +1496,7 @@ def get_ticket_analysis(db: Database, analysis_id: int) -> dict | None:
             "created_at": row.created_at,
             "completed_at": row.completed_at,
             "repo_docs_sections_used": row.repo_docs_sections_used,
+            "image_count": row.image_count,
         }
 
 

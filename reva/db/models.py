@@ -459,6 +459,9 @@ class TicketAnalysis(Base):
     # (migration 039). NULL = retrieval never attempted (no github_url / resume
     # path / legacy row); 0 = attempted, nothing injected; N = sections injected.
     repo_docs_sections_used: Mapped[int | None] = mapped_column(Integer)
+    # Images submitted with the ticket text (migration 048). The bytes are not
+    # stored, so this is what tells an operator a requeued analysis ran blind.
+    image_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     __table_args__ = (
         # Partial UNIQUE index (migration 006): job_id is unique only when set.

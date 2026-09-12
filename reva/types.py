@@ -606,6 +606,11 @@ class TicketJobParams(BaseModel):
     field_name: str
     text: str
     attachment: Attachment | None = None  # optional .docx/.pdf/.txt/.md, folded into the prompt
+    # Screenshots embedded in the ticket description, in document order; their
+    # [Image N] markers stay in `text` where they were. Same posture as the
+    # support path: gated at accept time, never persisted (a requeue rebuilds
+    # from the DB row and so runs image-blind — see ticket_analyses.image_count).
+    images: list[ImageAttachment] = Field(default_factory=list)
     # Optional repo URL from the record's Odoo project, stamped at create time.
     # Used for dashboard repo grouping AND by the worker to ground the analysis
     # in the repo's own custom-addon docs (reva/repo_docs.py, spec 2026-07-14);

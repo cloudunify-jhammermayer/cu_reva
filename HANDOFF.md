@@ -97,6 +97,59 @@ never served as a document from our origin.
 (`docker compose -f docker-compose.prod.yml build nginx && … up -d nginx`),
 plus the usual api redeploy for the `/repo-docs` change. Frontend behavior is
 NOT yet verified in a browser — the plan's Task 3 Step 4 check is owed.
+## Addendum 2026-08-26 — screenshots reach ticket analysis too, and the Odoo sender exists
+
+**Both halves of the images feature are now implemented.** Spec:
+`docs/superpowers/specs/2026-08-10-support-answer-images-design.md`. Plan (now
+marked done): `docs/superpowers/plans/2026-08-12-support-answer-images-odoo.md`.
+
+**REVA side (committed here).** `/api/v1/ticket-analysis` accepts `images`,
+closing the half of the spec's title that never shipped. The accept-time gate
+moved to `api/app/image_gate.py` and the image-block builder + preamble to
+`reva/image_attachment.py`, both now shared by the support and analysis paths;
+CLI-escalation staging is shared through `worker/worker/image_staging.py`.
+Migration 048 adds `ticket_analyses.image_count`, and the analysis requeue emits
+`requeue_lost_images` exactly as the support one does. Prompts **v2.21**. TUI
+shows `images:N` in the Tickets tab detail.
+
+**Odoo side (in `../Cloudunify`, on `Prod`, UNCOMMITTED — Joseph commits).**
+`custom_addons/cu_reva_ticket_analysis/models/reva_images.py` walks the
+description's `<img>` tags, resolves each to bytes, drops what is not worth
+sending, downscales above 2576 px, and rewrites kept images to `[Image N]` text
+nodes (and dropped ones to nothing) **before** `html2plaintext` — which is what
+keeps the markers and the array in lockstep. Both `_reva_submit_support` and
+`_reva_submit_analysis` go through one helper, `_reva_description_for_reva`.
+Addon bumped to 19.0.47.0.0.
+
+**One security decision worth knowing.** A description is customer-authored
+mail, so `_reva_resolve_image_src` will not resolve an arbitrary attachment id:
+an attachment must be this record's own (`res_model`/`res_id`) **or** carry the
+`access_token` Odoo minted when it rewrote the `cid:` reference. Without that,
+a crafted body could pull any attachment in the database into what Odoo sends
+REVA. External URLs are never fetched.
+
+**Nothing stores the image bytes** (Joseph's requirement — space). No new Odoo
+attachments; `reva.request.log` already strips anything under `content_base64`
+(now pinned by a test, since it is 8 MB per send into a permanent table); REVA
+persists only `image_count`. The bytes exist in the RQ payload and the Anthropic
+request, then they are gone.
+
+**Coverage.** REVA: worker 1607, api 365, scheduler 37, ruff clean, TUI
+`go build/vet/test` green. Odoo: **811 passed / 0 failed** against a live Odoo 19
+registry (a local `cu_reva_images` DB; the 4 `TestSaleLineBanner` failures the
+2026-08-24 commit documented were the missing `sale_project`, installed here and
+now passing). Contracts regenerated and synced to `Cloudunify/reva_contracts/`,
+pin bumped to `a70c331492c20997602f38a3cbdf9a961a95b574a2e533695ff9db14c5023b48`
+— which also lands the `reassign-issue` contract the 2026-08-20 addendum still
+owed.
+
+**Owed:** REVA is not deployed with this change, the Odoo side is not committed,
+and the end-to-end check is still outstanding — re-send ticket 6891 and confirm
+the answer names `[200028] IBC Container 1000l mit Glykol pur` instead of asking
+which product is affected. Every test on both sides mocks the HTTP call, so
+green proves the payload shape, not that the model reads a screenshot.
+Migration 048 is a single idempotent `ADD COLUMN IF NOT EXISTS`; it has not been
+run against real Postgres yet.
 
 ## Addendum 2026-08-20 — the Odoo side's three requests
 

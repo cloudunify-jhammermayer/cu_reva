@@ -562,6 +562,21 @@ func TestAnalysisExtrasShowRepoDocsCount(t *testing.T) {
 	}
 }
 
+func TestAnalysisExtrasShowImageCount(t *testing.T) {
+	// Mock ticket 456 was submitted with 2 screenshots. The bytes are never
+	// stored, so a requeue re-runs blind — the count is the only signal an
+	// operator has that it did. A zero count (ticket 777) shows nothing.
+	tab := ticketsWithData()
+	out := onRow(tab, 456).view(120, 30)
+	if !strings.Contains(out, "images:2") {
+		t.Fatalf("view missing the image count, got:\n%s", out)
+	}
+	out = onRow(ticketsWithData(), 777).view(120, 30)
+	if strings.Contains(out, "images:") {
+		t.Fatalf("image line shown for an analysis with no images:\n%s", out)
+	}
+}
+
 func TestTicketsGroupedByRepo(t *testing.T) {
 	tab := ticketsWithData()
 	out := tab.view(120, 30)

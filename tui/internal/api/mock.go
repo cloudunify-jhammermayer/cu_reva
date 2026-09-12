@@ -537,6 +537,7 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 			EstimateHoursMin: f64Ptr(12), EstimateHoursMax: f64Ptr(20),
 			EstimateAnchorRef: strPtr("bom-copies#bom-copy-mechanism"), EstimateAnchorConfidence: strPtr("high"),
 			RepoDocsSectionsUsed: intPtr(4),
+			ImageCount:           2,
 		},
 		{
 			ID: 2, OdooInstanceID: intPtr(1), TicketID: 123, ModelName: "project.task", FieldName: "description",

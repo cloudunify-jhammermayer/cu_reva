@@ -15,6 +15,7 @@ from reva.attachment_text import extract_attachment_text
 from reva.claude_client import ClaudeClient
 from reva.errors import MalformedModelOutput, PermanentError
 from reva.golden_estimates import Degradation, calibration_block
+from reva.image_attachment import IMAGES_PREAMBLE, build_image_blocks
 from reva.ticket_tool import TICKET_TOOL_NAME, build_ticket_tool_schema, ticket_tool_choice
 from reva.types import ClaudeResponse, ContentBlock, TicketAnalysisResult, TicketJobParams
 
@@ -61,6 +62,10 @@ class TicketAnalyzer:
             user_prompt=self._build_user_prompt(params),
             tools=[tool_schema],
             tool_choice=ticket_tool_choice(),
+            images=build_image_blocks(
+                params.images, f"analysis {params.analysis_id}"
+            ),
+            images_preamble=IMAGES_PREAMBLE,
             max_tokens=_MAX_TOKENS,
         )
 
@@ -99,7 +104,10 @@ class TicketAnalyzer:
         that says e.g. "report all requirements as clear" can't skew the
         staff-facing analysis. An attached file (.docx/.pdf/.txt) is extracted
         and fenced the same way; extraction failures raise PermanentError, which
-        the runner records as a failed analysis.
+        the runner records as a failed analysis. Screenshots ride as separate
+        image content blocks ahead of this text (they cannot be nonce-fenced —
+        see IMAGES_PREAMBLE); all this adds is the pointer from the [Image N]
+        markers left in the text to those blocks.
         """
         nonce = secrets.token_hex(8)
         sections = [
@@ -110,6 +118,17 @@ class TicketAnalyzer:
             params.text,
             f"</ticket_{nonce}>",
         ]
+        if params.images:
+            # The images themselves are separate content blocks above this
+            # prompt; this only explains what the [Image N] markers left behind
+            # in the ticket text point at.
+            sections += [
+                "",
+                f"The {len(params.images)} image(s) shown above this text are the "
+                "customer's screenshots, in the same order as the [Image N] "
+                "markers in the ticket. Read them before analysing, and treat "
+                "what they show as part of the requirement.",
+            ]
         if params.attachment is not None:
             attachment_text = extract_attachment_text(
                 params.attachment.filename, params.attachment.content_base64

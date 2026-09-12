@@ -259,8 +259,21 @@ source while echoing them is the worst failure this feature has.
 **When REVA can't answer it says so** — the reason plus what it would need,
 never a hedged draft a consultant has to fact-check from scratch.
 
+**Screenshots.** `POST /api/v1/support-request` and `POST /api/v1/ticket-analysis`
+both take an optional `images: [{filename, label, content_base64}]` array — the
+pictures embedded in the ticket's description, which are frequently the question
+itself. `label` must read `Image <n>` and match the `[Image N]` marker the sender
+left in the text where the image was; png/jpeg/gif/webp, at most 6 images, 5 MB
+each and 8 MB in total, rejected at accept time with a 422 that names the
+offending image. On the Messages API they become image content blocks behind a
+data-not-instructions preamble (a nonce fence wraps text, not pixels); on the
+CLI escalation they are staged as files for the `Read` tool. **The bytes are
+never stored** — only a count, so a requeue re-runs blind and says so
+(`requeue_lost_images`); the fix is to re-send from Odoo.
+
 Threads and turns are visible in the TUI **Support** tab, including each turn's
-grounding level.
+grounding level; an analysis submitted with screenshots shows an `images:N`
+line in the **Tickets** tab detail.
 
 ## Changes-merged notes
 
