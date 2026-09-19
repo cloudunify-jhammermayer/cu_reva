@@ -468,6 +468,20 @@ def test_fallback_unknown_h_prefixed_ticket_is_helpdesk(db, odoo):
     assert odoo.calls[0]["model_name"] == "helpdesk.ticket"
 
 
+def test_fallback_p_prefixed_ticket_never_lands_on_helpdesk(db, odoo):
+    # Helpdesk ticket 97 is known for this repo; `P97` is project.task 97 — a
+    # different record in a separate id sequence.
+    _seed_board_issue(db, ticket_id=97)
+    with db.session() as s:
+        s.add(OdooInstance(name="prod", key_hash="h1", key_prefix="rk_1",
+                           is_default=True))
+    _ctx(db, pr_body="plain refactor", head_ref="feat/P97")
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "ticket_signal_only"}
+    assert odoo.calls[0]["ticket_id"] == 97
+    assert odoo.calls[0]["model_name"] == "project.task"
+
+
 def test_fallback_unknown_ticket_no_default_records_ops_event(db, odoo):
     _ctx(db, pr_body="plain refactor", head_ref="cr/2010")
     out = run_board_status_update(_params("pr_active"))

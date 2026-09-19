@@ -78,20 +78,22 @@ def resolve_pr_tickets(db: Database, repo_full_name: str, issue_numbers: list[in
 
 
 # An optional leading `h` marks a helpdesk ticket (Odoo's `H1213` display-ref
-# convention); a bare number is a project task. The type prefix (bug/feat/cr/…)
-# is a work-item type, not an Odoo model — never mapped.
+# convention); a bare number or a leading `p` (`P7624`) is a project task. An
+# explicit `p` is additionally STRICT: it may only ever resolve to a
+# project.task (see resolve_ticket_by_id). The type prefix (bug/feat/cr/…) is a
+# work-item type, not an Odoo model — never mapped.
 _TICKET_BRANCH_RE = re.compile(
-    r"^(?:bug|feat|cr|conf|dev|mig|sup|doc)/(h)?(\d{1,9})$", re.IGNORECASE
+    r"^(?:bug|feat|cr|conf|dev|mig|sup|doc)/([hp])?(\d{1,9})$", re.IGNORECASE
 )
 # Trailing \b on the tag form (matching the token form's existing one) is
 # required, not cosmetic: without it, capping the digit group at 9 chars
 # would silently truncate a >9-digit run to a false 9-digit match instead of
 # rejecting it outright.
 _TICKET_TITLE_TAG_RE = re.compile(
-    r"\[(?:bug|feat|cr|conf|dev|mig|sup|doc)\]\s*(h)?(\d{1,9})(?!\.\d)\b", re.IGNORECASE
+    r"\[(?:bug|feat|cr|conf|dev|mig|sup|doc)\]\s*([hp])?(\d{1,9})(?!\.\d)\b", re.IGNORECASE
 )
 _TICKET_TITLE_TOKEN_RE = re.compile(
-    r"\b(?:bug|feat|cr|conf|dev|mig|sup|doc)/(h)?(\d{1,9})(?!\.\d)\b", re.IGNORECASE
+    r"\b(?:bug|feat|cr|conf|dev|mig|sup|doc)/([hp])?(\d{1,9})(?!\.\d)\b", re.IGNORECASE
 )
 
 # Model for an extracted ticket REVA has never seen (spec 2026-07-20, revised):
@@ -111,29 +113,40 @@ def _github_url_matches_repo(github_url: str | None, repo: str) -> bool:
     return path == repo or path.startswith(f"{repo}/")
 
 
-def extract_ticket_id(head_branch: str | None, pr_title: str | None) -> tuple[int, str] | None:
-    """(ticket_id, model_name) from the PR itself, for PRs with no linked REVA
+def extract_ticket_id(
+    head_branch: str | None, pr_title: str | None
+) -> tuple[int, str, bool] | None:
+    """(ticket_id, model_name, strict) from the PR itself, for PRs with no linked REVA
     issue: the head branch (`cr/2010`, the convention ticket_issue_runner writes
     into issue bodies) first, then the PR title (`[CR] 2010 - …` tag form, then a
-    `cr/2010` token). A bare number is a `project.task`; an `H`-prefixed id
-    (`H1213`) is a `helpdesk.ticket`. None = no recognisable reference — normal
+    `cr/2010` token). A bare or `P`-prefixed number (`P7624`) is a `project.task`;
+    an `H`-prefixed id (`H1213`) is a `helpdesk.ticket`. `strict` is True only for an
+    explicit `P`: the author named the model, so the lookup must not land on a
+    helpdesk ticket with the same number. None = no recognisable reference — normal
     lifecycle. Ids are bounded to 9 digits and 0 is rejected (never a real id)."""
     match = _TICKET_BRANCH_RE.match((head_branch or "").strip())
     if match:
         value = int(match.group(2))
         if value != 0:
-            return value, _HELPDESK_MODEL if match.group(1) else _PROJECT_MODEL
+            prefix = (match.group(1) or "").lower()
+            return value, _HELPDESK_MODEL if prefix == "h" else _PROJECT_MODEL, prefix == "p"
     title = pr_title or ""
     match = _TICKET_TITLE_TAG_RE.search(title) or _TICKET_TITLE_TOKEN_RE.search(title)
     if match:
         value = int(match.group(2))
         if value != 0:
-            return value, _HELPDESK_MODEL if match.group(1) else _PROJECT_MODEL
+            prefix = (match.group(1) or "").lower()
+            return value, _HELPDESK_MODEL if prefix == "h" else _PROJECT_MODEL, prefix == "p"
     return None
 
 
 def resolve_ticket_by_id(
-    db: Database, repo_full_name: str, ticket_id: int, default_model: str = _PROJECT_MODEL
+    db: Database,
+    repo_full_name: str,
+    ticket_id: int,
+    default_model: str = _PROJECT_MODEL,
+    *,
+    strict_model: bool = False,
 ) -> tuple[int, str] | None:
     """(odoo_instance_id, model_name) for an extracted ticket id.
 
@@ -144,8 +157,15 @@ def resolve_ticket_by_id(
     id, helpdesk.ticket for an `H`-prefixed one). A DB match wins over the guess
     — its recorded model is ground truth. None only when the ticket is unknown
     to REVA AND no active default instance exists (caller records the ops
-    event)."""
+    event).
+
+    `strict_model` (an explicit `P` reference) turns `default_model` from a guess
+    into a filter: only DB rows of that model may match. Task and helpdesk ids
+    are separate sequences, so without it `P210` would land on helpdesk ticket
+    210 whenever that is the only 210 REVA has seen."""
     repo = repo_full_name.lower()
+    run_model = [TicketIssueRun.model_name == default_model] if strict_model else []
+    analysis_model = [TicketAnalysis.model_name == default_model] if strict_model else []
     with db.session() as s:
         row = s.execute(
             select(TicketIssueRun.odoo_instance_id, TicketIssueRun.model_name)
@@ -153,6 +173,7 @@ def resolve_ticket_by_id(
                 TicketIssueRun.repo_full_name == repo,
                 TicketIssueRun.ticket_id == ticket_id,
                 TicketIssueRun.odoo_instance_id.is_not(None),
+                *run_model,
             )
             .order_by(TicketIssueRun.created_at.desc(), TicketIssueRun.id.desc())
             .limit(1)
@@ -167,6 +188,7 @@ def resolve_ticket_by_id(
                 .where(
                     TicketAnalysis.ticket_id == ticket_id,
                     TicketAnalysis.odoo_instance_id.is_not(None),
+                    *analysis_model,
                 )
                 .order_by(TicketAnalysis.created_at.desc(), TicketAnalysis.id.desc())
             ).all()

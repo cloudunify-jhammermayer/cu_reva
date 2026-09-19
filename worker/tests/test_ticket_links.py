@@ -100,11 +100,11 @@ def _instance(name: str, *, is_default: bool = False, active: bool = True) -> Od
 
 @pytest.mark.parametrize("prefix", ["bug", "feat", "cr", "conf", "dev", "mig", "sup", "doc"])
 def test_extract_from_branch_all_type_prefixes(prefix: str) -> None:
-    assert extract_ticket_id(f"{prefix}/210", None) == (210, "project.task")
+    assert extract_ticket_id(f"{prefix}/210", None) == (210, "project.task", False)
 
 
 def test_extract_from_branch_is_case_insensitive() -> None:
-    assert extract_ticket_id("CR/210", None) == (210, "project.task")
+    assert extract_ticket_id("CR/210", None) == (210, "project.task", False)
 
 
 @pytest.mark.parametrize("branch", ["cr/210/extra", "feature/210", "cr/abc", "cr210", "", None])
@@ -114,24 +114,24 @@ def test_extract_rejects_non_matching_branches(branch: str | None) -> None:
 
 def test_extract_from_title_tag_form() -> None:
     assert extract_ticket_id("feature/misc", "[CR] 210 - fix invoice rounding") == (
-        210, "project.task"
+        210, "project.task", False
     )
 
 
 def test_extract_from_title_tag_form_without_space() -> None:
-    assert extract_ticket_id(None, "[cr]210 follow-up") == (210, "project.task")
+    assert extract_ticket_id(None, "[cr]210 follow-up") == (210, "project.task", False)
 
 
 def test_extract_from_title_slash_token() -> None:
-    assert extract_ticket_id(None, "backport of cr/99 to 17.0") == (99, "project.task")
+    assert extract_ticket_id(None, "backport of cr/99 to 17.0") == (99, "project.task", False)
 
 
 def test_extract_title_tag_beats_slash_token() -> None:
-    assert extract_ticket_id(None, "[BUG] 5 supersedes cr/9") == (5, "project.task")
+    assert extract_ticket_id(None, "[BUG] 5 supersedes cr/9") == (5, "project.task", False)
 
 
 def test_extract_branch_beats_title() -> None:
-    assert extract_ticket_id("dev/7", "[CR] 210 - unrelated") == (7, "project.task")
+    assert extract_ticket_id("dev/7", "[CR] 210 - unrelated") == (7, "project.task", False)
 
 
 def test_extract_nothing_anywhere_is_none() -> None:
@@ -146,7 +146,7 @@ def test_extract_rejects_overlong_ticket_ids() -> None:
 
 def test_extract_rejects_ticket_id_zero() -> None:
     assert extract_ticket_id("cr/0", None) is None
-    assert extract_ticket_id("cr/0", "[CR] 210 - real one") == (210, "project.task")
+    assert extract_ticket_id("cr/0", "[CR] 210 - real one") == (210, "project.task", False)
 
 
 def test_extract_title_number_followed_by_version_dot_is_not_a_ticket() -> None:
@@ -157,23 +157,51 @@ def test_extract_title_number_followed_by_version_dot_is_not_a_ticket() -> None:
 
 
 def test_extract_h_prefixed_branch_is_helpdesk() -> None:
-    assert extract_ticket_id("sup/H1213", None) == (1213, "helpdesk.ticket")
+    assert extract_ticket_id("sup/H1213", None) == (1213, "helpdesk.ticket", False)
 
 
 def test_extract_h_prefix_is_case_insensitive() -> None:
-    assert extract_ticket_id("sup/h1213", None) == (1213, "helpdesk.ticket")
+    assert extract_ticket_id("sup/h1213", None) == (1213, "helpdesk.ticket", False)
 
 
 def test_extract_h_prefixed_title_tag_is_helpdesk() -> None:
-    assert extract_ticket_id(None, "[SUP] H1213 - portal login") == (1213, "helpdesk.ticket")
+    assert extract_ticket_id(None, "[SUP] H1213 - portal login") == (1213, "helpdesk.ticket", False)
 
 
 def test_extract_h_prefixed_title_token_is_helpdesk() -> None:
-    assert extract_ticket_id(None, "backport of sup/H1213 to 17.0") == (1213, "helpdesk.ticket")
+    assert extract_ticket_id(None, "backport of sup/H1213 to 17.0") == (1213, "helpdesk.ticket", False)
 
 
 def test_extract_bare_h_without_digits_is_not_a_ticket() -> None:
     assert extract_ticket_id("feat/hotfix", None) is None
+
+
+# --- P-prefix → project.task, strict (Odoo's `P7624` display ref) ----------------
+# Third element: only an explicit `P` is strict — a bare number and `H` stay hints.
+
+
+def test_extract_p_prefixed_branch_is_project_task() -> None:
+    assert extract_ticket_id("feat/P7624", None) == (7624, "project.task", True)
+
+
+def test_extract_p_prefix_is_case_insensitive() -> None:
+    assert extract_ticket_id("feat/p7624", None) == (7624, "project.task", True)
+
+
+def test_extract_p_prefixed_title_tag_is_project_task() -> None:
+    assert extract_ticket_id("stage", "[CONF] P7624 promote bootstrap to production") == (
+        7624,
+        "project.task",
+        True,
+    )
+
+
+def test_extract_p_prefixed_title_token_is_project_task() -> None:
+    assert extract_ticket_id(None, "backport of conf/P7624 to 17.0") == (7624, "project.task", True)
+
+
+def test_extract_bare_p_without_digits_is_not_a_ticket() -> None:
+    assert extract_ticket_id("feat/portal", None) is None
 
 
 # --- resolve_ticket_by_id (spec 2026-07-20) ------------------------------------
@@ -274,6 +302,46 @@ def test_resolve_by_id_unknown_ticket_honours_helpdesk_hint(db: Database) -> Non
     assert resolve_ticket_by_id(db, "acme/widgets", 9999, "helpdesk.ticket") == (
         default_id, "helpdesk.ticket"
     )
+
+
+# --- strict_model: a `P` reference never lands on a helpdesk ticket ------------
+
+
+def test_resolve_by_id_strict_model_ignores_helpdesk_issue_run(db: Database) -> None:
+    # Task and helpdesk ids are separate sequences: helpdesk ticket 210 is known
+    # for this repo, but `P210` means project.task 210.
+    with db.session() as s:
+        s.add(_instance("prod", is_default=True))
+        s.add(_issue_run(210, "acme/widgets", [{"number": 1}]))
+
+    with db.session() as s:
+        default_id = s.query(OdooInstance).filter_by(name="prod").one().id
+    assert resolve_ticket_by_id(
+        db, "acme/widgets", 210, "project.task", strict_model=True
+    ) == (default_id, "project.task")
+
+
+def test_resolve_by_id_strict_model_ignores_helpdesk_analysis(db: Database) -> None:
+    with db.session() as s:
+        s.add(_analysis(210, odoo_instance_id=3, model_name="project.task",
+                        created=datetime(2026, 6, 1, tzinfo=timezone.utc)))
+        s.add(_analysis(210, odoo_instance_id=4, model_name="helpdesk.ticket",
+                        created=datetime(2026, 7, 1, tzinfo=timezone.utc)))
+
+    assert resolve_ticket_by_id(
+        db, "acme/widgets", 210, "project.task", strict_model=True
+    ) == (3, "project.task")
+
+
+def test_resolve_by_id_strict_model_without_default_is_none(db: Database) -> None:
+    # Only a helpdesk row exists and there is no default instance: a strict
+    # lookup reports unknown rather than borrowing the helpdesk ticket.
+    with db.session() as s:
+        s.add(_issue_run(210, "acme/widgets", [{"number": 1}]))
+
+    assert resolve_ticket_by_id(
+        db, "acme/widgets", 210, "project.task", strict_model=True
+    ) is None
 
 
 def test_resolve_by_id_inactive_default_is_ignored(db: Database) -> None:

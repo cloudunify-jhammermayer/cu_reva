@@ -119,8 +119,10 @@ def run_board_status_update(job_params: dict) -> dict:
             (pr.get("head") or {}).get("ref"), pr.get("title")
         )
         if extracted is not None:
-            ticket_id, model_hint = extracted
-            resolved = resolve_ticket_by_id(ctx.db, repo, ticket_id, model_hint)
+            ticket_id, model_hint, strict_model = extracted
+            resolved = resolve_ticket_by_id(
+                ctx.db, repo, ticket_id, model_hint, strict_model=strict_model
+            )
             if resolved is None:
                 # Unknown ticket and no active default instance: the fallback
                 # is configured off at the data level — visible, not silent.
