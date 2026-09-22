@@ -363,12 +363,19 @@ def record_claude_spend(db: Database, kind: str, cost_usd: float | None) -> None
         _insert_spend(s, kind, cost_usd)
 
 
-def sum_estimated_cost_since(db: Database, since: datetime, *, serialize: bool = False) -> float:
-    """Total estimated USD cost of ALL Claude calls (reviews, audits, replies)
-    recorded in the claude_spend ledger at/after `since`.
+def sum_estimated_cost_since(
+    db: Database,
+    since: datetime,
+    *,
+    serialize: bool = False,
+    exclude_kinds: tuple[str, ...] = (),
+) -> float:
+    """Total estimated USD cost of Claude calls recorded in the claude_spend
+    ledger at/after `since`, minus the `exclude_kinds` (ledger `kind` values).
 
     Used by the worker's rolling spend cap — the ledger is the single accounting
-    source so the cap sees every kind of Claude spend, not just reviews.
+    source. The global cap excludes review spend ("review", "delta_verify"),
+    which is capped per PR author instead (sum_author_review_cost_since).
 
     With serialize=True the read is taken under a transaction-level advisory
     lock on Postgres, so concurrent workers evaluate the cap one at a time
@@ -384,9 +391,50 @@ def sum_estimated_cost_since(db: Database, since: datetime, *, serialize: bool =
                 text("SELECT pg_advisory_xact_lock(:k)"),
                 {"k": _BUDGET_ADVISORY_LOCK_KEY},
             )
+        q = select(_func.coalesce(_func.sum(ClaudeSpend.cost_usd), 0.0)).where(
+            ClaudeSpend.created_at >= since
+        )
+        if exclude_kinds:
+            q = q.where(ClaudeSpend.kind.not_in(exclude_kinds))
+        total = s.execute(q).scalar_one()
+    return float(total or 0.0)
+
+
+def sum_author_review_cost_since(
+    db: Database,
+    pull_request_id: int,
+    since: datetime,
+    *,
+    serialize: bool = False,
+) -> float | None:
+    """Rolling review spend (USD) of the author of `pull_request_id`, across all
+    repos: paid review_runs (estimated_cost_usd > 0) with completed_at >= since,
+    joined through pull_requests.author_login, regardless of status — review_runs
+    is upserted per (repo, pr, sha, mode), so a declined/failed row that reused a
+    paid run's row keeps that run's cost and must still count. None when the PR
+    has no author login (the per-author cap does not apply). serialize=True takes
+    the same advisory lock as sum_estimated_cost_since.
+    """
+    from sqlalchemy import func as _func
+
+    with db.session() as s:
+        if serialize and s.get_bind().dialect.name == "postgresql":
+            s.execute(
+                text("SELECT pg_advisory_xact_lock(:k)"),
+                {"k": _BUDGET_ADVISORY_LOCK_KEY},
+            )
+        author = s.execute(
+            select(PullRequest.author_login).where(PullRequest.id == pull_request_id)
+        ).scalar_one_or_none()
+        if author is None:
+            return None
         total = s.execute(
-            select(_func.coalesce(_func.sum(ClaudeSpend.cost_usd), 0.0)).where(
-                ClaudeSpend.created_at >= since
+            select(_func.coalesce(_func.sum(ReviewRun.estimated_cost_usd), 0.0))
+            .join(PullRequest, PullRequest.id == ReviewRun.pull_request_id)
+            .where(
+                PullRequest.author_login == author,
+                ReviewRun.estimated_cost_usd > 0,
+                ReviewRun.completed_at >= since,
             )
         ).scalar_one()
     return float(total or 0.0)

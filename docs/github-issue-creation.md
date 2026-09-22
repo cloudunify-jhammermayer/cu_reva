@@ -187,7 +187,7 @@ No new environment variables.
 
 - GitHub's search API is eventually consistent. The marker-search path is only a fallback (the DB-first adoption handles the realistic re-click cases), but a fresh run against a wiped DB shortly after issues were created could still miss them.
 - Bulk-creating up to 10 issues can trip GitHub's secondary rate limit (a 403 → `PermanentError` mid-loop). Progress is persisted per-issue, so the re-click/requeue path completes the set.
-- The planner does not gate on the daily budget cap before calling Claude (mirrors ticket analysis); it does record its spend in the ledger, so the cap counts it for the gated paths (reviews/audits/replies).
+- The planner does not gate on the daily budget cap before calling Claude (mirrors ticket analysis); it does record its spend in the ledger, so the cap counts it for the gated non-review paths (audits/replies); PR reviews are capped per author instead.
 - RQ retries fire on permanent errors too (rq 2.9 retries any exception); the reruns are cheap (resume/short-circuit) and duplicate `failed` callbacks land as 409s that the best-effort sender swallows — bounded noise, no incorrectness.
 
 ## Tests

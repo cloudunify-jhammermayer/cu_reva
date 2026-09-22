@@ -230,7 +230,7 @@ class RepoLookup(Protocol):
     def get_owner_name(self, repository_id: int) -> tuple[str, str]: ...
 
     def get_pr_basic(self, pull_request_id: int) -> dict:
-        """Returns {pr_number, title, body, base_branch, head_branch}."""
+        """Returns {pr_number, title, body, base_branch, head_branch, author_login}."""
         ...
 
     def get_last_completed_review(self, pull_request_id: int) -> dict | None:

@@ -33,6 +33,7 @@ def get_pr_basic(db: Database, pull_request_id: int) -> dict:
                 PullRequest.title,
                 PullRequest.base_branch,
                 PullRequest.head_branch,
+                PullRequest.author_login,
             ).where(PullRequest.id == pull_request_id)
         ).first()
     if not row:
@@ -43,6 +44,7 @@ def get_pr_basic(db: Database, pull_request_id: int) -> dict:
         "body": "",  # body is fetched from GitHub at review time
         "base_branch": row[2],
         "head_branch": row[3],
+        "author_login": row[4],
     }
 
 

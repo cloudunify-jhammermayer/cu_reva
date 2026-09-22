@@ -600,22 +600,90 @@ def test_requeue_of_failed_run_is_not_skipped(ctx_and_fakes):
 def _set_budget(s, budget):
     import dataclasses
     from worker.runner import set_context
-    set_context(dataclasses.replace(s["ctx"], daily_budget_usd=budget))
+    set_context(dataclasses.replace(s["ctx"], author_daily_budget_usd=budget))
 
 
-def test_review_declined_when_over_budget(ctx_and_fakes):
+def _seed_author_spend(s, cost: float, *, author: str = "alice", pr_number: int = 77) -> None:
+    """A completed, paid review by `author` on another PR (the per-author cap's source)."""
+    from reva.db.models import ReviewRun
+    pr_id = writers.upsert_pull_request(
+        s["db"], repository_id=s["repo_id"], github_pr_id=9000 + pr_number,
+        pr_number=pr_number, title="Prior", author_login=author, base_branch="main",
+        head_branch="feat/prior", head_sha=f"prior{pr_number}", state="closed", draft=False,
+    )
+    with s["db"].session() as db_s:
+        db_s.add(ReviewRun(
+            repository_id=s["repo_id"], pull_request_id=pr_id, head_sha=f"prior{pr_number}",
+            status="completed", trigger_event="opened", review_mode="diff",
+            estimated_cost_usd=cost, completed_at=datetime.now(timezone.utc),
+        ))
+
+
+def test_review_declined_when_author_over_budget(ctx_and_fakes):
     s = ctx_and_fakes
-    # Seed prior spend above the cap in the unified ledger (the cap's source).
-    writers.record_claude_spend(s["db"], "review", 5.0)
+    _seed_author_spend(s, 5.0)  # alice already spent $5 on another PR
     _set_budget(s, 1.0)
     s["reviewer"].result = _completed_result()
 
     out = run_review(_params(s))
 
     assert out["status"] == "declined"
+    assert "@alice" in out["decline_reason"]
+    assert "$1" in out["decline_reason"]
     assert s["reviewer"].call_count == 0           # paid review never ran
     assert len(s["github"].created_pr_reviews) == 0
     assert len(s["github"].created_issue_comments) == 1  # decline posted
+
+
+def test_review_runs_when_other_author_over_budget(ctx_and_fakes):
+    s = ctx_and_fakes
+    _seed_author_spend(s, 5.0, author="bob")
+    _set_budget(s, 1.0)
+    s["reviewer"].result = _completed_result()
+
+    out = run_review(_params(s))
+
+    assert out["status"] == "completed"
+    assert s["reviewer"].call_count == 1
+
+
+def test_review_ignores_global_cap(ctx_and_fakes):
+    # Review spend is capped per author only; the global cap guards non-review calls.
+    s = ctx_and_fakes
+    writers.record_claude_spend(s["db"], "review", 50.0)
+    set_context(replace(s["ctx"], daily_budget_usd=1.0, author_daily_budget_usd=100.0))
+    s["reviewer"].result = _completed_result()
+
+    out = run_review(_params(s))
+
+    assert out["status"] == "completed"
+
+
+def test_review_runs_without_author_login(ctx_and_fakes):
+    s = ctx_and_fakes
+    _seed_author_spend(s, 5.0)  # spend exists elsewhere; gate must skip on missing author, not zero spend
+    writers.upsert_pull_request(
+        s["db"], repository_id=s["repo_id"], github_pr_id=9001, pr_number=42,
+        title="Add foo", author_login=None, base_branch="main", head_branch="feat/foo",
+        head_sha="deadbeef", state="open", draft=False,
+    )
+    _set_budget(s, 1.0)
+    s["reviewer"].result = _completed_result()
+
+    out = run_review(_params(s))
+
+    assert out["status"] == "completed"
+
+
+def test_review_runs_when_author_cap_disabled(ctx_and_fakes):
+    s = ctx_and_fakes
+    _seed_author_spend(s, 500.0)
+    _set_budget(s, None)
+    s["reviewer"].result = _completed_result()
+
+    out = run_review(_params(s))
+
+    assert out["status"] == "completed"
 
 
 def _set_queue(s, queue):
@@ -679,8 +747,8 @@ def test_budget_declined_review_enqueues_nothing(ctx_and_fakes):
     # no review_started, so Odoo's reviewed badge is left untouched.
     s = ctx_and_fakes
     queue = MagicMock()
-    set_context(replace(s["ctx"], rq_queue=queue, daily_budget_usd=1.0))
-    writers.record_claude_spend(s["db"], "review", 5.0)
+    set_context(replace(s["ctx"], rq_queue=queue, author_daily_budget_usd=1.0))
+    _seed_author_spend(s, 5.0)
 
     run_review(_params(s))
 
@@ -802,15 +870,30 @@ def test_review_run_records_worker_id(ctx_and_fakes):
 
 
 def test_verify_budget_ok_passed_true_under_budget(ctx_and_fakes):
-    # Feature 6 wiring: execute() receives verify_budget_ok from the pre-flight
-    # budget check. Under budget it must be True. (The over-budget case declines
-    # upstream before execute runs, so False is unreachable here — the skip is
-    # unit-tested at the reviewer level.)
+    # execute() receives verify_budget_ok from the per-author pre-flight check.
     s = ctx_and_fakes
     _set_budget(s, 1000.0)
     s["reviewer"].result = _completed_result()
     run_review(_params(s))
     assert s["reviewer"].last_verify_budget_ok is True
+
+
+def test_verify_budget_ok_false_when_author_reaches_cap_after_preflight(ctx_and_fakes):
+    # Spend landing between the pre-flight gate and execute() must switch the
+    # self-critique off without declining the already-claimed review.
+    s = ctx_and_fakes
+    _set_budget(s, 1.0)
+    s["reviewer"].result = _completed_result()
+    from worker import runner as runner_mod
+    calls = {"n": 0}
+
+    def flip(ctx, pr_id):
+        calls["n"] += 1
+        return None if calls["n"] == 1 else 5.0  # pre-flight passes, later calls over
+
+    with patch.object(runner_mod, "author_budget_exceeded", side_effect=flip):
+        run_review(_params(s))
+    assert s["reviewer"].last_verify_budget_ok is False
 
 
 def test_completed_review_falls_back_to_body_only_on_unresolvable_line(ctx_and_fakes):
@@ -1401,7 +1484,7 @@ def test_resolution_pass_fires_on_full_non_delta_review():
     with patch("worker.runner.writers") as mw, \
          patch("worker.runner._backfill_comment_ids"), \
          patch("worker.runner._set_risk_label"), \
-         patch("worker.runner.budget_exceeded", return_value=None), \
+         patch("worker.runner.author_budget_exceeded", return_value=None), \
          patch("worker.runner._verify_and_resolve_findings") as resolve:
         mw.get_posted_github_ids.return_value = (1, 1)   # skip check/review recovery
         _post_result_to_github(ctx, params, result, 99, "o", "r", 42, MagicMock())
@@ -1415,7 +1498,7 @@ def test_resolution_pass_skipped_when_budget_exceeded():
     with patch("worker.runner.writers") as mw, \
          patch("worker.runner._backfill_comment_ids"), \
          patch("worker.runner._set_risk_label"), \
-         patch("worker.runner.budget_exceeded", return_value=12.34), \
+         patch("worker.runner.author_budget_exceeded", return_value=12.34), \
          patch("worker.runner._verify_and_resolve_findings") as resolve:
         mw.get_posted_github_ids.return_value = (1, 1)
         _post_result_to_github(ctx, params, result, 99, "o", "r", 42, log)

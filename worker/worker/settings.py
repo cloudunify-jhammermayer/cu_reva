@@ -32,9 +32,14 @@ class Settings:
     repo_cache_dir: str = "/repos"
     repo_cache_ttl_days: int = 30
     skills_dir: str = "/app/prompts/skills"
-    # Rolling 24-hour Anthropic spend cap (USD). None = no cap. When trailing
-    # 24-hour spend reaches this, new reviews are declined instead of run.
+    # Rolling 24-hour cap (USD) for non-review Claude spend (audits, replies,
+    # tickets, ...). None = no cap. Review spend is capped per author instead.
     daily_budget_usd: float | None = None
+    # Rolling 24-hour review spend cap per PR author (USD). Reviews by an author
+    # whose paid review spend (any run status) reached this in the trailing
+    # 24 hours are declined.
+    # None = no per-author cap. Default 100; REVA_AUTHOR_DAILY_BUDGET_USD <= 0 disables.
+    author_daily_budget_usd: float | None = 100.0
     # CodeGraph engine layer (repo-aware reviews/audits). Default off; pinned and
     # validated against the live CLI before enabling. See the engine-layer spec.
     codegraph_enabled: bool = False
@@ -86,6 +91,7 @@ class Settings:
                 if os.environ.get("REVA_DAILY_BUDGET_USD")
                 else None
             ),
+            author_daily_budget_usd=_author_daily_budget_from_env(),
             codegraph_enabled=os.environ.get("REVA_CODEGRAPH_ENABLED", "false").lower()
             in ("1", "true", "yes"),
             codegraph_version=os.environ.get("REVA_CODEGRAPH_VERSION", "0.9.8"),
@@ -124,3 +130,12 @@ def _verify_findings_default_from_env() -> bool:
             return legacy.lower() in ("1", "true", "yes")
         return True
     return value.lower() in ("1", "true", "yes")
+
+
+def _author_daily_budget_from_env() -> float | None:
+    """REVA_AUTHOR_DAILY_BUDGET_USD: unset = 100; a value <= 0 disables the cap."""
+    raw = os.environ.get("REVA_AUTHOR_DAILY_BUDGET_USD")
+    if raw is None or raw.strip() == "":
+        return 100.0
+    value = float(raw)
+    return value if value > 0 else None

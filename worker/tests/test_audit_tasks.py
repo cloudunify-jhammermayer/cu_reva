@@ -196,7 +196,7 @@ def test_run_audit_declines_when_over_budget_without_running(db):
     """SECU-4: an audit is the most expensive path — it must respect the cap.
     A new audit is declined when over budget; no AuditRun row, auditor not run."""
     d, repo_id = db
-    writers.record_claude_spend(d, "review", 50.0)  # already over the cap
+    writers.record_claude_spend(d, "audit", 50.0)  # already over the cap
     auditor = FakeAuditor(_result(cost=3.5))
     set_context(_ctx(d, auditor, budget=10.0))
 
@@ -208,6 +208,21 @@ def test_run_audit_declines_when_over_budget_without_running(db):
         assert s.query(AuditRun).count() == 0
         # no new spend recorded for the declined audit
         assert s.query(ClaudeSpend).count() == 1
+
+
+def test_run_audit_ignores_review_spend_in_global_cap(db):
+    """Review spend is capped per author; the global cap must not count it."""
+    d, repo_id = db
+    writers.record_claude_spend(d, "review", 50.0)
+    writers.record_claude_spend(d, "delta_verify", 5.0)
+    writers.record_claude_spend(d, "triage", 2.0)
+    auditor = FakeAuditor(_result(cost=3.5))
+    set_context(_ctx(d, auditor, budget=10.0))
+
+    out = run_audit({"repository_id": repo_id, "installation_id": 500})
+
+    assert out["status"] != "declined"
+    assert auditor.called is True
 
 
 def test_run_audit_marks_row_failed_on_error(db):

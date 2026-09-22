@@ -139,9 +139,10 @@ and marks lines that need a human decision.
   timeline** (analysis → issues → PRs → reviews → ready), audit results, feedback
   and mutes per repo, Odoo instances with per-instance spend, timesheet runs.
 - **Docs site**: consultant-facing repo documentation, browsable at `/docs`.
-- **Cost control**: every run's cost is recorded; a rolling 24-hour budget cap
-  (globally and per Odoo instance) declines work instead of overspending.
-  Typical real-world costs are small — see `technical.md`.
+- **Cost control**: every run's cost is recorded; rolling 24-hour budget caps
+  (non-review spend globally, per Odoo instance, and per PR author for review
+  spend) decline work instead of overspending. Typical real-world costs
+  are small — see `technical.md`.
 
 ---
 

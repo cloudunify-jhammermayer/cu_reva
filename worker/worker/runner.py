@@ -99,6 +99,7 @@ class WorkerContext:
     core_knowledge: CoreKnowledge | None = None
     google_chat_webhook_url: str = ""
     daily_budget_usd: float | None = None
+    author_daily_budget_usd: float | None = 100.0
     repo_cache_ttl_days: int = 30
     prompts_dir: str = "/app/prompts"
     value_report_chat_enabled: bool = False
@@ -205,6 +206,7 @@ def build_worker_context(settings: Settings, rq_queue: Any | None = None) -> Wor
         verifier=verifier,
         google_chat_webhook_url=settings.google_chat_webhook_url,
         daily_budget_usd=settings.daily_budget_usd,
+        author_daily_budget_usd=settings.author_daily_budget_usd,
         repo_cache_ttl_days=settings.repo_cache_ttl_days,
         prompts_dir=settings.prompts_dir,
         value_report_chat_enabled=settings.value_report_chat_enabled,
@@ -315,13 +317,13 @@ def run_review(job_params: dict) -> dict:
 
     log = log.bind(owner=owner, repo=name, pr_number=pr_number)
 
-    # Spend guard: if the rolling 24-hour estimated spend has reached the cap,
-    # decline (cheaply) instead of running a paid review.
-    budget_decline = _budget_decline_if_exceeded(ctx, log)
+    # Spend guard: if the PR author's rolling 24-hour review spend has reached
+    # their cap, decline (cheaply) instead of running a paid review.
+    budget_decline = _budget_decline_if_exceeded(ctx, params, pr_basic["author_login"], log)
     if budget_decline is not None:
         writers.record_review_declined(ctx.db, params, budget_decline.decline_reason or "Over budget.")
         _post_result_to_github(ctx, params, budget_decline, run_id, owner, name, pr_number, log)
-        log.info("review_job_done", status="declined", reason="over_budget")
+        log.info("review_job_done", status="declined", reason="over_author_budget")
         return budget_decline.model_dump(mode="json")
 
     # Review-started signal (work-status leg only, ticket-signal addendum
@@ -369,19 +371,41 @@ def _enqueue_board_status(
         )
 
 
-def budget_exceeded(ctx: WorkerContext) -> float | None:
-    """Rolling 24h spend (USD) if the daily cap is reached, else None.
+# Ledger kinds that are PR-review spend — capped per author, not globally.
+_REVIEW_SPEND_KINDS = ("review", "delta_verify", "triage")
 
-    Callers use this to decline a NEW Claude call (review/audit/reply) when the
-    cap is full; in-flight calls are never interrupted. Counts every kind of
-    spend via the claude_spend ledger.
+
+def budget_exceeded(ctx: WorkerContext) -> float | None:
+    """Rolling 24h NON-review spend (USD) if the global cap is reached, else None.
+
+    Callers use this to decline a NEW non-review Claude call (audit, reply,
+    ticket analysis, change note, ...) when the cap is full; in-flight calls are
+    never interrupted. PR-review spend is excluded here and capped per author
+    (author_budget_exceeded).
     """
     if ctx.daily_budget_usd is None:
         return None
     spent = writers.sum_estimated_cost_since(
-        ctx.db, datetime.now(timezone.utc) - timedelta(days=1), serialize=True
+        ctx.db, datetime.now(timezone.utc) - timedelta(days=1),
+        serialize=True, exclude_kinds=_REVIEW_SPEND_KINDS,
     )
     return spent if spent >= ctx.daily_budget_usd else None
+
+
+def author_budget_exceeded(ctx: WorkerContext, pull_request_id: int) -> float | None:
+    """Rolling 24h review spend (USD) of the PR's author if the per-author cap
+    is reached, else None. None also when the cap is off or the PR has no
+    author login (nothing to attribute to)."""
+    if ctx.author_daily_budget_usd is None:
+        return None
+    spent = writers.sum_author_review_cost_since(
+        ctx.db, pull_request_id, datetime.now(timezone.utc) - timedelta(days=1),
+        serialize=True,
+    )
+    if spent is None:
+        logger.info("author_budget_skipped_no_author", pull_request_id=pull_request_id)
+        return None
+    return spent if spent >= ctx.author_daily_budget_usd else None
 
 
 def instance_budget_exceeded(ctx: WorkerContext, odoo_instance_id: int) -> float | None:
@@ -395,17 +419,24 @@ def instance_budget_exceeded(ctx: WorkerContext, odoo_instance_id: int) -> float
     return spent if spent >= float(inst["daily_budget_usd"]) else None
 
 
-def _budget_decline_if_exceeded(ctx: WorkerContext, log) -> ReviewResult | None:
-    """Return a declined ReviewResult if the rolling 24h spend cap is reached, else None."""
-    spent = budget_exceeded(ctx)
+def _budget_decline_if_exceeded(
+    ctx: WorkerContext, params: JobParams, author: str | None, log
+) -> ReviewResult | None:
+    """Return a declined ReviewResult if the PR author's rolling 24h review
+    spend cap is reached, else None."""
+    spent = author_budget_exceeded(ctx, params.pull_request_id)
     if spent is None:
         return None
-    log.warning("review_over_budget", spent_usd=round(spent, 2), budget_usd=ctx.daily_budget_usd)
-    reason = (
-        f"REVA's rolling 24-hour review budget (${ctx.daily_budget_usd:.0f}) has been "
-        f"reached (≈${spent:.0f} spent). Reviews resume automatically as spend rolls off."
+    log.warning(
+        "review_over_author_budget", author=author,
+        spent_usd=round(spent, 2), budget_usd=ctx.author_daily_budget_usd,
     )
-    return ReviewResult(status="declined", summary="Daily review budget reached.",
+    reason = (
+        f"REVA's rolling 24-hour review budget for @{author} "
+        f"(${ctx.author_daily_budget_usd:.0f}) has been reached (≈${spent:.0f} spent). "
+        f"Reviews resume automatically as spend rolls off."
+    )
+    return ReviewResult(status="declined", summary="Author's daily review budget reached.",
                         risk_level="low", decline_reason=reason)
 
 
@@ -421,8 +452,10 @@ def _execute_and_persist(
     """Execute the reviewer and persist its outcome. Re-raises on any error."""
     try:
         # Pre-flight budget gate for the optional second-pass self-critique: don't
-        # start paid verification when the rolling cap is already reached.
-        result = ctx.reviewer.execute(params, verify_budget_ok=budget_exceeded(ctx) is None)
+        # start paid verification when the author's rolling cap is already reached.
+        result = ctx.reviewer.execute(
+            params, verify_budget_ok=author_budget_exceeded(ctx, params.pull_request_id) is None
+        )
     except TransientError:
         # Don't write a "failed" row — RQ will retry; started status preserved.
         log.warning("review_transient_error", exc_info=True)
@@ -512,8 +545,8 @@ def _post_result_to_github(
             # Runs on every completed review, not just deltas: a full review after a
             # rebase/force-push must still resolve threads fixed since the last run.
             # Pre-flight budget gate (same shape as the self-critique gating): each
-            # candidate is a paid verifier call, so skip when the rolling cap is blown.
-            if budget_exceeded(ctx) is None:
+            # candidate is a paid verifier call, so skip when the author's rolling cap is blown.
+            if author_budget_exceeded(ctx, params.pull_request_id) is None:
                 _verify_and_resolve_findings(ctx, params, result, token, owner, name, pr_number, run_id)
             else:
                 log.info("delta_resolution_budget_skip", run_id=run_id)
@@ -881,8 +914,10 @@ def _verify_and_resolve_findings(
     errors = 0
     resolved = 0
     # M1: each is_resolved() is a paid Messages-API call. The verdict carries
-    # the call's actual usage-derived cost; sum it into the unified ledger so
-    # the rolling budget cap counts this pass.
+    # the call's actual usage-derived cost; sum it into the unified ledger for
+    # cost dashboards only — the global cap excludes "delta_verify" and the
+    # per-author sum (reads review_runs) cannot attribute it (cents, bounded
+    # by _MAX_DELTA_VERIFICATIONS).
     verify_cost = 0.0
     for f in candidates:
         path = f["file_path"]

@@ -947,8 +947,9 @@ class AuditFinding(Base):
 
 class ClaudeSpend(Base):
     """Mirrors db/migrations/009_claude_spend.sql. One row per paid Claude call
-    (review/audit/reply); the single accounting source for the rolling budget
-    cap (sum_estimated_cost_since)."""
+    (review/audit/reply); the accounting source for the rolling NON-review
+    budget cap (sum_estimated_cost_since). Review spend is capped per author
+    instead, from review_runs (sum_author_review_cost_since)."""
 
     __tablename__ = "claude_spend"
 

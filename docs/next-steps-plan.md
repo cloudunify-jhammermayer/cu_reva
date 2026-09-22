@@ -85,4 +85,4 @@ Run these on the deployed server (tunnel up) — they exercise paths no unit tes
 5. **Auth** — TUI against prod with the correct `REVA_API_KEY` works; a wrong/missing key returns 401.
 6. **Comment reply** — reply to one of REVA's inline comments; confirm a follow-up answer is posted and it never replies to a bot.
 7. **404** — hit `https://reva.dev.cloudunify.org/` → the branded cloud 404.
-8. **Budget cap (optional)** — set a low `REVA_DAILY_BUDGET_USD`, confirm a new review/audit is declined (not run) once the cap is hit.
+8. **Budget cap (optional)** — set a low `REVA_DAILY_BUDGET_USD`, confirm a new audit is declined (not run) once the cap is hit; separately, set a low `REVA_AUTHOR_DAILY_BUDGET_USD` and confirm a new review is declined for that author.

@@ -211,8 +211,9 @@ problems degrade to a graph-less review, never a failed one.
 - Retention: raw customer ticket text (and Claude-rendered derivatives of it) is
   scrubbed after 30 days (`REVA_TICKET_TEXT_RETENTION_DAYS`); consultant files
   are never stored server-side.
-- Cost: rolling 24-h budget caps (global + per instance) are checked under an
-  advisory lock *before* any paid call — over budget means declined, not queued.
+- Cost: rolling 24-h budget caps (global non-review spend + per instance, plus a
+  per-PR-author cap on review spend) are checked under an advisory lock *before*
+  any paid call — over budget means declined, not queued.
 
 ## Expected costs & latency (production data, 2026-07-10)
 

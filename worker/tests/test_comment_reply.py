@@ -81,12 +81,12 @@ def test_reply_wraps_question_as_untrusted_and_records_spend(db_with_finding):
 
 
 def test_reply_skipped_when_over_budget(db_with_finding):
-    writers.record_claude_spend(db_with_finding, "review", 50.0)
+    writers.record_claude_spend(db_with_finding, "reply", 50.0)
     ctx = _ctx(db_with_finding, budget=10.0)
     run_comment_reply(_params())
 
     ctx.claude.chat.assert_not_called()
     ctx.github.reply_to_review_comment.assert_not_called()
-    # no reply spend added beyond the seeded review row
+    # no reply spend added beyond the seeded reply row
     with db_with_finding.session() as s:
         assert s.query(ClaudeSpend).count() == 1

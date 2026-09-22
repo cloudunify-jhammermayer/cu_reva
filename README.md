@@ -347,7 +347,8 @@ Notifications fire on `PermanentError` and unexpected exceptions. Transient erro
 | `REVA_CODEGRAPH_INDEX_TIMEOUT` | — | `180` | Seconds bounding the CodeGraph index step |
 | `REVA_REPO_CACHE_DIR` | — | `/repos` | Root path where the worker clones repos for the headless CLI |
 | `REVA_REPO_CACHE_TTL_DAYS` | — | `30` | Days before an unused cloned repo is pruned |
-| `REVA_DAILY_BUDGET_USD` | — | _(off)_ | Rolling 24-hour spend cap; reviews are declined (not run) once trailing spend reaches it. The check is serialized (Postgres advisory lock); residual overshoot is bounded by concurrent workers (≤ one in-flight review each) |
+| `REVA_DAILY_BUDGET_USD` | — | _(off)_ | Rolling 24-hour cap on **non-review** Claude spend (audits, replies, ticket analysis, change notes, ...); new calls are declined (not run) once trailing spend reaches it. Serialized via a Postgres advisory lock; overshoot bounded by concurrent workers |
+| `REVA_AUTHOR_DAILY_BUDGET_USD` | — | `100` | Rolling 24-hour PR-review spend cap per PR author (all repos). Reviews by an author at the cap are declined with a Check Run naming the author. `0` disables |
 | `REVA_STALE_RUNNING_SECONDS` | — | `2 × job timeout` (3600) | Scheduler reaps `review_runs` stuck in `running` longer than this (worker killed mid-review) and marks them failed |
 | `REVA_API_RATE_LIMIT_PER_MINUTE` | — | `0` (off) | Per-client (API key / IP) request cap on `/api/v1` over a rolling minute; per-instance, in addition to nginx's limit |
 | `REVA_QUEUE_DEPTH_ALERT` / `REVA_FAILED_JOBS_ALERT` / `REVA_REPO_CACHE_DISK_PCT_ALERT` | — | `50` / `10` / `90` | Scheduler operational-alert thresholds (need `GOOGLE_CHAT_WEBHOOK_URL`) |
