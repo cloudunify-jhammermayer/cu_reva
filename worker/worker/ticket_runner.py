@@ -5,6 +5,8 @@ run_ticket_analysis is what RQ calls for each enqueued ticket analysis job.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import structlog
 from pydantic import ValidationError
 
@@ -24,7 +26,12 @@ from worker.repo_config import (
     load_repo_config,
     resolve_repo_context,
 )
-from worker.runner import build_odoo_client, get_context, instance_budget_exceeded
+from worker.runner import (
+    build_odoo_client,
+    defer_for_budget,
+    get_context,
+    instance_budget_exceeded,
+)
 
 logger = structlog.get_logger()
 
@@ -211,13 +218,27 @@ def run_ticket_analysis(job_params: dict) -> dict:
     else:
         spent = instance_budget_exceeded(ctx, params.odoo_instance_id)
         if spent is not None:
+            waiting = defer_for_budget(
+                ctx, "worker.ticket_tasks.run_ticket_analysis", params.model_dump(mode="json"),
+                kind="ticket_analysis", spent=spent, log=log,
+            )
+            if waiting is not None:
+                writers.set_budget_wait_since(
+                    ctx.db, "ticket_analysis", params.analysis_id,
+                    datetime.fromisoformat(waiting["budget_wait_since"]),
+                )
+                return waiting
             error = (
                 f"Odoo instance daily budget reached (~${spent:.2f} in 24h); "
                 f"analysis declined."
             )
             log.warning("ticket_analysis_instance_over_budget", spent_usd=round(spent, 2))
+            writers.set_budget_wait_since(ctx.db, "ticket_analysis", params.analysis_id, None)
             writers.record_ticket_analysis_failed(ctx.db, params.analysis_id, error)
             raise PermanentError(error)
+        # Clear unconditionally: the row may carry a stale marker even when this
+        # job's own params don't (e.g. a fresh trigger after a give-up).
+        writers.set_budget_wait_since(ctx.db, "ticket_analysis", params.analysis_id, None)
         try:
             version = repo_core_version(ctx, params.github_url, params.analysis_id, log)
             knowledge = build_ticket_knowledge(

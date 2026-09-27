@@ -40,6 +40,12 @@ class Settings:
     # 24 hours are declined.
     # None = no per-author cap. Default 100; REVA_AUTHOR_DAILY_BUDGET_USD <= 0 disables.
     author_daily_budget_usd: float | None = 100.0
+    # Wait-and-resume for budget-gated jobs (spec 2026-09-27): a job that hits a
+    # cap re-enqueues itself every `budget_retry_seconds` (<= 0 disables and
+    # restores the old fail-fast behaviour) and gives up after
+    # `budget_wait_max_seconds` from its first wait.
+    budget_retry_seconds: int = 3600
+    budget_wait_max_seconds: int = 172800
     # CodeGraph engine layer (repo-aware reviews/audits). Default off; pinned and
     # validated against the live CLI before enabling. See the engine-layer spec.
     codegraph_enabled: bool = False
@@ -92,6 +98,8 @@ class Settings:
                 else None
             ),
             author_daily_budget_usd=_author_daily_budget_from_env(),
+            budget_retry_seconds=int(os.environ.get("REVA_BUDGET_RETRY_SECONDS", "3600")),
+            budget_wait_max_seconds=int(os.environ.get("REVA_BUDGET_WAIT_MAX_SECONDS", "172800")),
             codegraph_enabled=os.environ.get("REVA_CODEGRAPH_ENABLED", "false").lower()
             in ("1", "true", "yes"),
             codegraph_version=os.environ.get("REVA_CODEGRAPH_VERSION", "0.9.8"),

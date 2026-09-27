@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"reva-tui/internal/api"
 )
 
@@ -888,5 +889,68 @@ func TestJourneyErrorRendersUnavailableLine(t *testing.T) {
 	}
 	if strings.Contains(out, "Journey\n") {
 		t.Fatal("view rendered the Journey title alongside an error")
+	}
+}
+
+func TestCompactDuration(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{90 * time.Minute, "1h30m"},
+		{40 * time.Minute, "40m"},
+		{26*time.Hour + 5*time.Minute, "26h5m"},
+	}
+	for _, c := range cases {
+		if got := compactDuration(c.d); got != c.want {
+			t.Errorf("compactDuration(%v) = %q, want %q", c.d, got, c.want)
+		}
+	}
+}
+
+// TestTicketRowShowsWaitingForBudgetAligned drives the tickets tab through the
+// real row-rendering path — mock ticket 654 is parked on budget for both its
+// analysis and its create-issues run (tickets.go rowText) — and checks both
+// cells render the short waiting labels without pushing the Cost/When columns
+// out of alignment (CORR: oversized cell text broke column alignment before
+// the labels were shortened).
+func TestTicketRowShowsWaitingForBudgetAligned(t *testing.T) {
+	tab := ticketsWithData()
+	tab = onRow(tab, 654)
+	out := tab.view(120, 30)
+
+	if !strings.Contains(out, "~ budget wait") {
+		t.Fatalf("view missing the analysis waiting label, got:\n%s", out)
+	}
+	if !strings.Contains(out, "~ waiting") {
+		t.Fatalf("view missing the issue-run waiting label, got:\n%s", out)
+	}
+
+	var hdrLine, rowLine string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "Ticket") && strings.Contains(l, "When") {
+			hdrLine = l
+		}
+		if strings.Contains(l, "#654") {
+			rowLine = l
+		}
+	}
+	if hdrLine == "" || rowLine == "" {
+		t.Fatalf("could not locate header/row lines in:\n%s", out)
+	}
+
+	// The "When" column position is a reliable alignment probe: it sits right
+	// after Cost, so it only lands at the same offset as the header if neither
+	// the Analysis nor the Issues cell overflowed its column.
+	hdrIdx := strings.Index(hdrLine, "When")
+	rowIdx := strings.Index(rowLine, "40m ago")
+	if hdrIdx < 0 || rowIdx < 0 {
+		t.Fatalf("could not locate the When column markers, got header:\n%s\nrow:\n%s", hdrLine, rowLine)
+	}
+	hdrOffset := lipgloss.Width(hdrLine[:hdrIdx])
+	rowOffset := lipgloss.Width(rowLine[:rowIdx])
+	if hdrOffset != rowOffset {
+		t.Fatalf("When column misaligned: header at rune offset %d, row at %d\nheader: %q\nrow:    %q",
+			hdrOffset, rowOffset, hdrLine, rowLine)
 	}
 }

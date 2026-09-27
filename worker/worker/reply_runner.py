@@ -15,12 +15,12 @@ import structlog
 from reva.cost import estimate_cost
 from reva.db import writers
 from reva.errors import PermanentError
-from worker.runner import budget_exceeded, get_context
+from worker.runner import budget_exceeded, defer_for_budget, get_context
 
 logger = structlog.get_logger()
 
 
-def run_comment_reply(params: dict) -> None:
+def run_comment_reply(params: dict) -> dict | None:
     """Reply to a developer's question on one of REVA's inline findings.
 
     params keys: installation_id, owner, repo, pr_number, comment_id (REVA's
@@ -50,7 +50,10 @@ def run_comment_reply(params: dict) -> None:
     if spent is not None:
         log.warning("reply_over_budget", spent_usd=round(spent, 2),
                     budget_usd=ctx.daily_budget_usd)
-        return
+        return defer_for_budget(
+            ctx, "worker.tasks.run_comment_reply", params, kind="comment_reply",
+            spent=spent, log=log,
+        )
 
     token = ctx.github.get_installation_token(installation_id)
 

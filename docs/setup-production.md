@@ -169,10 +169,11 @@ sudo systemctl enable --now cloudflared
 `cloudflared service install <TOKEN>` with the ingress configured in the UI.)
 
 Gate the docs surface with Cloudflare Access. Create a Cloudflare Access
-application for `https://$REVA_DOMAIN` covering the paths `/docs` and
-`/repo-docs` (the consultant docs SPA plus its data API). Leave `/webhooks`
-(GitHub cannot SSO), `/api`, and `/health` ungated. Until this application
-exists, the docs site is reachable by anyone who can reach the tunnel hostname.
+application for `https://$REVA_DOMAIN` covering the paths `/docs`,
+`/repo-docs` and `/reviews` (the consultant docs SPA, its data API, and the
+budget status page). Leave `/webhooks` (GitHub cannot SSO), `/api`, and
+`/health` ungated. Until this application exists, the docs site is reachable
+by anyone who can reach the tunnel hostname.
 
 ---
 

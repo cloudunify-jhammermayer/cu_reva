@@ -86,12 +86,25 @@ server {
     }
 
     # --- Consultant docs site -------------------------------------------------
-    # The SPA (/docs) and its data API (/repo-docs) are the only human-facing
-    # surface. Gate BOTH with a Cloudflare Access application at the edge; leave
-    # /webhooks (GitHub can't SSO), /api, and /health untouched.
+    # The SPA (/docs), its data API (/repo-docs), and the budget page (/reviews)
+    # are the only human-facing surface. Gate ALL THREE with a Cloudflare Access
+    # application at the edge; leave /webhooks (GitHub can't SSO), /api, and
+    # /health untouched.
 
     # Docs data API — browser-driven, so reuse the per-IP api rate-limit zone.
     location /repo-docs/ {
+        limit_req zone=api burst=20 nodelay;
+        proxy_pass http://$api_upstream:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    # Consultant budget page (/reviews + /reviews/data), served by the api.
+    # Gate with the same Cloudflare Access application as /docs.
+    location = /reviews { return 301 /reviews/; }
+    location /reviews/ {
         limit_req zone=api burst=20 nodelay;
         proxy_pass http://$api_upstream:8080;
         proxy_set_header Host $host;

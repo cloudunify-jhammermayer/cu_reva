@@ -11,7 +11,7 @@ from reva.errors import TransientError
 from reva.ticket_links import parse_closing_refs, resolve_pr_tickets
 from worker.change_note_delivery import maybe_deliver_change_notes
 from worker.release_log_lookup import ReleaseLogLookupError, release_log_block
-from worker.runner import budget_exceeded, build_odoo_client, get_context
+from worker.runner import budget_exceeded, build_odoo_client, defer_for_budget, get_context
 
 logger = structlog.get_logger()
 
@@ -56,6 +56,14 @@ def run_change_note(job_params: dict) -> dict:
                 continue
             spent = budget_exceeded(ctx)
             if spent is not None:
+                waiting = defer_for_budget(
+                    ctx, "worker.change_note_tasks.run_change_note", job_params,
+                    kind="change_note", spent=spent, log=logger,
+                )
+                if waiting is not None:
+                    # Notes stay pending; delivery converges once the deferred
+                    # run has drafted them.
+                    return waiting
                 writers.record_change_note_failed(
                     ctx.db, note_id, "skipped_budget", f"budget reached (~${spent:.0f})"
                 )

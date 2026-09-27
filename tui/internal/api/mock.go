@@ -132,6 +132,19 @@ func (m *MockClient) Reviews(limit int, repo, status, author string) (*ReviewPag
 			EstimatedCostUSD: nil,
 			CreatedAt:        now.Add(-8 * time.Hour),
 		},
+		{
+			ID: 95, RepoFullName: "acme/backend", PRNumber: 199,
+			PRTitle:     "feat: bulk import for vendor bills",
+			AuthorLogin: strPtr("dave"),
+			HeadSHA:     "07f8e9d0",
+			Status:      "waiting_budget", ReviewMode: "diff",
+			Model:            nil,
+			RiskLevel:        nil,
+			FindingCount:     0,
+			DurationMS:       nil,
+			EstimatedCostUSD: nil,
+			CreatedAt:        now.Add(-9 * time.Hour),
+		},
 	}
 
 	var filtered []ReviewSummary
@@ -526,8 +539,18 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 	intPtr := func(i int) *int { return &i }
 	f64Ptr := func(f float64) *float64 { return &f }
 	t1 := now.Add(-5 * time.Minute)
+	tWait := now.Add(-40 * time.Minute)
 
 	items := []TicketAnalysisSummary{
+		{
+			// Parked on budget: still "pending", but BudgetWaitSince marks how
+			// long it's been waiting for the Odoo instance's budget to roll off.
+			ID: 6, OdooInstanceID: intPtr(2), TicketID: 654, ModelName: "helpdesk.ticket", FieldName: "description",
+			Status: "pending", Model: nil,
+			InputTokens: nil, OutputTokens: nil,
+			EstimatedCostUSD: nil, CreatedAt: tWait, CompletedAt: nil,
+			BudgetWaitSince: &tWait,
+		},
 		{
 			ID: 3, OdooInstanceID: intPtr(1), TicketID: 456, ModelName: "helpdesk.ticket", FieldName: "description",
 			Status: "completed", Model: strPtr("claude-sonnet-4-6"),
@@ -591,6 +614,7 @@ func (m *MockClient) TicketIssueRuns(limit int) (*TicketIssueRunPage, error) {
 	intPtr := func(i int) *int { return &i }
 	f64Ptr := func(f float64) *float64 { return &f }
 	t1 := now.Add(-3 * time.Minute)
+	issueWait := now.Add(-40 * time.Minute)
 
 	items := []TicketIssueRunSummary{
 		{
@@ -632,6 +656,14 @@ func (m *MockClient) TicketIssueRuns(limit int) (*TicketIssueRunPage, error) {
 			ID: 1, OdooInstanceID: intPtr(2), TicketID: 99, ModelName: "helpdesk.ticket",
 			GithubURL: "https://github.com/acme/api", Status: "pending",
 			CreatedAt: now.Add(-20 * time.Second),
+		},
+		{
+			// Same ticket as the budget-parked analysis (id 6 in TicketAnalyses) —
+			// its follow-on create-issues run is parked on budget too.
+			ID: 4, OdooInstanceID: intPtr(2), TicketID: 654, ModelName: "helpdesk.ticket",
+			Status:          "pending",
+			CreatedAt:       issueWait,
+			BudgetWaitSince: &issueWait,
 		},
 	}
 	n := min(limit, len(items))

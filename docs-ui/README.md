@@ -10,7 +10,8 @@ file, proxy embedded images.
 ```
 browser ─▶ Cloudflare Access ─▶ cloudflared tunnel ─▶ nginx ┬─ /docs/      → this SPA (static)
            (gates /docs +                                   ├─ /repo-docs/ → api  (docs data)
-            /repo-docs)                                      ├─ /webhooks/  → api  (GitHub, NOT gated)
+            /repo-docs +                                     ├─ /reviews/   → api  (budget page)
+            /reviews)                                        ├─ /webhooks/  → api  (GitHub, NOT gated)
                                                              ├─ /api/       → api  (TUI, Bearer key)
                                                              └─ /health     → api
 ```
@@ -56,11 +57,12 @@ CSS; the nginx image build does not run it.
 
 ### Cloudflare Access
 
-Create an Access application protecting **both** path prefixes on the prod host,
-with your consultant policy:
+Create an Access application protecting **all three** path prefixes on the prod
+host, with your consultant policy:
 
 - `reva.dev.cloudunify.org/docs` (the SPA)
 - `reva.dev.cloudunify.org/repo-docs` (the data API the SPA calls)
+- `reva.dev.cloudunify.org/reviews` (the budget status page)
 
 Leave `/webhooks`, `/api`, and `/health` **un-gated** — GitHub webhooks can't
 complete an SSO login, and the TUI authenticates to `/api` with a Bearer key.

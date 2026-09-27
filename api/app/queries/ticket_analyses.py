@@ -57,6 +57,7 @@ def list_ticket_analyses(
                     "odoo_instance_id": r.odoo_instance_id,
                     "repo_docs_sections_used": r.repo_docs_sections_used,
                     "image_count": r.image_count,
+                    "budget_wait_since": r.budget_wait_since,
                 }
             )
     return items, total

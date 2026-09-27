@@ -11,10 +11,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from rq import Retry
 from sqlalchemy.exc import IntegrityError
 
+from app.budget_wait import is_waiting_for_budget
 from app.dependencies import (
     ResolvedOdooInstance,
     assert_instance_within_budget,
     get_db,
+    get_settings,
     require_odoo_instance,
 )
 from app.pagination import clamp_limit, clamp_offset
@@ -26,6 +28,7 @@ from app.schemas.timesheet_reviews import (
     TimesheetReviewStatus,
     TimesheetReviewSummary,
 )
+from app.settings import Settings
 from reva.db import writers
 from reva.db.engine import Database
 from reva.types import TIMESHEET_CHUNK_SIZE, TimesheetJobParams
@@ -47,7 +50,9 @@ def _job_timeout(line_count: int) -> int:
     return max(600, 120 * n_chunks)
 
 
-def _is_stale_pending(row: dict) -> bool:
+def _is_stale_pending(row: dict, settings: Settings) -> bool:
+    if is_waiting_for_budget(row, _STALE_PENDING, settings.budget_wait_max_seconds):
+        return False
     created_at = row["created_at"]
     if created_at.tzinfo is None:
         created_at = created_at.replace(tzinfo=timezone.utc)
@@ -85,8 +90,9 @@ def submit_timesheet_review(
     request: Request,
     db: Database = Depends(get_db),
     instance: ResolvedOdooInstance = Depends(require_odoo_instance),
+    settings: Settings = Depends(get_settings),
 ) -> dict:
-    assert_instance_within_budget(db, instance)
+    assert_instance_within_budget(db, instance, settings)
     for word in body.flagged_words:
         if len(word) > 100:
             raise HTTPException(
@@ -95,7 +101,7 @@ def submit_timesheet_review(
             )
 
     existing = writers.get_pending_timesheet_run(db, instance.id, body.request_id)
-    if existing is not None and not _is_stale_pending(existing):
+    if existing is not None and not _is_stale_pending(existing, settings):
         logger.info("timesheet_review_dedup", run_id=existing["id"])
         return {"run_id": existing["id"], "job_id": existing["job_id"], "status": "pending"}
     if existing is not None:

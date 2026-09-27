@@ -8,7 +8,7 @@ touched here; that layer is covered by test_claude_client + test_reviewer.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +18,13 @@ from unittest.mock import MagicMock, patch
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.errors import PermanentError, TransientError
 from reva.prompt_builder import PromptBuilder
-from worker.runner import WorkerContext, _register_prompt_version, run_review, set_context
+from worker.runner import (
+    WorkerContext,
+    _register_prompt_version,
+    get_context,
+    run_review,
+    set_context,
+)
 from reva.types import Finding, JobParams, ReviewResult
 from reva.finding_verifier import VerifierVerdict
 
@@ -744,15 +750,20 @@ def test_review_started_enqueued_at_claim_before_review_done(ctx_and_fakes):
 
 def test_budget_declined_review_enqueues_nothing(ctx_and_fakes):
     # Over-budget declines happen before the claim commits to a review cycle —
-    # no review_started, so Odoo's reviewed badge is left untouched.
+    # no review_started, so Odoo's reviewed badge is left untouched. Waiting is
+    # disabled here (budget_retry_seconds=0) so the decline path — not the wait
+    # path — is genuinely exercised, even though a queue is present.
     s = ctx_and_fakes
     queue = MagicMock()
-    set_context(replace(s["ctx"], rq_queue=queue, author_daily_budget_usd=1.0))
+    set_context(replace(
+        s["ctx"], rq_queue=queue, author_daily_budget_usd=1.0, budget_retry_seconds=0,
+    ))
     _seed_author_spend(s, 5.0)
 
     run_review(_params(s))
 
     queue.enqueue.assert_not_called()
+    queue.enqueue_in.assert_not_called()
 
 
 def test_board_status_enqueue_failure_never_fails_the_review(ctx_and_fakes):
@@ -1505,3 +1516,141 @@ def test_resolution_pass_skipped_when_budget_exceeded():
     resolve.assert_not_called()
     assert any(c.args and c.args[0] == "delta_resolution_budget_skip"
                for c in log.info.call_args_list)
+
+
+def _deferring_queue():
+    q = MagicMock()
+    q.enqueue_in.return_value = MagicMock(id="rq:job:deferred")
+    return q
+
+
+def test_review_waits_for_author_budget_with_queued_check(ctx_and_fakes):
+    s = ctx_and_fakes
+    _seed_author_spend(s, 5.0)
+    _set_budget(s, 1.0)
+    q = _deferring_queue()
+    set_context(replace(get_context(), rq_queue=q))
+    s["reviewer"].result = _completed_result()
+
+    out = run_review(_params(s))
+
+    assert out["status"] == "waiting_budget"
+    assert s["reviewer"].call_count == 0
+    assert s["github"].created_issue_comments == []          # no decline comment
+    assert len(s["github"].created_check_runs) == 1
+    check = s["github"].created_check_runs[0]
+    assert check["status"] == "queued" and check["conclusion"] is None
+    assert "budget" in check["output"]["title"].lower()
+    from reva.db.models import ReviewRun
+    with s["db"].session() as db_s:
+        run = db_s.query(ReviewRun).filter_by(head_sha="deadbeef").one()
+        assert run.status == "waiting_budget"
+        assert run.budget_wait_since is not None
+    _, task, deferred = q.enqueue_in.call_args.args
+    assert task == "worker.tasks.run_review"
+    assert deferred["head_sha"] == "deadbeef" and deferred["budget_wait_since"]
+
+
+def test_deferred_review_rerun_completes_and_updates_queued_check(ctx_and_fakes):
+    s = ctx_and_fakes
+    _seed_author_spend(s, 5.0)
+    _set_budget(s, 1.0)
+    set_context(replace(get_context(), rq_queue=_deferring_queue()))
+    s["reviewer"].result = _completed_result()
+    first = run_review(_params(s))
+    assert first["status"] == "waiting_budget"
+    # The fake's find_check_run_id answers with recoverable_check_run_id; point
+    # it at the queued check so the re-run finds it by SHA like GitHub would.
+    s["github"].recoverable_check_run_id = s["github"].next_check_run_id - 1
+
+    _set_budget(s, None)   # cap lifted / spend rolled off
+    out = run_review(_params(s, budget_wait_since=first["budget_wait_since"]))
+
+    assert out["status"] == "completed"
+    assert s["reviewer"].call_count == 1
+    # The queued check was found by SHA and updated in place, not duplicated.
+    assert len(s["github"].created_check_runs) == 1
+    assert len(s["github"].updated_check_runs) >= 1
+    assert s["github"].updated_check_runs[-1]["status"] == "completed"
+
+
+def test_deferred_review_rerun_is_stale_when_head_moved(ctx_and_fakes):
+    """Review Focus 3: a deferred re-run's `stale` outcome (Reviewer faked to
+    return it) plumbs straight through to run_review's result — status only,
+    not a real head-moved/no-pay check (that's the Reviewer's own logic)."""
+    s = ctx_and_fakes
+    s["reviewer"].result = ReviewResult(status="stale", summary="Head SHA changed", risk_level="low")
+    out = run_review(_params(s, budget_wait_since="2026-09-27T08:00:00+00:00"))
+    assert out["status"] == "stale"
+
+
+def test_review_declines_after_max_wait_with_expired_text(ctx_and_fakes):
+    s = ctx_and_fakes
+    _seed_author_spend(s, 5.0)
+    _set_budget(s, 1.0)
+    set_context(replace(get_context(), rq_queue=_deferring_queue(), budget_wait_max_seconds=3600))
+    s["reviewer"].result = _completed_result()
+    since = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+
+    out = run_review(_params(s, budget_wait_since=since))
+
+    assert out["status"] == "declined"
+    assert "waited" in out["decline_reason"].lower()
+    assert len(s["github"].created_issue_comments) == 1
+
+
+def test_comment_during_wait_does_not_start_second_defer_chain(ctx_and_fakes):
+    """Review Important 2: a /review comment (or any other fresh trigger —
+    manual requeue, duplicate push job) landing while the deferred
+    wait-and-resume chain already owns this review must not start a SECOND
+    gate/defer chain, or the review is double-paid when both eventually run."""
+    s = ctx_and_fakes
+    _seed_author_spend(s, 5.0)
+    _set_budget(s, 1.0)
+    q = _deferring_queue()
+    set_context(replace(get_context(), rq_queue=q))
+    s["reviewer"].result = _completed_result()
+
+    first = run_review(_params(s))
+    assert first["status"] == "waiting_budget"
+
+    out = run_review(_params(s, trigger_event="comment"))
+
+    assert out["status"] == "already_waiting"
+    assert q.enqueue_in.call_count == 1          # not called a second time
+    assert s["github"].created_issue_comments == []
+    assert s["reviewer"].call_count == 0          # no paid call either time
+    from reva.db.models import ReviewRun
+    with s["db"].session() as db_s:
+        run = db_s.query(ReviewRun).filter_by(head_sha="deadbeef").one()
+        assert run.status == "waiting_budget"
+        stored = run.budget_wait_since
+        if stored.tzinfo is None:
+            stored = stored.replace(tzinfo=timezone.utc)
+        assert stored == datetime.fromisoformat(first["budget_wait_since"])
+
+
+def test_review_wait_branch_short_circuits_stale_when_head_moved(ctx_and_fakes):
+    """Review Minor: the PR moved on before this job could even defer —
+    waiting on (or reviewing) a superseded SHA is pointless; the next push's
+    own job covers the PR instead."""
+    s = ctx_and_fakes
+    _seed_author_spend(s, 5.0)
+    _set_budget(s, 1.0)
+    q = _deferring_queue()
+    set_context(replace(get_context(), rq_queue=q))
+    s["reviewer"].result = _completed_result()
+    writers.upsert_pull_request(
+        s["db"], repository_id=s["repo_id"], github_pr_id=9001, pr_number=42,
+        title="Add foo", author_login="alice", base_branch="main",
+        head_branch="feat/foo", head_sha="newerSHA", state="open", draft=False,
+    )
+
+    out = run_review(_params(s))
+
+    assert out["status"] == "stale"
+    q.enqueue_in.assert_not_called()
+    from reva.db.models import ReviewRun
+    with s["db"].session() as db_s:
+        run = db_s.query(ReviewRun).filter_by(head_sha="deadbeef").one()
+        assert run.status == "stale"

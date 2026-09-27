@@ -659,3 +659,33 @@ def test_image_staging_failure_degrades_and_records_an_ops_event(env, monkeypatc
     assert "images" not in call["params"]
     assert "image_staging_failed" in _ops(env.db)
     assert writers.get_support_turn(env.db, env.turn_id)["grounding_level"] == "code"
+
+
+def test_over_instance_budget_waits_when_enabled(env):
+    from dataclasses import replace
+    from unittest.mock import MagicMock
+    q = MagicMock()
+    q.enqueue_in.return_value = MagicMock(id="rq:job:deferred")
+    set_context(replace(env.ctx, rq_queue=q))
+    env.monkeypatch.setattr("worker.support_runner.instance_budget_exceeded", lambda c, i: 12.5)
+
+    out = run_support_answer(_params(env))
+
+    assert out["status"] == "waiting_budget"
+    row = writers.get_support_turn(env.db, env.turn_id)
+    assert row["status"] == "pending"
+    assert row["budget_wait_since"] is not None
+    assert q.enqueue_in.call_args.args[1] == "worker.support_tasks.run_support_answer"
+
+
+def test_deferred_rerun_clears_budget_wait_marker(env):
+    """Review Important 1: back under the cap, the re-run clears the marker
+    and completes (mirrors test_ticket_runner's version of this test)."""
+    from datetime import datetime, timedelta, timezone
+    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    writers.set_budget_wait_since(env.db, "support_answer", env.turn_id, since)
+
+    out = run_support_answer(_params(env, budget_wait_since=since.isoformat()))
+
+    assert out["status"] == "completed"
+    assert writers.get_support_turn(env.db, env.turn_id)["budget_wait_since"] is None

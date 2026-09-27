@@ -27,6 +27,13 @@ class Settings:
     # Per-client (API key / IP) request cap for /api/v1 over a rolling minute.
     # 0 disables. Per-instance (not shared across API replicas).
     rate_limit_per_minute: int = 0
+    # Mirrors the worker's budget-wait settings (spec 2026-09-27): a row whose
+    # budget_wait_since is younger than this plus the route's stale window has
+    # a live scheduled retry in Redis, so requeue must not double-pay it.
+    budget_retry_seconds: int = 3600
+    budget_wait_max_seconds: int = 172800
+    daily_budget_usd: float | None = None
+    author_daily_budget_usd: float | None = 100.0
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -57,4 +64,20 @@ class Settings:
             api_key=api_key,
             require_api_key=require_api_key,
             rate_limit_per_minute=int(os.environ.get("REVA_API_RATE_LIMIT_PER_MINUTE", "0")),
+            budget_retry_seconds=int(os.environ.get("REVA_BUDGET_RETRY_SECONDS", "3600")),
+            budget_wait_max_seconds=int(os.environ.get("REVA_BUDGET_WAIT_MAX_SECONDS", "172800")),
+            daily_budget_usd=(
+                float(os.environ["REVA_DAILY_BUDGET_USD"])
+                if os.environ.get("REVA_DAILY_BUDGET_USD") else None
+            ),
+            author_daily_budget_usd=_author_daily_budget_from_env(),
         )
+
+
+def _author_daily_budget_from_env() -> float | None:
+    """REVA_AUTHOR_DAILY_BUDGET_USD: unset = 100; a value <= 0 disables the cap."""
+    raw = os.environ.get("REVA_AUTHOR_DAILY_BUDGET_USD")
+    if raw is None or raw.strip() == "":
+        return 100.0
+    value = float(raw)
+    return value if value > 0 else None

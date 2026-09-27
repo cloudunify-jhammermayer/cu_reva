@@ -157,6 +157,33 @@ def test_stale_pending_is_superseded(client_db_queue):
     assert writers.get_timesheet_run(db, first["run_id"])["status"] == "failed"
 
 
+def test_resubmit_of_waiting_run_reuses_it(client_db_queue):
+    """A run waiting for budget has a live scheduled retry; a resubmit past the
+    plain stale window must still reuse it, not start a second paid run."""
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import update
+
+    from reva.db.models import TimesheetReviewRun
+
+    client, db, queue, headers = client_db_queue
+    first = client.post("/api/v1/timesheet-review", json=PAYLOAD, headers=headers).json()
+    with db.session() as s:
+        s.execute(
+            update(TimesheetReviewRun)
+            .where(TimesheetReviewRun.id == first["run_id"])
+            .values(
+                created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+                budget_wait_since=datetime.now(timezone.utc) - timedelta(hours=3),
+            )
+        )
+
+    second = client.post("/api/v1/timesheet-review", json=PAYLOAD, headers=headers).json()
+
+    assert second["run_id"] == first["run_id"]
+    assert len(queue.enqueued) == 1
+
+
 def test_master_can_read_timesheet_review(client_db_queue):
     client, _, _, headers = client_db_queue
     run_id = client.post("/api/v1/timesheet-review", json=PAYLOAD, headers=headers).json()["run_id"]

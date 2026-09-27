@@ -225,6 +225,23 @@ def test_run_audit_ignores_review_spend_in_global_cap(db):
     assert auditor.called is True
 
 
+def test_run_audit_waits_when_over_budget_and_queue_present(db):
+    from dataclasses import replace
+    from unittest.mock import MagicMock
+    d, repo_id = db
+    writers.record_claude_spend(d, "audit", 50.0)
+    auditor = FakeAuditor(_result(cost=3.5))
+    q = MagicMock(); q.enqueue_in.return_value = MagicMock(id="rq:job:deferred")
+    set_context(replace(_ctx(d, auditor, budget=10.0), rq_queue=q))
+
+    out = run_audit({"repository_id": repo_id, "installation_id": 500})
+
+    assert out["status"] == "waiting_budget"
+    assert auditor.called is False
+    assert q.enqueue_in.call_args.args[1] == "worker.audit_tasks.run_audit"
+    assert q.enqueue_in.call_args.args[2]["repository_id"] == repo_id
+
+
 def test_run_audit_marks_row_failed_on_error(db):
     """CORR-12: audits aren't RQ-retried, so a failure must mark the row failed —
     not leave it stuck in 'started' forever."""

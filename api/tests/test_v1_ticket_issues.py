@@ -308,6 +308,24 @@ def test_enqueue_failure_marks_run_failed_and_returns_503(client_db_queue):
         assert "enqueue failed" in row.error_message
 
 
+def test_requeue_of_waiting_run_is_409(client_db_queue):
+    from datetime import datetime, timedelta, timezone
+    from reva.db.models import TicketIssueRun
+
+    client, db, queue, headers = client_db_queue
+    run_id = client.post("/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers).json()["request_id"]
+    with db.session() as s:
+        row = s.get(TicketIssueRun, run_id)
+        row.created_at = datetime.now(timezone.utc) - timedelta(days=30)
+        row.budget_wait_since = datetime.now(timezone.utc) - timedelta(hours=3)
+
+    r = client.post(f"/api/v1/create-issues/{run_id}/requeue")
+
+    assert r.status_code == 409
+    assert "waiting for budget" in r.json()["detail"].lower()
+    assert len(queue.enqueued) == 1
+
+
 def test_requeue_allowed_for_stale_pending(client_db_queue):
     """A pending run whose job died without running (SIGKILLed worker) must be
     recoverable via requeue, not require manual DB surgery."""

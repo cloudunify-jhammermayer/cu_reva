@@ -578,3 +578,63 @@ def test_requeue_without_images_records_nothing(client_db_queue):
     assert client.post(f"/api/v1/ticket-analysis/{aid}/requeue").status_code == 202
     with db.session() as s:
         assert [e.event for e in s.query(OpsEvent).all()] == []
+
+
+def _mark_waiting(db, analysis_id, hours_ago: float, created_days_ago: int = 30):
+    from datetime import datetime, timedelta, timezone
+    from reva.db.models import TicketAnalysis
+    with db.session() as s:
+        row = s.get(TicketAnalysis, analysis_id)
+        row.created_at = datetime.now(timezone.utc) - timedelta(days=created_days_ago)
+        row.budget_wait_since = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
+
+
+def test_requeue_of_waiting_row_is_409(client_db_queue):
+    """Review Focus 4: a row waiting for budget is not stale, even when old."""
+    client, db, queue, headers = client_db_queue
+    aid = client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers).json()["analysis_id"]
+    _mark_waiting(db, aid, hours_ago=3)
+
+    r = client.post(f"/api/v1/ticket-analysis/{aid}/requeue")
+
+    assert r.status_code == 409
+    assert "waiting for budget" in r.json()["detail"].lower()
+    assert len(queue.enqueued) == 1
+
+
+def test_waiting_row_becomes_stale_after_max_wait_plus_window(client_db_queue):
+    client, db, queue, headers = client_db_queue
+    aid = client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers).json()["analysis_id"]
+    _mark_waiting(db, aid, hours_ago=48 + 4)   # past the 48 h max wait + the 2.4 h stale window
+
+    assert client.post(f"/api/v1/ticket-analysis/{aid}/requeue").status_code == 202
+
+
+def test_requeue_of_failed_row_with_stale_marker_is_202(client_db_queue):
+    """Review Important 1: a given-up (failed) row can still carry a
+    budget_wait_since marker from before it failed. That marker is stale, not
+    a live wait, so requeue must not 409 on it."""
+    from datetime import datetime, timedelta, timezone
+    from reva.db.models import TicketAnalysis
+
+    client, db, queue, headers = client_db_queue
+    aid = client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers).json()["analysis_id"]
+    with db.session() as s:
+        row = s.get(TicketAnalysis, aid)
+        row.status = "failed"
+        row.error_message = "Odoo instance daily budget reached"
+        row.budget_wait_since = datetime.now(timezone.utc) - timedelta(hours=3)
+
+    r = client.post(f"/api/v1/ticket-analysis/{aid}/requeue")
+
+    assert r.status_code == 202
+
+
+def test_status_and_list_expose_budget_wait_since(client_db_queue):
+    client, db, queue, headers = client_db_queue
+    aid = client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers).json()["analysis_id"]
+    _mark_waiting(db, aid, hours_ago=1)
+
+    assert client.get(f"/api/v1/ticket-analysis/{aid}").json()["budget_wait_since"] is not None
+    items = client.get("/api/v1/ticket-analyses").json()["items"]
+    assert items[0]["budget_wait_since"] is not None

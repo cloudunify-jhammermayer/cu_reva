@@ -108,8 +108,24 @@ def test_patch_rejects_negative_budget(client_db_queue):
     ).status_code == 422
 
 
-def test_submit_429_when_over_budget(client_db_queue):
+def test_submit_202_when_over_budget_and_waiting_enabled(client_db_queue):
     client, db, queue, iid, headers = client_db_queue
+    client.patch(f"/api/v1/odoo-instances/{iid}", json={"daily_budget_usd": 5})
+    _burn_budget(db, iid, cost=6.0)
+    r = client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers)
+    assert r.status_code == 202
+    assert len(queue.enqueued) == 1
+
+
+def test_submit_429_when_over_budget_and_waiting_disabled(client_db_queue):
+    client, db, queue, iid, headers = client_db_queue
+    settings = Settings(
+        database_url="sqlite:///:memory:", github_app_id=1,
+        github_webhook_secret="x", github_private_key="x",
+        redis_url="redis://localhost:6379/0",
+        budget_retry_seconds=0,
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
     client.patch(f"/api/v1/odoo-instances/{iid}", json={"daily_budget_usd": 5})
     _burn_budget(db, iid, cost=6.0)
     r = client.post("/api/v1/ticket-analysis", json=BASE_PAYLOAD, headers=headers)

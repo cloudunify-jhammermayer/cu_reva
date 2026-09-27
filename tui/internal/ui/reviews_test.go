@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"reva-tui/internal/api"
 )
 
@@ -31,5 +32,18 @@ func TestReviewsListShowsCarriedFromLabel(t *testing.T) {
 	out := r.view(200, 30)
 	if !strings.Contains(out, "carried from #101") {
 		t.Fatalf("view missing carried-from marker:\n%s", out)
+	}
+}
+
+func TestReviewsStatusFilterCycleIncludesWaitingBudget(t *testing.T) {
+	r := newReviews(&api.MockClient{})
+	r.width, r.height = 200, 30
+	press := func() { r, _ = r.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")}) }
+	want := []string{"completed", "failed", "stale", "waiting_budget", ""}
+	for i, w := range want {
+		press()
+		if r.statusFilter != w {
+			t.Fatalf("press %d: statusFilter = %q, want %q", i+1, r.statusFilter, w)
+		}
 	}
 }

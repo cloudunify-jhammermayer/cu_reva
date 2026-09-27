@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import Counter
+from datetime import datetime
 
 import structlog
 from rq import get_current_job
@@ -40,7 +41,12 @@ from reva.golden_estimates import apply_anchor, load
 from reva.types import TicketIssueJobParams
 from worker.change_note_delivery import maybe_deliver_change_notes
 from worker.golden_support import record_degradations
-from worker.runner import build_odoo_client, get_context, instance_budget_exceeded
+from worker.runner import (
+    build_odoo_client,
+    defer_for_budget,
+    get_context,
+    instance_budget_exceeded,
+)
 
 logger = structlog.get_logger()
 
@@ -560,6 +566,9 @@ def run_ticket_issues(job_params: dict) -> dict:
         _send_failed_callback(ctx, params, str(exc), log)
         raise PermanentError(str(exc)) from exc
 
+    if isinstance(issues, dict) and issues.get("status") == "waiting_budget":
+        return issues
+
     # Persist completion before the callback so the result is never lost.
     writers.record_ticket_issue_run_completed(ctx.db, params.run_id, issues)
 
@@ -905,9 +914,10 @@ def _project_step(ctx, token, owner, repo, params, issues, parent, log) -> None:
              "project_url": params.github_project_url, "error": str(exc)[:300]})
 
 
-def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
+def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict] | dict:
     """Resolve the issue list for this run (resume → adopt → reconcile → plan),
-    then create whatever is missing. Returns the final issues state."""
+    then create whatever is missing. Returns the final issues state, or the
+    `waiting_budget` result dict if planning is deferred for budget."""
     parsed = parse_github_repo_url(params.github_url)
     if parsed is None:  # route validates; guards requeued rows and manual enqueues
         raise PermanentError(f"invalid github_url: {params.github_url!r}")
@@ -996,14 +1006,28 @@ def _plan_and_create(ctx, params: TicketIssueJobParams, log) -> list[dict]:
         else:
             spent = instance_budget_exceeded(ctx, params.odoo_instance_id)
             if spent is not None:
+                waiting = defer_for_budget(
+                    ctx, "worker.ticket_issue_tasks.run_ticket_issues",
+                    params.model_dump(mode="json"), kind="ticket_issues", spent=spent, log=log,
+                )
+                if waiting is not None:
+                    writers.set_budget_wait_since(
+                        ctx.db, "ticket_issues", params.run_id,
+                        datetime.fromisoformat(waiting["budget_wait_since"]),
+                    )
+                    return waiting
                 error = (
                     f"Odoo instance daily budget reached (~${spent:.2f} in 24h); "
                     f"issue planning declined."
                 )
                 log.warning("ticket_issues_instance_over_budget", spent_usd=round(spent, 2))
+                writers.set_budget_wait_since(ctx.db, "ticket_issues", params.run_id, None)
                 writers.record_ticket_issue_run_failed(ctx.db, params.run_id, error)
                 _send_failed_callback(ctx, params, error, log)
                 raise PermanentError(error)
+            # Clear unconditionally: the row may carry a stale marker even when
+            # this job's own params don't (e.g. a fresh trigger after a give-up).
+            writers.set_budget_wait_since(ctx.db, "ticket_issues", params.run_id, None)
             response, plan = ctx.ticket_issue_planner.plan_with_response(params)
             # This is the only call site of plan_with_response in this module
             # (unlike ticket_runner.py's two converging legs), so

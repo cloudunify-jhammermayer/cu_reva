@@ -1800,3 +1800,39 @@ def test_planner_degradations_reach_the_ops_log(ctx_and_fakes):
 
     events = _ops_events(s["db"])
     assert any(e == "golden_estimates_file_missing" for _, e, _ in events)
+
+
+def test_instance_budget_gate_waits_when_queue_present(ctx_and_fakes, monkeypatch):
+    from dataclasses import replace
+    from unittest.mock import MagicMock
+    s = ctx_and_fakes
+    q = MagicMock()
+    q.enqueue_in.return_value = MagicMock(id="rq:job:deferred")
+    set_context(replace(s["ctx"], rq_queue=q))
+    monkeypatch.setattr("worker.ticket_issue_runner.instance_budget_exceeded", lambda ctx, iid: 12.5)
+    params = _make_params(s["db"])
+
+    out = run_ticket_issues(params)
+
+    assert out["status"] == "waiting_budget"
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["status"] == "pending" and row["budget_wait_since"] is not None
+    assert s["planner"].call_count == 0
+    assert s["odoo"].calls == []   # no failed callback while waiting
+    assert q.enqueue_in.call_args.args[1] == "worker.ticket_issue_tasks.run_ticket_issues"
+
+
+def test_deferred_rerun_clears_budget_wait_marker(ctx_and_fakes):
+    """Review Important 1: back under the cap, the re-run clears the marker
+    and completes (mirrors test_ticket_runner's version of this test)."""
+    from datetime import datetime, timedelta, timezone
+    s = ctx_and_fakes
+    params = _make_params(s["db"])
+    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    writers.set_budget_wait_since(s["db"], "ticket_issues", params["run_id"], since)
+    params["budget_wait_since"] = since.isoformat()
+
+    out = run_ticket_issues(params)
+
+    assert out["status"] == "completed"
+    assert writers.get_ticket_issue_run(s["db"], params["run_id"])["budget_wait_since"] is None

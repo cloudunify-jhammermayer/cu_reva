@@ -105,3 +105,9 @@ func TestDropLastRune(t *testing.T) {
 		t.Fatalf("empty should stay empty, got %q", got)
 	}
 }
+
+func TestStatusSymbolWaitingBudget(t *testing.T) {
+	if statusChar("waiting_budget") != "~" {
+		t.Fatalf("waiting_budget should render as ~ (pending style)")
+	}
+}

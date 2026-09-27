@@ -69,6 +69,7 @@ class TicketAnalysisStatus(BaseModel):
     created_at: datetime
     completed_at: datetime | None
     image_count: int = 0
+    budget_wait_since: datetime | None = None
 
 
 class TicketAnalysisSummary(BaseModel):
@@ -104,6 +105,7 @@ class TicketAnalysisSummary(BaseModel):
     # Screenshots submitted with the ticket. The bytes are never stored, so this
     # is the only signal that a requeued analysis re-ran image-blind.
     image_count: int = 0
+    budget_wait_since: datetime | None = None
 
 
 class TicketAnalysisPage(BaseModel):

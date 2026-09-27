@@ -103,6 +103,11 @@ def _is_unique_violation(exc: IntegrityError) -> bool:
 
 # --- review_runs writers -----------------------------------------------------
 
+# Ledger kinds that are PR-review spend: excluded from the global non-review
+# cap, capped per author instead. Shared by the worker gate and the api's
+# /reviews budget page so both read one definition.
+REVIEW_SPEND_KINDS = ("review", "delta_verify", "triage")
+
 
 @_retry_on_conflict
 def claim_review_run(
@@ -158,6 +163,7 @@ def claim_review_run(
         existing.claimed_by_job_id = job_id
         existing.worker_id = worker_id
         existing.trigger_event = params.trigger_event
+        existing.budget_wait_since = None
         s.flush()
         return existing.id, True
 
@@ -237,6 +243,40 @@ def record_review_declined(db: Database, params: JobParams, reason: str) -> int:
         s.flush()
         _replace_findings(s, run.id, [])
         return run.id
+
+
+def record_review_waiting_budget(
+    db: Database, params: JobParams, since: datetime, reason: str
+) -> int:
+    """Park a claimed run while its author's review cap is full (spec
+    2026-09-27). Not terminal: the deferred job re-claims it later."""
+    with db.session() as s:
+        run = _upsert_review_run(s, params, status="waiting_budget")
+        run.summary = reason
+        run.decline_reason = None
+        run.budget_wait_since = since
+        s.flush()
+        return run.id
+
+
+def list_reviews_waiting_budget(db: Database) -> list[dict]:
+    with db.session() as s:
+        rows = s.execute(
+            select(ReviewRun, Repository.full_name, PullRequest.pr_number,
+                   PullRequest.title, PullRequest.author_login)
+            .join(Repository, ReviewRun.repository_id == Repository.id)
+            .join(PullRequest, ReviewRun.pull_request_id == PullRequest.id)
+            .where(ReviewRun.status == "waiting_budget")
+            .order_by(Repository.full_name, ReviewRun.budget_wait_since)
+        ).all()
+        return [
+            {
+                "id": rr.id, "repo_full_name": full_name, "pr_number": pr_number,
+                "pr_title": title, "author_login": author, "review_mode": rr.review_mode,
+                "budget_wait_since": rr.budget_wait_since,
+            }
+            for rr, full_name, pr_number, title, author in rows
+        ]
 
 
 def record_review_stale(db: Database, params: JobParams) -> int:
@@ -330,7 +370,9 @@ def is_already_posted(db: Database, params: JobParams) -> bool:
     Used for RQ-retry idempotency: skip the whole job if a prior attempt
     already created the Check Run. A `failed` run is excluded — its
     check_run_id is the failure notice, not a real review, so a requeue/retry
-    must be allowed to produce a genuine review.
+    must be allowed to produce a genuine review. A `waiting_budget` run is
+    excluded too — its check_run_id is the queued "waiting for budget" check,
+    not a review.
     """
     with db.session() as s:
         row = s.execute(
@@ -341,7 +383,42 @@ def is_already_posted(db: Database, params: JobParams) -> bool:
                 & (ReviewRun.review_mode == params.review_mode)
             )
         ).first()
-    return bool(row and row[0] is not None and row[1] != "failed")
+    return bool(row and row[0] is not None and row[1] not in ("failed", "waiting_budget"))
+
+
+def get_review_run_status(db: Database, params: JobParams) -> str | None:
+    """The current status for this (repo, pr, sha, mode) key, or None if no
+    row exists yet. Read BEFORE claim_review_run, which overwrites status —
+    used by run_review to detect a fresh trigger (comment, manual requeue, or
+    a duplicate push job) landing while the review is already parked in
+    `waiting_budget` by the deferred wait-and-resume chain (spec 2026-09-27)."""
+    with db.session() as s:
+        return s.execute(
+            select(ReviewRun.status).where(
+                (ReviewRun.repository_id == params.repository_id)
+                & (ReviewRun.pull_request_id == params.pull_request_id)
+                & (ReviewRun.head_sha == params.head_sha)
+                & (ReviewRun.review_mode == params.review_mode)
+            )
+        ).scalar_one_or_none()
+
+
+def get_review_run_budget_wait_since(db: Database, params: JobParams) -> datetime | None:
+    """The current budget_wait_since for this (repo, pr, sha, mode) key.
+
+    Companion to get_review_run_status: read BEFORE claim_review_run clears
+    budget_wait_since, so the original deadline can be restored if this
+    attempt turns out to be a fresh trigger racing the deferred chain rather
+    than the deferred chain's own re-run."""
+    with db.session() as s:
+        return s.execute(
+            select(ReviewRun.budget_wait_since).where(
+                (ReviewRun.repository_id == params.repository_id)
+                & (ReviewRun.pull_request_id == params.pull_request_id)
+                & (ReviewRun.head_sha == params.head_sha)
+                & (ReviewRun.review_mode == params.review_mode)
+            )
+        ).scalar_one_or_none()
 
 
 # Arbitrary fixed key for the budget advisory lock ("REVB" as an int).
@@ -1543,6 +1620,7 @@ def get_ticket_analysis(db: Database, analysis_id: int) -> dict | None:
             "estimated_cost_usd": float(row.estimated_cost_usd) if row.estimated_cost_usd else None,
             "created_at": row.created_at,
             "completed_at": row.completed_at,
+            "budget_wait_since": row.budget_wait_since,
             "repo_docs_sections_used": row.repo_docs_sections_used,
             "image_count": row.image_count,
         }
@@ -1592,6 +1670,7 @@ def get_pending_timesheet_run(
             "job_id": row.job_id,
             "status": row.status,
             "created_at": row.created_at,
+            "budget_wait_since": row.budget_wait_since,
         }
 
 
@@ -1624,6 +1703,7 @@ def get_timesheet_run(db: Database, run_id: int) -> dict | None:
             "error_message": row.error_message,
             "created_at": row.created_at,
             "completed_at": row.completed_at,
+            "budget_wait_since": row.budget_wait_since,
         }
 
 
@@ -1990,6 +2070,7 @@ def get_ticket_issue_run(db: Database, run_id: int) -> dict | None:
             "estimated_cost_usd": float(row.estimated_cost_usd) if row.estimated_cost_usd else None,
             "created_at": row.created_at,
             "completed_at": row.completed_at,
+            "budget_wait_since": row.budget_wait_since,
         }
 
 
@@ -3271,6 +3352,59 @@ def sum_instance_cost_since(db: Database, odoo_instance_id: int, since: datetime
     return total
 
 
+# ------------------------------------------------------------ budget waiting
+
+BUDGET_WAIT_KINDS = ("ticket_analysis", "support_answer", "ticket_issues", "timesheet_review")
+_BUDGET_WAIT_MODELS = {
+    "ticket_analysis": TicketAnalysis,
+    "support_answer": SupportTurn,
+    "ticket_issues": TicketIssueRun,
+    "timesheet_review": TimesheetReviewRun,
+}
+
+
+def set_budget_wait_since(db: Database, kind: str, row_id: int, since: datetime | None) -> None:
+    """Stamp (or clear, since=None) the wait marker on one Odoo-facing run row.
+    `kind` is one of BUDGET_WAIT_KINDS; anything else is a programming error."""
+    model = _BUDGET_WAIT_MODELS[kind]
+    with db.session() as s:
+        row = s.get(model, row_id)
+        if row is not None:
+            row.budget_wait_since = since
+
+
+def list_budget_waiting(db: Database) -> list[dict]:
+    """Every Odoo-facing row currently waiting for budget, oldest first, with
+    the instance name and a human record label for the /reviews page."""
+    out: list[dict] = []
+    with db.session() as s:
+        names = dict(s.execute(select(OdooInstance.id, OdooInstance.name)).all())
+        for kind, model in _BUDGET_WAIT_MODELS.items():
+            rows = s.execute(
+                select(model).where(model.budget_wait_since.is_not(None), model.status == "pending")
+            ).scalars().all()
+            for r in rows:
+                if kind == "support_answer":
+                    thread = s.get(SupportThread, r.thread_id)
+                    model_name, ticket_id = thread.model_name, thread.ticket_id
+                    record = f"{model_name} {ticket_id}"
+                elif kind == "timesheet_review":
+                    model_name, ticket_id = None, None
+                    record = f"timesheet {r.request_id}"
+                else:
+                    model_name, ticket_id = r.model_name, r.ticket_id
+                    record = f"{model_name} {ticket_id}"
+                out.append({
+                    "kind": kind, "row_id": r.id,
+                    "odoo_instance_id": r.odoo_instance_id,
+                    "instance_name": names.get(r.odoo_instance_id),
+                    "model_name": model_name, "ticket_id": ticket_id, "record": record,
+                    "budget_wait_since": r.budget_wait_since,
+                })
+    out.sort(key=lambda r: r["budget_wait_since"])
+    return out
+
+
 # ------------------------------------------------------------------- personas
 
 _PERSONA_FIELDS = (
@@ -3361,7 +3495,7 @@ _SUPPORT_TURN_FIELDS = (
     "id", "thread_id", "odoo_instance_id", "seq", "job_id", "question",
     "answer_html", "result_structured", "request_kind", "answer_status",
     "grounding_level", "status", "error_message", "model", "estimated_cost_usd",
-    "created_at", "completed_at", "callback_sent_at", "callback_error",
+    "created_at", "completed_at", "budget_wait_since", "callback_sent_at", "callback_error",
     "image_count",
 )
 

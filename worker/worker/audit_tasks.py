@@ -12,7 +12,7 @@ from reva.db.repo_lookup import get_repo_meta
 from reva.errors import TransientError
 from reva.review_formatter import SEVERITY_EMOJI
 from reva.types import AuditJobParams, Finding
-from worker.runner import budget_exceeded, get_context
+from worker.runner import budget_exceeded, defer_for_budget, get_context
 
 logger = structlog.get_logger()
 
@@ -134,6 +134,11 @@ def run_audit(job_params: dict) -> dict:
     if spent is not None:
         log.warning("audit_over_budget", spent_usd=round(spent, 2),
                     budget_usd=ctx.daily_budget_usd)
+        waiting = defer_for_budget(
+            ctx, "worker.audit_tasks.run_audit", job_params, kind="audit", spent=spent, log=log,
+        )
+        if waiting is not None:
+            return waiting
         return {"audit_id": None, "status": "declined", "reason": "over_budget"}
 
     with ctx.db.session() as s:

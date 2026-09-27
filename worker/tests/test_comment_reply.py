@@ -90,3 +90,18 @@ def test_reply_skipped_when_over_budget(db_with_finding):
     # no reply spend added beyond the seeded reply row
     with db_with_finding.session() as s:
         assert s.query(ClaudeSpend).count() == 1
+
+
+def test_reply_waits_when_over_budget_and_queue_present(db_with_finding):
+    from dataclasses import replace
+    writers.record_claude_spend(db_with_finding, "reply", 50.0)
+    ctx = _ctx(db_with_finding, budget=10.0)
+    q = MagicMock(); q.enqueue_in.return_value = MagicMock(id="rq:job:deferred")
+    set_context(replace(ctx, rq_queue=q))
+
+    out = run_comment_reply(_params())
+
+    assert out["status"] == "waiting_budget"
+    ctx.claude.chat.assert_not_called()
+    assert q.enqueue_in.call_args.args[1] == "worker.tasks.run_comment_reply"
+    assert q.enqueue_in.call_args.args[2]["comment_id"] == _COMMENT_ID

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import structlog
 
 from reva.db import writers
@@ -12,7 +14,12 @@ from reva.types import (
     TimesheetLine,
     TimesheetLineResult,
 )
-from worker.runner import build_odoo_client, get_context, instance_budget_exceeded
+from worker.runner import (
+    build_odoo_client,
+    defer_for_budget,
+    get_context,
+    instance_budget_exceeded,
+)
 
 logger = structlog.get_logger()
 
@@ -91,13 +98,27 @@ def run_timesheet_review(job_params: dict) -> dict:
     if remaining:
         spent = instance_budget_exceeded(ctx, params.odoo_instance_id)
         if spent is not None:
+            waiting = defer_for_budget(
+                ctx, "worker.timesheet_tasks.run_timesheet_review",
+                params.model_dump(mode="json"), kind="timesheet_review", spent=spent, log=log,
+            )
+            if waiting is not None:
+                writers.set_budget_wait_since(
+                    ctx.db, "timesheet_review", params.run_id,
+                    datetime.fromisoformat(waiting["budget_wait_since"]),
+                )
+                return waiting
             error = (
                 f"Odoo instance daily budget reached (~${spent:.2f} in 24h); "
                 "timesheet review declined."
             )
             log.warning("timesheet_review_instance_over_budget", spent_usd=round(spent, 2))
+            writers.set_budget_wait_since(ctx.db, "timesheet_review", params.run_id, None)
             writers.record_timesheet_run_failed(ctx.db, params.run_id, error)
             raise PermanentError(error)
+        # Clear unconditionally: the row may carry a stale marker even when this
+        # job's own params don't (e.g. a fresh trigger after a give-up).
+        writers.set_budget_wait_since(ctx.db, "timesheet_review", params.run_id, None)
 
     for chunk in _chunks(remaining, TIMESHEET_CHUNK_SIZE):
         try:

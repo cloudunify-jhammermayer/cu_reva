@@ -97,6 +97,7 @@ class SupportTurnStatus(BaseModel):
     completed_at: datetime | None
     callback_sent_at: datetime | None
     callback_error: str | None
+    budget_wait_since: datetime | None = None
 
     model_config = {"from_attributes": True}
 

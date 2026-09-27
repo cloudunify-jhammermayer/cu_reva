@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from redis import Redis
 from rq import Queue
 
-from app.routes import docs, health, webhooks
+from app.routes import budget_status, docs, health, webhooks
 from app.routes.v1 import router as v1_router
 from app.settings import Settings
 from reva.db.engine import Database, create_engine_from_url
@@ -73,3 +73,5 @@ app.include_router(health.router)
 app.include_router(v1_router, prefix="/api/v1")
 # Consultant docs browser — gated by Cloudflare Access, not the machine API key.
 app.include_router(docs.router, prefix="/repo-docs")
+# Consultant budget page — gated by Cloudflare Access like /docs, not the API key.
+app.include_router(budget_status.router, prefix="/reviews")

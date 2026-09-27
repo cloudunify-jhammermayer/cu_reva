@@ -94,8 +94,17 @@ def require_odoo_instance(
     )
 
 
-def assert_instance_within_budget(db: Database, instance: ResolvedOdooInstance) -> None:
-    """429 when the instance's rolling-24h spend has reached its cap."""
+def assert_instance_within_budget(
+    db: Database, instance: ResolvedOdooInstance, settings: Settings
+) -> None:
+    """Accept while waiting is enabled, even over the cap (the worker gate
+    parks the job instead); 429 only when waiting is disabled
+    (`budget_retry_seconds <= 0`) and the instance's rolling-24h spend has
+    reached its cap."""
+    if settings.budget_retry_seconds > 0:
+        # Waiting is on (spec 2026-09-27): accept, let the worker gate park the
+        # job until spend rolls off. Only a disabled wait fails fast here.
+        return
     if instance.daily_budget_usd is None:
         return
     from reva.db import writers

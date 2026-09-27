@@ -1429,3 +1429,69 @@ def test_image_staging_failure_degrades_and_records_an_ops_event(
     call = code_runner.review_calls[0]
     assert "images" not in call["params"]
     assert _ops_events(s["db"], "image_staging_failed")
+
+
+def _waiting_queue():
+    from unittest.mock import MagicMock
+    q = MagicMock()
+    q.enqueue_in.return_value = MagicMock(id="rq:job:deferred")
+    return q
+
+
+def test_instance_budget_gate_waits_and_keeps_row_pending(ctx_and_fakes, monkeypatch):
+    """Over budget with waiting enabled: no paid call, no failure, row pending
+    with the wait marker, the same job re-enqueued for later."""
+    from dataclasses import replace
+    s = ctx_and_fakes
+    q = _waiting_queue()
+    set_context(replace(s["ctx"], rq_queue=q))
+    monkeypatch.setattr("worker.ticket_runner.instance_budget_exceeded", lambda ctx, iid: 12.5)
+    params = _make_params(s["db"])
+
+    out = run_ticket_analysis(params)
+
+    assert out["status"] == "waiting_budget"
+    row = writers.get_ticket_analysis(s["db"], params["analysis_id"])
+    assert row["status"] == "pending"
+    assert row["budget_wait_since"] is not None
+    assert s["analyzer"].call_count == 0
+    _, task, deferred = q.enqueue_in.call_args.args
+    assert task == "worker.ticket_tasks.run_ticket_analysis"
+    assert deferred["analysis_id"] == params["analysis_id"]
+    assert deferred["budget_wait_since"]
+
+
+def test_deferred_rerun_clears_budget_wait_marker(ctx_and_fakes, monkeypatch):
+    """Review Focus 2: back under the cap, the re-run clears the marker and completes."""
+    from datetime import datetime, timedelta, timezone
+    s = ctx_and_fakes
+    params = _make_params(s["db"])
+    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    writers.set_budget_wait_since(s["db"], "ticket_analysis", params["analysis_id"], since)
+    params["budget_wait_since"] = since.isoformat()
+
+    out = run_ticket_analysis(params)
+
+    assert out["status"] == "completed"
+    assert writers.get_ticket_analysis(s["db"], params["analysis_id"])["budget_wait_since"] is None
+
+
+def test_instance_budget_gate_fails_after_max_wait(ctx_and_fakes, monkeypatch):
+    """Review Important 1: giving up must clear the wait marker too, or the row
+    stays stuck looking like it's still waiting."""
+    from dataclasses import replace
+    from datetime import datetime, timedelta, timezone
+    s = ctx_and_fakes
+    set_context(replace(s["ctx"], rq_queue=_waiting_queue(), budget_wait_max_seconds=3600))
+    monkeypatch.setattr("worker.ticket_runner.instance_budget_exceeded", lambda ctx, iid: 12.5)
+    params = _make_params(s["db"])
+    since = datetime.now(timezone.utc) - timedelta(hours=2)
+    writers.set_budget_wait_since(s["db"], "ticket_analysis", params["analysis_id"], since)
+    params["budget_wait_since"] = since.isoformat()
+
+    with pytest.raises(PermanentError):
+        run_ticket_analysis(params)
+
+    row = writers.get_ticket_analysis(s["db"], params["analysis_id"])
+    assert row["status"] == "failed"
+    assert row["budget_wait_since"] is None

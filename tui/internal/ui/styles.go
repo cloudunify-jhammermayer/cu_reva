@@ -81,6 +81,8 @@ func statusSymbol(status string) string {
 		return styleStatusFailed.Render("x")
 	case "stale":
 		return styleStatusStale.Render("!")
+	case "waiting_budget":
+		return styleStatusStale.Render("~")
 	default:
 		return styleStatusOther.Render("-")
 	}
@@ -137,6 +139,8 @@ func statusChar(status string) string {
 		return "x"
 	case "stale":
 		return "!"
+	case "waiting_budget":
+		return "~"
 	default:
 		return "-"
 	}

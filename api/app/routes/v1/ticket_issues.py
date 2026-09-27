@@ -19,11 +19,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from rq import Retry
 from sqlalchemy.exc import IntegrityError
 
+from app.budget_wait import WAITING_DETAIL, is_waiting_for_budget
 from app.dependencies import (
     ResolvedOdooInstance,
     assert_instance_within_budget,
     get_db,
     get_github_client,
+    get_settings,
     require_master_or_odoo_instance,
     require_odoo_instance,
 )
@@ -40,6 +42,7 @@ from app.schemas.ticket_issues import (
     TicketIssuesAccepted,
     UpdateIssueEstimateRequest,
 )
+from app.settings import Settings
 from reva.attachment_text import classify_attachment
 from reva.db import writers
 from reva.db.engine import Database
@@ -102,13 +105,14 @@ def submit_create_issues(
     db: Database = Depends(get_db),
     github: GitHubClient = Depends(get_github_client),
     instance: ResolvedOdooInstance = Depends(require_odoo_instance),
+    settings: Settings = Depends(get_settings),
 ) -> dict:
     """Accept an Odoo create-issues request, enqueue the job, return immediately.
 
     Odoo's outbound timeout is 10 s and any non-202 is shown to the user with a
     transaction rollback — so validation must happen here, not in the worker.
     """
-    assert_instance_within_budget(db, instance)
+    assert_instance_within_budget(db, instance, settings)
     parsed = parse_github_repo_url(body.github_url)
     if parsed is None:
         raise HTTPException(
@@ -363,7 +367,9 @@ def get_ticket_issue_run(
     return row
 
 
-def _is_stale_pending(row: dict) -> bool:
+def _is_stale_pending(row: dict, settings: Settings) -> bool:
+    if is_waiting_for_budget(row, _STALE_PENDING, settings.budget_wait_max_seconds):
+        return False
     created_at = row["created_at"]
     if created_at.tzinfo is None:  # SQLite returns naive datetimes
         created_at = created_at.replace(tzinfo=timezone.utc)
@@ -380,6 +386,7 @@ def requeue_ticket_issue_run(
     request: Request,
     db: Database = Depends(get_db),
     instance: ResolvedOdooInstance | None = Depends(require_master_or_odoo_instance),
+    settings: Settings = Depends(get_settings),
 ) -> dict:
     """Re-enqueue a failed/completed run — or a stale pending one (its job died
     without running, e.g. a SIGKILLed worker; without this the pending dedup
@@ -393,7 +400,11 @@ def requeue_ticket_issue_run(
     row = writers.get_ticket_issue_run(db, request_id)
     if row is None or (instance is not None and row["odoo_instance_id"] != instance.id):
         raise HTTPException(status_code=404, detail="Ticket issue run not found")
-    if row["status"] not in ("failed", "completed") and not _is_stale_pending(row):
+    if row["status"] == "pending" and is_waiting_for_budget(
+        row, _STALE_PENDING, settings.budget_wait_max_seconds
+    ):
+        raise HTTPException(status_code=409, detail=WAITING_DETAIL)
+    if row["status"] not in ("failed", "completed") and not _is_stale_pending(row, settings):
         raise HTTPException(
             status_code=409,
             detail="Only failed, completed, or stale pending runs can be requeued",

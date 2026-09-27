@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REVA budgets</title>
+<style>
+  :root { --bg:#f5f6f8; --surface:#fff; --line:#dde1e7; --ink:#1d2430; --muted:#64707f;
+          --accent:#2f5fa8; --wait:#b7791f; --over:#b23a3a; --over-soft:#f9e3e3;
+          --accent-soft:#e4ecf8; --track:#e8ebf0; }
+  @media (prefers-color-scheme: dark) { :root { color-scheme:dark; --bg:#14181e; --surface:#1c2229;
+          --line:#2c343e; --ink:#e6eaef; --muted:#98a3b1; --accent:#7ea6e6; --wait:#e0a94a;
+          --over:#e57373; --over-soft:#3f2222; --accent-soft:#223247; --track:#2a323c; } }
+  body { margin:0; padding:0 16px 48px; background:var(--bg); color:var(--ink);
+         font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  .wrap { max-width:1080px; margin:0 auto; display:grid; gap:28px; }
+  header { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:baseline;
+           gap:8px 24px; padding:22px 0 14px; border-bottom:1px solid var(--line); }
+  h1 { font-size:20px; margin:0; } h1 span { color:var(--muted); font-weight:400; }
+  .meta { color:var(--muted); font-size:13px; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:0 0 10px; }
+  .budgets { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:14px 16px; }
+  .panel h3 { font-size:14px; margin:0 0 12px; display:flex; justify-content:space-between; }
+  .panel h3 small { color:var(--muted); font-weight:400; font-size:12px; }
+  .meter { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 12px; align-items:center;
+           padding:7px 0; border-top:1px solid var(--line); }
+  .meter:first-of-type { border-top:0; padding-top:0; }
+  .num { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; color:var(--muted); white-space:nowrap; }
+  .num b { color:var(--ink); font-weight:500; }
+  .track { grid-column:1/-1; height:6px; background:var(--track); border-radius:3px; overflow:hidden; }
+  .fill { height:100%; background:var(--accent); } .fill.warn { background:var(--wait); } .fill.over { background:var(--over); }
+  .pill { font-size:11px; font-weight:600; text-transform:uppercase; padding:1px 7px; border-radius:3px; }
+  .pill.over { background:var(--over-soft); color:var(--over); } .pill.off { background:var(--accent-soft); color:var(--accent); }
+  .repo { background:var(--surface); border:1px solid var(--line); border-radius:6px; margin-top:8px; }
+  .repo summary { list-style:none; cursor:pointer; display:grid; grid-template-columns:auto minmax(0,1fr) auto;
+                  gap:12px; align-items:center; padding:10px 14px; }
+  .repo summary::-webkit-details-marker { display:none; }
+  .chev { color:var(--muted); font-size:11px; } .repo[open] .chev { transform:rotate(90deg); display:inline-block; }
+  .title { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .title .sub { font-weight:400; color:var(--muted); font-size:12.5px; margin-left:8px; }
+  .right { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; color:var(--muted); white-space:nowrap; }
+  .tablewrap { overflow-x:auto; background:var(--surface); border:1px solid var(--line); border-radius:6px; }
+  .repo .tablewrap { border:0; border-top:1px solid var(--line); border-radius:0 0 6px 6px; }
+  table { border-collapse:collapse; width:100%; min-width:560px; }
+  th, td { text-align:left; padding:9px 14px; border-top:1px solid var(--line); vertical-align:top; }
+  th { border-top:0; font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  td.mono { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; white-space:nowrap; }
+  td .sub { display:block; color:var(--muted); font-size:12px; }
+  tr.stripe { border-left:3px solid var(--wait); } tr.stripe.over { border-left-color:var(--over); }
+  .empty { padding:14px; color:var(--muted); } .count { color:var(--muted); margin-left:6px; font-weight:400; }
+  .note { color:var(--muted); font-size:12.5px; margin:8px 0 0; } .err { color:var(--over); }
+  @media (max-width:560px) { .repo summary { grid-template-columns:auto minmax(0,1fr); } .right { grid-column:2; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>REVA <span>/ budgets and waiting work</span></h1>
+    <div class="meta" id="meta">Loading…</div>
+  </header>
+  <section><h2>Budgets, rolling 24 h</h2><div class="budgets" id="budgets"></div></section>
+  <section><h2>Waiting PR reviews <span class="count" id="rev-count"></span></h2><div id="reviews"></div></section>
+  <section><h2>Waiting Odoo work <span class="count" id="odoo-count"></span></h2><div id="odoo"></div></section>
+  <section><h2>Other deferred jobs <span class="count" id="jobs-count"></span></h2><div id="jobs"></div>
+    <p class="note">Read-only. Requeue and cap changes stay in the TUI.</p></section>
+</div>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const money = (v) => v == null ? "—" : "$" + Number(v).toFixed(2);
+  const hm = (iso) => iso ? new Date(iso).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}) : "—";
+  const ago = (iso) => {
+    if (!iso) return "";
+    const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
+    return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
+  };
+  const OPEN_KEY = "reva.reviews.open";
+  const openRepos = () => { try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) || "[]")); } catch { return new Set(); } };
+  const saveOpen = (set) => { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...set])); } catch {} };
+
+  function meter(name, spent, cap, over) {
+    const pct = cap ? Math.min(100, Math.round(spent / cap * 100)) : (spent > 0 ? 4 : 0);
+    const cls = over ? "over" : (pct >= 75 ? "warn" : "");
+    const capTxt = cap == null ? `<span class="pill off">no cap</span>` : `${money(cap)}${over ? ' <span class="pill over">over</span>' : ""}`;
+    return `<div class="meter"><div>${esc(name)}</div><div class="num"><b>${money(spent)}</b> / ${capTxt}</div>
+            <div class="track"><div class="fill ${cls}" style="width:${pct}%"></div></div></div>`;
+  }
+  function panel(title, small, rows, emptyText) {
+    return `<div class="panel"><h3>${title} <small>${small}</small></h3>${rows.length ? rows.join("") : `<div class="note">${emptyText}</div>`}</div>`;
+  }
+  function render(d) {
+    const s = d.settings;
+    $("meta").textContent = `Refreshed ${hm(d.generated_at)} · every 60 s · waiting jobs re-check every ${Math.round(s.retry_seconds / 60)} min, give up after ${Math.round(s.max_wait_seconds / 3600)} h`;
+    const g = d.budgets.global;
+    $("budgets").innerHTML =
+      panel("Global, non-review calls", "audits, replies, change notes", [meter("All instances and repos", g.spent_usd, g.cap_usd, g.over)], "") +
+      panel("Odoo instances", "ticket analysis, support, issues, timesheets", d.budgets.instances.map((i) => meter(i.name, i.spent_usd, i.cap_usd, i.over)), "No Odoo instances.") +
+      panel("PR authors", "review spend, last 24 h", d.budgets.authors.map((a) => meter(a.author_login, a.spent_usd, a.cap_usd, a.over)), "No paid reviews in the last 24 h.");
+
+    const groups = d.waiting.reviews;
+    const total = groups.reduce((n, g) => n + g.count, 0);
+    $("rev-count").textContent = total ? `${total} in ${groups.length} repo${groups.length === 1 ? "" : "s"}` : "";
+    const open = openRepos();
+    $("reviews").innerHTML = groups.length ? groups.map((g) => `
+      <details class="repo" data-repo="${esc(g.repo_full_name)}" ${open.has(g.repo_full_name) ? "open" : ""}>
+        <summary><span class="chev">&#9654;</span>
+          <span class="title">${esc(g.repo_full_name)} <span class="sub">${g.count} PR${g.count === 1 ? "" : "s"} · ${esc(g.authors.join(", "))}</span></span>
+          <span class="right">oldest ${hm(g.oldest_since)} (${ago(g.oldest_since)})</span></summary>
+        <div class="tablewrap"><table><thead><tr><th>PR</th><th>Author</th><th>Mode</th><th>Waiting since</th></tr></thead><tbody>
+          ${g.prs.map((p) => `<tr class="stripe"><td>#${p.pr_number} <span class="sub">${esc(p.pr_title)}</span></td><td>${esc(p.author_login)}</td><td>${esc(p.review_mode)}</td><td class="mono">${hm(p.budget_wait_since)} (${ago(p.budget_wait_since)})</td></tr>`).join("")}
+        </tbody></table></div></details>`).join("") : `<div class="tablewrap"><div class="empty">Nothing waiting.</div></div>`;
+    document.querySelectorAll("details.repo").forEach((el) => el.addEventListener("toggle", () => {
+      const set = openRepos(); el.open ? set.add(el.dataset.repo) : set.delete(el.dataset.repo); saveOpen(set);
+    }));
+
+    const KIND = {ticket_analysis: "Ticket analysis", support_answer: "Support answer", ticket_issues: "Issue planning",
+                  timesheet_review: "Timesheet review", audit: "Repo audit", comment_reply: "Comment reply", change_note: "Change note"};
+    const odoo = d.waiting.odoo;
+    $("odoo-count").textContent = odoo.length || "";
+    $("odoo").innerHTML = odoo.length ? `<div class="tablewrap"><table><thead><tr><th>Kind</th><th>Instance</th><th>Record</th><th>Waiting since</th><th>Gives up</th></tr></thead><tbody>
+      ${odoo.map((r) => { const giveUp = new Date(new Date(r.budget_wait_since).getTime() + s.max_wait_seconds * 1000).toISOString();
+        return `<tr class="stripe"><td>${KIND[r.kind] || esc(r.kind)}</td><td>${esc(r.instance_name)}</td><td class="mono">${esc(r.record)}</td><td class="mono">${hm(r.budget_wait_since)} (${ago(r.budget_wait_since)})</td><td class="mono">${new Date(giveUp).toLocaleString([], {weekday: "short", hour: "2-digit", minute: "2-digit"})}</td></tr>`; }).join("")}
+      </tbody></table></div>` : `<div class="tablewrap"><div class="empty">Nothing waiting.</div></div>`;
+
+    const jobs = d.waiting.jobs;
+    $("jobs-count").textContent = jobs.length || "";
+    $("jobs").innerHTML = (jobs.length ? `<div class="tablewrap"><table><thead><tr><th>Kind</th><th>Target</th><th>Waiting since</th><th>Next run</th></tr></thead><tbody>
+      ${jobs.map((j) => `<tr class="stripe"><td>${KIND[j.kind] || esc(j.kind)}</td><td>${esc(j.target)}</td><td class="mono">${hm(j.budget_wait_since)} (${ago(j.budget_wait_since)})</td><td class="mono">${hm(j.next_run_at)}</td></tr>`).join("")}
+      </tbody></table></div>` : `<div class="tablewrap"><div class="empty">Nothing waiting.</div></div>`) +
+      (d.waiting.jobs_error ? `<p class="note err">Job queue unreachable: ${esc(d.waiting.jobs_error)}</p>` : "");
+  }
+  async function load() {
+    try {
+      const res = await fetch("data", {cache: "no-store"});
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      render(await res.json());
+    } catch (e) {
+      $("meta").innerHTML = `<span class="err">Could not load: ${esc(e.message)}</span>`;
+    }
+  }
+  load();
+  setInterval(load, 60000);
+})();
+</script>
+</body>
+</html>

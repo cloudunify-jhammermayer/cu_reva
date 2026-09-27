@@ -15,6 +15,8 @@ sent to the customer.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import structlog
 
 from reva.db import writers
@@ -31,6 +33,7 @@ from worker.repo_config import code_grounding_allowed, resolve_repo_context
 from worker.runner import (
     budget_exceeded,
     build_odoo_client,
+    defer_for_budget,
     get_context,
     instance_budget_exceeded,
 )
@@ -108,6 +111,27 @@ def run_support_answer(job_params: dict) -> dict:
         html = existing["answer_html"]
     else:
         try:
+            spent = instance_budget_exceeded(ctx, params.odoo_instance_id)
+            if spent is not None:
+                waiting = defer_for_budget(
+                    ctx, "worker.support_tasks.run_support_answer",
+                    params.model_dump(mode="json"), kind="support_answer", spent=spent, log=log,
+                )
+                if waiting is not None:
+                    writers.set_budget_wait_since(
+                        ctx.db, "support_answer", params.turn_id,
+                        datetime.fromisoformat(waiting["budget_wait_since"]),
+                    )
+                    return waiting
+                log.warning("support_answer_instance_over_budget", spent_usd=round(spent, 2))
+                writers.set_budget_wait_since(ctx.db, "support_answer", params.turn_id, None)
+                raise PermanentError(
+                    f"Odoo instance daily budget reached (~${spent:.2f} in 24h); "
+                    f"support answer declined."
+                )
+            # Clear unconditionally: the row may carry a stale marker even when
+            # this job's own params don't (e.g. a fresh trigger after a give-up).
+            writers.set_budget_wait_since(ctx.db, "support_answer", params.turn_id, None)
             html = _produce_answer(ctx, params, odoo, log)
         except TransientError:
             # RQ will retry; the turn stays pending on purpose so the retry
@@ -172,16 +196,6 @@ def run_support_answer(job_params: dict) -> dict:
 
 def _produce_answer(ctx, params: SupportJobParams, odoo, log) -> str:
     """Run the paid work for one turn and persist it. Returns the rendered HTML."""
-    spent = instance_budget_exceeded(ctx, params.odoo_instance_id)
-    if spent is not None:
-        error = (
-            f"Odoo instance daily budget reached (~${spent:.2f} in 24h); "
-            f"support answer declined."
-        )
-        log.warning("support_answer_instance_over_budget", spent_usd=round(spent, 2))
-        writers.record_support_turn_failed(ctx.db, params.turn_id, error)
-        raise PermanentError(error)
-
     repo = resolve_repo_context(ctx.github, params.github_url, log)
     config = repo[3] if repo else None
     version = _core_version(ctx, config)

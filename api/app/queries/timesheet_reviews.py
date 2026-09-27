@@ -42,6 +42,7 @@ def list_timesheet_reviews(
                 "error_message": r.error_message,
                 "created_at": r.created_at,
                 "completed_at": r.completed_at,
+                "budget_wait_since": r.budget_wait_since,
             }
             for r in rows
         ]

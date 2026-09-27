@@ -141,8 +141,9 @@ and marks lines that need a human decision.
 - **Docs site**: consultant-facing repo documentation, browsable at `/docs`.
 - **Cost control**: every run's cost is recorded; rolling 24-hour budget caps
   (non-review spend globally, per Odoo instance, and per PR author for review
-  spend) decline work instead of overspending. Typical real-world costs
-  are small — see `technical.md`.
+  spend) park work until spend rolls off (re-checked hourly, up to 2 days)
+  instead of overspending; `/reviews` shows what is waiting. Typical
+  real-world costs are small — see `technical.md`.
 
 ---
 

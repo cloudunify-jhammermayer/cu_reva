@@ -258,6 +258,27 @@ def test_change_note_job_delivers_when_ticket_already_ready(cn_ctx):
     assert _note_rows(s["db"])[0].delivered_at is not None
 
 
+def test_change_note_waits_when_over_budget_and_queue_present(cn_ctx, monkeypatch):
+    from worker.change_note_runner import run_change_note
+
+    s = cn_ctx
+    q = MagicMock()
+    q.enqueue_in.return_value = MagicMock(id="rq:job:deferred")
+    s["ctx"].rq_queue = q
+    s["ctx"].budget_retry_seconds = 900
+    s["ctx"].budget_wait_max_seconds = 86400
+    monkeypatch.setattr("worker.change_note_runner.budget_exceeded", lambda c: 50.0)
+    _seed_run(s["db"], issues=[{"number": 50, "state": "closed"}])  # ready
+
+    out = run_change_note(_cn_params())
+
+    assert out["status"] == "waiting_budget"
+    assert _note_rows(s["db"])[0].status == "pending"   # not skipped_budget
+    assert s["odoo"].calls == []                         # nothing delivered yet
+    assert q.enqueue_in.call_args.args[1] == "worker.change_note_tasks.run_change_note"
+    assert q.enqueue_in.call_args.args[2]["pr_number"] == 7
+
+
 # --- release-log entries instead of Claude drafts (spec 2026-09-04) -----------
 
 _OPEN_LOG = (

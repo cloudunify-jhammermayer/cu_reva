@@ -13,10 +13,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from rq import Retry
 from sqlalchemy.exc import IntegrityError
 
+from app.budget_wait import WAITING_DETAIL, is_waiting_for_budget
 from app.dependencies import (
     ResolvedOdooInstance,
     assert_instance_within_budget,
     get_db,
+    get_settings,
     require_master_or_odoo_instance,
     require_odoo_instance,
 )
@@ -30,6 +32,7 @@ from app.schemas.ticket_analyses import (
     TicketAnalysisSummary,
     TicketAnalysisStatus,
 )
+from app.settings import Settings
 from reva.attachment_text import classify_attachment
 from reva.claude_code_runner import REVIEW_JOB_TIMEOUT
 from reva.db import writers
@@ -94,7 +97,9 @@ def _enqueue(request: Request, db: Database, analysis_id: int, params: TicketJob
     return job.id
 
 
-def _is_stale_pending(row: dict) -> bool:
+def _is_stale_pending(row: dict, settings: Settings) -> bool:
+    if is_waiting_for_budget(row, _STALE_PENDING, settings.budget_wait_max_seconds):
+        return False
     created_at = row["created_at"]
     if created_at.tzinfo is None:  # SQLite returns naive datetimes
         created_at = created_at.replace(tzinfo=timezone.utc)
@@ -111,9 +116,10 @@ def submit_ticket_analysis(
     request: Request,
     db: Database = Depends(get_db),
     instance: ResolvedOdooInstance = Depends(require_odoo_instance),
+    settings: Settings = Depends(get_settings),
 ) -> dict:
     """Accept a ticket text, enqueue the analysis job, and return immediately."""
-    assert_instance_within_budget(db, instance)
+    assert_instance_within_budget(db, instance, settings)
     if body.attachment is not None:
         try:
             classify_attachment(body.attachment.filename, body.attachment.content_base64)
@@ -239,6 +245,7 @@ def requeue_ticket_analysis(
     request: Request,
     db: Database = Depends(get_db),
     instance: ResolvedOdooInstance | None = Depends(require_master_or_odoo_instance),
+    settings: Settings = Depends(get_settings),
 ) -> dict:
     """Re-enqueue a failed/completed analysis — or a stale pending one whose job
     died without running (e.g. a SIGKILLed worker or a lost Redis job); without
@@ -246,7 +253,11 @@ def requeue_ticket_analysis(
     row = writers.get_ticket_analysis(db, analysis_id)
     if row is None or (instance is not None and row["odoo_instance_id"] != instance.id):
         raise HTTPException(status_code=404, detail="Ticket analysis not found")
-    if row["status"] not in ("failed", "completed") and not _is_stale_pending(row):
+    if row["status"] == "pending" and is_waiting_for_budget(
+        row, _STALE_PENDING, settings.budget_wait_max_seconds
+    ):
+        raise HTTPException(status_code=409, detail=WAITING_DETAIL)
+    if row["status"] not in ("failed", "completed") and not _is_stale_pending(row, settings):
         raise HTTPException(
             status_code=409,
             detail="Only failed, completed, or stale pending analyses can be requeued",

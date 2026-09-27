@@ -1,5 +1,68 @@
 # REVA — Work Handoff
 
+## Addendum 2026-09-27 — budget wait-and-resume
+
+**Status: implemented, not deployed** (spec
+`docs/superpowers/specs/archive/2026-09-27-budget-wait-and-resume-design.md`,
+plan `docs/superpowers/plans/archive/2026-09-27-budget-wait-and-resume.md`).
+Every budget gate (ticket analysis, support answer, ticket issues, timesheet
+review, the PR-review per-author cap, audit, comment reply, change note) now
+waits instead of failing terminally the moment a cap is hit:
+`worker/worker/runner.py::defer_for_budget` re-enqueues the job via RQ
+`enqueue_in` every `REVA_BUDGET_RETRY_SECONDS` (default 3600; `<= 0` disables
+retrying) until the gate clears or `REVA_BUDGET_WAIT_MAX_SECONDS` (default
+172800) elapses, at which point it falls back to the old terminal path. Ops
+events: `budget_wait_started` / `budget_wait_expired` /
+`budget_wait_enqueue_failed`.
+
+Migration `050_budget_wait_since.sql` adds a nullable `budget_wait_since` to
+`review_runs`, `ticket_analyses`, `ticket_issue_runs`, `timesheet_review_runs`,
+`support_turns`. PR reviews get a new status `waiting_budget` with a queued
+"Waiting for review budget" Check Run; the Odoo-facing rows (ticket
+analysis/issues/timesheet/support) stay `pending` with the marker set, so the
+Odoo status contract is untouched. There is no reaper for these Odoo rows —
+it's the api's stale-pending check (on requeue and resubmit) that now excludes
+waiting rows; requeuing a waiting ticket-analysis / support-turn / ticket-issue
+row returns 409 "Waiting for budget; retries automatically", scoped to
+`status == "pending"` so a given-up (failed) row with a stale marker is still
+requeueable. The PR-review requeue endpoint is not wired to this and keeps its
+generic 409 for a `waiting_budget` run. The accept-time instance-cap response
+becomes 202 (was 429) while waiting is enabled, and 429 only when
+`REVA_BUDGET_RETRY_SECONDS <= 0`.
+
+New consultant-facing page: `GET /reviews/` + `/reviews/data`
+(`api/app/routes/budget_status.py`, `api/app/static/reviews.html`) lists
+everything currently waiting on budget. Like `/repo-docs` it carries **no
+app-layer auth** — nginx already proxies `/reviews/` to the api and
+`setup-production.md` documents the `/reviews` Access prefix, but the
+Cloudflare dashboard config itself is a manual step (see ops step below). TUI:
+`budget_wait_since` surfaced on the four summary types, "waiting for budget"
+shown in the Tickets tab, `waiting_budget` added to the Reviews tab status
+filter.
+
+**Deploy:** migration 050 at boot; worker + api + scheduler images rebuilt
+(shared `reva/` plus api/worker changes); both compose files already pass the
+`REVA_BUDGET_RETRY_SECONDS` / `REVA_BUDGET_WAIT_MAX_SECONDS` env vars.
+
+**Ops step owed:** add the `/reviews` path prefix to the existing Cloudflare
+Access application (alongside `/docs` and `/repo-docs`) — until then the page
+is reachable by anyone with the hostname.
+
+**Not live-validated (unit-tested only):** the real RQ `enqueue_in` round trip
+(worker runs `with_scheduler=True`), the Postgres migration itself, and the
+nginx `/reviews/` location on prod.
+
+**Staging checklist (do before/at deploy):**
+
+1. Boot once against Postgres: migration 050 applies (`\d ticket_analyses`
+   shows `budget_wait_since`).
+2. Set `REVA_BUDGET_RETRY_SECONDS=60` and an instance cap of `0.01`; submit a
+   ticket analysis; expect a `waiting_budget` job result, the row `pending`
+   with the marker, `/reviews/` listing it, and after raising the cap the job
+   re-firing within ~60 s and completing.
+3. Open `/reviews/` through the tunnel: Cloudflare Access must challenge
+   (prefix added).
+
 ## Addendum 2026-09-04 (evening) — release-log entries replace drafted change notes
 
 **Status: implemented, not deployed** (spec

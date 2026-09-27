@@ -537,7 +537,9 @@ func (t Tickets) view(w, h int) string {
 
 	colTicket := 9
 	colModule := 10
-	// Wide enough for the "completed ⚠ not in Odoo" delivery-warning label.
+	// Wide enough for the longest label it must fit: "completed ⚠ not in Odoo"
+	// (23 runes) — longer than the budget-wait label "~ budget wait 999h59m"
+	// (22 runes).
 	colAnalysis := 24
 	colIssues := 12
 	colCost := 10
@@ -566,6 +568,9 @@ func (t Tickets) view(w, h int) string {
 				// saw it. Flag it distinctly rather than a green "completed".
 				analysisPlain = "completed ⚠ not in Odoo"
 				analysisColored = styleStatusStale.Render("completed ⚠ not in Odoo")
+			} else if a.Status == "pending" && a.BudgetWaitSince != nil {
+				analysisPlain = analysisStatusText(*a)
+				analysisColored = styleStatusStale.Render(analysisPlain)
 			} else {
 				analysisPlain = strings.TrimSpace(plainStatusSymbol(a.Status, a.CreatedAt) + " " + a.Status)
 				analysisColored = strings.TrimSpace(ticketStatusSymbol(a.Status, a.CreatedAt) + " " + a.Status)
@@ -578,8 +583,13 @@ func (t Tickets) view(w, h int) string {
 		issuesPlain, issuesColored := "—", styleStatusOther.Render("—")
 		if run := row.issueRun; run != nil {
 			counts := issueRunCounts(*run)
-			issuesPlain = strings.TrimSpace(plainStatusSymbol(run.Status, run.CreatedAt) + " " + counts)
-			issuesColored = strings.TrimSpace(ticketStatusSymbol(run.Status, run.CreatedAt) + " " + counts)
+			if run.Status == "pending" && run.BudgetWaitSince != nil {
+				issuesPlain = "~ waiting"
+				issuesColored = styleStatusStale.Render(issuesPlain)
+			} else {
+				issuesPlain = strings.TrimSpace(plainStatusSymbol(run.Status, run.CreatedAt) + " " + counts)
+				issuesColored = strings.TrimSpace(ticketStatusSymbol(run.Status, run.CreatedAt) + " " + counts)
+			}
 			if cost == "" && run.EstimatedCostUSD != nil {
 				cost = fmt.Sprintf("$%.4f", *run.EstimatedCostUSD)
 			}
@@ -652,6 +662,10 @@ func (t Tickets) view(w, h int) string {
 				meta = append(meta, fmt.Sprintf("images:%d", a.ImageCount))
 			}
 			extras = append(extras, styleSubtitle.Render("  "+strings.Join(meta, "  ")))
+			if a.Status == "pending" && a.BudgetWaitSince != nil {
+				extras = append(extras, styleSubtitle.Render(
+					"  waiting for budget since "+a.BudgetWaitSince.Local().Format("15:04")+" (re-checked hourly)"))
+			}
 			if a.ErrorMessage != nil && *a.ErrorMessage != "" {
 				extras = append(extras, styleStatusFailed.Render(truncate("  analysis error: "+*a.ErrorMessage, w-2)))
 			}
@@ -665,6 +679,10 @@ func (t Tickets) view(w, h int) string {
 				line += " — " + refs
 			}
 			extras = append(extras, styleSubtitle.Render(truncate("  "+line, w-2)))
+			if run.Status == "pending" && run.BudgetWaitSince != nil {
+				extras = append(extras, styleSubtitle.Render(
+					"  waiting for budget since "+run.BudgetWaitSince.Local().Format("15:04")+" (re-checked hourly)"))
+			}
 			if run.Status == "failed" && run.ErrorMessage != nil && *run.ErrorMessage != "" {
 				extras = append(extras, styleStatusFailed.Render(
 					truncate("  issues error: "+*run.ErrorMessage, w-2)))
@@ -860,6 +878,33 @@ func (t Tickets) detailView(w, h int) string {
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+}
+
+// analysisStatusText is the status cell for an analysis row: a pending row that
+// is parked on budget says so instead of looking stuck. Kept short (worst case
+// "~ budget wait 999h59m" is 22 runes) to fit colAnalysis alongside the other
+// columns without pushing Cost/When out of alignment.
+func analysisStatusText(a api.TicketAnalysisSummary) string {
+	if a.Status == "pending" && a.BudgetWaitSince != nil {
+		return "~ budget wait " + compactDuration(time.Since(*a.BudgetWaitSince))
+	}
+	return strings.TrimSpace(plainStatusSymbol(a.Status, a.CreatedAt) + " " + a.Status)
+}
+
+// compactDuration renders d at minute granularity with no trailing zero unit
+// ("40m", "1h30m", "26h5m") — short enough for a table cell, unlike
+// time.Duration.String()'s seconds-precision output.
+func compactDuration(d time.Duration) string {
+	totalMinutes := int(d.Truncate(time.Minute) / time.Minute)
+	h := totalMinutes / 60
+	m := totalMinutes % 60
+	if h > 0 {
+		if m > 0 {
+			return fmt.Sprintf("%dh%dm", h, m)
+		}
+		return fmt.Sprintf("%dh", h)
+	}
+	return fmt.Sprintf("%dm", m)
 }
 
 func ticketStatusSymbol(status string, createdAt time.Time) string {

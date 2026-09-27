@@ -56,6 +56,21 @@ exposes a read-only MCP server (`mcp__codegraph__*`) to repo-aware skills only
 | `REVA_CODEGRAPH_ENABLED` | `false` |
 | `REVA_CODEGRAPH_INDEX_TIMEOUT` | `180` |
 
+## Budget wait-and-resume
+
+When a job hits a rolling spend cap (daily non-review budget, per-instance, or
+per-author review budget), `defer_for_budget` (`worker/runner.py`) re-enqueues
+it with the same params `REVA_BUDGET_RETRY_SECONDS` later instead of failing
+it, stamping `budget_wait_since` on the first wait so the deadline survives
+the round trips. A job waits at most `REVA_BUDGET_WAIT_MAX_SECONDS` before it
+gives up and takes its old fail path. Waiting jobs and current budget fill are
+visible at `/reviews` (api, edge-gated like `/docs`).
+
+| Env var | Default |
+|---|---|
+| `REVA_BUDGET_RETRY_SECONDS` | `3600` (`<= 0` disables waiting) |
+| `REVA_BUDGET_WAIT_MAX_SECONDS` | `172800` |
+
 ## Why it's built this way
 
 - **Pure `Reviewer` / `Auditor`.** Keeping the LLM orchestration free of DB and

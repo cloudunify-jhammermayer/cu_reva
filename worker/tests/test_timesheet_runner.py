@@ -238,3 +238,39 @@ def test_instance_budget_gate_declines_before_paid_call(ctx_and_fakes, monkeypat
     assert row["status"] == "failed"
     assert "budget" in row["error_message"].lower()
     assert s["analyzer"].calls == []
+
+
+def test_instance_budget_gate_waits_when_queue_present(ctx_and_fakes, monkeypatch):
+    from dataclasses import replace
+    from unittest.mock import MagicMock
+    s = ctx_and_fakes
+    q = MagicMock()
+    q.enqueue_in.return_value = MagicMock(id="rq:job:deferred")
+    set_context(replace(s["ctx"], rq_queue=q))
+    monkeypatch.setattr("worker.timesheet_runner.instance_budget_exceeded", lambda ctx, iid: 10.0)
+    params = _params(s["db"])
+
+    out = run_timesheet_review(params)
+
+    assert out["status"] == "waiting_budget"
+    row = writers.get_timesheet_run(s["db"], params["run_id"])
+    assert row["status"] == "pending" and row["budget_wait_since"] is not None
+    assert s["analyzer"].calls == []
+    assert s["odoo"].calls == []
+    assert q.enqueue_in.call_args.args[1] == "worker.timesheet_tasks.run_timesheet_review"
+
+
+def test_deferred_rerun_clears_budget_wait_marker(ctx_and_fakes):
+    """Review Important 1: back under the cap, the re-run clears the marker
+    and completes (mirrors test_ticket_runner's version of this test)."""
+    from datetime import datetime, timedelta, timezone
+    s = ctx_and_fakes
+    params = _params(s["db"])
+    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    writers.set_budget_wait_since(s["db"], "timesheet_review", params["run_id"], since)
+    params["budget_wait_since"] = since.isoformat()
+
+    out = run_timesheet_review(params)
+
+    assert out["status"] == "completed"
+    assert writers.get_timesheet_run(s["db"], params["run_id"])["budget_wait_since"] is None

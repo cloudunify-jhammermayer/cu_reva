@@ -259,6 +259,9 @@ type TicketAnalysisSummary struct {
 	// bytes are never stored, so a requeue re-runs image-blind — this is the
 	// only signal that it did.
 	ImageCount int `json:"image_count"`
+	// BudgetWaitSince is set while the row waits for its Odoo instance's budget
+	// to roll off (spec 2026-09-27); nil otherwise. Status stays "pending".
+	BudgetWaitSince *time.Time `json:"budget_wait_since"`
 }
 
 type TicketAnalysisPage struct {
@@ -296,6 +299,9 @@ type TicketIssueRunSummary struct {
 	EstimatedCostUSD *float64         `json:"estimated_cost_usd"`
 	CreatedAt        time.Time        `json:"created_at"`
 	CompletedAt      *time.Time       `json:"completed_at"`
+	// BudgetWaitSince is set while the row waits for its Odoo instance's budget
+	// to roll off (spec 2026-09-27); nil otherwise. Status stays "pending".
+	BudgetWaitSince *time.Time `json:"budget_wait_since"`
 }
 
 type TicketIssueRunPage struct {
@@ -316,6 +322,9 @@ type TimesheetReviewSummary struct {
 	ErrorMessage     *string    `json:"error_message"`
 	CreatedAt        time.Time  `json:"created_at"`
 	CompletedAt      *time.Time `json:"completed_at"`
+	// BudgetWaitSince is set while the row waits for its Odoo instance's budget
+	// to roll off (spec 2026-09-27); nil otherwise. Status stays "pending".
+	BudgetWaitSince *time.Time `json:"budget_wait_since"`
 }
 
 type TimesheetReviewPage struct {
@@ -520,6 +529,9 @@ type SupportTurnDetail struct {
 	CompletedAt      *time.Time `json:"completed_at"`
 	CallbackSentAt   *time.Time `json:"callback_sent_at"`
 	CallbackError    *string    `json:"callback_error"`
+	// BudgetWaitSince is set while the row waits for its Odoo instance's budget
+	// to roll off (spec 2026-09-27); nil otherwise. Status stays "pending".
+	BudgetWaitSince *time.Time `json:"budget_wait_since"`
 }
 
 // Persona is one configured tone row — either the single 'default' scope row

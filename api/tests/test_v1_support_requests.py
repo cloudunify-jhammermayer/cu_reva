@@ -484,3 +484,21 @@ def test_unreadable_structured_result_degrades_visibly(client_db_queue):
 
     with db.session() as s:
         assert [e.event for e in s.query(OpsEvent).all()] == ["structured_unreadable"]
+
+
+def test_requeue_of_waiting_turn_is_409(client_db_queue):
+    from datetime import datetime, timedelta, timezone
+    from reva.db.models import SupportTurn
+
+    client, db, queue, headers = client_db_queue
+    turn_id = _post(client, headers).json()["turn_id"]
+    with db.session() as s:
+        row = s.get(SupportTurn, turn_id)
+        row.created_at = datetime.now(timezone.utc) - timedelta(days=30)
+        row.budget_wait_since = datetime.now(timezone.utc) - timedelta(hours=3)
+
+    r = client.post(f"/api/v1/support-turn/{turn_id}/requeue", headers=headers)
+
+    assert r.status_code == 409
+    assert "waiting for budget" in r.json()["detail"].lower()
+    assert len(queue.enqueued) == 1

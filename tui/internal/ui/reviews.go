@@ -29,7 +29,7 @@ type Reviews struct {
 	// filter state
 	filterMode   bool
 	repoInput    textinput.Model
-	statusFilter string // "", "completed", "failed", "stale"
+	statusFilter string // "", "completed", "failed", "stale", "waiting_budget"
 	authorFilter string
 }
 
@@ -130,6 +130,8 @@ func (r Reviews) update(msg tea.Msg) (Reviews, tea.Cmd) {
 				r.statusFilter = "failed"
 			case "failed":
 				r.statusFilter = "stale"
+			case "stale":
+				r.statusFilter = "waiting_budget"
 			default:
 				r.statusFilter = ""
 			}

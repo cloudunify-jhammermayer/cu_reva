@@ -27,7 +27,7 @@ from rq import get_current_job
 
 from reva import secrets_crypto
 from reva.claude_client import ClaudeClient
-from reva.claude_code_runner import ClaudeCodeRunner
+from reva.claude_code_runner import REVIEW_JOB_TIMEOUT, ClaudeCodeRunner
 from reva.core_knowledge import CoreKnowledge
 from reva.notifications import notify_operational_alert, notify_worker_error
 from reva.odoo_client import OdooCallbackClient
@@ -100,6 +100,8 @@ class WorkerContext:
     google_chat_webhook_url: str = ""
     daily_budget_usd: float | None = None
     author_daily_budget_usd: float | None = 100.0
+    budget_retry_seconds: int = 3600
+    budget_wait_max_seconds: int = 172800
     repo_cache_ttl_days: int = 30
     prompts_dir: str = "/app/prompts"
     value_report_chat_enabled: bool = False
@@ -207,6 +209,8 @@ def build_worker_context(settings: Settings, rq_queue: Any | None = None) -> Wor
         google_chat_webhook_url=settings.google_chat_webhook_url,
         daily_budget_usd=settings.daily_budget_usd,
         author_daily_budget_usd=settings.author_daily_budget_usd,
+        budget_retry_seconds=settings.budget_retry_seconds,
+        budget_wait_max_seconds=settings.budget_wait_max_seconds,
         repo_cache_ttl_days=settings.repo_cache_ttl_days,
         prompts_dir=settings.prompts_dir,
         value_report_chat_enabled=settings.value_report_chat_enabled,
@@ -288,6 +292,21 @@ def run_review(job_params: dict) -> dict:
         log.info("review_already_posted")
         return {"status": "already_posted"}
 
+    # Read the run's status BEFORE claiming: claim_review_run below always
+    # resets status to "running" and clears budget_wait_since, so this is the
+    # only chance to see whether the deferred wait-and-resume chain (spec
+    # 2026-09-27) already owns this review. A fresh trigger (a /review
+    # comment, a manual requeue, or a duplicate push job on the same SHA)
+    # landing mid-wait must not start a SECOND gate/defer chain (double pay) —
+    # the deferred chain's own re-run always carries budget_wait_since, so its
+    # absence on THIS job's params is what marks a trigger as "fresh".
+    prior_wait_since = None
+    if (
+        params.budget_wait_since is None
+        and writers.get_review_run_status(ctx.db, params) == "waiting_budget"
+    ):
+        prior_wait_since = writers.get_review_run_budget_wait_since(ctx.db, params)
+
     # CONC-1: atomically claim this (repo,pr,sha,mode) for our RQ job. If another
     # worker job already holds it in-flight, skip — don't pay for a duplicate
     # review. A retry of THIS job re-claims, so retries still complete.
@@ -300,10 +319,6 @@ def run_review(job_params: dict) -> dict:
     if not claimed:
         log.info("review_skipped_duplicate_in_flight")
         return {"status": "duplicate_in_flight"}
-    if explicit:
-        # Re-review: wipe the prior attempt's posted IDs/outcome so the post
-        # step creates a fresh Check Run + PR Review rather than reusing them.
-        writers.reset_review_run_post_state(ctx.db, run_id)
 
     # Resolve repo/PR metadata once — reused on all success and error paths
     # to avoid repeated DB round-trips per job.
@@ -317,10 +332,59 @@ def run_review(job_params: dict) -> dict:
 
     log = log.bind(owner=owner, repo=name, pr_number=pr_number)
 
+    if prior_wait_since is not None:
+        # claim_review_run just reset status/budget_wait_since on the row —
+        # undo that and hand back to the deferred chain, which still owns the
+        # real deadline, instead of re-running the gate and deferring again.
+        author = pr_basic["author_login"]
+        restored_spent = author_budget_exceeded(ctx, params.pull_request_id) or 0.0
+        writers.record_review_waiting_budget(
+            ctx.db, params, prior_wait_since,
+            f"Waiting for @{author}'s review budget to free up.")
+        _post_waiting_check_run(ctx, params, run_id, owner, name, author, restored_spent, log)
+        log.info("review_job_done", status="already_waiting", author=author)
+        return {"status": "already_waiting"}
+
+    if explicit or params.budget_wait_since is not None:
+        # Re-review, or back from a budget wait: wipe the prior attempt's posted
+        # IDs/outcome so the post step creates a fresh Check Run + PR Review
+        # (the queued "waiting" check is found by SHA and updated in place).
+        writers.reset_review_run_post_state(ctx.db, run_id)
+
     # Spend guard: if the PR author's rolling 24-hour review spend has reached
-    # their cap, decline (cheaply) instead of running a paid review.
-    budget_decline = _budget_decline_if_exceeded(ctx, params, pr_basic["author_login"], log)
-    if budget_decline is not None:
+    # their cap, wait for it to roll off (spec 2026-09-27) — decline only once
+    # waiting is disabled or the maximum wait has passed.
+    spent = author_budget_exceeded(ctx, params.pull_request_id)
+    if spent is not None:
+        author = pr_basic["author_login"]
+        current_head_sha = pr_basic.get("head_sha")
+        if current_head_sha and current_head_sha != params.head_sha:
+            # The PR moved on before this job could even defer — waiting on a
+            # superseded SHA would just burn a re-check cycle for nothing; the
+            # next push's own job covers the PR instead (minor, cheap fix).
+            writers.record_review_stale(ctx.db, params)
+            stale = ReviewResult(
+                status="stale", summary="Head SHA changed before review started.",
+                risk_level="low",
+            )
+            _post_result_to_github(ctx, params, stale, run_id, owner, name, pr_number, log)
+            log.info("review_job_done", status="stale")
+            return stale.model_dump(mode="json")
+        log.warning("review_over_author_budget", author=author,
+                    spent_usd=round(spent, 2), budget_usd=ctx.author_daily_budget_usd)
+        waiting = defer_for_budget(
+            ctx, "worker.tasks.run_review", params.model_dump(mode="json"),
+            kind="review", spent=spent, log=log, job_timeout=REVIEW_JOB_TIMEOUT,
+        )
+        if waiting is not None:
+            since = datetime.fromisoformat(waiting["budget_wait_since"])
+            writers.record_review_waiting_budget(
+                ctx.db, params, since, f"Waiting for @{author}'s review budget to free up.")
+            _post_waiting_check_run(ctx, params, run_id, owner, name, author, spent, log)
+            log.info("review_job_done", status="waiting_budget")
+            return waiting
+        budget_decline = _decline_for_author_budget(
+            ctx, author, spent, waited=params.budget_wait_since is not None)
         writers.record_review_declined(ctx.db, params, budget_decline.decline_reason or "Over budget.")
         _post_result_to_github(ctx, params, budget_decline, run_id, owner, name, pr_number, log)
         log.info("review_job_done", status="declined", reason="over_author_budget")
@@ -372,7 +436,7 @@ def _enqueue_board_status(
 
 
 # Ledger kinds that are PR-review spend — capped per author, not globally.
-_REVIEW_SPEND_KINDS = ("review", "delta_verify", "triage")
+_REVIEW_SPEND_KINDS = writers.REVIEW_SPEND_KINDS
 
 
 def budget_exceeded(ctx: WorkerContext) -> float | None:
@@ -419,22 +483,94 @@ def instance_budget_exceeded(ctx: WorkerContext, odoo_instance_id: int) -> float
     return spent if spent >= float(inst["daily_budget_usd"]) else None
 
 
-def _budget_decline_if_exceeded(
-    ctx: WorkerContext, params: JobParams, author: str | None, log
-) -> ReviewResult | None:
-    """Return a declined ReviewResult if the PR author's rolling 24h review
-    spend cap is reached, else None."""
-    spent = author_budget_exceeded(ctx, params.pull_request_id)
-    if spent is None:
+def _parse_wait_since(raw: object) -> datetime | None:
+    """`budget_wait_since` as it comes back out of RQ: an ISO string (set by
+    this helper), a datetime (a caller passed `params.model_dump()` without
+    mode="json"), or absent. Naive values are UTC."""
+    if raw is None:
         return None
-    log.warning(
-        "review_over_author_budget", author=author,
-        spent_usd=round(spent, 2), budget_usd=ctx.author_daily_budget_usd,
+    since = datetime.fromisoformat(raw) if isinstance(raw, str) else raw
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    return since
+
+
+def defer_for_budget(
+    ctx: WorkerContext, task: str, job_params: dict, *, kind: str, spent: float,
+    log, job_timeout: int | None = None,
+) -> dict | None:
+    """Wait-and-resume for a budget-gated job (spec 2026-09-27).
+
+    Re-enqueues `task` with the same params `budget_retry_seconds` from now,
+    stamping `budget_wait_since` on the first wait so the deadline survives
+    the round trips. Returns the terminal result dict for THIS attempt, or
+    None when the caller must take its old terminal path: waiting disabled,
+    no queue handle, deadline passed, or the enqueue itself failed.
+    """
+    retry = ctx.budget_retry_seconds
+    if retry <= 0 or ctx.rq_queue is None:
+        return None
+    now = datetime.now(timezone.utc)
+    first_wait = job_params.get("budget_wait_since") is None
+    since = _parse_wait_since(job_params.get("budget_wait_since")) or now
+    waited = (now - since).total_seconds()
+    if waited >= ctx.budget_wait_max_seconds:
+        log.warning("budget_wait_expired", kind=kind, waited_s=int(waited),
+                    spent_usd=round(spent, 2))
+        writers.record_ops_event(ctx.db, kind, "error", "budget_wait_expired", {
+            "task": task, "waited_seconds": int(waited), "spent_usd": round(spent, 2),
+        })
+        return None
+
+    from rq import Retry
+
+    job = get_current_job()
+    timeout = getattr(job, "timeout", None) or job_timeout
+    failure_ttl = getattr(job, "failure_ttl", None)
+    params = dict(job_params)
+    params["budget_wait_since"] = since.isoformat()
+    try:
+        deferred = ctx.rq_queue.enqueue_in(
+            timedelta(seconds=retry), task, params,
+            job_timeout=timeout, retry=Retry(max=3, interval=[30, 120, 300]),
+            failure_ttl=failure_ttl,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("budget_wait_enqueue_failed", kind=kind, exc_info=True)
+        writers.record_ops_event(ctx.db, kind, "error", "budget_wait_enqueue_failed", {
+            "task": task, "error": str(exc)[:300],
+        })
+        return None
+    if first_wait:
+        writers.record_ops_event(ctx.db, kind, "warning", "budget_wait_started", {
+            "task": task, "spent_usd": round(spent, 2), "retry_in_seconds": retry,
+        })
+    log.info("budget_wait_deferred", kind=kind, retry_in_seconds=retry,
+             waited_s=int(waited), spent_usd=round(spent, 2), retry_job_id=deferred.id)
+    return {
+        "status": "waiting_budget",
+        "kind": kind,
+        "spent_usd": round(spent, 2),
+        "budget_wait_since": since.isoformat(),
+        "retry_job_id": deferred.id,
+        "retry_in_seconds": retry,
+    }
+
+
+def _decline_for_author_budget(
+    ctx: WorkerContext, author: str | None, spent: float, *, waited: bool
+) -> ReviewResult:
+    """The declined ReviewResult for a full per-author cap. `waited` = the job
+    already waited the maximum (spec 2026-09-27) and is giving up."""
+    tail = (
+        f"REVA waited {ctx.budget_wait_max_seconds / 3600:g} h for it to free up and gave up; "
+        f"push again or comment `/review` later to retry."
+        if waited else
+        "Reviews resume automatically as spend rolls off."
     )
     reason = (
         f"REVA's rolling 24-hour review budget for @{author} "
-        f"(${ctx.author_daily_budget_usd:.0f}) has been reached (≈${spent:.0f} spent). "
-        f"Reviews resume automatically as spend rolls off."
+        f"(${ctx.author_daily_budget_usd:.0f}) has been reached (≈${spent:.0f} spent). {tail}"
     )
     return ReviewResult(status="declined", summary="Author's daily review budget reached.",
                         risk_level="low", decline_reason=reason)
@@ -775,6 +911,39 @@ def _set_risk_label(
             ctx.github.add_labels(token, owner, name, pr_number, [target])
     except Exception:  # noqa: BLE001
         log.warning("risk_label_failed", exc_info=True)
+
+
+def _post_waiting_check_run(
+    ctx: WorkerContext, params: JobParams, run_id: int, owner: str, name: str,
+    author: str | None, spent: float, log,
+) -> None:
+    """Best-effort `queued` Check Run while the review waits for budget. No PR
+    comment (no spam); the eventual result updates this check in place."""
+    try:
+        token = ctx.github.get_installation_token(params.installation_id)
+        output = {
+            "title": "Waiting for review budget",
+            "summary": (
+                f"@{author}'s rolling 24-hour review budget "
+                f"(${ctx.author_daily_budget_usd:.0f}) is full (≈${spent:.0f} spent). "
+                f"REVA re-checks every {ctx.budget_retry_seconds // 60} min and reviews "
+                f"this commit as soon as spend rolls off."
+            ),
+        }
+        check_run_id = _check_run_id_or_recover(
+            ctx, token, owner, name, params.head_sha,
+            lambda existing_id: _create_or_update_check(
+                ctx, token, owner, name, existing_id,
+                status="queued", conclusion=None, started_at=None, completed_at=None,
+                output=output, head_sha=params.head_sha,
+            ),
+        )
+        writers.attach_github_ids(ctx.db, run_id, check_run_id=check_run_id)
+    except Exception:  # noqa: BLE001
+        log.warning("waiting_check_run_post_failed", exc_info=True)
+        writers.record_ops_event(ctx.db, "review", "warning", "waiting_check_post_failed", {
+            "run_id": run_id, "repo": f"{owner}/{name}", "sha": params.head_sha[:8],
+        })
 
 
 def _post_failure_check_run(

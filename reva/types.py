@@ -276,6 +276,9 @@ class JobParams(BaseModel):
     installation_id: int
     review_mode: ReviewMode = "diff"
     trigger_event: TriggerEvent
+    # Set by worker.runner.defer_for_budget on a job that is waiting for budget
+    # (spec 2026-09-27); None on every job the api enqueues.
+    budget_wait_since: datetime | None = None
 
 
 # --- Claude content blocks (Anthropic Messages API shape) ---------------------
@@ -616,6 +619,9 @@ class TicketJobParams(BaseModel):
     # in the repo's own custom-addon docs (reva/repo_docs.py, spec 2026-07-14);
     # default None keeps every worker path untouched.
     github_url: str | None = None
+    # Set by worker.runner.defer_for_budget on a job that is waiting for budget
+    # (spec 2026-09-27); None on every job the api enqueues.
+    budget_wait_since: datetime | None = None
 
 
 # --- Support answer types -----------------------------------------------------
@@ -659,6 +665,9 @@ class SupportJobParams(BaseModel):
     # requeue path rebuilds params from the DB row) — support_turns.image_count
     # plus a requeue ops event make that loss visible instead of silent.
     images: list[ImageAttachment] = Field(default_factory=list)
+    # Set by worker.runner.defer_for_budget on a job that is waiting for budget
+    # (spec 2026-09-27); None on every job the api enqueues.
+    budget_wait_since: datetime | None = None
 
 
 class SupportSource(BaseModel):
@@ -919,6 +928,9 @@ class TicketIssueJobParams(BaseModel):
     plan_date: date | None = None
     # Release the ticket ships in (R4): named on every created issue body.
     release: ReleaseRef | None = None
+    # Set by worker.runner.defer_for_budget on a job that is waiting for budget
+    # (spec 2026-09-27); None on every job the api enqueues.
+    budget_wait_since: datetime | None = None
 
 
 # --- Timesheet wording review types -----------------------------------------
@@ -972,6 +984,9 @@ class TimesheetJobParams(BaseModel):
     request_id: str
     flagged_words: list[str] = Field(default_factory=list)
     lines: list[TimesheetLine]
+    # Set by worker.runner.defer_for_budget on a job that is waiting for budget
+    # (spec 2026-09-27); None on every job the api enqueues.
+    budget_wait_since: datetime | None = None
 
 
 class AuditJobParams(BaseModel):
@@ -980,6 +995,9 @@ class AuditJobParams(BaseModel):
     repository_id: int
     installation_id: int
     requested_by: str | None = None
+    # Set by worker.runner.defer_for_budget on a job that is waiting for budget
+    # (spec 2026-09-27); None on every job the api enqueues.
+    budget_wait_since: datetime | None = None
 
 
 class AuditResult(BaseModel):
