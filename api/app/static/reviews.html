@@ -6,11 +6,11 @@
 <title>REVA budgets</title>
 <style>
   :root { --bg:#f5f6f8; --surface:#fff; --line:#dde1e7; --ink:#1d2430; --muted:#64707f;
-          --accent:#2f5fa8; --wait:#b7791f; --over:#b23a3a; --over-soft:#f9e3e3;
+          --accent:#2f5fa8; --wait:#b7791f; --over:#b23a3a; --over-soft:#f9e3e3; --ok:#2e7d4f; --ok-soft:#e3f3e8;
           --accent-soft:#e4ecf8; --track:#e8ebf0; }
   @media (prefers-color-scheme: dark) { :root { color-scheme:dark; --bg:#14181e; --surface:#1c2229;
           --line:#2c343e; --ink:#e6eaef; --muted:#98a3b1; --accent:#7ea6e6; --wait:#e0a94a;
-          --over:#e57373; --over-soft:#3f2222; --accent-soft:#223247; --track:#2a323c; } }
+          --over:#e57373; --over-soft:#3f2222; --ok:#6cc08b; --ok-soft:#1e3326; --accent-soft:#223247; --track:#2a323c; } }
   body { margin:0; padding:0 16px 48px; background:var(--bg); color:var(--ink);
          font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
   .wrap { max-width:1080px; margin:0 auto; display:grid; gap:28px; }
@@ -50,7 +50,7 @@
   tr.stripe { border-left:3px solid var(--wait); } tr.stripe.over { border-left-color:var(--over); }
   .empty { padding:14px; color:var(--muted); } .count { color:var(--muted); margin-left:6px; font-weight:400; }
   .note { color:var(--muted); font-size:12.5px; margin:8px 0 0; } .err { color:var(--over); }
-  .banner.ok { background:var(--surface); color:var(--muted); border-color:var(--line); font-weight:400; }
+  .banner.ok { background:var(--ok-soft); color:var(--ok); border-color:var(--ok); }
   .banner { background:var(--over-soft); color:var(--over); border:1px solid var(--over);
             border-radius:6px; padding:10px 14px; font-size:13px; font-weight:500; }
   @media (max-width:560px) { .repo summary { grid-template-columns:auto minmax(0,1fr); } .right { grid-column:2; } }
