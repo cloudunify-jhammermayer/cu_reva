@@ -147,30 +147,15 @@
         <dt><code>verify_findings</code></dt><dd>Second-pass self-check of blocking findings before posting (default on)</dd>
       </dl>
     </div>
-    <p class="note" style="margin:10px 0 6px">Copy-pasteable starting point. Every key is optional; the values shown are the defaults unless the comment says otherwise. Commented keys are examples you can enable.</p>
+    <p class="note" style="margin:10px 0 6px">Copy-pasteable starting point; every key is optional.</p>
     <pre class="yaml" id="yaml"><button class="copy" type="button" id="copy-yaml">Copy</button><span class="c"># .claude-review.yml — REVA settings for this repo (read from the PR's head commit)</span>
 
-odoo: true                      <span class="c"># default false; true enables the Odoo-specific reviewers (set it for Odoo repos)</span>
-odoo_version: "19.0"            <span class="c"># which Odoo core REVA grounds against (set to your project's version)</span>
-<span class="c"># odoo_instance: "Cloudunify Prod"  # example: the Odoo instance whose release-log lookups may search this repo</span>
+odoo: true                      <span class="c"># enables the Odoo-specific reviewers</span>
+odoo_version: "19.0"            <span class="c"># the Odoo core REVA grounds against; set your project's version</span>
 
-block_on_severity: major        <span class="c"># critical | major | minor | none — what turns the Check Run red</span>
-max_diff_lines: 2500            <span class="c"># bigger diffs are declined ("split the PR")</span>
-<span class="c"># max_xml_diff_lines: 1500     # example: an extra, stricter cap that applies only to XML-only PRs</span>
-
-<span class="c"># skip_paths:                  # example: globs never reviewed
-#   - "custom_addons/legacy_*/**"
-#   - "**/static/lib/**"</span>
-review_all_paths: false         <span class="c"># true = review every path, not only custom_addons/</span>
-
-<span class="c"># custom_instructions: |       # example: free text REVA follows on this repo
-#   We use the OCA queue_job stack; do not suggest cron-based alternatives.
-#   German UI strings live in i18n/de.po, do not flag them.</span>
-
-verify_findings: true           <span class="c"># second-pass self-check of blocking findings before posting</span>
-learned_memory: true            <span class="c"># per-repo memory from your /dismiss feedback</span>
-code_grounding: true            <span class="c"># ticket analysis may read this repo's code</span>
-change_notes: true              <span class="c"># merge notes for linked Odoo tickets</span></pre>
+custom_instructions: |          <span class="c"># free text REVA follows on this repo</span>
+  We use the OCA queue_job stack; do not suggest cron-based alternatives.
+  German UI strings live in i18n/de.po, do not flag them.</pre>
   </section>
 
   <section>
