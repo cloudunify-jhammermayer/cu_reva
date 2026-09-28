@@ -14,6 +14,7 @@
   body { margin:0; padding:0 16px 48px; background:var(--bg); color:var(--ink);
          font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
   .wrap { max-width:1080px; margin:0 auto; display:grid; gap:28px; }
+  nav a { color:var(--accent); text-decoration:none; margin-right:16px; font-size:13px; } nav a.active { font-weight:600; border-bottom:2px solid var(--accent); }
   header { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:baseline;
            gap:8px 24px; padding:22px 0 14px; border-bottom:1px solid var(--line); }
   h1 { font-size:20px; margin:0; } h1 span { color:var(--muted); font-weight:400; }
@@ -53,6 +54,13 @@
   .banner.ok { background:var(--ok-soft); color:var(--ok); border-color:var(--ok); }
   .banner { background:var(--over-soft); color:var(--over); border:1px solid var(--over);
             border-radius:6px; padding:10px 14px; font-size:13px; font-weight:500; }
+  .status-ok { color:var(--ok); } .status-wait { color:var(--wait); } .status-over { color:var(--over); }
+  #author { font:inherit; padding:6px 10px; border:1px solid var(--line); border-radius:4px;
+            background:var(--surface); color:var(--ink); margin-bottom:10px; width:220px; }
+  details.legend { background:var(--surface); border:1px solid var(--line); border-radius:6px;
+                   padding:10px 14px; margin-top:8px; }
+  details.legend summary { cursor:pointer; font-weight:600; }
+  details.legend table { margin-top:10px; }
   @media (max-width:560px) { .repo summary { grid-template-columns:auto minmax(0,1fr); } .right { grid-column:2; } }
 </style>
 </head>
@@ -60,9 +68,25 @@
 <div class="wrap">
   <header>
     <h1>REVA <span>/ budgets and waiting work</span></h1>
+    <nav><a href="./" class="active">Status</a><a href="how-it-works">How it works</a></nav>
     <div class="meta" id="meta">Loading…</div>
   </header>
   <div class="banner" id="banner" style="display:none"></div>
+  <div class="meta" id="health"></div>
+  <section><h2>Queue</h2><div class="budgets" id="queue"></div></section>
+  <section><h2>PRs</h2>
+    <input type="text" id="author" placeholder="GitHub login" autocomplete="off">
+    <div id="prs"></div>
+    <details class="legend">
+      <summary>Why a review didn't happen</summary>
+      <div class="tablewrap"><table><tbody>
+        <tr><td>Nothing under <code>custom_addons/</code></td><td>only files under custom_addons/ are reviewed; use /review-all for other paths</td></tr>
+        <tr><td>Diff too large</td><td>split the PR, or raise max_diff_lines in .claude-review.yml</td></tr>
+        <tr><td>Your 24 h author cap</td><td>resumes automatically as your spend rolls off (see PR authors)</td></tr>
+        <tr><td>Anthropic credit balance empty</td><td>the account balance is empty; REVA re-checks hourly and resumes by itself</td></tr>
+      </tbody></table></div>
+    </details>
+  </section>
   <section><h2>Budgets, rolling 24 h</h2><div class="budgets" id="budgets"></div></section>
   <section><h2>Waiting PR reviews <span class="count" id="rev-count"></span></h2><div id="reviews"></div></section>
   <section><h2>Waiting Odoo work <span class="count" id="odoo-count"></span></h2><div id="odoo"></div></section>
@@ -80,27 +104,37 @@
     const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
     return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
   };
+  const when = (iso) => iso ? new Date(iso).toLocaleString([], {weekday: "short", hour: "2-digit", minute: "2-digit"}) : "—";
   const OPEN_KEY = "reva.reviews.open";
   const openRepos = () => { try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) || "[]")); } catch { return new Set(); } };
   const saveOpen = (set) => { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...set])); } catch {} };
 
-  function meter(name, spent, cap, over) {
+  function meter(name, spent, cap, over, freesAt) {
     const pct = cap ? Math.min(100, Math.round(spent / cap * 100)) : (spent > 0 ? 4 : 0);
     const cls = over ? "over" : (pct >= 75 ? "warn" : "");
     const capTxt = cap == null ? `<span class="pill off">no cap</span>` : `${money(cap)}${over ? ' <span class="pill over">over</span>' : ""}`;
-    return `<div class="meter"><div>${esc(name)}</div><div class="num"><b>${money(spent)}</b> / ${capTxt}</div>
+    const frees = freesAt ? ` · frees at ${hm(freesAt)}` : "";
+    return `<div class="meter"><div>${esc(name)}</div><div class="num"><b>${money(spent)}</b> / ${capTxt}${frees}</div>
             <div class="track"><div class="fill ${cls}" style="width:${pct}%"></div></div></div>`;
   }
   function panel(title, small, rows, emptyText) {
     return `<div class="panel"><h3>${title} <small>${small}</small></h3>${rows.length ? rows.join("") : `<div class="note">${emptyText}</div>`}</div>`;
   }
   const waitFor = (reason) => reason === "provider_credit" ? "Anthropic credit" : "REVA cap";
+  function miniTable(headers, rows, emptyText) {
+    return `<div class="tablewrap">${rows.length ? `<table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>` : `<div class="empty">${emptyText}</div>`}</div>`;
+  }
+  function statusClass(label) {
+    if (label.startsWith("reviewed")) return "status-ok";
+    if (label.startsWith("waiting")) return "status-wait";
+    if (label.startsWith("declined") || label.startsWith("failed") || label.startsWith("not reviewed")) return "status-over";
+    return "";
+  }
   function render(d) {
     const s = d.settings;
     $("meta").textContent = `Refreshed ${hm(d.generated_at)} · every 60 s · waiting jobs re-check every ${Math.round(s.retry_seconds / 60)} min, give up after ${Math.round(s.max_wait_seconds / 3600)} h`;
     const pc = d.budgets.provider_credit || {};
     const banner = $("banner");
-    const when = (iso) => iso ? new Date(iso).toLocaleString([], {weekday: "short", hour: "2-digit", minute: "2-digit"}) : "—";
     if (pc.exhausted) {
       banner.className = "banner";
       banner.style.display = "";
@@ -112,11 +146,32 @@
       banner.style.display = "";
       banner.textContent = `Anthropic credit balance: OK (last paid call ${when(pc.last_paid_call_at)}).`;
     }
+    const health = d.health || {};
+    const healthEl = $("health");
+    healthEl.className = (health.workers_alive === 0 || health.error) ? "meta err" : "meta";
+    healthEl.textContent = `REVA: ${health.workers_alive == null ? "?" : health.workers_alive} workers · last webhook ${when(health.last_webhook_at)} · last review ${when(health.last_completed_review_at)}`
+      + (health.error ? ` · error: ${health.error}` : "");
+
+    const activity = d.activity || {prs: [], queue: {pending: [], running: []}};
+    const queue = activity.queue || {pending: [], running: []};
+    $("queue").innerHTML =
+      `<div class="panel"><h3>Pending</h3>${miniTable(["PR", "Mode", "Trigger", "Scheduled"],
+        queue.pending.map((p) => `<tr class="stripe"><td>${esc(p.repo_full_name)} #${p.pr_number}</td><td>${esc(p.review_mode)}</td><td>${esc(p.trigger_event)}</td><td class="mono">${hm(p.scheduled_at)}</td></tr>`),
+        "Nothing queued.")}<p class="note">New pushes reset the 10 min timer.</p></div>` +
+      `<div class="panel"><h3>Running</h3>${miniTable(["PR", "Mode", "Started"],
+        queue.running.map((r) => `<tr class="stripe"><td>${esc(r.repo_full_name)} #${r.pr_number}</td><td>${esc(r.review_mode)}</td><td class="mono">${hm(r.started_at)}</td></tr>`),
+        "Nothing running.")}</div>`;
+
+    const prs = activity.prs || [];
+    $("prs").innerHTML = miniTable(["PR", "Author", "Mode", "Status", "Hint", "When"],
+      prs.map((p) => `<tr class="stripe"><td><a href="${esc(p.pr_url)}" target="_blank" rel="noopener">${esc(p.repo_full_name)} #${p.pr_number}</a><span class="sub">${esc(p.pr_title)}</span></td><td>${esc(p.author_login)}</td><td>${esc(p.review_mode)}</td><td class="${statusClass(p.label)}">${esc(p.label)}</td><td>${esc(p.hint)}</td><td class="mono">${hm(p.completed_at || p.started_at)}</td></tr>`),
+      "No recent PR activity.");
+
     const g = d.budgets.global;
     $("budgets").innerHTML =
       panel("Global, non-review calls", "audits, replies, change notes", [meter("All instances and repos", g.spent_usd, g.cap_usd, g.over)], "") +
       panel("Odoo instances", "ticket analysis, support, issues, timesheets", d.budgets.instances.map((i) => meter(i.name, i.spent_usd, i.cap_usd, i.over)), "No Odoo instances.") +
-      panel("PR authors", "review spend, last 24 h", d.budgets.authors.map((a) => meter(a.author_login, a.spent_usd, a.cap_usd, a.over)), "No paid reviews in the last 24 h.");
+      panel("PR authors", "review spend, last 24 h", d.budgets.authors.map((a) => meter(a.author_login, a.spent_usd, a.cap_usd, a.over, a.frees_at)), "No paid reviews in the last 24 h.");
 
     const groups = d.waiting.reviews;
     const total = groups.reduce((n, g) => n + g.count, 0);
@@ -150,9 +205,25 @@
       </tbody></table></div>` : `<div class="tablewrap"><div class="empty">Nothing waiting.</div></div>`) +
       (d.waiting.jobs_error ? `<p class="note err">Job queue unreachable: ${esc(d.waiting.jobs_error)}</p>` : "");
   }
+  const AUTHOR_KEY = "reva.reviews.author";
+  let author = "";
+  try { author = localStorage.getItem(AUTHOR_KEY) || ""; } catch {}
+  const authorInput = $("author");
+  authorInput.value = author;
+  let authorTimer;
+  authorInput.addEventListener("input", () => {
+    clearTimeout(authorTimer);
+    authorTimer = setTimeout(() => {
+      author = authorInput.value.trim();
+      try { localStorage.setItem(AUTHOR_KEY, author); } catch {}
+      load();
+    }, 300);
+  });
+
   async function load() {
     try {
-      const res = await fetch("data", {cache: "no-store"});
+      const url = author ? `data?author=${encodeURIComponent(author)}` : "data";
+      const res = await fetch(url, {cache: "no-store"});
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       render(await res.json());
     } catch (e) {

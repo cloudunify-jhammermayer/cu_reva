@@ -75,6 +75,19 @@ banner appears while the Anthropic balance is empty. The lubac PR 58 run 2488
 failed with this exact refusal before this landed and needs a manual requeue
 once credits are topped up.
 
+**Follow-up 2026-09-28 — developer-facing sections on `/reviews`.** `/reviews`
+now also shows health, queue, per-PR status with plain-language hints, author
+cap frees-at: `GET /reviews/data?author=<login>` surfaces a GitHub login's
+full open-PR review history (bypassing the default 14-day window);
+`activity.queue` lists the unconsumed debounce queue and currently-running
+reviews; `health` reports `last_webhook_at`, `last_completed_review_at` and
+`workers_alive` (fail-soft alongside the existing scheduled-registry read,
+reusing `jobs_error` rather than a second ops event); each over-cap PR author
+now carries `frees_at`, the instant their rolling 24 h spend next clears the
+cap; and every run's raw status/decline/error text is translated to a plain
+`(label, hint)` pair by the new pure `explain_run`
+(`api/app/queries/budget_status.py`). Plus a static developer TL;DR at `/reviews/how-it-works` (triggers, commands, replies, outcomes, a copy-pasteable `.claude-review.yml`), linked from the status page's nav.
+
 ## Addendum 2026-09-04 (evening) — release-log entries replace drafted change notes
 
 **Status: implemented, not deployed** (spec

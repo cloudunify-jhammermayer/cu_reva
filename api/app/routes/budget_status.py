@@ -19,6 +19,7 @@ from reva.db.engine import Database
 
 router = APIRouter()
 _PAGE = Path(__file__).resolve().parent.parent / "static" / "reviews.html"
+_HOWTO = Path(__file__).resolve().parent.parent / "static" / "how-it-works.html"
 
 
 @router.get("/", include_in_schema=False)
@@ -27,7 +28,14 @@ def page() -> FileResponse:
                         headers={"Cache-Control": "no-store"})
 
 
+@router.get("/how-it-works", include_in_schema=False)
+def how_it_works() -> FileResponse:
+    """Static developer TL;DR: when REVA reviews, commands, replies, config."""
+    return FileResponse(_HOWTO, media_type="text/html; charset=utf-8",
+                        headers={"Cache-Control": "no-store"})
+
+
 @router.get("/data")
-def data(request: Request, db: Database = Depends(get_db),
+def data(request: Request, author: str | None = None, db: Database = Depends(get_db),
          settings: Settings = Depends(get_settings)) -> dict:
-    return build_status(db, getattr(request.app.state, "rq_queue", None), settings)
+    return build_status(db, getattr(request.app.state, "rq_queue", None), settings, author=author)
