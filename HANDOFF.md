@@ -13,7 +13,7 @@ waits instead of failing terminally the moment a cap is hit:
 retrying) until the gate clears or `REVA_BUDGET_WAIT_MAX_SECONDS` (default
 172800) elapses, at which point it falls back to the old terminal path. Ops
 events: `budget_wait_started` / `budget_wait_expired` /
-`budget_wait_enqueue_failed`.
+`budget_wait_enqueue_failed`. Every provider-credit refusal also records `provider_credit_refused`; `/reviews` derives a persistent "Anthropic credit balance: OK / too low since X (last checked Y)" status from those events against the spend ledger, so consultants can check the balance state themselves.
 
 Migration `050_budget_wait_since.sql` adds a nullable `budget_wait_since` to
 `review_runs`, `ticket_analyses`, `ticket_issue_runs`, `timesheet_review_runs`,

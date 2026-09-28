@@ -89,8 +89,7 @@ def test_provider_credit_reason_uses_error_severity_and_is_threaded_through():
     params = q.enqueue_in.call_args.args[2]
     assert params["budget_wait_reason"] == "provider_credit"
     with ctx.db.session() as s:
-        event = s.query(OpsEvent).one()
-        assert event.event == "budget_wait_started"
+        event = s.query(OpsEvent).filter_by(event="budget_wait_started").one()
         assert event.severity == "error"
         assert event.detail["reason"] == "provider_credit"
 
@@ -105,8 +104,7 @@ def test_provider_credit_expiry_records_reason_in_event_detail():
 
     assert out is None
     with ctx.db.session() as s:
-        event = s.query(OpsEvent).one()
-        assert event.event == "budget_wait_expired"
+        event = s.query(OpsEvent).filter_by(event="budget_wait_expired").one()
         assert event.detail["reason"] == "provider_credit"
 
 
@@ -210,3 +208,22 @@ def test_params_models_accept_budget_wait_since():
     assert AuditJobParams(repository_id=1, installation_id=1).budget_wait_since is None
     for model in (TicketJobParams, SupportJobParams, TicketIssueJobParams, TimesheetJobParams):
         assert "budget_wait_since" in model.model_fields
+
+
+def test_provider_credit_refusal_records_an_event_on_every_call():
+    """Each refusal (first wait AND every hourly re-check) leaves a
+    provider_credit_refused event; the /reviews page reads the streak."""
+    q = _queue()
+    ctx = _ctx(q)
+    log = MagicMock()
+    first = defer_for_budget(ctx, "t", {}, kind="review", spent=0.0, log=log, reason="provider_credit")
+    defer_for_budget(ctx, "t", {"budget_wait_since": first["budget_wait_since"]},
+                     kind="review", spent=0.0, log=log, reason="provider_credit")
+
+    events = _events(ctx)
+    assert events.count(("review", "warning", "provider_credit_refused")) == 2
+    assert events.count(("review", "error", "budget_wait_started")) == 1
+    # A cap wait never emits the provider event.
+    ctx2 = _ctx(_queue())
+    defer_for_budget(ctx2, "t", {}, kind="audit", spent=5.0, log=log)
+    assert ("audit", "warning", "provider_credit_refused") not in _events(ctx2)

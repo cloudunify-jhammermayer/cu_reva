@@ -455,6 +455,32 @@ def _insert_spend(s, kind: str, cost_usd: float | None) -> None:
     s.add(ClaudeSpend(kind=kind, cost_usd=cost_usd or 0.0))
 
 
+def latest_paid_call_at(db: Database) -> datetime | None:
+    """When the last Claude call that cost money was ledgered (any kind); the
+    /reviews page uses it to tell "credit balance still empty" from "topped up"."""
+    with db.session() as s:
+        return s.execute(
+            select(func.max(ClaudeSpend.created_at)).where(ClaudeSpend.cost_usd > 0)
+        ).scalar()
+
+
+def latest_ops_event_at(db: Database, event: str) -> datetime | None:
+    with db.session() as s:
+        return s.execute(
+            select(func.max(OpsEvent.created_at)).where(OpsEvent.event == event)
+        ).scalar()
+
+
+def first_ops_event_at_after(db: Database, event: str, after: datetime | None) -> datetime | None:
+    """Start of the current streak of `event`: its earliest occurrence after
+    `after` (or ever, when `after` is None)."""
+    with db.session() as s:
+        stmt = select(func.min(OpsEvent.created_at)).where(OpsEvent.event == event)
+        if after is not None:
+            stmt = stmt.where(OpsEvent.created_at > after)
+        return s.execute(stmt).scalar()
+
+
 def record_claude_spend(db: Database, kind: str, cost_usd: float | None) -> None:
     """Record one paid Claude call in the unified spend ledger (own transaction).
 

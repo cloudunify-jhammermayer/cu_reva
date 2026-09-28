@@ -162,6 +162,21 @@ def build_status(db: Database, queue, settings: Settings) -> dict:
         if job.get("reason") == "provider_credit" and job["budget_wait_since"]:
             provider_credit_since.append(job["budget_wait_since"])
 
+    # Persistent status, independent of waiting rows: the balance counts as
+    # empty when the last provider_credit_refused event is newer than the last
+    # paid call in the spend ledger (a paid call proves a top-up). Waiting rows
+    # with that reason keep the banner on as well (older deployments, or a
+    # refusal that came from a row the ledger can't see).
+    last_refused = writers.latest_ops_event_at(db, "provider_credit_refused")
+    last_paid = writers.latest_paid_call_at(db)
+    refused_now = last_refused is not None and (last_paid is None or _iso(last_paid) < _iso(last_refused))
+    streak_start = (
+        writers.first_ops_event_at_after(db, "provider_credit_refused", last_paid)
+        if refused_now else None
+    )
+    exhausted = refused_now or bool(provider_credit_since)
+    since_candidates = [x for x in [_iso(streak_start), *provider_credit_since] if x]
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "settings": {"retry_seconds": settings.budget_retry_seconds,
@@ -172,8 +187,10 @@ def build_status(db: Database, queue, settings: Settings) -> dict:
             "instances": instances,
             "authors": authors,
             "provider_credit": {
-                "exhausted": bool(provider_credit_since),
-                "since": min(provider_credit_since) if provider_credit_since else None,
+                "exhausted": exhausted,
+                "since": min(since_candidates) if since_candidates else None,
+                "last_refused_at": _iso(last_refused),
+                "last_paid_call_at": _iso(last_paid),
             },
         },
         "waiting": {

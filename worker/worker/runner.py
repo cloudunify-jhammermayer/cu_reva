@@ -532,6 +532,14 @@ def defer_for_budget(
     first_wait = job_params.get("budget_wait_since") is None
     since = _parse_wait_since(job_params.get("budget_wait_since")) or now
     waited = (now - since).total_seconds()
+    if reason == "provider_credit":
+        # Every refusal, not just the first: the /reviews page derives
+        # "balance still empty since X, last checked Y" from these events
+        # against the spend ledger (a paid call newer than the last refusal
+        # means the balance was topped up).
+        writers.record_ops_event(ctx.db, kind, "warning", "provider_credit_refused", {
+            "task": task, "waited_seconds": int(waited),
+        })
     if waited >= ctx.budget_wait_max_seconds:
         log.warning("budget_wait_expired", kind=kind, waited_s=int(waited),
                     spent_usd=round(spent, 2))

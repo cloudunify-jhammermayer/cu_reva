@@ -68,7 +68,8 @@ def test_data_empty_state(env):
     assert body["settings"] == {"retry_seconds": 3600, "max_wait_seconds": 172800}
     assert body["budgets"]["global"] == {"spent_usd": 0.0, "cap_usd": 200.0, "over": False}
     assert body["budgets"]["instances"] == [] and body["budgets"]["authors"] == []
-    assert body["budgets"]["provider_credit"] == {"exhausted": False, "since": None}
+    assert body["budgets"]["provider_credit"] == {
+        "exhausted": False, "since": None, "last_refused_at": None, "last_paid_call_at": None}
     assert body["waiting"] == {"reviews": [], "odoo": [], "jobs": [], "jobs_error": None}
 
 
@@ -129,6 +130,7 @@ def test_data_flags_provider_credit_exhausted_for_odoo_wait(env):
 
     assert body["budgets"]["provider_credit"] == {
         "exhausted": True, "since": body["waiting"]["odoo"][0]["budget_wait_since"],
+        "last_refused_at": None, "last_paid_call_at": None,
     }
     assert body["waiting"]["odoo"][0]["reason"] == "provider_credit"
 
@@ -139,7 +141,8 @@ def test_data_provider_credit_not_exhausted_for_plain_cap_wait(env):
 
     body = client.get("/reviews/data").json()
 
-    assert body["budgets"]["provider_credit"] == {"exhausted": False, "since": None}
+    assert body["budgets"]["provider_credit"] == {
+        "exhausted": False, "since": None, "last_refused_at": None, "last_paid_call_at": None}
     assert body["waiting"]["reviews"][0]["prs"][0]["reason"] == "cap"
 
 
@@ -208,3 +211,22 @@ def test_scheduled_budget_jobs_reads_registry(monkeypatch):
     # "cap"; j3 explicitly carries "provider_credit".
     assert out[0]["reason"] == "cap"
     assert out[1]["reason"] == "provider_credit"
+
+
+def test_provider_credit_status_from_events(env):
+    """Banner state comes from the refusal events vs the spend ledger, not only
+    from waiting rows: refused after the last paid call -> exhausted; a paid
+    call after the last refusal -> OK again."""
+    client, db, _ = env
+    body = client.get("/reviews/data").json()["budgets"]["provider_credit"]
+    assert body == {"exhausted": False, "since": None, "last_refused_at": None, "last_paid_call_at": None}
+
+    writers.record_ops_event(db, "review", "warning", "provider_credit_refused", {"task": "t"})
+    body = client.get("/reviews/data").json()["budgets"]["provider_credit"]
+    assert body["exhausted"] is True
+    assert body["since"] is not None and body["last_refused_at"] is not None
+
+    writers.record_claude_spend(db, "review", 0.5)   # a paid call proves the top-up
+    body = client.get("/reviews/data").json()["budgets"]["provider_credit"]
+    assert body["exhausted"] is False
+    assert body["since"] is None and body["last_paid_call_at"] is not None

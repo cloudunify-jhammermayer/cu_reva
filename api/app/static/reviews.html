@@ -50,6 +50,7 @@
   tr.stripe { border-left:3px solid var(--wait); } tr.stripe.over { border-left-color:var(--over); }
   .empty { padding:14px; color:var(--muted); } .count { color:var(--muted); margin-left:6px; font-weight:400; }
   .note { color:var(--muted); font-size:12.5px; margin:8px 0 0; } .err { color:var(--over); }
+  .banner.ok { background:var(--surface); color:var(--muted); border-color:var(--line); font-weight:400; }
   .banner { background:var(--over-soft); color:var(--over); border:1px solid var(--over);
             border-radius:6px; padding:10px 14px; font-size:13px; font-weight:500; }
   @media (max-width:560px) { .repo summary { grid-template-columns:auto minmax(0,1fr); } .right { grid-column:2; } }
@@ -97,13 +98,19 @@
   function render(d) {
     const s = d.settings;
     $("meta").textContent = `Refreshed ${hm(d.generated_at)} · every 60 s · waiting jobs re-check every ${Math.round(s.retry_seconds / 60)} min, give up after ${Math.round(s.max_wait_seconds / 3600)} h`;
-    const pc = d.budgets.provider_credit;
+    const pc = d.budgets.provider_credit || {};
     const banner = $("banner");
-    if (pc && pc.exhausted) {
+    const when = (iso) => iso ? new Date(iso).toLocaleString([], {weekday: "short", hour: "2-digit", minute: "2-digit"}) : "—";
+    if (pc.exhausted) {
+      banner.className = "banner";
       banner.style.display = "";
-      banner.textContent = `Anthropic credit balance is empty since ${hm(pc.since)} — every Claude call waits until it is topped up.`;
+      banner.textContent = `Anthropic credit balance is too low since ${when(pc.since)} (last checked ${when(pc.last_refused_at)}). `
+        + "REVA has paused every review, analysis and answer and resumes them automatically once the balance is topped up. "
+        + "Nothing needs to be re-submitted; there is no need to contact anyone.";
     } else {
-      banner.style.display = "none";
+      banner.className = "banner ok";
+      banner.style.display = "";
+      banner.textContent = `Anthropic credit balance: OK (last paid call ${when(pc.last_paid_call_at)}).`;
     }
     const g = d.budgets.global;
     $("budgets").innerHTML =
