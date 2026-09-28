@@ -50,6 +50,8 @@
   tr.stripe { border-left:3px solid var(--wait); } tr.stripe.over { border-left-color:var(--over); }
   .empty { padding:14px; color:var(--muted); } .count { color:var(--muted); margin-left:6px; font-weight:400; }
   .note { color:var(--muted); font-size:12.5px; margin:8px 0 0; } .err { color:var(--over); }
+  .banner { background:var(--over-soft); color:var(--over); border:1px solid var(--over);
+            border-radius:6px; padding:10px 14px; font-size:13px; font-weight:500; }
   @media (max-width:560px) { .repo summary { grid-template-columns:auto minmax(0,1fr); } .right { grid-column:2; } }
 </style>
 </head>
@@ -59,6 +61,7 @@
     <h1>REVA <span>/ budgets and waiting work</span></h1>
     <div class="meta" id="meta">Loading…</div>
   </header>
+  <div class="banner" id="banner" style="display:none"></div>
   <section><h2>Budgets, rolling 24 h</h2><div class="budgets" id="budgets"></div></section>
   <section><h2>Waiting PR reviews <span class="count" id="rev-count"></span></h2><div id="reviews"></div></section>
   <section><h2>Waiting Odoo work <span class="count" id="odoo-count"></span></h2><div id="odoo"></div></section>
@@ -90,9 +93,18 @@
   function panel(title, small, rows, emptyText) {
     return `<div class="panel"><h3>${title} <small>${small}</small></h3>${rows.length ? rows.join("") : `<div class="note">${emptyText}</div>`}</div>`;
   }
+  const waitFor = (reason) => reason === "provider_credit" ? "Anthropic credit" : "REVA cap";
   function render(d) {
     const s = d.settings;
     $("meta").textContent = `Refreshed ${hm(d.generated_at)} · every 60 s · waiting jobs re-check every ${Math.round(s.retry_seconds / 60)} min, give up after ${Math.round(s.max_wait_seconds / 3600)} h`;
+    const pc = d.budgets.provider_credit;
+    const banner = $("banner");
+    if (pc && pc.exhausted) {
+      banner.style.display = "";
+      banner.textContent = `Anthropic credit balance is empty since ${hm(pc.since)} — every Claude call waits until it is topped up.`;
+    } else {
+      banner.style.display = "none";
+    }
     const g = d.budgets.global;
     $("budgets").innerHTML =
       panel("Global, non-review calls", "audits, replies, change notes", [meter("All instances and repos", g.spent_usd, g.cap_usd, g.over)], "") +
@@ -108,8 +120,8 @@
         <summary><span class="chev">&#9654;</span>
           <span class="title">${esc(g.repo_full_name)} <span class="sub">${g.count} PR${g.count === 1 ? "" : "s"} · ${esc(g.authors.join(", "))}</span></span>
           <span class="right">oldest ${hm(g.oldest_since)} (${ago(g.oldest_since)})</span></summary>
-        <div class="tablewrap"><table><thead><tr><th>PR</th><th>Author</th><th>Mode</th><th>Waiting since</th></tr></thead><tbody>
-          ${g.prs.map((p) => `<tr class="stripe"><td>#${p.pr_number} <span class="sub">${esc(p.pr_title)}</span></td><td>${esc(p.author_login)}</td><td>${esc(p.review_mode)}</td><td class="mono">${hm(p.budget_wait_since)} (${ago(p.budget_wait_since)})</td></tr>`).join("")}
+        <div class="tablewrap"><table><thead><tr><th>PR</th><th>Author</th><th>Mode</th><th>Waiting since</th><th>Waiting for</th></tr></thead><tbody>
+          ${g.prs.map((p) => `<tr class="stripe"><td>#${p.pr_number} <span class="sub">${esc(p.pr_title)}</span></td><td>${esc(p.author_login)}</td><td>${esc(p.review_mode)}</td><td class="mono">${hm(p.budget_wait_since)} (${ago(p.budget_wait_since)})</td><td>${waitFor(p.reason)}</td></tr>`).join("")}
         </tbody></table></div></details>`).join("") : `<div class="tablewrap"><div class="empty">Nothing waiting.</div></div>`;
     document.querySelectorAll("details.repo").forEach((el) => el.addEventListener("toggle", () => {
       const set = openRepos(); el.open ? set.add(el.dataset.repo) : set.delete(el.dataset.repo); saveOpen(set);
@@ -119,15 +131,15 @@
                   timesheet_review: "Timesheet review", audit: "Repo audit", comment_reply: "Comment reply", change_note: "Change note"};
     const odoo = d.waiting.odoo;
     $("odoo-count").textContent = odoo.length || "";
-    $("odoo").innerHTML = odoo.length ? `<div class="tablewrap"><table><thead><tr><th>Kind</th><th>Instance</th><th>Record</th><th>Waiting since</th><th>Gives up</th></tr></thead><tbody>
+    $("odoo").innerHTML = odoo.length ? `<div class="tablewrap"><table><thead><tr><th>Kind</th><th>Instance</th><th>Record</th><th>Waiting since</th><th>Gives up</th><th>Waiting for</th></tr></thead><tbody>
       ${odoo.map((r) => { const giveUp = new Date(new Date(r.budget_wait_since).getTime() + s.max_wait_seconds * 1000).toISOString();
-        return `<tr class="stripe"><td>${KIND[r.kind] || esc(r.kind)}</td><td>${esc(r.instance_name)}</td><td class="mono">${esc(r.record)}</td><td class="mono">${hm(r.budget_wait_since)} (${ago(r.budget_wait_since)})</td><td class="mono">${new Date(giveUp).toLocaleString([], {weekday: "short", hour: "2-digit", minute: "2-digit"})}</td></tr>`; }).join("")}
+        return `<tr class="stripe"><td>${KIND[r.kind] || esc(r.kind)}</td><td>${esc(r.instance_name)}</td><td class="mono">${esc(r.record)}</td><td class="mono">${hm(r.budget_wait_since)} (${ago(r.budget_wait_since)})</td><td class="mono">${new Date(giveUp).toLocaleString([], {weekday: "short", hour: "2-digit", minute: "2-digit"})}</td><td>${waitFor(r.reason)}</td></tr>`; }).join("")}
       </tbody></table></div>` : `<div class="tablewrap"><div class="empty">Nothing waiting.</div></div>`;
 
     const jobs = d.waiting.jobs;
     $("jobs-count").textContent = jobs.length || "";
-    $("jobs").innerHTML = (jobs.length ? `<div class="tablewrap"><table><thead><tr><th>Kind</th><th>Target</th><th>Waiting since</th><th>Next run</th></tr></thead><tbody>
-      ${jobs.map((j) => `<tr class="stripe"><td>${KIND[j.kind] || esc(j.kind)}</td><td>${esc(j.target)}</td><td class="mono">${hm(j.budget_wait_since)} (${ago(j.budget_wait_since)})</td><td class="mono">${hm(j.next_run_at)}</td></tr>`).join("")}
+    $("jobs").innerHTML = (jobs.length ? `<div class="tablewrap"><table><thead><tr><th>Kind</th><th>Target</th><th>Waiting since</th><th>Next run</th><th>Waiting for</th></tr></thead><tbody>
+      ${jobs.map((j) => `<tr class="stripe"><td>${KIND[j.kind] || esc(j.kind)}</td><td>${esc(j.target)}</td><td class="mono">${hm(j.budget_wait_since)} (${ago(j.budget_wait_since)})</td><td class="mono">${hm(j.next_run_at)}</td><td>${waitFor(j.reason)}</td></tr>`).join("")}
       </tbody></table></div>` : `<div class="tablewrap"><div class="empty">Nothing waiting.</div></div>`) +
       (d.waiting.jobs_error ? `<p class="note err">Job queue unreachable: ${esc(d.waiting.jobs_error)}</p>` : "");
   }

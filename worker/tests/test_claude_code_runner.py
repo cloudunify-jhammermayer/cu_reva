@@ -15,7 +15,7 @@ from reva.claude_code_runner import (
     SUBPROCESS_TIMEOUT,
     ClaudeCodeRunner,
 )
-from reva.errors import PermanentError, TransientError
+from reva.errors import PermanentError, ProviderCreditExhausted, TransientError
 from tests.conftest import SHIPPED_PROMPTS
 
 
@@ -774,6 +774,23 @@ def test_review_raises_permanent_on_exit_1(runner_with_skill, tmp_path):
     with patch("subprocess.run", return_value=_fail(code=1, stderr="bad prompt")):
         with pytest.raises(PermanentError, match="exited 1"):
             runner_with_skill.review(repo_path=repo_path, skill="reva-diff-review", params={})
+
+
+def test_review_raises_provider_credit_exhausted_on_credit_balance_error(runner_with_skill, tmp_path):
+    """A 400 Anthropic refusal surfaces as ProviderCreditExhausted (subclass of
+    PermanentError) so runners can defer instead of failing outright."""
+    repo_path = str(tmp_path / "repo")
+    os.makedirs(repo_path)
+    stderr = (
+        '{"is_error":true,"api_error_status":400,'
+        '"result":"Credit balance is too low",'
+        '"session_id":"abc"}'
+    )
+
+    with patch("subprocess.run", return_value=_fail(code=1, stderr=stderr)):
+        with pytest.raises(ProviderCreditExhausted) as exc_info:
+            runner_with_skill.review(repo_path=repo_path, skill="reva-diff-review", params={})
+        assert isinstance(exc_info.value, PermanentError)
 
 
 def test_review_raises_transient_on_exit_2(runner_with_skill, tmp_path):

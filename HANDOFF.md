@@ -63,6 +63,18 @@ nginx `/reviews/` location on prod.
 3. Open `/reviews/` through the tunnel: Cloudflare Access must challenge
    (prefix added).
 
+**Follow-up 2026-09-27 — provider-credit exhaustion waits like a cap.** An
+Anthropic account with no credit left (CLI/Messages-API 400 "Credit balance is
+too low") is not one of REVA's own spend caps — `ProviderCreditExhausted`
+(`reva/errors.py`) is deferred through the same `defer_for_budget` wait-and-
+resume instead of failing every Claude call terminally. Migration
+`051_budget_wait_reason.sql` adds `budget_wait_reason` ("cap" /
+"provider_credit") beside `budget_wait_since` on the same five tables; the
+`/reviews/` page and TUI show which budget a row is waiting for, and a page
+banner appears while the Anthropic balance is empty. The lubac PR 58 run 2488
+failed with this exact refusal before this landed and needs a manual requeue
+once credits are topped up.
+
 ## Addendum 2026-09-04 (evening) — release-log entries replace drafted change notes
 
 **Status: implemented, not deployed** (spec

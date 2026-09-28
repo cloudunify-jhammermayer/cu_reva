@@ -27,7 +27,12 @@ from pathlib import Path
 import structlog
 
 from reva.config import DEFAULT_MODEL, DEEP_MODEL
-from reva.errors import PermanentError, TransientError
+from reva.errors import (
+    PermanentError,
+    ProviderCreditExhausted,
+    TransientError,
+    is_provider_credit_error,
+)
 from reva.types import ClaudeResponse
 
 logger = structlog.get_logger()
@@ -394,7 +399,7 @@ class ClaudeCodeRunner:
                     returncode=proc.returncode,
                     stderr=(proc.stderr or proc.stdout or "")[:300],
                 )
-                raise _exit_to_error(proc.returncode, proc.stderr or proc.stdout)
+                raise _exit_to_error(proc.returncode, f"{proc.stderr or ''}\n{proc.stdout or ''}")
 
             try:
                 with open(output_path) as f:
@@ -741,6 +746,8 @@ class ClaudeCodeRunner:
 
 def _exit_to_error(returncode: int, stderr: str) -> Exception:
     snippet = stderr[:200]
+    if is_provider_credit_error(stderr):
+        return ProviderCreditExhausted(f"Anthropic credit balance too low: {snippet}")
     if returncode == 1:
         return PermanentError(f"claude exited 1: {snippet}")
     return TransientError(f"claude exited {returncode}: {snippet}")

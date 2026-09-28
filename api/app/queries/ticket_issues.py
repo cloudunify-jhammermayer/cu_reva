@@ -73,6 +73,7 @@ def list_ticket_issue_runs(
                 "completed_at": r.completed_at,
                 "odoo_instance_id": r.odoo_instance_id,
                 "budget_wait_since": r.budget_wait_since,
+                "budget_wait_reason": r.budget_wait_reason,
             }
             for r in rows
         ]

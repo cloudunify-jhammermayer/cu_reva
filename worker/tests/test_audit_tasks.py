@@ -242,6 +242,55 @@ def test_run_audit_waits_when_over_budget_and_queue_present(db):
     assert q.enqueue_in.call_args.args[2]["repository_id"] == repo_id
 
 
+def test_run_audit_waits_on_provider_credit_exhausted_when_queue_present(db):
+    """A "Credit balance is too low" refusal is deferred like a full cap: the
+    already-inserted AuditRun row is marked failed (a fresh row is inserted on
+    the re-run) so it doesn't sit stuck in 'started'."""
+    from dataclasses import replace
+    from unittest.mock import MagicMock
+    from reva.errors import ProviderCreditExhausted
+
+    d, repo_id = db
+
+    class _CreditExhausted:
+        def execute(self, params):
+            raise ProviderCreditExhausted("Credit balance is too low")
+
+    q = MagicMock(); q.enqueue_in.return_value = MagicMock(id="rq:job:deferred")
+    set_context(replace(_ctx(d, _CreditExhausted()), rq_queue=q))
+
+    out = run_audit({"repository_id": repo_id, "installation_id": 500})
+
+    assert out["status"] == "waiting_budget"
+    assert out["reason"] == "provider_credit"
+    assert q.enqueue_in.call_args.args[1] == "worker.audit_tasks.run_audit"
+    assert q.enqueue_in.call_args.args[2]["repository_id"] == repo_id
+    with d.session() as s:
+        row = s.query(AuditRun).one()
+        assert row.status == "failed"
+        assert row.error_message == "deferred: Anthropic credit balance too low"
+
+
+def test_run_audit_fails_on_provider_credit_exhausted_without_queue(db):
+    from reva.errors import ProviderCreditExhausted
+
+    d, repo_id = db
+
+    class _CreditExhausted:
+        def execute(self, params):
+            raise ProviderCreditExhausted("Credit balance is too low")
+
+    set_context(_ctx(d, _CreditExhausted()))
+
+    with pytest.raises(ProviderCreditExhausted):
+        run_audit({"repository_id": repo_id, "installation_id": 500})
+
+    with d.session() as s:
+        row = s.query(AuditRun).one()
+        assert row.status == "failed"
+        assert "Credit balance is too low" in (row.error_message or "")
+
+
 def test_run_audit_marks_row_failed_on_error(db):
     """CORR-12: audits aren't RQ-retried, so a failure must mark the row failed —
     not leave it stuck in 'started' forever."""

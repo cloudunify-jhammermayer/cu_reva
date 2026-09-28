@@ -20,7 +20,12 @@ from datetime import datetime
 import structlog
 
 from reva.db import writers
-from reva.errors import MalformedModelOutput, PermanentError, TransientError
+from reva.errors import (
+    MalformedModelOutput,
+    PermanentError,
+    ProviderCreditExhausted,
+    TransientError,
+)
 from reva.github_urls import parse_github_repo_url
 from reva.html_guard import ensure_renderable
 from reva.persona import render_persona_block, resolve_persona
@@ -132,7 +137,29 @@ def run_support_answer(job_params: dict) -> dict:
             # Clear unconditionally: the row may carry a stale marker even when
             # this job's own params don't (e.g. a fresh trigger after a give-up).
             writers.set_budget_wait_since(ctx.db, "support_answer", params.turn_id, None)
-            html = _produce_answer(ctx, params, odoo, log)
+            try:
+                html = _produce_answer(ctx, params, odoo, log)
+            except ProviderCreditExhausted as exc:
+                log.error("provider_credit_exhausted", error=str(exc))
+                waiting = defer_for_budget(
+                    ctx, "worker.support_tasks.run_support_answer",
+                    params.model_dump(mode="json"), kind="support_answer",
+                    spent=0.0, log=log, reason="provider_credit",
+                )
+                if waiting is not None:
+                    writers.set_budget_wait_since(
+                        ctx.db, "support_answer", params.turn_id,
+                        datetime.fromisoformat(waiting["budget_wait_since"]),
+                        reason="provider_credit",
+                    )
+                    return waiting
+                # Not caught here on purpose: propagating lets the sibling
+                # `except Exception` below record the failed turn + ops event,
+                # exactly like today's terminal path for any other failure.
+                raise PermanentError(
+                    "Anthropic credit balance too low for the maximum wait; "
+                    "support answer declined."
+                ) from exc
         except TransientError:
             # RQ will retry; the turn stays pending on purpose so the retry
             # resumes it rather than the dedup treating it as finished.

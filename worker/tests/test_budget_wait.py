@@ -60,6 +60,56 @@ def test_first_wait_stamps_since_and_enqueues_with_retry():
     assert _events(ctx) == [("audit", "warning", "budget_wait_started")]
 
 
+def test_reason_defaults_to_cap_in_dict_params_and_event_detail():
+    q = _queue()
+    ctx = _ctx(q)
+
+    out = defer_for_budget(ctx, "worker.audit_tasks.run_audit", {}, kind="audit",
+                           spent=1.0, log=MagicMock())
+
+    assert out["reason"] == "cap"
+    params = q.enqueue_in.call_args.args[2]
+    assert params["budget_wait_reason"] == "cap"
+    with ctx.db.session() as s:
+        event = s.query(OpsEvent).one()
+        assert event.severity == "warning"
+        assert event.detail["reason"] == "cap"
+
+
+def test_provider_credit_reason_uses_error_severity_and_is_threaded_through():
+    q = _queue()
+    ctx = _ctx(q)
+    log = MagicMock()
+
+    out = defer_for_budget(ctx, "worker.tasks.run_review", {}, kind="review",
+                           spent=0.0, log=log, reason="provider_credit")
+
+    assert out["status"] == "waiting_budget"
+    assert out["reason"] == "provider_credit"
+    params = q.enqueue_in.call_args.args[2]
+    assert params["budget_wait_reason"] == "provider_credit"
+    with ctx.db.session() as s:
+        event = s.query(OpsEvent).one()
+        assert event.event == "budget_wait_started"
+        assert event.severity == "error"
+        assert event.detail["reason"] == "provider_credit"
+
+
+def test_provider_credit_expiry_records_reason_in_event_detail():
+    q = _queue()
+    ctx = _ctx(q, max_wait=3600)
+    since = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+
+    out = defer_for_budget(ctx, "t", {"budget_wait_since": since}, kind="review",
+                           spent=1.0, log=MagicMock(), reason="provider_credit")
+
+    assert out is None
+    with ctx.db.session() as s:
+        event = s.query(OpsEvent).one()
+        assert event.event == "budget_wait_expired"
+        assert event.detail["reason"] == "provider_credit"
+
+
 def test_repeat_wait_keeps_original_since_and_records_no_event():
     q = _queue()
     ctx = _ctx(q)

@@ -7,7 +7,7 @@ import structlog
 from reva.change_note import build_note
 from reva.db import writers
 from reva.diff_utils import extract_file_paths
-from reva.errors import TransientError
+from reva.errors import ProviderCreditExhausted, TransientError
 from reva.ticket_links import parse_closing_refs, resolve_pr_tickets
 from worker.change_note_delivery import maybe_deliver_change_notes
 from worker.release_log_lookup import ReleaseLogLookupError, release_log_block
@@ -88,6 +88,26 @@ def run_change_note(job_params: dict) -> dict:
                 )
             except TransientError:
                 raise
+            except ProviderCreditExhausted as exc:
+                logger.error("provider_credit_exhausted", error=str(exc))
+                waiting = defer_for_budget(
+                    ctx, "worker.change_note_tasks.run_change_note", job_params,
+                    kind="change_note", spent=0.0, log=logger, reason="provider_credit",
+                )
+                if waiting is not None:
+                    # Notes stay pending; delivery converges once the deferred
+                    # run has drafted them.
+                    return waiting
+                writers.record_change_note_failed(
+                    ctx.db, note_id, "skipped_budget", "Anthropic credit balance too low"
+                )
+                # A skipped note is terminal — it never blocks delivery of the
+                # ticket's other notes, so still test the convergent condition.
+                if maybe_deliver_change_notes(
+                    ctx, odoo, ref.odoo_instance_id, ref.ticket_id, ref.model_name, logger
+                ):
+                    delivered += 1
+                continue
             except Exception as exc:
                 writers.record_change_note_failed(ctx.db, note_id, "failed", str(exc))
                 writers.record_ops_event(

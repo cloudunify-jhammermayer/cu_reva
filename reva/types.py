@@ -279,6 +279,9 @@ class JobParams(BaseModel):
     # Set by worker.runner.defer_for_budget on a job that is waiting for budget
     # (spec 2026-09-27); None on every job the api enqueues.
     budget_wait_since: datetime | None = None
+    # 'cap' or 'provider_credit' (spec 2026-09-27-provider-credit-wait); None
+    # on every job the api enqueues.
+    budget_wait_reason: str | None = None
 
 
 # --- Claude content blocks (Anthropic Messages API shape) ---------------------
@@ -622,6 +625,9 @@ class TicketJobParams(BaseModel):
     # Set by worker.runner.defer_for_budget on a job that is waiting for budget
     # (spec 2026-09-27); None on every job the api enqueues.
     budget_wait_since: datetime | None = None
+    # 'cap' or 'provider_credit' (spec 2026-09-27-provider-credit-wait); None
+    # on every job the api enqueues.
+    budget_wait_reason: str | None = None
 
 
 # --- Support answer types -----------------------------------------------------
@@ -668,6 +674,9 @@ class SupportJobParams(BaseModel):
     # Set by worker.runner.defer_for_budget on a job that is waiting for budget
     # (spec 2026-09-27); None on every job the api enqueues.
     budget_wait_since: datetime | None = None
+    # 'cap' or 'provider_credit' (spec 2026-09-27-provider-credit-wait); None
+    # on every job the api enqueues.
+    budget_wait_reason: str | None = None
 
 
 class SupportSource(BaseModel):
@@ -931,6 +940,9 @@ class TicketIssueJobParams(BaseModel):
     # Set by worker.runner.defer_for_budget on a job that is waiting for budget
     # (spec 2026-09-27); None on every job the api enqueues.
     budget_wait_since: datetime | None = None
+    # 'cap' or 'provider_credit' (spec 2026-09-27-provider-credit-wait); None
+    # on every job the api enqueues.
+    budget_wait_reason: str | None = None
 
 
 # --- Timesheet wording review types -----------------------------------------
@@ -987,6 +999,9 @@ class TimesheetJobParams(BaseModel):
     # Set by worker.runner.defer_for_budget on a job that is waiting for budget
     # (spec 2026-09-27); None on every job the api enqueues.
     budget_wait_since: datetime | None = None
+    # 'cap' or 'provider_credit' (spec 2026-09-27-provider-credit-wait); None
+    # on every job the api enqueues.
+    budget_wait_reason: str | None = None
 
 
 class AuditJobParams(BaseModel):
@@ -998,6 +1013,9 @@ class AuditJobParams(BaseModel):
     # Set by worker.runner.defer_for_budget on a job that is waiting for budget
     # (spec 2026-09-27); None on every job the api enqueues.
     budget_wait_since: datetime | None = None
+    # 'cap' or 'provider_credit' (spec 2026-09-27-provider-credit-wait); None
+    # on every job the api enqueues.
+    budget_wait_reason: str | None = None
 
 
 class AuditResult(BaseModel):

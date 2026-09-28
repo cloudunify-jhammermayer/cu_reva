@@ -35,7 +35,7 @@ from rq import get_current_job
 
 from reva.cost import estimate_cost
 from reva.db import writers
-from reva.errors import PermanentError, TransientError
+from reva.errors import PermanentError, ProviderCreditExhausted, TransientError
 from reva.github_urls import parse_github_project_url, parse_github_repo_url
 from reva.golden_estimates import apply_anchor, load
 from reva.types import TicketIssueJobParams
@@ -555,6 +555,23 @@ def run_ticket_issues(job_params: dict) -> dict:
         writers.record_ticket_issue_run_failed(ctx.db, params.run_id, str(exc))
         _send_failed_callback(ctx, params, str(exc), log)
         raise
+    except ProviderCreditExhausted as exc:
+        log.error("provider_credit_exhausted", error=str(exc))
+        waiting = defer_for_budget(
+            ctx, "worker.ticket_issue_tasks.run_ticket_issues", params.model_dump(mode="json"),
+            kind="ticket_issues", spent=0.0, log=log, reason="provider_credit",
+        )
+        if waiting is not None:
+            writers.set_budget_wait_since(
+                ctx.db, "ticket_issues", params.run_id,
+                datetime.fromisoformat(waiting["budget_wait_since"]),
+                reason="provider_credit",
+            )
+            return waiting
+        error = "Anthropic credit balance too low for the maximum wait; issue creation declined."
+        writers.record_ticket_issue_run_failed(ctx.db, params.run_id, error)
+        _send_failed_callback(ctx, params, error, log)
+        raise PermanentError(error) from exc
     except PermanentError as exc:
         log.error("ticket_issues_error", error=str(exc))
         writers.record_ticket_issue_run_failed(ctx.db, params.run_id, str(exc))

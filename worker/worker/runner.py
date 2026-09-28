@@ -44,7 +44,7 @@ from reva.db import (
     writers,
 )
 from reva.diff_utils import extract_file_paths, parse_diff_hunks
-from reva.errors import PermanentError, TransientError
+from reva.errors import PermanentError, ProviderCreditExhausted, TransientError
 from reva.finding_verifier import FindingVerifier, StoredFinding
 from reva.github_client import GitHubClient
 from reva.prompt_builder import PromptBuilder
@@ -301,11 +301,13 @@ def run_review(job_params: dict) -> dict:
     # the deferred chain's own re-run always carries budget_wait_since, so its
     # absence on THIS job's params is what marks a trigger as "fresh".
     prior_wait_since = None
+    prior_wait_reason = "cap"
     if (
         params.budget_wait_since is None
         and writers.get_review_run_status(ctx.db, params) == "waiting_budget"
     ):
         prior_wait_since = writers.get_review_run_budget_wait_since(ctx.db, params)
+        prior_wait_reason = writers.get_review_run_budget_wait_reason(ctx.db, params) or "cap"
 
     # CONC-1: atomically claim this (repo,pr,sha,mode) for our RQ job. If another
     # worker job already holds it in-flight, skip — don't pay for a duplicate
@@ -338,10 +340,17 @@ def run_review(job_params: dict) -> dict:
         # real deadline, instead of re-running the gate and deferring again.
         author = pr_basic["author_login"]
         restored_spent = author_budget_exceeded(ctx, params.pull_request_id) or 0.0
+        reason_text = (
+            "Waiting for the Anthropic credit balance to be topped up."
+            if prior_wait_reason == "provider_credit"
+            else f"Waiting for @{author}'s review budget to free up."
+        )
         writers.record_review_waiting_budget(
-            ctx.db, params, prior_wait_since,
-            f"Waiting for @{author}'s review budget to free up.")
-        _post_waiting_check_run(ctx, params, run_id, owner, name, author, restored_spent, log)
+            ctx.db, params, prior_wait_since, reason_text, reason=prior_wait_reason)
+        _post_waiting_check_run(
+            ctx, params, run_id, owner, name, author, restored_spent, log,
+            reason=prior_wait_reason,
+        )
         log.info("review_job_done", status="already_waiting", author=author)
         return {"status": "already_waiting"}
 
@@ -397,6 +406,11 @@ def run_review(job_params: dict) -> dict:
     _enqueue_board_status(ctx, params, owner, name, pr_number, "review_started", log)
 
     result = _execute_and_persist(ctx, params, run_id, owner, name, pr_number, log)
+    if isinstance(result, dict):
+        # Provider-credit exhaustion deferred: the queued check is already
+        # posted from _execute_and_persist; nothing more to send to GitHub.
+        log.info("review_job_done", status="waiting_budget")
+        return result
     _post_result_to_github(ctx, params, result, run_id, owner, name, pr_number, log)
 
     if result.status == "completed":
@@ -497,15 +511,19 @@ def _parse_wait_since(raw: object) -> datetime | None:
 
 def defer_for_budget(
     ctx: WorkerContext, task: str, job_params: dict, *, kind: str, spent: float,
-    log, job_timeout: int | None = None,
+    log, job_timeout: int | None = None, reason: str = "cap",
 ) -> dict | None:
-    """Wait-and-resume for a budget-gated job (spec 2026-09-27).
+    """Wait-and-resume for a budget-gated job (spec 2026-09-27; provider-credit
+    exhaustion is deferred the same way, spec 2026-09-27-provider-credit-wait).
 
     Re-enqueues `task` with the same params `budget_retry_seconds` from now,
     stamping `budget_wait_since` on the first wait so the deadline survives
-    the round trips. Returns the terminal result dict for THIS attempt, or
-    None when the caller must take its old terminal path: waiting disabled,
-    no queue handle, deadline passed, or the enqueue itself failed.
+    the round trips. `reason` ("cap" or "provider_credit") says WHICH budget
+    the job is waiting for; it rides along in the deferred params
+    (`budget_wait_reason`) so a row-less registry job can still show it, and
+    in the ops-event detail. Returns the terminal result dict for THIS
+    attempt, or None when the caller must take its old terminal path: waiting
+    disabled, no queue handle, deadline passed, or the enqueue itself failed.
     """
     retry = ctx.budget_retry_seconds
     if retry <= 0 or ctx.rq_queue is None:
@@ -519,6 +537,7 @@ def defer_for_budget(
                     spent_usd=round(spent, 2))
         writers.record_ops_event(ctx.db, kind, "error", "budget_wait_expired", {
             "task": task, "waited_seconds": int(waited), "spent_usd": round(spent, 2),
+            "reason": reason,
         })
         return None
 
@@ -529,6 +548,7 @@ def defer_for_budget(
     failure_ttl = getattr(job, "failure_ttl", None)
     params = dict(job_params)
     params["budget_wait_since"] = since.isoformat()
+    params["budget_wait_reason"] = reason
     try:
         deferred = ctx.rq_queue.enqueue_in(
             timedelta(seconds=retry), task, params,
@@ -542,14 +562,21 @@ def defer_for_budget(
         })
         return None
     if first_wait:
-        writers.record_ops_event(ctx.db, kind, "warning", "budget_wait_started", {
+        # An empty Anthropic balance is an operator incident (every Claude call
+        # in every runner fails until topped up) — error, not warning; a full
+        # REVA cap is expected/self-resolving and stays a warning.
+        severity = "error" if reason == "provider_credit" else "warning"
+        writers.record_ops_event(ctx.db, kind, severity, "budget_wait_started", {
             "task": task, "spent_usd": round(spent, 2), "retry_in_seconds": retry,
+            "reason": reason,
         })
     log.info("budget_wait_deferred", kind=kind, retry_in_seconds=retry,
-             waited_s=int(waited), spent_usd=round(spent, 2), retry_job_id=deferred.id)
+             waited_s=int(waited), spent_usd=round(spent, 2), retry_job_id=deferred.id,
+             reason=reason)
     return {
         "status": "waiting_budget",
         "kind": kind,
+        "reason": reason,
         "spent_usd": round(spent, 2),
         "budget_wait_since": since.isoformat(),
         "retry_job_id": deferred.id,
@@ -584,8 +611,13 @@ def _execute_and_persist(
     name: str,
     pr_number: int,
     log,
-) -> ReviewResult:
-    """Execute the reviewer and persist its outcome. Re-raises on any error."""
+) -> ReviewResult | dict:
+    """Execute the reviewer and persist its outcome. Re-raises on any error.
+
+    Returns the `waiting_budget` dict (instead of a ReviewResult) when a
+    provider-credit exhaustion is deferred — run_review passes that straight
+    back without posting to GitHub again (a queued check is already posted
+    from here)."""
     try:
         # Pre-flight budget gate for the optional second-pass self-critique: don't
         # start paid verification when the author's rolling cap is already reached.
@@ -596,6 +628,30 @@ def _execute_and_persist(
         # Don't write a "failed" row — RQ will retry; started status preserved.
         log.warning("review_transient_error", exc_info=True)
         raise
+    except ProviderCreditExhausted as exc:
+        log.error("provider_credit_exhausted", error=str(exc))
+        waiting = defer_for_budget(
+            ctx, "worker.tasks.run_review", params.model_dump(mode="json"),
+            kind="review", spent=0.0, log=log, job_timeout=REVIEW_JOB_TIMEOUT,
+            reason="provider_credit",
+        )
+        if waiting is not None:
+            since = datetime.fromisoformat(waiting["budget_wait_since"])
+            writers.record_review_waiting_budget(
+                ctx.db, params, since,
+                "Waiting for the Anthropic credit balance to be topped up.",
+                reason="provider_credit",
+            )
+            _post_waiting_check_run(
+                ctx, params, run_id, owner, name, None, 0.0, log, reason="provider_credit",
+            )
+            return waiting
+        error = "Anthropic credit balance too low for the maximum wait; review declined."
+        log.error("review_permanent_error", error=error)
+        writers.record_review_failed(ctx.db, params, "permanent", error)
+        _post_failure_check_run(ctx, params, run_id, error, owner, name)
+        _notify_error(ctx, params, "ProviderCreditExhausted", error, owner, name, pr_number)
+        raise PermanentError(error) from exc
     except PermanentError as exc:
         log.error("review_permanent_error", error=str(exc))
         # M1: a parse failure after the paid CLI run carries the incurred cost so
@@ -915,20 +971,30 @@ def _set_risk_label(
 
 def _post_waiting_check_run(
     ctx: WorkerContext, params: JobParams, run_id: int, owner: str, name: str,
-    author: str | None, spent: float, log,
+    author: str | None, spent: float, log, *, reason: str = "cap",
 ) -> None:
-    """Best-effort `queued` Check Run while the review waits for budget. No PR
-    comment (no spam); the eventual result updates this check in place."""
+    """Best-effort `queued` Check Run while the review waits for budget — a full
+    REVA cap, or an empty Anthropic credit balance (spec 2026-09-27-provider-
+    credit-wait). No PR comment (no spam); the eventual result updates this
+    check in place."""
     try:
         token = ctx.github.get_installation_token(params.installation_id)
-        output = {
-            "title": "Waiting for review budget",
-            "summary": (
+        if reason == "provider_credit":
+            summary = (
+                "REVA's Anthropic credit balance is empty. It re-checks every "
+                f"{ctx.budget_retry_seconds // 60} min and reviews this commit "
+                "once the balance is topped up."
+            )
+        else:
+            summary = (
                 f"@{author}'s rolling 24-hour review budget "
                 f"(${ctx.author_daily_budget_usd:.0f}) is full (≈${spent:.0f} spent). "
                 f"REVA re-checks every {ctx.budget_retry_seconds // 60} min and reviews "
                 f"this commit as soon as spend rolls off."
-            ),
+            )
+        output = {
+            "title": "Waiting for review budget",
+            "summary": summary,
         }
         check_run_id = _check_run_id_or_recover(
             ctx, token, owner, name, params.head_sha,

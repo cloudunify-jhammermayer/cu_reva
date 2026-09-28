@@ -16,7 +16,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from reva.db import Base, Database, create_engine_from_url, writers
-from reva.errors import PermanentError, TransientError
+from reva.errors import PermanentError, ProviderCreditExhausted, TransientError
 from reva.prompt_builder import PromptBuilder
 from worker.runner import (
     WorkerContext,
@@ -1551,6 +1551,50 @@ def test_review_waits_for_author_budget_with_queued_check(ctx_and_fakes):
     assert deferred["head_sha"] == "deadbeef" and deferred["budget_wait_since"]
 
 
+def test_review_waits_on_provider_credit_exhausted_with_queued_check(ctx_and_fakes):
+    """An Anthropic "Credit balance is too low" refusal is deferred exactly
+    like a full cap — no failure, no PR comment, reason recorded."""
+    s = ctx_and_fakes
+    q = _deferring_queue()
+    set_context(replace(get_context(), rq_queue=q))
+    s["reviewer"].raise_exc = ProviderCreditExhausted("Credit balance is too low")
+
+    out = run_review(_params(s))
+
+    assert out["status"] == "waiting_budget"
+    assert out["reason"] == "provider_credit"
+    assert s["github"].created_issue_comments == []          # no decline comment
+    assert len(s["github"].created_check_runs) == 1
+    check = s["github"].created_check_runs[0]
+    assert check["status"] == "queued" and check["conclusion"] is None
+    assert "credit" in check["output"]["summary"].lower()
+    from reva.db.models import ReviewRun
+    with s["db"].session() as db_s:
+        run = db_s.query(ReviewRun).filter_by(head_sha="deadbeef").one()
+        assert run.status == "waiting_budget"
+        assert run.budget_wait_since is not None
+        assert run.budget_wait_reason == "provider_credit"
+    _, task, deferred = q.enqueue_in.call_args.args
+    assert task == "worker.tasks.run_review"
+    assert deferred["head_sha"] == "deadbeef" and deferred["budget_wait_since"]
+
+
+def test_review_fails_on_provider_credit_exhausted_without_queue(ctx_and_fakes):
+    """No queue to defer through: give up like today's terminal failure path."""
+    s = ctx_and_fakes
+    s["reviewer"].raise_exc = ProviderCreditExhausted("Credit balance is too low")
+
+    with pytest.raises(PermanentError):
+        run_review(_params(s))
+
+    from reva.db.models import ReviewRun
+    with s["db"].session() as db_s:
+        run = db_s.query(ReviewRun).filter_by(head_sha="deadbeef").one()
+        assert run.status == "failed"
+        assert "credit balance too low" in run.error_message.lower()
+    assert len(s["github"].created_check_runs) == 1  # failure check posted
+
+
 def test_deferred_review_rerun_completes_and_updates_queued_check(ctx_and_fakes):
     s = ctx_and_fakes
     _seed_author_spend(s, 5.0)
@@ -1628,6 +1672,9 @@ def test_comment_during_wait_does_not_start_second_defer_chain(ctx_and_fakes):
         if stored.tzinfo is None:
             stored = stored.replace(tzinfo=timezone.utc)
         assert stored == datetime.fromisoformat(first["budget_wait_since"])
+        # The restore must preserve the original wait's reason, not silently
+        # assume "cap" (spec 2026-09-27-provider-credit-wait).
+        assert run.budget_wait_reason == "cap"
 
 
 def test_review_wait_branch_short_circuits_stale_when_head_moved(ctx_and_fakes):

@@ -16,7 +16,12 @@ import pytest
 
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.db.models import OpsEvent
-from reva.errors import MalformedModelOutput, PermanentError, TransientError
+from reva.errors import (
+    MalformedModelOutput,
+    PermanentError,
+    ProviderCreditExhausted,
+    TransientError,
+)
 from reva.ticket_knowledge import TicketKnowledge
 from reva.types import ClaudeResponse, SupportAnswerResult, SupportJobParams
 from worker.runner import WorkerContext, set_context
@@ -361,6 +366,42 @@ def test_completed_turn_resumes_without_re_paying(env):
     run_support_answer(_params(env))          # RQ retry after a callback blip
     assert env.answerer.calls == 1            # no second paid call
     assert len(env.odoo.written) == 2         # but delivery is retried
+
+
+def test_provider_credit_exhausted_waits_when_queue_present(env):
+    from dataclasses import replace
+    from unittest.mock import MagicMock
+
+    def _raise(params, persona_block, prior_turns, extra_system_blocks=None):
+        raise ProviderCreditExhausted("Credit balance is too low")
+    env.answerer.answer_with_response = _raise
+
+    q = MagicMock()
+    q.enqueue_in.return_value = MagicMock(id="rq:job:deferred")
+    set_context(replace(env.ctx, rq_queue=q))
+
+    out = run_support_answer(_params(env))
+
+    assert out["status"] == "waiting_budget"
+    assert out["reason"] == "provider_credit"
+    row = writers.get_support_turn(env.db, env.turn_id)
+    assert row["status"] == "pending"
+    assert row["budget_wait_since"] is not None
+    assert row["budget_wait_reason"] == "provider_credit"
+    assert q.enqueue_in.call_args.args[1] == "worker.support_tasks.run_support_answer"
+    assert env.odoo.written == []
+
+
+def test_provider_credit_exhausted_fails_without_queue(env):
+    def _raise(params, persona_block, prior_turns, extra_system_blocks=None):
+        raise ProviderCreditExhausted("Credit balance is too low")
+    env.answerer.answer_with_response = _raise
+
+    with pytest.raises(PermanentError):
+        run_support_answer(_params(env))
+
+    row = writers.get_support_turn(env.db, env.turn_id)
+    assert row["status"] == "failed"
 
 
 def test_callback_failure_records_error_and_reraises(env):

@@ -14,7 +14,7 @@ import structlog
 
 from reva.cost import estimate_cost
 from reva.db import writers
-from reva.errors import PermanentError
+from reva.errors import PermanentError, ProviderCreditExhausted
 from worker.runner import budget_exceeded, defer_for_budget, get_context
 
 logger = structlog.get_logger()
@@ -86,7 +86,18 @@ def run_comment_reply(params: dict) -> dict | None:
         + f"<reply_{nonce}>\n{question}\n</reply_{nonce}>"
     )
 
-    reply_text = ctx.claude.chat(system=system, user=user_prompt)
+    try:
+        reply_text = ctx.claude.chat(system=system, user=user_prompt)
+    except ProviderCreditExhausted as exc:
+        log.error("provider_credit_exhausted", error=str(exc))
+        waiting = defer_for_budget(
+            ctx, "worker.tasks.run_comment_reply", params, kind="comment_reply",
+            spent=0.0, log=log, reason="provider_credit",
+        )
+        if waiting is not None:
+            return waiting
+        log.warning("reply_declined_provider_credit", error=str(exc))
+        return None
     # SECU-3: record reply spend in the unified ledger so the cap counts it.
     # chat() doesn't return usage; replies are bounded (≤1024 out tokens), so
     # estimate from sizes at the model chat() actually used (M3: was hardcoded to

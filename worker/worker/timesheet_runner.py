@@ -7,7 +7,7 @@ from datetime import datetime
 import structlog
 
 from reva.db import writers
-from reva.errors import PermanentError, TransientError
+from reva.errors import PermanentError, ProviderCreditExhausted, TransientError
 from reva.types import (
     TIMESHEET_CHUNK_SIZE,
     TimesheetJobParams,
@@ -132,6 +132,24 @@ def run_timesheet_review(job_params: dict) -> dict:
         except TransientError:
             log.warning("timesheet_review_transient_error", exc_info=True)
             raise
+        except ProviderCreditExhausted as exc:
+            log.error("provider_credit_exhausted", error=str(exc))
+            waiting = defer_for_budget(
+                ctx, "worker.timesheet_tasks.run_timesheet_review",
+                params.model_dump(mode="json"), kind="timesheet_review",
+                spent=0.0, log=log, reason="provider_credit",
+            )
+            if waiting is not None:
+                writers.set_budget_wait_since(
+                    ctx.db, "timesheet_review", params.run_id,
+                    datetime.fromisoformat(waiting["budget_wait_since"]),
+                    reason="provider_credit",
+                )
+                return waiting
+            error = "Anthropic credit balance too low for the maximum wait; timesheet review declined."
+            writers.set_budget_wait_since(ctx.db, "timesheet_review", params.run_id, None)
+            writers.record_timesheet_run_failed(ctx.db, params.run_id, error)
+            raise PermanentError(error) from exc
         except PermanentError as exc:
             log.error("timesheet_review_permanent_error", error=str(exc))
             writers.record_timesheet_run_failed(ctx.db, params.run_id, str(exc))

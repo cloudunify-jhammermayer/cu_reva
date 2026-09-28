@@ -954,3 +954,24 @@ func TestTicketRowShowsWaitingForBudgetAligned(t *testing.T) {
 			hdrOffset, rowOffset, hdrLine, rowLine)
 	}
 }
+
+// TestTicketDetailShowsBudgetWaitReason: ticket 654's analysis is parked on a
+// provider-credit wait (mock), its create-issues run on a plain cap wait
+// (BudgetWaitReason nil) — the two "waiting for budget since" detail lines
+// must each name which budget, not just that something is waiting (spec
+// 2026-09-27-provider-credit-wait).
+func TestTicketDetailShowsBudgetWaitReason(t *testing.T) {
+	tab := ticketsWithData()
+	tab = onRow(tab, 654)
+	out := tab.view(120, 30)
+
+	if !strings.Contains(out, "waiting for budget since") {
+		t.Fatalf("view missing a waiting-for-budget detail line, got:\n%s", out)
+	}
+	if !strings.Contains(out, "(Anthropic credit)") {
+		t.Fatalf("analysis detail line missing the provider-credit suffix, got:\n%s", out)
+	}
+	if !strings.Contains(out, "(REVA cap)") {
+		t.Fatalf("issue-run detail line missing the REVA-cap suffix, got:\n%s", out)
+	}
+}

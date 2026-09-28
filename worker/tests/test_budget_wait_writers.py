@@ -45,6 +45,35 @@ def test_unknown_kind_is_a_programming_error(db):
         writers.set_budget_wait_since(db, "nope", 1, SINCE)
 
 
+def test_set_budget_wait_since_stores_and_clears_reason(db):
+    inst = _instance(db)
+    aid = writers.record_ticket_analysis_created(db, TicketJobParams(
+        analysis_id=0, odoo_instance_id=inst, ticket_id=42, model_name="helpdesk.ticket",
+        field_name="description", text="t"))
+
+    writers.set_budget_wait_since(db, "ticket_analysis", aid, SINCE, reason="provider_credit")
+    row = writers.get_ticket_analysis(db, aid)
+    assert row["budget_wait_reason"] == "provider_credit"
+
+    # Clearing (since=None) always clears the reason too, regardless of arg.
+    writers.set_budget_wait_since(db, "ticket_analysis", aid, None, reason="provider_credit")
+    row = writers.get_ticket_analysis(db, aid)
+    assert row["budget_wait_since"] is None
+    assert row["budget_wait_reason"] is None
+
+
+def test_list_budget_waiting_includes_reason(db):
+    inst = _instance(db)
+    aid = writers.record_ticket_analysis_created(db, TicketJobParams(
+        analysis_id=0, odoo_instance_id=inst, ticket_id=42, model_name="helpdesk.ticket",
+        field_name="description", text="t"))
+    writers.set_budget_wait_since(db, "ticket_analysis", aid, SINCE, reason="provider_credit")
+
+    rows = writers.list_budget_waiting(db)
+
+    assert rows[0]["budget_wait_reason"] == "provider_credit"
+
+
 def test_list_budget_waiting_spans_the_four_tables(db):
     inst = _instance(db)
     aid = writers.record_ticket_analysis_created(db, TicketJobParams(
@@ -68,6 +97,10 @@ def test_list_budget_waiting_spans_the_four_tables(db):
     assert by_kind["support_answer"]["record"] == "project.task 99"
     assert by_kind["timesheet_review"]["record"] == "timesheet req-7"
     assert all(r["budget_wait_since"] is not None for r in rows)
+    # No reason was passed to set_budget_wait_since here (the plain cap path
+    # doesn't), so the column is NULL — the "cap" default lives at the API
+    # display layer (api/app/queries/budget_status.py), not in this reader.
+    assert by_kind["ticket_analysis"]["budget_wait_reason"] is None
 
 
 def test_list_budget_waiting_ignores_failed_rows(db):
@@ -105,13 +138,42 @@ def test_review_waiting_budget_row_and_listing(db):
     assert rows[0]["pr_number"] == 42
     assert rows[0]["author_login"] == "alice"
     assert rows[0]["review_mode"] == "diff"
+    # Default kind is "cap" (keeps the existing positional call sites working).
+    assert rows[0]["budget_wait_reason"] == "cap"
     # A queued Check Run on a waiting row is not a posted review.
     writers.attach_github_ids(db, run_id, check_run_id=777)
     assert writers.is_already_posted(db, params) is False
-    # Re-claim works (non-running rows are re-claimable) and clears the marker.
+    # Re-claim works (non-running rows are re-claimable) and clears the marker
+    # (and the reason alongside it).
     _, claimed = writers.claim_review_run(db, params, job_id="rq:2")
     assert claimed is True
     assert writers.list_reviews_waiting_budget(db) == []
+    with db.session() as s:
+        from reva.db.models import ReviewRun
+        run = s.get(ReviewRun, run_id)
+        assert run.budget_wait_reason is None
+
+
+def test_get_review_run_budget_wait_reason(db):
+    params = _review_params(db)
+    writers.record_review_waiting_budget(
+        db, params, SINCE, "Waiting for the Anthropic credit balance to be topped up.",
+        reason="provider_credit",
+    )
+
+    assert writers.get_review_run_budget_wait_reason(db, params) == "provider_credit"
+
+
+def test_review_waiting_budget_provider_credit_reason(db):
+    params = _review_params(db)
+    run_id = writers.record_review_waiting_budget(
+        db, params, SINCE, "Waiting for the Anthropic credit balance to be topped up.",
+        reason="provider_credit",
+    )
+
+    rows = writers.list_reviews_waiting_budget(db)
+    assert rows[0]["id"] == run_id
+    assert rows[0]["budget_wait_reason"] == "provider_credit"
 
 
 def test_review_spend_kinds_exported():

@@ -64,7 +64,10 @@ it with the same params `REVA_BUDGET_RETRY_SECONDS` later instead of failing
 it, stamping `budget_wait_since` on the first wait so the deadline survives
 the round trips. A job waits at most `REVA_BUDGET_WAIT_MAX_SECONDS` before it
 gives up and takes its old fail path. Waiting jobs and current budget fill are
-visible at `/reviews` (api, edge-gated like `/docs`).
+visible at `/reviews` (api, edge-gated like `/docs`). An Anthropic "credit
+balance is too low" refusal (`ProviderCreditExhausted`) is deferred the same
+way, tagged `budget_wait_reason = "provider_credit"` so the page and TUI show
+which budget a job is waiting for.
 
 | Env var | Default |
 |---|---|

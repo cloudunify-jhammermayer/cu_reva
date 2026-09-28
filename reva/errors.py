@@ -32,3 +32,17 @@ class MalformedModelOutput(PermanentError):
     before treating it as a failure the user sees."""
 
 
+class ProviderCreditExhausted(PermanentError):
+    """The Anthropic account has no credit left (HTTP 400 "Credit balance is
+    too low"). Not one of REVA's own spend caps: nothing was paid, and the
+    call will succeed again once the balance is topped up, so runners defer
+    the job (worker.runner.defer_for_budget) instead of failing it. Subclasses
+    PermanentError so any path without specific handling still degrades to
+    today's terminal behaviour."""
+
+
+def is_provider_credit_error(text: str | None) -> bool:
+    """True for the Anthropic "credit balance is too low" refusal (any casing)."""
+    return bool(text) and "credit balance is too low" in text.lower()
+
+

@@ -544,12 +544,15 @@ func (m *MockClient) TicketAnalyses(limit int) (*TicketAnalysisPage, error) {
 	items := []TicketAnalysisSummary{
 		{
 			// Parked on budget: still "pending", but BudgetWaitSince marks how
-			// long it's been waiting for the Odoo instance's budget to roll off.
+			// long it's been waiting. This one is a provider-credit wait (the
+			// Anthropic account itself is out of credit, not one of REVA's own
+			// caps) — BudgetWaitReason distinguishes it from the follow-on
+			// create-issues run below, which is a plain REVA cap wait.
 			ID: 6, OdooInstanceID: intPtr(2), TicketID: 654, ModelName: "helpdesk.ticket", FieldName: "description",
 			Status: "pending", Model: nil,
 			InputTokens: nil, OutputTokens: nil,
 			EstimatedCostUSD: nil, CreatedAt: tWait, CompletedAt: nil,
-			BudgetWaitSince: &tWait,
+			BudgetWaitSince: &tWait, BudgetWaitReason: strPtr("provider_credit"),
 		},
 		{
 			ID: 3, OdooInstanceID: intPtr(1), TicketID: 456, ModelName: "helpdesk.ticket", FieldName: "description",

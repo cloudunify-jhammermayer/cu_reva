@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from reva.claude_client import ANTHROPIC_VERSION, ClaudeClient
-from reva.errors import PermanentError, TransientError
+from reva.errors import PermanentError, ProviderCreditExhausted, TransientError
 from reva.review_tool import (
     REVIEW_TOOL_NAME,
     build_review_tool_schema,
@@ -171,6 +171,21 @@ def test_review_maps_401_to_permanent():
     client = _make_client(lambda req: httpx.Response(401, text="bad key"))
     with pytest.raises(PermanentError):
         client.review(**_review_args())
+
+
+def test_review_maps_400_credit_balance_to_provider_credit_exhausted():
+    body = {"error": {"message": "Your credit balance is too low to access the Anthropic API."}}
+    client = _make_client(lambda req: httpx.Response(400, json=body))
+    with pytest.raises(ProviderCreditExhausted) as exc_info:
+        client.review(**_review_args())
+    assert isinstance(exc_info.value, PermanentError)
+
+
+def test_review_maps_plain_400_to_permanent_not_provider_credit():
+    client = _make_client(lambda req: httpx.Response(400, text="bad input"))
+    with pytest.raises(PermanentError) as exc_info:
+        client.review(**_review_args())
+    assert not isinstance(exc_info.value, ProviderCreditExhausted)
 
 
 # --- transport-level failures -------------------------------------------------

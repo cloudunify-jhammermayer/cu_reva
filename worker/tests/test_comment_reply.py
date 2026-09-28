@@ -9,6 +9,7 @@ import pytest
 
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.db.models import ClaudeSpend, ReviewFinding, ReviewRun
+from reva.errors import ProviderCreditExhausted
 from worker.reply_runner import run_comment_reply
 from worker.runner import WorkerContext, set_context
 
@@ -105,3 +106,29 @@ def test_reply_waits_when_over_budget_and_queue_present(db_with_finding):
     ctx.claude.chat.assert_not_called()
     assert q.enqueue_in.call_args.args[1] == "worker.tasks.run_comment_reply"
     assert q.enqueue_in.call_args.args[2]["comment_id"] == _COMMENT_ID
+
+
+def test_provider_credit_exhausted_waits_when_queue_present(db_with_finding):
+    from dataclasses import replace
+    ctx = _ctx(db_with_finding)
+    ctx.claude.chat.side_effect = ProviderCreditExhausted("Credit balance is too low")
+    q = MagicMock(); q.enqueue_in.return_value = MagicMock(id="rq:job:deferred")
+    set_context(replace(ctx, rq_queue=q))
+
+    out = run_comment_reply(_params())
+
+    assert out["status"] == "waiting_budget"
+    assert out["reason"] == "provider_credit"
+    ctx.github.reply_to_review_comment.assert_not_called()
+    assert q.enqueue_in.call_args.args[1] == "worker.tasks.run_comment_reply"
+    assert q.enqueue_in.call_args.args[2]["comment_id"] == _COMMENT_ID
+
+
+def test_provider_credit_exhausted_skipped_without_queue(db_with_finding):
+    ctx = _ctx(db_with_finding)
+    ctx.claude.chat.side_effect = ProviderCreditExhausted("Credit balance is too low")
+
+    out = run_comment_reply(_params())
+
+    assert out is None
+    ctx.github.reply_to_review_comment.assert_not_called()

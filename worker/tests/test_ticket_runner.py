@@ -17,7 +17,12 @@ import structlog
 
 from reva.db import Base, Database, create_engine_from_url, writers
 from reva.db.models import ClaudeSpend, OpsEvent, TicketAnalysis
-from reva.errors import MalformedModelOutput, PermanentError, TransientError
+from reva.errors import (
+    MalformedModelOutput,
+    PermanentError,
+    ProviderCreditExhausted,
+    TransientError,
+)
 from reva.golden_estimates import Degradation
 from reva.ticket_knowledge import TicketKnowledge
 from reva.types import (
@@ -1474,6 +1479,42 @@ def test_deferred_rerun_clears_budget_wait_marker(ctx_and_fakes, monkeypatch):
 
     assert out["status"] == "completed"
     assert writers.get_ticket_analysis(s["db"], params["analysis_id"])["budget_wait_since"] is None
+
+
+def test_provider_credit_exhausted_waits_when_queue_present(ctx_and_fakes):
+    """A "Credit balance is too low" refusal is deferred exactly like a full
+    cap — no failure, row stays pending, reason recorded as provider_credit."""
+    from dataclasses import replace
+    s = ctx_and_fakes
+    q = _waiting_queue()
+    set_context(replace(s["ctx"], rq_queue=q))
+    s["analyzer"].raise_exc = ProviderCreditExhausted("Credit balance is too low")
+    params = _make_params(s["db"])
+
+    out = run_ticket_analysis(params)
+
+    assert out["status"] == "waiting_budget"
+    assert out["reason"] == "provider_credit"
+    row = writers.get_ticket_analysis(s["db"], params["analysis_id"])
+    assert row["status"] == "pending"
+    assert row["budget_wait_since"] is not None
+    assert row["budget_wait_reason"] == "provider_credit"
+    _, task, deferred = q.enqueue_in.call_args.args
+    assert task == "worker.ticket_tasks.run_ticket_analysis"
+    assert deferred["analysis_id"] == params["analysis_id"]
+
+
+def test_provider_credit_exhausted_fails_without_queue(ctx_and_fakes):
+    """No queue to defer through: give up like today's terminal failure path."""
+    s = ctx_and_fakes
+    s["analyzer"].raise_exc = ProviderCreditExhausted("Credit balance is too low")
+    params = _make_params(s["db"])
+
+    with pytest.raises(PermanentError):
+        run_ticket_analysis(params)
+
+    row = writers.get_ticket_analysis(s["db"], params["analysis_id"])
+    assert row["status"] == "failed"
 
 
 def test_instance_budget_gate_fails_after_max_wait(ctx_and_fakes, monkeypatch):

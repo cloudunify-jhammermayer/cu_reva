@@ -262,6 +262,9 @@ type TicketAnalysisSummary struct {
 	// BudgetWaitSince is set while the row waits for its Odoo instance's budget
 	// to roll off (spec 2026-09-27); nil otherwise. Status stays "pending".
 	BudgetWaitSince *time.Time `json:"budget_wait_since"`
+	// BudgetWaitReason is "cap" or "provider_credit" (spec
+	// 2026-09-27-provider-credit-wait); nil when not waiting.
+	BudgetWaitReason *string `json:"budget_wait_reason"`
 }
 
 type TicketAnalysisPage struct {
@@ -302,6 +305,9 @@ type TicketIssueRunSummary struct {
 	// BudgetWaitSince is set while the row waits for its Odoo instance's budget
 	// to roll off (spec 2026-09-27); nil otherwise. Status stays "pending".
 	BudgetWaitSince *time.Time `json:"budget_wait_since"`
+	// BudgetWaitReason is "cap" or "provider_credit" (spec
+	// 2026-09-27-provider-credit-wait); nil when not waiting.
+	BudgetWaitReason *string `json:"budget_wait_reason"`
 }
 
 type TicketIssueRunPage struct {
@@ -325,6 +331,9 @@ type TimesheetReviewSummary struct {
 	// BudgetWaitSince is set while the row waits for its Odoo instance's budget
 	// to roll off (spec 2026-09-27); nil otherwise. Status stays "pending".
 	BudgetWaitSince *time.Time `json:"budget_wait_since"`
+	// BudgetWaitReason is "cap" or "provider_credit" (spec
+	// 2026-09-27-provider-credit-wait); nil when not waiting.
+	BudgetWaitReason *string `json:"budget_wait_reason"`
 }
 
 type TimesheetReviewPage struct {
@@ -532,6 +541,9 @@ type SupportTurnDetail struct {
 	// BudgetWaitSince is set while the row waits for its Odoo instance's budget
 	// to roll off (spec 2026-09-27); nil otherwise. Status stays "pending".
 	BudgetWaitSince *time.Time `json:"budget_wait_since"`
+	// BudgetWaitReason is "cap" or "provider_credit" (spec
+	// 2026-09-27-provider-credit-wait); nil when not waiting.
+	BudgetWaitReason *string `json:"budget_wait_reason"`
 }
 
 // Persona is one configured tone row — either the single 'default' scope row

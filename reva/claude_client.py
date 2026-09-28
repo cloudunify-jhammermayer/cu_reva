@@ -11,7 +11,12 @@ from __future__ import annotations
 import httpx
 
 from reva.config import DEFAULT_MODEL, DEEP_MODEL
-from reva.errors import PermanentError, TransientError
+from reva.errors import (
+    PermanentError,
+    ProviderCreditExhausted,
+    TransientError,
+    is_provider_credit_error,
+)
 from reva.types import ClaudeResponse, ContentBlock
 
 ANTHROPIC_VERSION = "2023-06-01"
@@ -198,6 +203,8 @@ def _map_status_to_error(status_code: int, retry_after_header: str | None, body:
     if status_code == 429 or status_code >= 500:
         retry_after = _parse_retry_after(retry_after_header)
         return TransientError(f"Claude {status_code}: {snippet}", retry_after=retry_after)
+    if is_provider_credit_error(body):
+        return ProviderCreditExhausted(f"Anthropic credit balance too low: {snippet}")
     return PermanentError(f"Claude {status_code}: {snippet}")
 
 

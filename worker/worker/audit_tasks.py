@@ -9,7 +9,7 @@ import structlog
 
 from reva.db import writers
 from reva.db.repo_lookup import get_repo_meta
-from reva.errors import TransientError
+from reva.errors import ProviderCreditExhausted, TransientError
 from reva.review_formatter import SEVERITY_EMOJI
 from reva.types import AuditJobParams, Finding
 from worker.runner import budget_exceeded, defer_for_budget, get_context
@@ -153,7 +153,28 @@ def run_audit(job_params: dict) -> dict:
         s.commit()
 
     try:
-        result = ctx.auditor.execute(params)
+        try:
+            result = ctx.auditor.execute(params)
+        except ProviderCreditExhausted as exc:
+            log.error("provider_credit_exhausted", error=str(exc))
+            waiting = defer_for_budget(
+                ctx, "worker.audit_tasks.run_audit", job_params, kind="audit",
+                spent=0.0, log=log, reason="provider_credit",
+            )
+            if waiting is None:
+                # Not caught here on purpose: falls through to the except
+                # Exception below, which marks the row failed and re-raises —
+                # today's terminal path for any other audit failure.
+                raise
+            with ctx.db.session() as s:
+                s.execute(
+                    update(AuditRun)
+                    .where(AuditRun.id == audit_id)
+                    .values(status="failed",
+                           error_message="deferred: Anthropic credit balance too low")
+                )
+                s.commit()
+            return waiting
     except Exception as exc:
         # Audits are not RQ-retried, so any failure (transient or permanent) is
         # terminal — mark the row failed instead of leaving it stuck in 'started'

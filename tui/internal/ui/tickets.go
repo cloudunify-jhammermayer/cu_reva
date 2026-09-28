@@ -664,7 +664,7 @@ func (t Tickets) view(w, h int) string {
 			extras = append(extras, styleSubtitle.Render("  "+strings.Join(meta, "  ")))
 			if a.Status == "pending" && a.BudgetWaitSince != nil {
 				extras = append(extras, styleSubtitle.Render(
-					"  waiting for budget since "+a.BudgetWaitSince.Local().Format("15:04")+" (re-checked hourly)"))
+					"  waiting for budget since "+a.BudgetWaitSince.Local().Format("15:04")+" (re-checked hourly)"+budgetWaitReasonSuffix(a.BudgetWaitReason)))
 			}
 			if a.ErrorMessage != nil && *a.ErrorMessage != "" {
 				extras = append(extras, styleStatusFailed.Render(truncate("  analysis error: "+*a.ErrorMessage, w-2)))
@@ -681,7 +681,7 @@ func (t Tickets) view(w, h int) string {
 			extras = append(extras, styleSubtitle.Render(truncate("  "+line, w-2)))
 			if run.Status == "pending" && run.BudgetWaitSince != nil {
 				extras = append(extras, styleSubtitle.Render(
-					"  waiting for budget since "+run.BudgetWaitSince.Local().Format("15:04")+" (re-checked hourly)"))
+					"  waiting for budget since "+run.BudgetWaitSince.Local().Format("15:04")+" (re-checked hourly)"+budgetWaitReasonSuffix(run.BudgetWaitReason)))
 			}
 			if run.Status == "failed" && run.ErrorMessage != nil && *run.ErrorMessage != "" {
 				extras = append(extras, styleStatusFailed.Render(
@@ -889,6 +889,18 @@ func analysisStatusText(a api.TicketAnalysisSummary) string {
 		return "~ budget wait " + compactDuration(time.Since(*a.BudgetWaitSince))
 	}
 	return strings.TrimSpace(plainStatusSymbol(a.Status, a.CreatedAt) + " " + a.Status)
+}
+
+// budgetWaitReasonSuffix names which budget a waiting row is parked on, for
+// the "waiting for budget since" detail lines (spec 2026-09-27-provider-
+// credit-wait): "provider_credit" means the Anthropic account itself is out
+// of credit (not one of REVA's own spend caps); nil/anything else is a plain
+// REVA cap wait.
+func budgetWaitReasonSuffix(reason *string) string {
+	if reason != nil && *reason == "provider_credit" {
+		return " (Anthropic credit)"
+	}
+	return " (REVA cap)"
 }
 
 // compactDuration renders d at minute granularity with no trailing zero unit

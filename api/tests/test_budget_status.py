@@ -68,6 +68,7 @@ def test_data_empty_state(env):
     assert body["settings"] == {"retry_seconds": 3600, "max_wait_seconds": 172800}
     assert body["budgets"]["global"] == {"spent_usd": 0.0, "cap_usd": 200.0, "over": False}
     assert body["budgets"]["instances"] == [] and body["budgets"]["authors"] == []
+    assert body["budgets"]["provider_credit"] == {"exhausted": False, "since": None}
     assert body["waiting"] == {"reviews": [], "odoo": [], "jobs": [], "jobs_error": None}
 
 
@@ -107,7 +108,39 @@ def test_data_lists_waiting_odoo_rows_with_instance_budget(env):
     assert inst_row["name"] == "cu-prod" and inst_row["cap_usd"] == 60.0
     odoo = body["waiting"]["odoo"]
     assert odoo == [{"kind": "ticket_analysis", "instance_name": "cu-prod",
-                     "record": "helpdesk.ticket 6791", "budget_wait_since": odoo[0]["budget_wait_since"]}]
+                     "record": "helpdesk.ticket 6791", "budget_wait_since": odoo[0]["budget_wait_since"],
+                     "reason": "cap"}]
+
+
+def test_data_flags_provider_credit_exhausted_for_odoo_wait(env):
+    """An Anthropic credit-balance wait flips the page's global banner flag,
+    independent of which table the waiting row lives in."""
+    client, db, _ = env
+    inst = writers.create_odoo_instance(
+        db, name="cu-prod", key_hash="h1", key_prefix="reva_odoo_aa",
+        callback_url="", callback_api_key_enc="x",
+    )
+    aid = writers.record_ticket_analysis_created(db, TicketJobParams(
+        analysis_id=0, odoo_instance_id=inst, ticket_id=6791, model_name="helpdesk.ticket",
+        field_name="description", text="t"))
+    writers.set_budget_wait_since(db, "ticket_analysis", aid, SINCE, reason="provider_credit")
+
+    body = client.get("/reviews/data").json()
+
+    assert body["budgets"]["provider_credit"] == {
+        "exhausted": True, "since": body["waiting"]["odoo"][0]["budget_wait_since"],
+    }
+    assert body["waiting"]["odoo"][0]["reason"] == "provider_credit"
+
+
+def test_data_provider_credit_not_exhausted_for_plain_cap_wait(env):
+    client, db, _ = env
+    _seed_review_waiting(db, pr_number=42)
+
+    body = client.get("/reviews/data").json()
+
+    assert body["budgets"]["provider_credit"] == {"exhausted": False, "since": None}
+    assert body["waiting"]["reviews"][0]["prs"][0]["reason"] == "cap"
 
 
 def test_data_includes_rowless_jobs_from_registry(env):
@@ -155,7 +188,8 @@ def test_scheduled_budget_jobs_reads_registry(monkeypatch):
                               args=({"owner": "acme", "repo": "w", "pr_number": 3, "question": "secret?"},)),
         "j3": SimpleNamespace(func_name="worker.change_note_tasks.run_change_note",
                               args=({"repo_full_name": "acme/w", "pr_number": 9, "pr_body": "secret",
-                                     "budget_wait_since": SINCE.isoformat()},)),
+                                     "budget_wait_since": SINCE.isoformat(),
+                                     "budget_wait_reason": "provider_credit"},)),
     }
     queue = SimpleNamespace(fetch_job=lambda jid: jobs[jid])
     fake_registry = SimpleNamespace(
@@ -170,3 +204,7 @@ def test_scheduled_budget_jobs_reads_registry(monkeypatch):
     assert [j["kind"] for j in out] == ["audit", "change_note"]   # j2 has no budget_wait_since
     assert out[0]["target"] == "acme/w" and out[1]["target"] == "acme/w #9"
     assert "secret" not in str(out)
+    # j1 carries no budget_wait_reason (pre-existing cap wait) -> defaults to
+    # "cap"; j3 explicitly carries "provider_credit".
+    assert out[0]["reason"] == "cap"
+    assert out[1]["reason"] == "provider_credit"

@@ -12,7 +12,12 @@ from pydantic import ValidationError
 
 from reva import config
 from reva.db import writers
-from reva.errors import MalformedModelOutput, PermanentError, TransientError
+from reva.errors import (
+    MalformedModelOutput,
+    PermanentError,
+    ProviderCreditExhausted,
+    TransientError,
+)
 from reva.github_urls import parse_github_repo_url
 from reva.golden_estimates import apply_anchor, calibration_block, load
 from reva.html_guard import ensure_renderable
@@ -336,6 +341,23 @@ def run_ticket_analysis(job_params: dict) -> dict:
         except TransientError:
             log.warning("ticket_analysis_transient_error", exc_info=True)
             raise
+        except ProviderCreditExhausted as exc:
+            log.error("provider_credit_exhausted", error=str(exc))
+            waiting = defer_for_budget(
+                ctx, "worker.ticket_tasks.run_ticket_analysis", params.model_dump(mode="json"),
+                kind="ticket_analysis", spent=0.0, log=log, reason="provider_credit",
+            )
+            if waiting is not None:
+                writers.set_budget_wait_since(
+                    ctx.db, "ticket_analysis", params.analysis_id,
+                    datetime.fromisoformat(waiting["budget_wait_since"]),
+                    reason="provider_credit",
+                )
+                return waiting
+            error = "Anthropic credit balance too low for the maximum wait; analysis declined."
+            writers.set_budget_wait_since(ctx.db, "ticket_analysis", params.analysis_id, None)
+            writers.record_ticket_analysis_failed(ctx.db, params.analysis_id, error)
+            raise PermanentError(error) from exc
         except PermanentError as exc:
             log.error("ticket_analysis_permanent_error", error=str(exc))
             writers.record_ticket_analysis_failed(ctx.db, params.analysis_id, str(exc))

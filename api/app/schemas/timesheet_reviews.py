@@ -43,6 +43,7 @@ class TimesheetReviewStatus(BaseModel):
     created_at: datetime
     completed_at: datetime | None
     budget_wait_since: datetime | None = None
+    budget_wait_reason: str | None = None
 
 
 class TimesheetReviewSummary(BaseModel):
@@ -59,6 +60,7 @@ class TimesheetReviewSummary(BaseModel):
     created_at: datetime
     completed_at: datetime | None
     budget_wait_since: datetime | None = None
+    budget_wait_reason: str | None = None
 
 
 class TimesheetReviewPage(BaseModel):

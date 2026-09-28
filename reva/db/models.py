@@ -159,6 +159,8 @@ class ReviewRun(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Waiting for budget since (migration 050); NULL when not waiting.
     budget_wait_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 'cap' or 'provider_credit' (migration 051); NULL when not waiting.
+    budget_wait_reason: Mapped[str | None] = mapped_column(Text)
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     input_tokens: Mapped[int | None] = mapped_column(Integer)
     output_tokens: Mapped[int | None] = mapped_column(Integer)
@@ -455,6 +457,8 @@ class TicketAnalysis(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Waiting for budget since (migration 050); NULL when not waiting.
     budget_wait_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 'cap' or 'provider_credit' (migration 051); NULL when not waiting.
+    budget_wait_reason: Mapped[str | None] = mapped_column(Text)
     # Delivery visibility (migration 033): the Odoo write_field callback happens
     # after the row is 'completed'; callback_sent_at is NULL until it lands.
     callback_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -557,6 +561,8 @@ class TicketIssueRun(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Waiting for budget since (migration 050); NULL when not waiting.
     budget_wait_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 'cap' or 'provider_credit' (migration 051); NULL when not waiting.
+    budget_wait_reason: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         # Partial UNIQUE index (migration 012): job_id is unique only when set.
@@ -763,6 +769,8 @@ class TimesheetReviewRun(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Waiting for budget since (migration 050); NULL when not waiting.
     budget_wait_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 'cap' or 'provider_credit' (migration 051); NULL when not waiting.
+    budget_wait_reason: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         Index(
@@ -1205,6 +1213,8 @@ class SupportTurn(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Waiting for budget since (migration 050); NULL when not waiting.
     budget_wait_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 'cap' or 'provider_credit' (migration 051); NULL when not waiting.
+    budget_wait_reason: Mapped[str | None] = mapped_column(Text)
     callback_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     callback_error: Mapped[str | None] = mapped_column(Text)
 

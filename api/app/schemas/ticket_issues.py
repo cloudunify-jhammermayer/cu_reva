@@ -175,6 +175,7 @@ class TicketIssueRunSummary(BaseModel):
     completed_at: datetime | None
     odoo_instance_id: int | None = None
     budget_wait_since: datetime | None = None
+    budget_wait_reason: str | None = None
 
 
 class TicketIssueRunPage(BaseModel):
@@ -205,3 +206,4 @@ class TicketIssueRunStatus(BaseModel):
     created_at: datetime
     completed_at: datetime | None
     budget_wait_since: datetime | None = None
+    budget_wait_reason: str | None = None

@@ -74,6 +74,7 @@ def scheduled_budget_jobs(queue, db: Database) -> list[dict]:
             "kind": kind,
             "target": _target(db, kind, params),
             "budget_wait_since": params["budget_wait_since"],
+            "reason": params.get("budget_wait_reason") or "cap",
             "next_run_at": next_run.isoformat() if next_run else None,
         })
     out.sort(key=lambda j: j["budget_wait_since"])
@@ -104,7 +105,7 @@ def _group_reviews(rows: list[dict]) -> list[dict]:
         g["prs"].append({
             "id": r["id"], "pr_number": r["pr_number"], "pr_title": r["pr_title"],
             "author_login": r["author_login"], "review_mode": r["review_mode"],
-            "budget_wait_since": since,
+            "budget_wait_since": since, "reason": r.get("budget_wait_reason") or "cap",
         })
     return [groups[k] for k in sorted(groups)]
 
@@ -138,6 +139,29 @@ def build_status(db: Database, queue, settings: Settings) -> dict:
         writers.record_ops_event(db, "budget_status", "warning", "scheduled_registry_unavailable",
                                  {"error": detail})
 
+    reviews = _group_reviews(writers.list_reviews_waiting_budget(db))
+    odoo = [
+        {"kind": r["kind"], "instance_name": r["instance_name"], "record": r["record"],
+         "budget_wait_since": _iso(r["budget_wait_since"]),
+         "reason": r.get("budget_wait_reason") or "cap"}
+        for r in writers.list_budget_waiting(db)
+    ]
+
+    # An empty Anthropic credit balance is not one of REVA's own spend caps —
+    # every waiting row, whatever table it lives on, carries the same
+    # provider_credit reason, so the banner is true iff any of them does.
+    provider_credit_since: list[str] = []
+    for g in reviews:
+        for pr in g["prs"]:
+            if pr["reason"] == "provider_credit" and pr["budget_wait_since"]:
+                provider_credit_since.append(pr["budget_wait_since"])
+    for row in odoo:
+        if row["reason"] == "provider_credit" and row["budget_wait_since"]:
+            provider_credit_since.append(row["budget_wait_since"])
+    for job in jobs:
+        if job.get("reason") == "provider_credit" and job["budget_wait_since"]:
+            provider_credit_since.append(job["budget_wait_since"])
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "settings": {"retry_seconds": settings.budget_retry_seconds,
@@ -147,14 +171,14 @@ def build_status(db: Database, queue, settings: Settings) -> dict:
                        "over": global_cap is not None and global_spent >= global_cap},
             "instances": instances,
             "authors": authors,
+            "provider_credit": {
+                "exhausted": bool(provider_credit_since),
+                "since": min(provider_credit_since) if provider_credit_since else None,
+            },
         },
         "waiting": {
-            "reviews": _group_reviews(writers.list_reviews_waiting_budget(db)),
-            "odoo": [
-                {"kind": r["kind"], "instance_name": r["instance_name"], "record": r["record"],
-                 "budget_wait_since": _iso(r["budget_wait_since"])}
-                for r in writers.list_budget_waiting(db)
-            ],
+            "reviews": reviews,
+            "odoo": odoo,
             "jobs": jobs,
             "jobs_error": jobs_error,
         },

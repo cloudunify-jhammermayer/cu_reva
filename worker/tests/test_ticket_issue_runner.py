@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 import pytest
 
 from reva.db import Base, Database, create_engine_from_url, writers
-from reva.errors import PermanentError, TransientError
+from reva.errors import PermanentError, ProviderCreditExhausted, TransientError
 from reva.golden_estimates import Degradation
 from reva.types import (
     ClaudeResponse,
@@ -1836,3 +1836,38 @@ def test_deferred_rerun_clears_budget_wait_marker(ctx_and_fakes):
 
     assert out["status"] == "completed"
     assert writers.get_ticket_issue_run(s["db"], params["run_id"])["budget_wait_since"] is None
+
+
+def test_provider_credit_exhausted_waits_when_queue_present(ctx_and_fakes):
+    from dataclasses import replace
+    from unittest.mock import MagicMock
+    s = ctx_and_fakes
+    q = MagicMock()
+    q.enqueue_in.return_value = MagicMock(id="rq:job:deferred")
+    set_context(replace(s["ctx"], rq_queue=q))
+    s["planner"].raise_exc = ProviderCreditExhausted("Credit balance is too low")
+    params = _make_params(s["db"])
+
+    out = run_ticket_issues(params)
+
+    assert out["status"] == "waiting_budget"
+    assert out["reason"] == "provider_credit"
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["status"] == "pending"
+    assert row["budget_wait_since"] is not None
+    assert row["budget_wait_reason"] == "provider_credit"
+    assert s["odoo"].calls == []   # no failed callback while waiting
+    assert q.enqueue_in.call_args.args[1] == "worker.ticket_issue_tasks.run_ticket_issues"
+
+
+def test_provider_credit_exhausted_fails_without_queue(ctx_and_fakes):
+    s = ctx_and_fakes
+    s["planner"].raise_exc = ProviderCreditExhausted("Credit balance is too low")
+    params = _make_params(s["db"])
+
+    with pytest.raises(PermanentError):
+        run_ticket_issues(params)
+
+    row = writers.get_ticket_issue_run(s["db"], params["run_id"])
+    assert row["status"] == "failed"
+    assert s["odoo"].calls[-1]["status"] == "failed"   # failed callback sent
