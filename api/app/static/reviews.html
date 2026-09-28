@@ -124,6 +124,29 @@
   function miniTable(headers, rows, emptyText) {
     return `<div class="tablewrap">${rows.length ? `<table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>` : `<div class="empty">${emptyText}</div>`}</div>`;
   }
+  function groupPRsByRepoThenAuthor(prs) {
+    const byRepo = new Map();
+    for (const p of prs) {
+      if (!byRepo.has(p.repo_full_name)) byRepo.set(p.repo_full_name, []);
+      byRepo.get(p.repo_full_name).push(p);
+    }
+    return [...byRepo.keys()].sort().map((repo) => {
+      const repoPrs = byRepo.get(repo);
+      const byAuthor = new Map();
+      for (const p of repoPrs) {
+        const author = p.author_login || "";
+        if (!byAuthor.has(author)) byAuthor.set(author, []);
+        byAuthor.get(author).push(p);
+      }
+      const authors = [...byAuthor.keys()].sort((a, b) => a.localeCompare(b));
+      return {
+        repo, count: repoPrs.length,
+        authors: authors.map((a) => a || "(no author)"),
+        notReviewed: repoPrs.filter((p) => p.label !== "reviewed").length,
+        authorGroups: authors.map((author) => ({author, prs: byAuthor.get(author)})),
+      };
+    });
+  }
   function statusClass(label) {
     if (label.startsWith("reviewed")) return "status-ok";
     if (label.startsWith("waiting")) return "status-wait";
@@ -163,9 +186,22 @@
         "Nothing running.")}</div>`;
 
     const prs = activity.prs || [];
-    $("prs").innerHTML = miniTable(["PR", "Author", "Mode", "Status", "Hint", "When"],
-      prs.map((p) => `<tr class="stripe"><td><a href="${esc(p.pr_url)}" target="_blank" rel="noopener">${esc(p.repo_full_name)} #${p.pr_number}</a><span class="sub">${esc(p.pr_title)}</span></td><td>${esc(p.author_login)}</td><td>${esc(p.review_mode)}</td><td class="${statusClass(p.label)}">${esc(p.label)}</td><td>${esc(p.hint)}</td><td class="mono">${hm(p.completed_at || p.started_at)}</td></tr>`),
-      "No recent PR activity.");
+    const open = openRepos();
+    const forceOpenPrs = !!author;
+    const prGroups = groupPRsByRepoThenAuthor(prs);
+    $("prs").innerHTML = prGroups.length ? prGroups.map((rg) => { const repoKey = `prs:${rg.repo}`; return `
+      <details class="repo" data-repo="${esc(repoKey)}" ${forceOpenPrs || open.has(repoKey) ? "open" : ""}>
+        <summary><span class="chev">&#9654;</span>
+          <span class="title">${esc(rg.repo)} <span class="sub">${rg.count} PR${rg.count === 1 ? "" : "s"} · ${esc(rg.authors.join(", "))}</span></span>
+          <span class="right">${rg.notReviewed} not reviewed</span></summary>
+        <div>${rg.authorGroups.map((ag) => { const key = `prs:${rg.repo}|${ag.author}`; return `
+          <details class="repo" data-repo="${esc(key)}" ${forceOpenPrs || open.has(key) ? "open" : ""}>
+            <summary><span class="chev">&#9654;</span>
+              <span class="title">${esc(ag.author || "(no author)")} <span class="sub">${ag.prs.length} PR${ag.prs.length === 1 ? "" : "s"}</span></span></summary>
+            <div class="tablewrap"><table><thead><tr><th>PR</th><th>Mode</th><th>Status</th><th>Hint</th><th>When</th></tr></thead><tbody>
+              ${ag.prs.map((p) => `<tr class="stripe"><td><a href="${esc(p.pr_url)}" target="_blank" rel="noopener">${esc(p.repo_full_name)} #${p.pr_number}</a><span class="sub">${esc(p.pr_title)}</span></td><td>${esc(p.review_mode)}</td><td class="${statusClass(p.label)}">${esc(p.label)}</td><td>${esc(p.hint)}</td><td class="mono">${hm(p.completed_at || p.started_at)}</td></tr>`).join("")}
+            </tbody></table></div></details>`; }).join("")}
+        </div></details>`; }).join("") : `<div class="tablewrap"><div class="empty">No recent PR activity.</div></div>`;
 
     const g = d.budgets.global;
     $("budgets").innerHTML =
@@ -176,7 +212,6 @@
     const groups = d.waiting.reviews;
     const total = groups.reduce((n, g) => n + g.count, 0);
     $("rev-count").textContent = total ? `${total} in ${groups.length} repo${groups.length === 1 ? "" : "s"}` : "";
-    const open = openRepos();
     $("reviews").innerHTML = groups.length ? groups.map((g) => `
       <details class="repo" data-repo="${esc(g.repo_full_name)}" ${open.has(g.repo_full_name) ? "open" : ""}>
         <summary><span class="chev">&#9654;</span>
@@ -186,6 +221,10 @@
           ${g.prs.map((p) => `<tr class="stripe"><td>#${p.pr_number} <span class="sub">${esc(p.pr_title)}</span></td><td>${esc(p.author_login)}</td><td>${esc(p.review_mode)}</td><td class="mono">${hm(p.budget_wait_since)} (${ago(p.budget_wait_since)})</td><td>${waitFor(p.reason)}</td></tr>`).join("")}
         </tbody></table></div></details>`).join("") : `<div class="tablewrap"><div class="empty">Nothing waiting.</div></div>`;
     document.querySelectorAll("details.repo").forEach((el) => el.addEventListener("toggle", () => {
+      // While the author filter forces every PRs-section group open, don't
+      // persist that transient state (a manual collapse during it shouldn't
+      // stick once the filter is cleared).
+      if (forceOpenPrs && el.dataset.repo.startsWith("prs:")) return;
       const set = openRepos(); el.open ? set.add(el.dataset.repo) : set.delete(el.dataset.repo); saveOpen(set);
     }));
 

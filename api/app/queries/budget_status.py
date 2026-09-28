@@ -104,12 +104,14 @@ def explain_run(
                     "split the PR, or raise max_diff_lines in .claude-review.yml")
         if "review budget" in reason:
             return ("declined: 24 h cap",
-                    "the cap was full and the wait expired; push again or comment /review")
+                    "the cap was full and the wait expired; REVA retries by itself once "
+                    "the budget frees up; comment /review to retry sooner")
         return "declined", reason[:120]
     if status == "failed":
-        if error_message and "Credit balance" in error_message:
+        if error_message and ("anthropic credit balance too low" in error_message.lower() or "credit balance is too low" in error_message.lower()):
             return ("failed: Anthropic credit was empty",
-                    "comment /review to re-run; REVA now waits instead of failing in this case")
+                    "REVA retries by itself once the balance is topped up; "
+                    "comment /review to retry sooner")
         return "failed", "internal error, ops were notified; comment /review to retry"
     if status == "stale":
         return "superseded", "a newer push replaced this commit"

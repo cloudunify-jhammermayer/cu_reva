@@ -599,7 +599,7 @@ def _decline_for_author_budget(
     already waited the maximum (spec 2026-09-27) and is giving up."""
     tail = (
         f"REVA waited {ctx.budget_wait_max_seconds / 3600:g} h for it to free up and gave up; "
-        f"push again or comment `/review` later to retry."
+        f"REVA retries by itself once the budget frees up; comment `/review` to retry sooner."
         if waited else
         "Reviews resume automatically as spend rolls off."
     )

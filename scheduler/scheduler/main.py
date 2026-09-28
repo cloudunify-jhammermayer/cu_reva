@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import signal
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import structlog
@@ -55,6 +55,55 @@ def maybe_distill_memories(queue, db, now, last_distill, interval_s, min_dismiss
         queue.enqueue("worker.memory_distill_runner.run_memory_distill", repo_id)
     if due:
         logger.info("memory_distill_enqueued", repos=len(due))
+    return now
+
+
+def maybe_requeue_budget_failures(db, now, last_run, interval_s, min_age_s, retry_seconds):
+    """Auto-requeue PR reviews that ended only because of a budget refusal —
+    an empty Anthropic credit balance or the per-author cap — not a code
+    error, so Joseph doesn't have to comment `/review` by hand for those.
+    `interval_s <= 0` disables the loop. `min_age_s` is the cooldown: a run
+    that just gave up needs to have ended at least this long ago before being
+    requeued, so a run whose gate is still over budget doesn't get requeued in
+    a tight loop (the worker gate defers it again if the budget is still over).
+    `retry_seconds` mirrors the worker's REVA_BUDGET_RETRY_SECONDS: when
+    budget waiting itself is disabled (<= 0), a requeued run would just fail
+    or decline again immediately, so this loop would otherwise cycle every PR
+    through a fresh Check Run + notification on every tick — a no-op instead.
+    Pure DB (upserts pending_reviews for the poller to pick up), so this runs
+    directly rather than via the queue. Returns the new last-run timestamp
+    (unchanged if not yet due).
+    """
+    if interval_s <= 0:
+        return last_run
+    if retry_seconds <= 0:
+        logger.debug("budget_requeue_skipped_retry_disabled")
+        return last_run
+    if last_run is not None and (now - last_run).total_seconds() < interval_s:
+        return last_run
+    older_than = now - timedelta(seconds=min_age_s)
+    for row in writers.list_budget_ended_reviews(db, older_than):
+        writers.upsert_pending_review(
+            db,
+            repository_id=row["repository_id"],
+            pull_request_id=row["pull_request_id"],
+            pr_number=row["pr_number"],
+            head_sha=row["head_sha"],
+            installation_id=row["installation_id"],
+            trigger_event="manual_requeue",
+            review_mode=row["review_mode"],
+            scheduled_at=now,
+        )
+        logger.info(
+            "budget_failure_requeued",
+            review_run_id=row["id"], repo=row["repo_full_name"], pr=row["pr_number"],
+            status=row["status"],
+        )
+        writers.record_ops_event(
+            db, "scheduler", "info", "budget_failure_requeued",
+            {"review_run_id": row["id"], "repo": row["repo_full_name"],
+             "pr": row["pr_number"], "status": row["status"]},
+        )
     return now
 
 
@@ -178,6 +227,7 @@ def main() -> None:
     # Memory distillation: run one shortly after startup, then on its interval.
     last_distill = None
     last_value_report = None
+    last_budget_requeue = None
 
     while not stop:
         now = datetime.now(timezone.utc)
@@ -239,6 +289,16 @@ def main() -> None:
             )
         except Exception:
             logger.exception("scheduler_value_report_error")
+
+        try:
+            last_budget_requeue = maybe_requeue_budget_failures(
+                db, now, last_budget_requeue,
+                settings.budget_requeue_interval_seconds,
+                settings.budget_requeue_min_age_seconds,
+                settings.budget_retry_seconds,
+            )
+        except Exception:
+            logger.exception("scheduler_budget_requeue_error")
 
         # Liveness heartbeat — the container healthcheck checks its freshness.
         # Only refresh it when the poll (the DB-dependent core loop) succeeded, so

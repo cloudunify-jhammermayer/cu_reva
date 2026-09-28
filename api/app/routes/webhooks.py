@@ -218,6 +218,12 @@ def _handle_pull_request(db: Database, payload: dict, settings: Settings, github
         return
 
     if action not in _REVIEWABLE_ACTIONS:
+        # Keep the PR row's state/draft flag current even for non-reviewable
+        # events: the scheduler's budget auto-requeue only requeues PRs the DB
+        # says are open and not draft, so an abandoned close or a move to draft
+        # must land here or the loop would pay for a dead PR.
+        if action in ("closed", "converted_to_draft"):
+            _upsert_repo_and_pr(db, payload)
         logger.info("pr_event_ignored", reason="non-reviewable action", action=action)
         return
 

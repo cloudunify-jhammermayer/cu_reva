@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -178,3 +178,203 @@ def test_review_waiting_budget_provider_credit_reason(db):
 
 def test_review_spend_kinds_exported():
     assert writers.REVIEW_SPEND_KINDS == ("review", "delta_verify", "triage")
+
+
+# --- list_budget_ended_reviews (2026-09-28 auto-requeue) --------------------
+
+
+NOW = datetime(2026, 9, 28, 12, 0, tzinfo=timezone.utc)
+
+
+def _repo_pr(db, *, github_repo_id: int, pr_number: int, state: str = "open") -> tuple[int, int]:
+    repo_id = writers.upsert_repository(
+        db, github_repository_id=github_repo_id, owner="acme", name=f"w{pr_number}",
+        default_branch="main", installation_id=5)
+    pr_id = writers.upsert_pull_request(
+        db, repository_id=repo_id, github_pr_id=pr_number, pr_number=pr_number, title="Add foo",
+        author_login="alice", base_branch="main", head_branch="f", head_sha="deadbeef",
+        state=state, draft=False)
+    return repo_id, pr_id
+
+
+def _age_run(db, run_id: int, completed_at: datetime) -> None:
+    from reva.db.models import ReviewRun
+    with db.session() as s:
+        run = s.get(ReviewRun, run_id)
+        run.completed_at = completed_at
+
+
+def test_list_budget_ended_reviews_credit_failed_open_pr_listed(db):
+    repo_id, pr_id = _repo_pr(db, github_repo_id=1, pr_number=42)
+    params = JobParams(repository_id=repo_id, pull_request_id=pr_id, head_sha="deadbeef",
+                       installation_id=5, review_mode="diff", trigger_event="opened")
+    run_id = writers.record_review_failed(
+        db, params, "permanent",
+        "Anthropic credit balance too low for the maximum wait; review declined.")
+    _age_run(db, run_id, NOW - timedelta(hours=2))
+
+    rows = writers.list_budget_ended_reviews(db, older_than=NOW - timedelta(hours=1))
+
+    assert [r["id"] for r in rows] == [run_id]
+    row = rows[0]
+    assert row["repository_id"] == repo_id
+    assert row["pull_request_id"] == pr_id
+    assert row["pr_number"] == 42
+    assert row["installation_id"] == 5
+    assert row["head_sha"] == "deadbeef"
+    assert row["review_mode"] == "diff"
+    assert row["status"] == "failed"
+    assert row["repo_full_name"] == "acme/w42"
+
+
+def test_list_budget_ended_reviews_old_credit_text_matches_too(db):
+    # The pre-2026-09-27 CLI refusal text, still possible on old rows.
+    repo_id, pr_id = _repo_pr(db, github_repo_id=1, pr_number=42)
+    params = JobParams(repository_id=repo_id, pull_request_id=pr_id, head_sha="deadbeef",
+                       installation_id=5, review_mode="diff", trigger_event="opened")
+    run_id = writers.record_review_failed(db, params, "permanent", "Credit balance is too low.")
+    _age_run(db, run_id, NOW - timedelta(hours=2))
+
+    rows = writers.list_budget_ended_reviews(db, older_than=NOW - timedelta(hours=1))
+    assert [r["id"] for r in rows] == [run_id]
+
+
+def test_list_budget_ended_reviews_closed_pr_excluded(db):
+    repo_id, pr_id = _repo_pr(db, github_repo_id=1, pr_number=42, state="closed")
+    params = JobParams(repository_id=repo_id, pull_request_id=pr_id, head_sha="deadbeef",
+                       installation_id=5, review_mode="diff", trigger_event="opened")
+    run_id = writers.record_review_failed(db, params, "permanent", "Credit balance is too low.")
+    _age_run(db, run_id, NOW - timedelta(hours=2))
+
+    assert writers.list_budget_ended_reviews(db, older_than=NOW - timedelta(hours=1)) == []
+
+
+def test_list_budget_ended_reviews_git_error_excluded(db):
+    repo_id, pr_id = _repo_pr(db, github_repo_id=1, pr_number=42)
+    params = JobParams(repository_id=repo_id, pull_request_id=pr_id, head_sha="deadbeef",
+                       installation_id=5, review_mode="diff", trigger_event="opened")
+    run_id = writers.record_review_failed(db, params, "permanent", "git fetch failed: timeout")
+    _age_run(db, run_id, NOW - timedelta(hours=2))
+
+    assert writers.list_budget_ended_reviews(db, older_than=NOW - timedelta(hours=1)) == []
+
+
+def test_list_budget_ended_reviews_cap_declined_listed(db):
+    repo_id, pr_id = _repo_pr(db, github_repo_id=1, pr_number=42)
+    params = JobParams(repository_id=repo_id, pull_request_id=pr_id, head_sha="deadbeef",
+                       installation_id=5, review_mode="diff", trigger_event="opened")
+    run_id = writers.record_review_declined(
+        db, params,
+        "REVA's rolling 24-hour review budget for @alice ($50) has been reached "
+        "(≈15 spent). REVA waited 6 h for it to free up and gave up; REVA retries "
+        "by itself once the budget frees up; comment `/review` to retry sooner.")
+    _age_run(db, run_id, NOW - timedelta(hours=2))
+
+    rows = writers.list_budget_ended_reviews(db, older_than=NOW - timedelta(hours=1))
+    assert [r["id"] for r in rows] == [run_id]
+    assert rows[0]["status"] == "declined"
+
+
+def test_list_budget_ended_reviews_other_decline_excluded(db):
+    repo_id, pr_id = _repo_pr(db, github_repo_id=1, pr_number=42)
+    params = JobParams(repository_id=repo_id, pull_request_id=pr_id, head_sha="deadbeef",
+                       installation_id=5, review_mode="diff", trigger_event="opened")
+    run_id = writers.record_review_declined(db, params, "No reviewable files under custom_addons/")
+    _age_run(db, run_id, NOW - timedelta(hours=2))
+
+    assert writers.list_budget_ended_reviews(db, older_than=NOW - timedelta(hours=1)) == []
+
+
+def test_list_budget_ended_reviews_young_run_excluded(db):
+    repo_id, pr_id = _repo_pr(db, github_repo_id=1, pr_number=42)
+    params = JobParams(repository_id=repo_id, pull_request_id=pr_id, head_sha="deadbeef",
+                       installation_id=5, review_mode="diff", trigger_event="opened")
+    run_id = writers.record_review_failed(db, params, "permanent", "Credit balance is too low.")
+    _age_run(db, run_id, NOW - timedelta(minutes=5))
+
+    assert writers.list_budget_ended_reviews(db, older_than=NOW - timedelta(hours=1)) == []
+
+
+def test_list_budget_ended_reviews_only_latest_run_per_pr(db):
+    repo_id, pr_id = _repo_pr(db, github_repo_id=1, pr_number=42)
+    old_params = JobParams(repository_id=repo_id, pull_request_id=pr_id, head_sha="sha1",
+                           installation_id=5, review_mode="diff", trigger_event="opened")
+    old_run_id = writers.record_review_failed(db, old_params, "permanent",
+                                               "Credit balance is too low.")
+    _age_run(db, old_run_id, NOW - timedelta(hours=2))
+
+    # A later push landed on the PR (head_sha now sha2) with a run that isn't
+    # a budget failure — the PR's *latest* run is no longer the budget-ended
+    # one, so it must not be requeued even though an older budget failure
+    # exists underneath it.
+    writers.upsert_pull_request(
+        db, repository_id=repo_id, github_pr_id=42, pr_number=42, title="Add foo",
+        author_login="alice", base_branch="main", head_branch="f", head_sha="sha2",
+        state="open", draft=False)
+    new_params = JobParams(repository_id=repo_id, pull_request_id=pr_id, head_sha="sha2",
+                           installation_id=5, review_mode="diff", trigger_event="synchronize")
+    writers.record_review_declined(db, new_params, "No reviewable files under custom_addons/")
+
+    assert writers.list_budget_ended_reviews(db, older_than=NOW - timedelta(hours=1)) == []
+
+
+def test_list_budget_ended_reviews_newer_pending_row_excluded(db):
+    """A fresh push (or this loop's own prior requeue) already queued a
+    pending_reviews row scheduled after the run ended — must not be clobbered
+    with the stale SHA or duplicated (Critical 1 + 2, review 2026-09-28)."""
+    repo_id, pr_id = _repo_pr(db, github_repo_id=1, pr_number=42)
+    params = JobParams(repository_id=repo_id, pull_request_id=pr_id, head_sha="deadbeef",
+                       installation_id=5, review_mode="diff", trigger_event="opened")
+    run_id = writers.record_review_failed(db, params, "permanent", "Credit balance is too low.")
+    _age_run(db, run_id, NOW - timedelta(hours=2))
+    writers.upsert_pending_review(
+        db, repository_id=repo_id, pull_request_id=pr_id, pr_number=42, head_sha="deadbeef",
+        installation_id=5, trigger_event="manual_requeue", review_mode="diff",
+        scheduled_at=NOW - timedelta(minutes=90))
+
+    assert writers.list_budget_ended_reviews(db, older_than=NOW - timedelta(hours=1)) == []
+
+
+def test_list_budget_ended_reviews_head_moved_excluded(db):
+    """The run's head_sha is no longer the PR's current head — a later push
+    needs its own review, not a requeue of a stale SHA (Critical 1)."""
+    repo_id, pr_id = _repo_pr(db, github_repo_id=1, pr_number=42)
+    params = JobParams(repository_id=repo_id, pull_request_id=pr_id, head_sha="deadbeef",
+                       installation_id=5, review_mode="diff", trigger_event="opened")
+    run_id = writers.record_review_failed(db, params, "permanent", "Credit balance is too low.")
+    _age_run(db, run_id, NOW - timedelta(hours=2))
+    writers.upsert_pull_request(
+        db, repository_id=repo_id, github_pr_id=42, pr_number=42, title="Add foo",
+        author_login="alice", base_branch="main", head_branch="f", head_sha="sha2",
+        state="open", draft=False)
+
+    assert writers.list_budget_ended_reviews(db, older_than=NOW - timedelta(hours=1)) == []
+
+
+def test_list_budget_ended_reviews_draft_pr_excluded(db):
+    repo_id, pr_id = _repo_pr(db, github_repo_id=1, pr_number=42)
+    writers.upsert_pull_request(
+        db, repository_id=repo_id, github_pr_id=42, pr_number=42, title="Add foo",
+        author_login="alice", base_branch="main", head_branch="f", head_sha="deadbeef",
+        state="open", draft=True)
+    params = JobParams(repository_id=repo_id, pull_request_id=pr_id, head_sha="deadbeef",
+                       installation_id=5, review_mode="diff", trigger_event="opened")
+    run_id = writers.record_review_failed(db, params, "permanent", "Credit balance is too low.")
+    _age_run(db, run_id, NOW - timedelta(hours=2))
+
+    assert writers.list_budget_ended_reviews(db, older_than=NOW - timedelta(hours=1)) == []
+
+
+def test_list_budget_ended_reviews_schema_validation_false_positive_excluded(db):
+    """'credit balance' is an ordinary accounting phrase that can show up in a
+    Claude finding's own text on a schema-validation failure — must not match
+    REVA's own budget-refusal texts (Important 3, review 2026-09-28)."""
+    repo_id, pr_id = _repo_pr(db, github_repo_id=1, pr_number=42)
+    params = JobParams(repository_id=repo_id, pull_request_id=pr_id, head_sha="deadbeef",
+                       installation_id=5, review_mode="diff", trigger_event="opened")
+    run_id = writers.record_review_failed(
+        db, params, "permanent",
+        "Claude finding failed schema validation: credit balance moves must...")
+    _age_run(db, run_id, NOW - timedelta(hours=2))
+
+    assert writers.list_budget_ended_reviews(db, older_than=NOW - timedelta(hours=1)) == []

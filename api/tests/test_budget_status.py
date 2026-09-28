@@ -302,10 +302,17 @@ def test_explain_run_table():
           "split the PR, or raise max_diff_lines in .claude-review.yml")),
         (("declined", "review budget exhausted, wait expired", None, None, 0, None),
          ("declined: 24 h cap",
-          "the cap was full and the wait expired; push again or comment /review")),
+          "the cap was full and the wait expired; REVA retries by itself once "
+          "the budget frees up; comment /review to retry sooner")),
         (("failed", None, "Credit balance is too low", None, 0, None),
          ("failed: Anthropic credit was empty",
-          "comment /review to re-run; REVA now waits instead of failing in this case")),
+          "REVA retries by itself once the balance is topped up; "
+          "comment /review to retry sooner")),
+        (("failed", None, "Anthropic credit balance too low for the maximum wait; "
+          "review declined.", None, 0, None),
+         ("failed: Anthropic credit was empty",
+          "REVA retries by itself once the balance is topped up; "
+          "comment /review to retry sooner")),
         (("failed", None, "boom, internal traceback", None, 0, None),
          ("failed", "internal error, ops were notified; comment /review to retry")),
         (("stale", None, None, None, 0, None),

@@ -51,6 +51,16 @@ class Settings:
     memory_distill_min_dismissals: int = 3
     value_report_day: int = 1
     value_report_hour_utc: int = 7
+    # Auto-requeue PR reviews that ended only because of a budget refusal
+    # (empty Anthropic credit, or the per-author cap) — not a code error.
+    # <= 0 disables the loop. min_age is the cooldown before a given ended
+    # run is requeued, so a run whose gate is still over budget doesn't spin.
+    budget_requeue_interval_seconds: int = 900
+    budget_requeue_min_age_seconds: int = 3600
+    # Same REVA_BUDGET_RETRY_SECONDS the worker reads (reva/config.py callers):
+    # when budget waiting itself is disabled (<= 0), a requeued run would just
+    # fail again immediately, so the auto-requeue loop is a no-op too.
+    budget_retry_seconds: int = 3600
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -94,4 +104,11 @@ class Settings:
             ),
             value_report_day=int(os.environ.get("REVA_VALUE_REPORT_DAY", "1")),
             value_report_hour_utc=int(os.environ.get("REVA_VALUE_REPORT_HOUR_UTC", "7")),
+            budget_requeue_interval_seconds=int(
+                os.environ.get("REVA_BUDGET_REQUEUE_INTERVAL_SECONDS", "900")
+            ),
+            budget_requeue_min_age_seconds=int(
+                os.environ.get("REVA_BUDGET_REQUEUE_MIN_AGE_SECONDS", "3600")
+            ),
+            budget_retry_seconds=int(os.environ.get("REVA_BUDGET_RETRY_SECONDS", "3600")),
         )

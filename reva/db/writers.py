@@ -20,7 +20,7 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import and_, case, delete, func, or_, select, text, update
+from sqlalchemy import and_, case, delete, exists, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from reva.cost import estimate_cost
@@ -286,6 +286,72 @@ def list_reviews_waiting_budget(db: Database) -> list[dict]:
             }
             for rr, full_name, pr_number, title, author in rows
         ]
+
+
+def list_budget_ended_reviews(db: Database, older_than: datetime) -> list[dict]:
+    """review_runs rows whose terminal outcome was caused by a budget refusal —
+    an empty Anthropic credit balance (failed) or the per-author cap
+    (declined) — not by the code, on a PR that's still open and not a draft.
+    Only the PR's latest run (max id per pull_request_id) qualifies, only
+    against the PR's *current* head_sha (a later push needs its own review,
+    not a requeue of a now-stale SHA), and only once it ended at least
+    `older_than` ago (completed_at, or created_at when NULL) — the
+    scheduler's cooldown against re-requeuing a run that is still over
+    budget. Also excludes a PR with any pending_reviews row scheduled at or
+    after the run ended: that's either a fresh push already queued (must not
+    be clobbered with the stale failed SHA) or this loop's own prior requeue
+    still sitting unclaimed (must not be duplicated). Mirrors the
+    latest-run-per-PR shape of budget_status.list_recent_pr_runs.
+    """
+    with db.session() as s:
+        latest_ids = (
+            select(func.max(ReviewRun.id).label("id"))
+            .group_by(ReviewRun.pull_request_id)
+            .subquery()
+        )
+        ended_at = func.coalesce(ReviewRun.completed_at, ReviewRun.created_at)
+        budget_ended = or_(
+            and_(ReviewRun.status == "failed",
+                 or_(ReviewRun.error_message.ilike("%anthropic credit balance too low%"),
+                     ReviewRun.error_message.ilike("%credit balance is too low%"))),
+            and_(ReviewRun.status == "declined",
+                 ReviewRun.decline_reason.ilike("%review budget%")),
+        )
+        already_pending = exists(
+            select(PendingReview.id).where(
+                PendingReview.pull_request_id == ReviewRun.pull_request_id,
+                PendingReview.scheduled_at >= ended_at,
+            )
+        )
+        rows = s.execute(
+            select(ReviewRun, Repository.installation_id, Repository.full_name,
+                   PullRequest.pr_number)
+            .join(latest_ids, ReviewRun.id == latest_ids.c.id)
+            .join(PullRequest, ReviewRun.pull_request_id == PullRequest.id)
+            .join(Repository, ReviewRun.repository_id == Repository.id)
+            .where(
+                PullRequest.state == "open",
+                PullRequest.draft.is_(False),
+                PullRequest.head_sha == ReviewRun.head_sha,
+                budget_ended,
+                ended_at <= older_than,
+                ~already_pending,
+            )
+        ).all()
+    return [
+        {
+            "id": rr.id,
+            "repository_id": rr.repository_id,
+            "pull_request_id": rr.pull_request_id,
+            "pr_number": pr_number,
+            "installation_id": installation_id,
+            "head_sha": rr.head_sha,
+            "review_mode": rr.review_mode,
+            "status": rr.status,
+            "repo_full_name": full_name,
+        }
+        for rr, installation_id, full_name, pr_number in rows
+    ]
 
 
 def record_review_stale(db: Database, params: JobParams) -> int:

@@ -122,6 +122,9 @@ services:
     environment:
       DATABASE_URL: postgresql://review:${POSTGRES_PASSWORD}@postgres:5432/reviews
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      REVA_BUDGET_RETRY_SECONDS: ${REVA_BUDGET_RETRY_SECONDS:-3600}
+      REVA_BUDGET_REQUEUE_INTERVAL_SECONDS: ${REVA_BUDGET_REQUEUE_INTERVAL_SECONDS:-900}
+      REVA_BUDGET_REQUEUE_MIN_AGE_SECONDS: ${REVA_BUDGET_REQUEUE_MIN_AGE_SECONDS:-3600}
       # Operational alerts (queue depth, failed jobs, repo-cache disk).
       GOOGLE_CHAT_WEBHOOK_URL: ${GOOGLE_CHAT_WEBHOOK_URL:-}
     depends_on:

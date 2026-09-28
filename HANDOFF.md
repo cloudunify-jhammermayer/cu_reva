@@ -88,6 +88,15 @@ cap; and every run's raw status/decline/error text is translated to a plain
 `(label, hint)` pair by the new pure `explain_run`
 (`api/app/queries/budget_status.py`). Plus a static developer TL;DR at `/reviews/how-it-works` (triggers, commands, replies, outcomes, a copy-pasteable `.claude-review.yml`), linked from the status page's nav.
 
+**Follow-up 2026-09-28 (cont.) — budget auto-requeue + PRs grouping.** The
+scheduler now auto-requeues (`trigger_event="manual_requeue"`) any PR review
+whose latest run ended purely on a budget refusal (empty Anthropic credit or
+the per-author cap) and is old enough (`REVA_BUDGET_REQUEUE_INTERVAL_SECONDS`
+/ `REVA_BUDGET_REQUEUE_MIN_AGE_SECONDS`, `scheduler/scheduler/main.py::maybe_requeue_budget_failures`), recording a `budget_failure_requeued` ops event
+per row; and the `/reviews` PRs table is now nested collapsible groups by
+repository then by author instead of one flat table, reusing the existing
+`details.repo` open-state persistence.
+
 ## Addendum 2026-09-04 (evening) — release-log entries replace drafted change notes
 
 **Status: implemented, not deployed** (spec

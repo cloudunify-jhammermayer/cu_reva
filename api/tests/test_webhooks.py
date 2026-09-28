@@ -244,6 +244,35 @@ def test_pr_closed_unmerged_marks_nothing(client_and_db):
         assert s.get(ReviewFinding, fid).outcome == "open"
 
 
+def test_pr_closed_unmerged_persists_closed_state(client_and_db):
+    """An abandoned close must reach the DB: the scheduler's budget auto-requeue
+    only requeues PRs the DB says are open, so a stale 'open' would pay for a
+    review of a dead PR."""
+    from reva.db.models import PullRequest
+
+    client, db = client_and_db
+    _post(client, _pr_payload("opened"))
+    payload = _pr_payload("closed")
+    payload["pull_request"]["merged"] = False
+    payload["pull_request"]["state"] = "closed"
+    _post(client, payload, delivery="closed-unmerged-1")
+
+    with db.session() as s:
+        assert s.query(PullRequest).one().state == "closed"
+
+
+def test_pr_converted_to_draft_persists_draft_flag(client_and_db):
+    from reva.db.models import PullRequest
+
+    client, db = client_and_db
+    _post(client, _pr_payload("opened"))
+    payload = _pr_payload("converted_to_draft", draft=True)
+    _post(client, payload, delivery="to-draft-1")
+
+    with db.session() as s:
+        assert s.query(PullRequest).one().draft is True
+
+
 def test_draft_pr_does_not_create_pending_review(client_and_db):
     client, db = client_and_db
     _post(client, _pr_payload("opened", draft=True))

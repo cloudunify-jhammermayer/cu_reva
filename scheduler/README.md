@@ -20,6 +20,11 @@ can't (the API only reacts to webhooks):
 4. **Stale-run reaper** — each tick fails `review_runs` stuck in `running` longer
    than `REVA_STALE_RUNNING_SECONDS` (default 2× the review job timeout), so a
    worker killed mid-review doesn't leave an orphaned row forever.
+5. **Budget auto-requeue** (`main.py::maybe_requeue_budget_failures`, every
+   `REVA_BUDGET_REQUEUE_INTERVAL_SECONDS`) — requeues (as `manual_requeue`) any
+   open PR's latest review run that ended purely on a budget refusal (empty
+   Anthropic credit or the per-author cap) once it's aged past
+   `REVA_BUDGET_REQUEUE_MIN_AGE_SECONDS`.
 
 Each tick also touches a heartbeat file (`REVA_SCHEDULER_HEARTBEAT_PATH`) that the
 container healthcheck reads to detect a hung loop.
