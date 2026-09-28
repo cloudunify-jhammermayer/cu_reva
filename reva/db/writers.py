@@ -164,6 +164,7 @@ def claim_review_run(
         existing.worker_id = worker_id
         existing.trigger_event = params.trigger_event
         existing.budget_wait_since = None
+        existing.budget_wait_reason = None
         s.flush()
         return existing.id, True
 
@@ -246,15 +247,22 @@ def record_review_declined(db: Database, params: JobParams, reason: str) -> int:
 
 
 def record_review_waiting_budget(
-    db: Database, params: JobParams, since: datetime, reason: str
+    db: Database, params: JobParams, since: datetime, reason_text: str, *, reason: str = "cap"
 ) -> int:
-    """Park a claimed run while its author's review cap is full (spec
-    2026-09-27). Not terminal: the deferred job re-claims it later."""
+    """Park a claimed run while its author's review cap is full, or the
+    Anthropic credit balance is empty (spec 2026-09-27 + 2026-09-27-provider-
+    credit-wait). Not terminal: the deferred job re-claims it later.
+
+    `reason_text` is the human-readable summary shown on the PR/Check Run;
+    `reason` ("cap" or "provider_credit") is the machine kind stored in
+    budget_wait_reason for the /reviews page and TUI.
+    """
     with db.session() as s:
         run = _upsert_review_run(s, params, status="waiting_budget")
-        run.summary = reason
+        run.summary = reason_text
         run.decline_reason = None
         run.budget_wait_since = since
+        run.budget_wait_reason = reason
         s.flush()
         return run.id
 
@@ -274,6 +282,7 @@ def list_reviews_waiting_budget(db: Database) -> list[dict]:
                 "id": rr.id, "repo_full_name": full_name, "pr_number": pr_number,
                 "pr_title": title, "author_login": author, "review_mode": rr.review_mode,
                 "budget_wait_since": rr.budget_wait_since,
+                "budget_wait_reason": rr.budget_wait_reason,
             }
             for rr, full_name, pr_number, title, author in rows
         ]
@@ -413,6 +422,22 @@ def get_review_run_budget_wait_since(db: Database, params: JobParams) -> datetim
     with db.session() as s:
         return s.execute(
             select(ReviewRun.budget_wait_since).where(
+                (ReviewRun.repository_id == params.repository_id)
+                & (ReviewRun.pull_request_id == params.pull_request_id)
+                & (ReviewRun.head_sha == params.head_sha)
+                & (ReviewRun.review_mode == params.review_mode)
+            )
+        ).scalar_one_or_none()
+
+
+def get_review_run_budget_wait_reason(db: Database, params: JobParams) -> str | None:
+    """The current budget_wait_reason ('cap' or 'provider_credit') for this
+    (repo, pr, sha, mode) key. Companion to get_review_run_budget_wait_since:
+    read BEFORE claim_review_run clears both columns, so a fresh trigger
+    racing the deferred wait-and-resume chain restores the right one."""
+    with db.session() as s:
+        return s.execute(
+            select(ReviewRun.budget_wait_reason).where(
                 (ReviewRun.repository_id == params.repository_id)
                 & (ReviewRun.pull_request_id == params.pull_request_id)
                 & (ReviewRun.head_sha == params.head_sha)
@@ -1621,6 +1646,7 @@ def get_ticket_analysis(db: Database, analysis_id: int) -> dict | None:
             "created_at": row.created_at,
             "completed_at": row.completed_at,
             "budget_wait_since": row.budget_wait_since,
+            "budget_wait_reason": row.budget_wait_reason,
             "repo_docs_sections_used": row.repo_docs_sections_used,
             "image_count": row.image_count,
         }
@@ -1704,6 +1730,7 @@ def get_timesheet_run(db: Database, run_id: int) -> dict | None:
             "created_at": row.created_at,
             "completed_at": row.completed_at,
             "budget_wait_since": row.budget_wait_since,
+            "budget_wait_reason": row.budget_wait_reason,
         }
 
 
@@ -2071,6 +2098,7 @@ def get_ticket_issue_run(db: Database, run_id: int) -> dict | None:
             "created_at": row.created_at,
             "completed_at": row.completed_at,
             "budget_wait_since": row.budget_wait_since,
+            "budget_wait_reason": row.budget_wait_reason,
         }
 
 
@@ -3315,20 +3343,24 @@ def delete_odoo_instance(db: Database, instance_id: int) -> bool:
     """Hard-delete an Odoo instance. Returns False if the row is missing.
 
     Run history keeps its data but loses the instance link: the nullable
-    odoo_instance_id FKs are set NULL, and change_notes rows (NOT NULL FK)
-    are deleted with the instance.
+    odoo_instance_id FKs are set NULL, and rows whose FK is NOT NULL
+    (change_notes, release_notes, ticket_actuals, ticket_issue_reassignments)
+    are deleted with the instance. Every FK onto odoo_instances is plain
+    (no ON DELETE rule), so a table missing here makes the delete fail.
     """
     with db.session() as s:
         row = s.get(OdooInstance, instance_id)
         if row is None:
             return False
-        for model in (TicketAnalysis, TicketIssueRun, TimesheetReviewRun):
+        for model in (TicketAnalysis, TicketIssueRun, TimesheetReviewRun,
+                      SupportThread, SupportTurn):
             s.execute(
                 update(model)
                 .where(model.odoo_instance_id == instance_id)
                 .values(odoo_instance_id=None)
             )
-        s.execute(delete(ChangeNote).where(ChangeNote.odoo_instance_id == instance_id))
+        for model in (ChangeNote, ReleaseNote, TicketActual, TicketIssueReassignment):
+            s.execute(delete(model).where(model.odoo_instance_id == instance_id))
         s.delete(row)
         return True
 
@@ -3363,14 +3395,19 @@ _BUDGET_WAIT_MODELS = {
 }
 
 
-def set_budget_wait_since(db: Database, kind: str, row_id: int, since: datetime | None) -> None:
+def set_budget_wait_since(
+    db: Database, kind: str, row_id: int, since: datetime | None, reason: str | None = None
+) -> None:
     """Stamp (or clear, since=None) the wait marker on one Odoo-facing run row.
-    `kind` is one of BUDGET_WAIT_KINDS; anything else is a programming error."""
+    `kind` is one of BUDGET_WAIT_KINDS; anything else is a programming error.
+    `reason` ("cap" or "provider_credit") is stored as given; clearing the
+    marker (since=None) always clears the reason too, whatever was passed."""
     model = _BUDGET_WAIT_MODELS[kind]
     with db.session() as s:
         row = s.get(model, row_id)
         if row is not None:
             row.budget_wait_since = since
+            row.budget_wait_reason = reason if since is not None else None
 
 
 def list_budget_waiting(db: Database) -> list[dict]:
@@ -3400,6 +3437,7 @@ def list_budget_waiting(db: Database) -> list[dict]:
                     "instance_name": names.get(r.odoo_instance_id),
                     "model_name": model_name, "ticket_id": ticket_id, "record": record,
                     "budget_wait_since": r.budget_wait_since,
+                    "budget_wait_reason": r.budget_wait_reason,
                 })
     out.sort(key=lambda r: r["budget_wait_since"])
     return out
@@ -3495,8 +3533,8 @@ _SUPPORT_TURN_FIELDS = (
     "id", "thread_id", "odoo_instance_id", "seq", "job_id", "question",
     "answer_html", "result_structured", "request_kind", "answer_status",
     "grounding_level", "status", "error_message", "model", "estimated_cost_usd",
-    "created_at", "completed_at", "budget_wait_since", "callback_sent_at", "callback_error",
-    "image_count",
+    "created_at", "completed_at", "budget_wait_since", "budget_wait_reason",
+    "callback_sent_at", "callback_error", "image_count",
 )
 
 

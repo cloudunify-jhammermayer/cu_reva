@@ -43,3 +43,21 @@ def test_update_fields(db: Database) -> None:
     row = writers.get_odoo_instance(db, iid)
     assert row["active"] is False
     assert row["callback_url"] == "https://x/write-field"
+
+
+def test_delete_clears_support_rows_and_removes_instance(db: Database) -> None:
+    """support_threads/support_turns reference the instance through a plain FK;
+    the delete must unlink them (SET NULL) or Postgres rejects it."""
+    iid = writers.create_odoo_instance(
+        db, name="local_home", key_hash="h1", key_prefix="p", callback_url="", callback_api_key_enc="",
+    )
+    thread_id = writers.get_or_create_support_thread(
+        db, odoo_instance_id=iid, ticket_id=1, model_name="helpdesk.ticket", field_name="f",
+    )
+    turn_id = writers.record_support_turn_created(db, thread_id, iid, "Wie?")
+
+    assert writers.delete_odoo_instance(db, iid) is True
+
+    assert writers.get_odoo_instance(db, iid) is None
+    assert writers.get_support_turn(db, turn_id)["odoo_instance_id"] is None
+    assert writers.get_support_thread(db, thread_id)["odoo_instance_id"] is None
