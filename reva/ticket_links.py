@@ -22,7 +22,9 @@ class TicketRef:
     odoo_instance_id: int
     ticket_id: int
     model_name: str
-    run_id: int
+    # The run holding the plan; None when the ticket was resolved through the
+    # PR's branch or title instead of a REVA-created issue.
+    run_id: int | None
 
 
 def parse_closing_refs(text: str | None) -> list[int]:
@@ -147,6 +149,7 @@ def resolve_ticket_by_id(
     default_model: str = _PROJECT_MODEL,
     *,
     strict_model: bool = False,
+    instance_id: int | None = None,
 ) -> tuple[int, str] | None:
     """(odoo_instance_id, model_name) for an extracted ticket id.
 
@@ -159,6 +162,11 @@ def resolve_ticket_by_id(
     to REVA AND no active default instance exists (caller records the ops
     event).
 
+    `instance_id` is the instance the repo declares in `.claude-review.yml`:
+    the analyses rungs then only consider that instance and the last rung
+    returns it instead of the default (rung 1 ignores it: a run of this repo
+    is ground truth).
+
     `strict_model` (an explicit `P` reference) turns `default_model` from a guess
     into a filter: only DB rows of that model may match. Task and helpdesk ids
     are separate sequences, so without it `P210` would land on helpdesk ticket
@@ -166,6 +174,8 @@ def resolve_ticket_by_id(
     repo = repo_full_name.lower()
     run_model = [TicketIssueRun.model_name == default_model] if strict_model else []
     analysis_model = [TicketAnalysis.model_name == default_model] if strict_model else []
+    if instance_id is not None:
+        analysis_model.append(TicketAnalysis.odoo_instance_id == instance_id)
     with db.session() as s:
         row = s.execute(
             select(TicketIssueRun.odoo_instance_id, TicketIssueRun.model_name)
@@ -198,6 +208,8 @@ def resolve_ticket_by_id(
             ) or (candidates[0] if candidates else None)
         if row is not None:
             return row.odoo_instance_id, row.model_name
+        if instance_id is not None:
+            return instance_id, default_model
         default_id = s.execute(
             select(OdooInstance.id)
             .where(OdooInstance.is_default.is_(True), OdooInstance.active.is_(True))

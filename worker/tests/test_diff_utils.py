@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from reva.diff_utils import (
     DiffHunk,
+    affected_modules,
     analyze_test_coverage,
     count_diff_lines,
     diff_content_hash,
@@ -20,6 +21,7 @@ from reva.diff_utils import (
     migration_paths,
     module_root,
     parse_diff_hunks,
+    updated_submodules,
     xml_only_diff,
 )
 
@@ -597,3 +599,75 @@ def test_diff_content_hash_differs_on_content():
     a = "@@ -0,0 +1 @@\n+x = 1\n"
     b = "@@ -0,0 +1 @@\n+x = 2\n"
     assert diff_content_hash(a) != diff_content_hash(b)
+
+
+def test_affected_modules_are_sorted_and_deduplicated():
+    assert affected_modules([
+        "custom_addons/cu_sale/models/sale.py",
+        "custom_addons/cu_auth/views/login.xml",
+        "custom_addons/cu_sale/views/sale.xml",
+        "custom-addons/cu_stock/models/stock.py",
+    ]) == ["cu_auth", "cu_sale", "cu_stock"]
+
+
+def test_affected_modules_ignore_paths_outside_the_addons_prefixes():
+    assert affected_modules([
+        ".github/workflows/ci.yml",
+        "docs/releases/lollipop.md",
+        "odoo/addons/sale/models/sale.py",
+        "enterprise/helpdesk/models/x.py",
+    ]) == []
+
+
+def test_affected_modules_list_a_module_touched_only_by_tests_or_translations():
+    assert affected_modules([
+        "custom_addons/cu_auth/tests/test_login.py",
+        "custom_addons/cu_sale/i18n/de.po",
+    ]) == ["cu_auth", "cu_sale"]
+
+
+def test_affected_modules_skip_a_file_lying_directly_in_the_prefix():
+    # custom_addons/README.md is not a module called "README.md".
+    assert affected_modules(["custom_addons/README.md", "custom_addons/"]) == []
+
+
+_SHA_A = "73862a7e7a3599e98df33af5eff97660ad6cd382"
+_SHA_B = "0be808739a939be37f0e2132f25bb50e96fb56f5"
+
+
+def test_updated_submodules_names_a_moved_submodule():
+    # The shape GitHub's changed-files listing returns for a gitlink.
+    files = [
+        {"filename": "3rd_party_addons/cu/queue", "status": "modified",
+         "patch": f"@@ -1 +1 @@\n-Subproject commit {_SHA_A}\n+Subproject commit {_SHA_B}"},
+        {"filename": "custom_addons/cu_sale/models/sale.py", "status": "modified",
+         "patch": "@@ -1 +1 @@\n-x = 1\n+x = 2"},
+    ]
+    assert updated_submodules(files) == ["3rd_party_addons/cu/queue"]
+
+
+def test_updated_submodules_names_added_and_removed_submodules_sorted():
+    files = [
+        {"filename": "3rd_party_addons/cu/timetracking", "status": "removed",
+         "patch": f"@@ -1 +0,0 @@\n-Subproject commit {_SHA_A}"},
+        {"filename": "3rd_party_addons/cu/3cx", "status": "added",
+         "patch": f"@@ -0,0 +1 @@\n+Subproject commit {_SHA_B}"},
+    ]
+    assert updated_submodules(files) == ["3rd_party_addons/cu/3cx", "3rd_party_addons/cu/timetracking"]
+
+
+def test_updated_submodules_ignores_a_file_that_merely_mentions_the_words():
+    files = [
+        {"filename": "docs/submodules.md", "status": "modified",
+         "patch": f"@@ -1,2 +1,2 @@\n context\n-Subproject commit {_SHA_A}\n+Subproject commit {_SHA_B}"},
+        {"filename": "docs/pins.md", "status": "modified",
+         "patch": f"@@ -1 +1,2 @@\n+Subproject commit {_SHA_B}\n+and a second line"},
+        {"filename": "docs/note.md", "status": "modified",
+         "patch": f"@@ -1 +1 @@\n-old\n+Subproject commit {_SHA_B} is the pin"},
+    ]
+    assert updated_submodules(files) == []
+
+
+def test_updated_submodules_ignores_entries_without_a_patch():
+    # Binary files and very large diffs come without a patch.
+    assert updated_submodules([{"filename": "static/logo.png", "status": "added"}]) == []

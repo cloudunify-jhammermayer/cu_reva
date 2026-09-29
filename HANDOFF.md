@@ -1,5 +1,84 @@
 # REVA — Work Handoff
 
+## Addendum 2026-09-29 — change summary lists the affected modules
+
+**Status: implemented, not deployed** (spec
+`docs/superpowers/specs/archive/2026-09-29-change-summary-modules-design.md`, plan
+`docs/superpowers/plans/archive/2026-09-29-change-summary-modules.md`). Three
+changes to the "Changes merged" summary:
+
+1. **Modules.** At merge, `worker/worker/change_note_runner.py` lists the PR's
+   changed files and stores the technical module names (the directories
+   directly under `custom_addons/`) on the `change_notes` row (`modules`,
+   migration `052_change_notes_modules.sql`). They travel as `notes[].modules`
+   on `tickets.change-summary`; Odoo posts their sorted union as one
+   **Modules:** line under the header. No Claude call is involved, and REVA
+   does not know whether a module is installed anywhere. A git submodule the
+   PR moved is named by its path the same way (`submodules`,
+   `notes[].submodules`, a **Submodules updated:** line): shared modules live
+   in submodules outside `custom_addons/`. Neither list is part of Odoo's
+   dedup hash.
+2. **Setup section.** `prompts/change_note.md` asks for a fourth section,
+   "Setup after deployment", omitted when the change needs none.
+3. **Branch-linked tickets.** A merged PR without `closes #N` still gets a
+   summary when its branch or title names the ticket (`cr/2010`,
+   `[CR] 2010 - …`, `sup/H1213`), resolved like the work-status fallback. A
+   ticket without REVA-created issues never turns ready, so its summary ships
+   per merged PR, as soon as no note for it is pending. Odoo heads such a note
+   "Changes merged", without "ready for review/deploy".
+
+**Follow-ups in the same change** (spec
+`docs/superpowers/specs/archive/2026-09-30-change-summary-followups-design.md`,
+plan `docs/superpowers/plans/archive/2026-09-30-change-summary-followups.md`):
+
+- The merge job reuses the lists an earlier run stored for the PR and asks
+  GitHub only on a first run.
+- A branch-linked PR that touches no addon and moves no submodule gets no
+  draft (`nothing_to_deploy`).
+- The branch fallback (change notes and work status) resolves an unknown
+  ticket to the instance the repo declares with `odoo_instance` in
+  `.claude-review.yml`, not to the default instance. A repo naming an instance
+  REVA does not know gets no ticket (ops event `unknown_repo_instance`) and so
+  does a repo whose config cannot be read (`repo_instance_config_failed`).
+- The scheduler fails change notes stuck in `pending` for longer than
+  `REVA_BUDGET_WAIT_MAX_SECONDS` + `REVA_BUDGET_RETRY_SECONDS` + 2 h (ops
+  event `stale_pending_reaped`) and enqueues `deliver_change_notes` for their
+  tickets.
+- `GET /api/v1/change-notes` feeds the TUI Tickets tab: a record with change
+  notes only has a row and a journey.
+- A requeued create-issues run keeps its release (migration
+  `053_ticket_issue_runs_release.sql`).
+
+**Deploy:** Odoo first. Upgrade `cu_reva_ticket_analysis` to 19.0.57.1.0 on
+every registered instance, then rebuild worker + api + scheduler (shared
+`reva/` changed; migrations 052 and 053 at boot; prompts v2.22). A new TUI
+binary shows the change-note rows. The lists and the
+dedup hash are safe in either order, the header is not: an instance still on
+the old module heads the per-merge summary of a ticket without REVA issues
+"Changes merged — ready for review/deploy". Before deploying, check on prod
+that no run predates the multi-instance split:
+`SELECT count(*) FROM ticket_issue_runs WHERE odoo_instance_id IS NULL AND issues IS NOT NULL;`
+Such a ticket would resolve to the default instance with an empty issue
+union and get its summary per merge although Odoo shows open issues.
+The scheduler's first loop after the deploy fails every change note that has
+been `pending` for longer than the reaper threshold and enqueues delivery for
+its ticket, so summaries that a dead note has been blocking can appear in
+chatter at once. Count them first:
+`SELECT count(*) FROM change_notes WHERE status = 'pending' AND created_at < now() - interval '53 hours';`
+
+**Not live-validated (unit-tested only):** the GitHub changed-files call
+against a real PR (the submodule hint rests on the `patch` shape of a gitlink
+entry, checked by hand against one real commit), a real `tickets.change-summary` round trip with `modules`.
+Migration 052 ran on Postgres 16 through `make test-integration`. Of the follow-ups: the config fetch for a
+repo's declared instance and the scheduler's `deliver_change_notes` enqueue ran
+against fakes only. The reaper's `FOR UPDATE SKIP LOCKED` query ran on SQLite only; it has the same shape as the review reaper's.
+
+**Watch:** branch-only PRs now draw on `REVA_DAILY_BUDGET_USD`. A branch number
+that is no record id in Odoo shows up as the ops event `change_summary_rejected`.
+The webhook does not look at the base branch: a ticket branch merged into a
+staging branch and later into production yields a note per merge (open, see
+the spec's risks).
+
 ## Addendum 2026-09-27 — budget wait-and-resume
 
 **Status: implemented, not deployed** (spec

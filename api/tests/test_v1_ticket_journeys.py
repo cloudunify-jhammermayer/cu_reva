@@ -393,3 +393,53 @@ def test_journey_requires_master_key():
         assert resp.status_code == 401
     finally:
         app.dependency_overrides.clear()
+
+
+def test_journey_change_note_names_the_affected_modules(client_and_db):
+    client, db = client_and_db
+    _add_issue_run(db, odoo_instance_id=1, ticket_id=4714, repo_full_name="acme/widgets")
+    note_id, _ = writers.get_or_create_change_note(
+        db, repo_full_name="acme/widgets", pr_number=88, ticket_id=4714,
+        odoo_instance_id=1, model_name="helpdesk.ticket",
+    )
+    writers.record_change_note_modules(db, note_id, ["cu_auth", "cu_sale"], [])
+    writers.record_change_note_completed(db, note_id, "<p>note</p>", 0.01)
+
+    resp = client.get("/api/v1/ticket-journeys?model_name=helpdesk.ticket&ticket_id=4714&odoo_instance_id=1")
+    assert resp.status_code == 200
+    event = next(e for e in resp.json()["events"] if e["kind"] == "change_note_posted")
+    assert event["summary"] == "acme/widgets#88 → internal note (completed) · cu_auth, cu_sale"
+
+
+def test_journey_change_note_without_modules_keeps_its_summary(client_and_db):
+    client, db = client_and_db
+    _add_issue_run(db, odoo_instance_id=1, ticket_id=4714, repo_full_name="acme/widgets")
+    note_id, _ = writers.get_or_create_change_note(
+        db, repo_full_name="acme/widgets", pr_number=88, ticket_id=4714,
+        odoo_instance_id=1, model_name="helpdesk.ticket",
+    )
+    writers.record_change_note_completed(db, note_id, "<p>note</p>", 0.01)
+
+    resp = client.get("/api/v1/ticket-journeys?model_name=helpdesk.ticket&ticket_id=4714&odoo_instance_id=1")
+    event = next(e for e in resp.json()["events"] if e["kind"] == "change_note_posted")
+    assert event["summary"] == "acme/widgets#88 → internal note (completed)"
+
+
+def test_journey_of_a_ticket_with_change_notes_only(client_and_db):
+    # A merged PR named the ticket through its branch; REVA holds no analysis
+    # and no issue run for it, only the change note.
+    client, db = client_and_db
+    note_id, _ = writers.get_or_create_change_note(
+        db, repo_full_name="acme/widgets", pr_number=91, ticket_id=2010,
+        odoo_instance_id=1, model_name="project.task",
+    )
+    writers.record_change_note_modules(db, note_id, ["cu_auth"], [])
+    writers.record_change_note_completed(db, note_id, "<p>note</p>", 0.01)
+
+    resp = client.get("/api/v1/ticket-journeys?model_name=project.task&ticket_id=2010&odoo_instance_id=1")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ticket"]["ready"] is False
+    assert [e["summary"] for e in body["events"] if e["kind"] == "change_note_posted"] == [
+        "acme/widgets#91 → internal note (completed) · cu_auth"
+    ]

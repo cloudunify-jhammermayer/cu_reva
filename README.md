@@ -133,7 +133,7 @@ Per-repo config (`.claude-review.yml`):
 | `verify_findings` | global | Per-repo override for the second-pass self-critique (see `REVA_VERIFY_HIGH_COST`). |
 | `cross_branch_reuse` | `true` | Allow a promotion PR to reuse an identical prior review's verdict (see below). Global kill switch: `REVA_CROSS_BRANCH_REUSE`. |
 | `odoo` / `custom_instructions` | — | Apply the Odoo guidance / inject repo-specific reviewer instructions. |
-| `odoo_instance` | — | Name of the Odoo instance (as registered in REVA) whose release-log lookups search this repo's `docs/releases/`. Unset: never searched. |
+| `odoo_instance` | — | Name of the Odoo instance (as registered in REVA) whose release-log lookups search this repo's `docs/releases/`. Unset: never searched. Also decides which Odoo instance a ticket named only by a PR's branch or title belongs to. |
 
 ## Incremental & carried-forward reviews
 
@@ -282,6 +282,14 @@ merged" note to Odoo summarizing the merged PRs — normally a customer-facing
 note Claude drafts per PR from its diff. A ticket covered by the repository's
 release log (`docs/releases/<name>.md`, `## <ticket> — …`) gets that entry
 (Gebaut and To-do) in the summary instead of a drafted note.
+
+The summary also lists the technical modules the merged PRs touched (the
+directories under `custom_addons/`) and names any git submodule a PR moved, so
+the consultant knows what to install or upgrade on each environment. A merged
+PR without `closes #N` is covered too when its branch or title names the
+ticket (`cr/2010`, `[CR] 2010 - …`). Such a ticket has no REVA-created issues
+to wait for, so the rule above does not apply to it: its summary is posted per
+merged PR, headed "Changes merged" without "ready for review/deploy".
 
 ## Error notifications
 

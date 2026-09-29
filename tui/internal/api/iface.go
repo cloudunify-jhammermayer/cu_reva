@@ -17,6 +17,7 @@ type ClientIface interface {
 	AddRepo(owner, name string) error
 	TicketAnalyses(limit int) (*TicketAnalysisPage, error)
 	TicketIssueRuns(limit int) (*TicketIssueRunPage, error)
+	ChangeNotes(limit int) (*ChangeNotePage, error)
 	TimesheetReviews(limit int) (*TimesheetReviewPage, error)
 	ReleaseNotes(limit int) (*ReleaseNotePage, error)
 	RequeueTicket(id int) error

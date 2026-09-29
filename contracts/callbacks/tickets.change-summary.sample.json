@@ -2,13 +2,19 @@
   "model_name": "helpdesk.ticket",
   "notes": [
     {
+      "modules": [
+        "cu_auth"
+      ],
       "note_html": "",
       "pr": {
         "number": 7,
         "repo": "acme/widgets",
         "title": "Login rework",
         "url": "https://github.com/acme/widgets/pull/7"
-      }
+      },
+      "submodules": [
+        "3rd_party_addons/cu/queue"
+      ]
     }
   ],
   "release_log": {

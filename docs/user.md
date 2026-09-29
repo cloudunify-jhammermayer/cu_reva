@@ -121,7 +121,10 @@ and then moves the cards as work happens:
   and the requester gets a to-do activity. (Deployment itself stays a human step —
   REVA never marks a ticket done.)
 - A PR that closes one of the issues gets **merged** → a change note lands in the
-  ticket's chatter: what changed, in consultant language.
+  ticket's chatter: what changed, in consultant language, what to set up after
+  deployment, and which technical modules to install or upgrade. A PR that names
+  the ticket only through its branch or title (`cr/2010`, `[CR] 2010 - …`) gets
+  one too.
 
 ### Timesheet wording review
 Timesheet lines can be sent in batch to REVA, which flags/rewrites wording that

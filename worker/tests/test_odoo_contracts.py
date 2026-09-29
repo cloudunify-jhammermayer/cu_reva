@@ -166,7 +166,8 @@ def test_change_summary_wire_shape():
             "note_html": "<p>x</p>",
         }],
     )
-    # exclude_none drops release_log when the repo has no entry for the ticket.
+    # exclude_none drops release_log when the repo has no entry for the ticket;
+    # modules and submodules are always on the wire, [] when nothing was found.
     assert payload.model_dump(exclude_none=True) == {
         "ticket_id": 123,
         "model_name": "helpdesk.ticket",
@@ -174,8 +175,27 @@ def test_change_summary_wire_shape():
             "pr": {"number": 7, "title": "Login rework",
                    "url": "https://github.com/acme/widgets/pull/7", "repo": "acme/widgets"},
             "note_html": "<p>x</p>",
+            "modules": [],
+            "submodules": [],
         }],
     }
+
+
+def test_change_summary_note_carries_its_modules_and_submodules():
+    payload = ChangeSummaryPayload(
+        ticket_id=123,
+        model_name="helpdesk.ticket",
+        notes=[{
+            "pr": {"number": 7, "title": "Login rework",
+                   "url": "https://github.com/acme/widgets/pull/7", "repo": "acme/widgets"},
+            "note_html": "<p>x</p>",
+            "modules": ["cu_auth", "cu_sale"],
+            "submodules": ["3rd_party_addons/cu/queue"],
+        }],
+    )
+    note = payload.model_dump(exclude_none=True)["notes"][0]
+    assert note["modules"] == ["cu_auth", "cu_sale"]
+    assert note["submodules"] == ["3rd_party_addons/cu/queue"]
 
 
 def test_contracts_table_complete_and_sane():

@@ -2,12 +2,28 @@
   "$defs": {
     "ChangeSummaryNote": {
       "properties": {
+        "modules": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Modules",
+          "type": "array"
+        },
         "note_html": {
           "title": "Note Html",
           "type": "string"
         },
         "pr": {
           "$ref": "#/$defs/PrRefPayload"
+        },
+        "submodules": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Submodules",
+          "type": "array"
         }
       },
       "required": [

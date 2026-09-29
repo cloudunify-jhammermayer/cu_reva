@@ -18,7 +18,7 @@ from app.settings import Settings
 from reva.claude_code_runner import REVIEW_JOB_TIMEOUT
 from reva.db import writers
 from reva.db.engine import Database
-from reva.ticket_links import parse_closing_refs
+from reva.ticket_links import extract_ticket_id, parse_closing_refs
 from reva.types import Category, RepoConfig
 
 router = APIRouter()
@@ -197,9 +197,14 @@ def _handle_pull_request(db: Database, payload: dict, settings: Settings, github
         _, pr_id = _upsert_repo_and_pr(db, payload)
         marked = writers.mark_open_findings_at_merge(db, pr_id)
         logger.info("findings_marked_at_merge", pr=pr_data.get("number"), count=marked)
+        head_ref = (pr_data.get("head") or {}).get("ref") or ""
         if (
             rq_queue is not None
-            and parse_closing_refs(pr_data.get("body"))
+            and (
+                parse_closing_refs(pr_data.get("body"))
+                # No closing ref: the branch or title may still name the ticket.
+                or extract_ticket_id(head_ref, pr_data.get("title")) is not None
+            )
             and _change_notes_enabled(github, payload)
         ):
             repo_data = payload["repository"]
@@ -211,6 +216,7 @@ def _handle_pull_request(db: Database, payload: dict, settings: Settings, github
                     "pr_title": pr_data.get("title") or "",
                     "pr_body": pr_data.get("body") or "",
                     "pr_url": pr_data.get("html_url") or "",
+                    "head_ref": head_ref,
                     "installation_id": payload["installation"]["id"],
                 },
                 retry=Retry(max=3, interval=[30, 120, 300]),

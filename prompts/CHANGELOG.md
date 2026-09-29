@@ -1,3 +1,16 @@
+## v2.22 — Merge change note: setup section, language without a ticket name
+
+- `change_note.md` gains a fourth section, **Setup after deployment**: settings
+  to configure, access groups to assign, scheduled actions to activate, data to
+  import, named as the user sees them in the interface. Omitted when the change
+  needs no setup. The consultant deploys the merged work to several
+  environments and so far had to find out from the diff what to configure
+  afterwards.
+- When the task gives no ticket name, the note is written in the language of
+  the PR title and description. A merged PR that names its ticket only through
+  its branch or title can belong to a record REVA holds no name for (spec
+  `docs/superpowers/specs/archive/2026-09-29-change-summary-modules-design.md`).
+
 ## v2.21 — Ticket analysis can read the customer's screenshots too
 
 - `ticket_analysis.md` and `skills/reva-ticket-analysis.md` gain the same

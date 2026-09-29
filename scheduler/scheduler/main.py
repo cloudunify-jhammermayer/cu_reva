@@ -16,7 +16,7 @@ from pathlib import Path
 
 import structlog
 from redis import Redis
-from rq import Queue
+from rq import Queue, Retry
 
 from reva.db import writers
 from reva.db.engine import Database, create_engine_from_url
@@ -105,6 +105,44 @@ def maybe_requeue_budget_failures(db, now, last_run, interval_s, min_age_s, retr
              "pr": row["pr_number"], "status": row["status"]},
         )
     return now
+
+
+def reap_change_notes(db, queue, stale_seconds: int) -> int:
+    """Fail change notes stuck in `pending` (worker killed mid-job) and enqueue
+    one delivery job per affected ticket, so the notes they were blocking ship.
+    A failed enqueue is recorded; the next merge or ready event delivers.
+    Returns the number of notes reaped."""
+    reaped = writers.reap_stale_pending_change_notes(db, stale_seconds)
+    tickets: dict[tuple[int, int, str], None] = {}
+    for row in reaped:
+        logger.warning(
+            "change_note_reaped",
+            note_id=row["id"], repo=row["repo_full_name"], pr=row["pr_number"],
+            ticket_id=row["ticket_id"],
+        )
+        writers.record_ops_event(
+            db, "change_note", "warning", "stale_pending_reaped",
+            {"repo": row["repo_full_name"], "pr": row["pr_number"],
+             "ticket_id": row["ticket_id"]},
+        )
+        tickets[(row["odoo_instance_id"], row["ticket_id"], row["model_name"])] = None
+    for odoo_instance_id, ticket_id, model_name in tickets:
+        try:
+            queue.enqueue(
+                "worker.change_note_tasks.deliver_change_notes",
+                {"odoo_instance_id": odoo_instance_id, "ticket_id": ticket_id,
+                 "model_name": model_name},
+                retry=Retry(max=3, interval=[30, 120, 300]),
+            )
+        except Exception as exc:  # noqa: BLE001 — degrade, stay visible
+            logger.warning(
+                "change_note_reaper_enqueue_failed", ticket_id=ticket_id, exc_info=True
+            )
+            writers.record_ops_event(
+                db, "change_note", "warning", "reaper_enqueue_failed",
+                {"ticket_id": ticket_id, "error": str(exc)[:300]},
+            )
+    return len(reaped)
 
 
 def _previous_month_bounds(now: datetime) -> tuple[datetime, datetime]:
@@ -254,6 +292,11 @@ def main() -> None:
             writers.reap_stale_running_reviews(db, settings.stale_running_seconds)
         except Exception:
             logger.exception("scheduler_reaper_error")
+
+        try:
+            reap_change_notes(db, queue, settings.stale_change_note_seconds)
+        except Exception:
+            logger.exception("scheduler_change_note_reaper_error")
 
         try:
             last_eviction = maybe_enqueue_eviction(

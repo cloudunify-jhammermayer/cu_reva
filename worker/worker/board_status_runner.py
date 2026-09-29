@@ -41,6 +41,7 @@ from reva.ticket_links import (
     resolve_ticket_by_id,
 )
 from reva.types import RepoConfig
+from worker.repo_instance import UnknownRepoInstance, UnreadableRepoConfig, declared_instance_id
 from worker.runner import build_odoo_client, get_context
 
 logger = structlog.get_logger()
@@ -120,19 +121,34 @@ def run_board_status_update(job_params: dict) -> dict:
         )
         if extracted is not None:
             ticket_id, model_hint, strict_model = extracted
-            resolved = resolve_ticket_by_id(
-                ctx.db, repo, ticket_id, model_hint, strict_model=strict_model
-            )
-            if resolved is None:
-                # Unknown ticket and no active default instance: the fallback
-                # is configured off at the data level — visible, not silent.
-                log.warning("ticket_signal_no_default_instance", ticket_id=ticket_id)
-                writers.record_ops_event(
-                    ctx.db, "odoo_callback", "warning", "no_default_instance",
-                    {"repo": repo, "pr": pr_number, "ticket_id": ticket_id},
+            try:
+                instance_id = declared_instance_id(ctx, repo, job_params["installation_id"], log)
+                resolved = resolve_ticket_by_id(
+                    ctx.db, repo, ticket_id, model_hint,
+                    strict_model=strict_model, instance_id=instance_id,
                 )
+            except UnknownRepoInstance as exc:
+                log.warning("ticket_signal_unknown_repo_instance", ticket_id=ticket_id,
+                            instance=exc.args[0])
+                writers.record_ops_event(
+                    ctx.db, "odoo_callback", "warning", "unknown_repo_instance",
+                    {"repo": repo, "pr": pr_number, "ticket_id": ticket_id,
+                     "instance": exc.args[0]},
+                )
+                resolved = None
+            except UnreadableRepoConfig:
+                pass  # the helper recorded the ops event; fallback stays None
             else:
-                fallback = (resolved[0], ticket_id, resolved[1])
+                if resolved is None:
+                    # Unknown ticket and no active default instance: the fallback
+                    # is configured off at the data level — visible, not silent.
+                    log.warning("ticket_signal_no_default_instance", ticket_id=ticket_id)
+                    writers.record_ops_event(
+                        ctx.db, "odoo_callback", "warning", "no_default_instance",
+                        {"repo": repo, "pr": pr_number, "ticket_id": ticket_id},
+                    )
+                else:
+                    fallback = (resolved[0], ticket_id, resolved[1])
         else:
             log.debug("ticket_signal_no_ticket_ref")
 

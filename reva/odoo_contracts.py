@@ -136,6 +136,10 @@ class IssueWorkStatusPayload(BaseModel):
 class ChangeSummaryNote(BaseModel):
     pr: PrRefPayload
     note_html: str
+    # Technical names of the modules the PR touched, sorted; [] when none.
+    modules: list[str] = []
+    # Paths of the git submodules the PR moved, sorted; [] when none.
+    submodules: list[str] = []
 
 
 class ReleaseLogEntryPayload(BaseModel):
@@ -376,6 +380,8 @@ CONTRACTS: list[Contract] = [
                     "repo": "acme/widgets",
                 },
                 "note_html": "",
+                "modules": ["cu_auth"],
+                "submodules": ["3rd_party_addons/cu/queue"],
             }],
             "release_log": {
                 "release": "lollipop",
@@ -387,7 +393,7 @@ CONTRACTS: list[Contract] = [
                 "<p><strong>To-do</strong></p><ul><li>Rollen prüfen <em>(Einstellungen → Benutzer)</em></li></ul>",
             },
         },
-        # Legacy shape (pre release-log): plain per-PR note_html, no release_log.
+        # Without a release-log entry: drafted per-PR note_html, no release_log.
         extra_samples=[{
             "ticket_id": 123,
             "model_name": "helpdesk.ticket",
@@ -399,6 +405,8 @@ CONTRACTS: list[Contract] = [
                     "repo": "acme/widgets",
                 },
                 "note_html": "<p>Die Änderung wurde gemerged.</p>",
+                "modules": ["cu_auth", "cu_sale"],
+                "submodules": [],
             }],
         }],
     ),

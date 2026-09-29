@@ -192,3 +192,40 @@ func TestTicketJourneyResponse(t *testing.T) {
 		t.Error("expected nil timestamp on event 2")
 	}
 }
+
+func TestChangeNotesDecodesPage(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.RequestURI()
+		_, _ = w.Write([]byte(`{"total":2,"items":[
+			{"id":2,"repo_full_name":"acme/repo","pr_number":9,"pr_title":"T","pr_url":"https://github.com/acme/repo/pull/9",
+			 "odoo_instance_id":1,"ticket_id":50,"model_name":"project.task","status":"completed","source":"claude",
+			 "modules":["cu_auth"],"submodules":[],"error_message":null,"estimated_cost_usd":0.02,
+			 "created_at":"2026-09-30T10:00:00Z","completed_at":"2026-09-30T10:01:00Z","delivered_at":null},
+			{"id":1,"repo_full_name":"acme/repo","pr_number":8,"pr_title":null,"pr_url":null,
+			 "odoo_instance_id":1,"ticket_id":50,"model_name":"project.task","status":"pending","source":"claude",
+			 "modules":null,"submodules":null,"error_message":null,"estimated_cost_usd":null,
+			 "created_at":"2026-09-30T09:00:00Z","completed_at":null,"delivered_at":null}]}`))
+	}))
+	defer srv.Close()
+
+	page, err := NewClient(srv.URL, "", "", "").ChangeNotes(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/change-notes?limit=100" {
+		t.Errorf("path = %q", path)
+	}
+	if page.Total != 2 || len(page.Items) != 2 {
+		t.Fatalf("page = %+v", page)
+	}
+	if got := page.Items[0].Modules; len(got) != 1 || got[0] != "cu_auth" {
+		t.Errorf("modules = %v, want [cu_auth]", got)
+	}
+	if page.Items[1].Modules != nil {
+		t.Errorf("modules null should decode to nil, got %v", page.Items[1].Modules)
+	}
+	if page.Items[0].OdooInstanceID != 1 || page.Items[0].TicketID != 50 || page.Items[0].PRNumber != 9 {
+		t.Errorf("ids mismatch: %+v", page.Items[0])
+	}
+}

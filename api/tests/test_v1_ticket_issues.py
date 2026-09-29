@@ -867,3 +867,64 @@ def test_update_issue_estimate_requires_instance_key(client_db_queue):
         "number": 42, "estimate_hours": 5.0,
     })
     assert r.status_code in (401, 403)
+
+
+# --- the release survives a requeue -------------------------------------------
+
+
+def _fail_run_with_plan(db, run_id):
+    from reva.db.models import TicketIssueRun
+    plan = [{"title": "A", "body": "b", "acceptance_criteria": [],
+             "number": 42, "url": "https://github.com/org/repo/issues/42"}]
+    with db.session() as s:
+        s.get(TicketIssueRun, run_id).issues = plan
+    writers.record_ticket_issue_run_failed(db, run_id, "boom")
+
+
+def test_requeue_carries_release(client_db_queue):
+    client, db, queue, headers = client_db_queue
+    created = client.post(
+        "/api/v1/create-issues",
+        json={**CONTRACT_PAYLOAD,
+              "release": {"id": 3275, "name": "Lollipop", "date": "2026-09-30 00:00:00"}},
+        headers=headers,
+    ).json()
+    run_id = created["request_id"]
+    _fail_run_with_plan(db, run_id)
+
+    assert client.post(f"/api/v1/create-issues/{run_id}/requeue").status_code == 202
+    _, params, _ = queue.enqueued[1]
+    assert params["release"]["id"] == 3275
+    assert params["release"]["name"] == "Lollipop"
+
+
+def test_requeue_without_release_has_none(client_db_queue):
+    client, db, queue, headers = client_db_queue
+    run_id = client.post(
+        "/api/v1/create-issues", json=CONTRACT_PAYLOAD, headers=headers
+    ).json()["request_id"]
+    _fail_run_with_plan(db, run_id)
+
+    assert client.post(f"/api/v1/create-issues/{run_id}/requeue").status_code == 202
+    _, params, _ = queue.enqueued[1]
+    assert params["release"] is None
+
+
+def test_requeue_of_run_created_before_release_columns_has_none(client_db_queue):
+    from reva.db.models import TicketIssueRun
+    client, db, queue, _ = client_db_queue
+    with db.session() as s:
+        row = TicketIssueRun(
+            ticket_id=7, model_name="helpdesk.ticket", odoo_instance_id=1,
+            github_url="https://github.com/org/repo", repo_full_name="org/repo",
+            name="n", description="d", analysis_html="", priority="1",
+            ticket_url="https://odoo.example.com/#7", status="pending",
+        )
+        s.add(row)
+        s.flush()
+        run_id = row.id
+    _fail_run_with_plan(db, run_id)
+
+    assert client.post(f"/api/v1/create-issues/{run_id}/requeue").status_code == 202
+    _, params, _ = queue.enqueued[0]
+    assert params["release"] is None

@@ -539,3 +539,64 @@ def test_fallback_on_closed_pr_is_pr_closed_noop(db, odoo):
     out = run_board_status_update(_params("review_done"))
     assert out == {"status": "pr_closed"}
     assert odoo.calls == []
+
+
+def _seed_declaring_repo(db):
+    from reva.db.models import Repository
+
+    with db.session() as s:
+        s.add(Repository(id=3, github_repository_id=1003, owner="acme", name="widgets",
+                         full_name="acme/widgets", installation_id=99, enabled=True,
+                         default_branch="main"))
+
+
+def test_fallback_goes_to_the_instance_the_repo_declares(db, odoo, monkeypatch):
+    with db.session() as s:
+        s.add(OdooInstance(name="prod", key_hash="h1", key_prefix="rk_1", is_default=True))
+        s.add(OdooInstance(name="customer", key_hash="h2", key_prefix="rk_2"))
+    with db.session() as s:
+        customer_id = s.execute(
+            select(OdooInstance.id).where(OdooInstance.name == "customer")
+        ).scalar_one()
+    _seed_declaring_repo(db)
+    asked = []
+
+    def _build(ctx, instance_id):
+        asked.append(instance_id)
+        return odoo
+
+    monkeypatch.setattr("worker.board_status_runner.build_odoo_client", _build)
+    _ctx(db, pr_body="plain refactor", head_ref="cr/2010",
+         config_yaml="odoo_instance: customer\n")
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "ticket_signal_only"}
+    assert asked == [customer_id]
+    assert odoo.calls[0]["ticket_id"] == 2010
+
+
+def test_fallback_of_a_repo_declaring_an_unknown_instance_sends_no_signal(db, odoo):
+    with db.session() as s:
+        s.add(OdooInstance(name="prod", key_hash="h1", key_prefix="rk_1", is_default=True))
+    _seed_declaring_repo(db)
+    _ctx(db, pr_body="plain refactor", head_ref="cr/2010",
+         config_yaml="odoo_instance: nowhere\n")
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "no_refs"}
+    assert odoo.calls == []
+    assert any(e["event"] == "unknown_repo_instance" and e["component"] == "odoo_callback"
+               for e in _ops_events(db))
+
+
+def test_fallback_of_a_repo_with_an_unreadable_config_sends_no_signal(db, odoo):
+    with db.session() as s:
+        s.add(OdooInstance(name="prod", key_hash="h1", key_prefix="rk_1", is_default=True))
+    _seed_declaring_repo(db)
+    _ctx(db, pr_body="plain refactor", head_ref="cr/2010",
+         config_yaml="odoo_instance: [unclosed\n")
+    out = run_board_status_update(_params("pr_active"))
+    assert out == {"status": "no_refs"}
+    assert odoo.calls == []
+    events = [e["event"] for e in _ops_events(db)]
+    assert "repo_instance_config_failed" in events
+    assert "unknown_repo_instance" not in events
+    assert "no_default_instance" not in events

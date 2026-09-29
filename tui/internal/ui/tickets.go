@@ -12,14 +12,16 @@ import (
 )
 
 // ticketRow is one Odoo record in the Tickets tab — it may have a REVA
-// analysis, a create-issues run, or both. The tab is the union of the two
-// feeds so a ticket that only had issues created (never analyzed) still shows.
+// analysis, a create-issues run, change notes, or any mix. The tab is the union
+// of the three feeds so a ticket that only had issues created (never analyzed),
+// or that only a merged PR named (change notes), still shows.
 type ticketRow struct {
 	modelName string
 	ticketID  int
 	analysis  *api.TicketAnalysisSummary
 	issueRun  *api.TicketIssueRunSummary
-	activity  time.Time // most recent of the two, for ordering
+	notes     []api.ChangeNoteSummary // newest first
+	activity  time.Time               // most recent of the feeds, for ordering
 }
 
 type Tickets struct {
@@ -28,7 +30,9 @@ type Tickets struct {
 	analyses []api.TicketAnalysisSummary
 	// Latest create-issues run per record, keyed by "<model_name>#<ticket_id>".
 	issueRuns map[string]api.TicketIssueRunSummary
-	rows      []ticketRow // union of analyses + issueRuns, newest first
+	// Change notes per record, newest first, keyed like issueRuns.
+	notes     map[string][]api.ChangeNoteSummary
+	rows      []ticketRow // union of analyses + issueRuns + notes, newest first
 	err       error
 	loading   bool
 	cursor    int
@@ -74,10 +78,14 @@ func (t Tickets) load() tea.Cmd {
 			data, err := t.client.TicketIssueRuns(100)
 			return ticketIssueRunsLoadedMsg{data: data, err: err}
 		},
+		func() tea.Msg {
+			data, err := t.client.ChangeNotes(100)
+			return changeNotesLoadedMsg{data: data, err: err}
+		},
 	)
 }
 
-// rebuildRows recomputes the union from the two feeds, newest activity first.
+// rebuildRows recomputes the union from the three feeds, newest activity first.
 func (t *Tickets) rebuildRows() {
 	byKey := map[string]*ticketRow{}
 	var order []string
@@ -110,6 +118,16 @@ func (t *Tickets) rebuildRows() {
 		r.issueRun = &rc
 		if run.CreatedAt.After(r.activity) {
 			r.activity = run.CreatedAt
+		}
+	}
+	for _, notes := range t.notes {
+		if len(notes) == 0 {
+			continue
+		}
+		r := get(notes[0].ModelName, notes[0].TicketID)
+		r.notes = notes
+		if notes[0].CreatedAt.After(r.activity) {
+			r.activity = notes[0].CreatedAt
 		}
 	}
 	rows := make([]ticketRow, 0, len(order))
@@ -148,8 +166,8 @@ func (t Tickets) filteredRows() []ticketRow {
 
 // repoKey is the grouping key for a row: "owner/repo" parsed from its
 // create-issues run's github_url, falling back to the analysis's github_url
-// (stamped at analysis time) when there is no run yet. "" when neither carries
-// a repo — the "(no repo yet)" bucket. The issue-run URL wins when present: it
+// (stamped at analysis time) when there is no run yet, then to the newest change
+// note's repo. "" when none carries a repo — the "(no repo yet)" bucket. The issue-run URL wins when present: it
 // is the operative repo issues were created against.
 func (t Tickets) repoKey(r ticketRow) string {
 	url := ""
@@ -157,6 +175,11 @@ func (t Tickets) repoKey(r ticketRow) string {
 		url = r.issueRun.GithubURL
 	} else if r.analysis != nil {
 		url = r.analysis.GithubURL
+	}
+	if url == "" && len(r.notes) > 0 {
+		// Notes carry the repo name, not a URL. Only reached when neither the
+		// run nor the analysis names a repo.
+		return r.notes[0].RepoFullName
 	}
 	if url == "" {
 		return ""
@@ -309,6 +332,18 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 			t.rebuildRows()
 		}
 
+	case changeNotesLoadedMsg:
+		// Change notes are auxiliary too — an error keeps the last good feed.
+		if m.err == nil && m.data != nil {
+			notes := map[string][]api.ChangeNoteSummary{}
+			for _, n := range m.data.Items { // feed is newest-first
+				key := issueRunKey(n.ModelName, n.TicketID)
+				notes[key] = append(notes[key], n)
+			}
+			t.notes = notes
+			t.rebuildRows()
+		}
+
 	case ticketRequeuedMsg:
 		if m.err != nil {
 			t.statusMsg = fmt.Sprintf("requeue failed: %s", m.err)
@@ -422,6 +457,18 @@ func (t Tickets) update(msg tea.Msg) (Tickets, tea.Cmd) {
 				t.journeyErr = ""
 				t.detailKey = issueRunKey(cur.row.issueRun.ModelName, cur.row.issueRun.TicketID)
 				journeyCmd = t.loadJourneyCmd(cur.row.issueRun.OdooInstanceID, cur.row.issueRun.ModelName, cur.row.issueRun.TicketID)
+			} else if len(cur.row.notes) > 0 {
+				// Notes-only record: no issue lines, just the journey.
+				t.detail = true
+				t.detailIssues, t.detailParent = nil, nil
+				t.detailIssueType, t.detailAssignee, t.detailProject, t.detailPlanDate = "", "", "", ""
+				t.detailCursor, t.detailOffset = 0, 0
+				t.journey = nil
+				t.journeyErr = ""
+				n := cur.row.notes[0]
+				t.detailKey = issueRunKey(n.ModelName, n.TicketID)
+				instanceID := n.OdooInstanceID
+				journeyCmd = t.loadJourneyCmd(&instanceID, n.ModelName, n.TicketID)
 			} else {
 				t.statusMsg = "no GitHub issues for this ticket"
 			}
@@ -593,6 +640,12 @@ func (t Tickets) view(w, h int) string {
 			if cost == "" && run.EstimatedCostUSD != nil {
 				cost = fmt.Sprintf("$%.4f", *run.EstimatedCostUSD)
 			}
+		} else if n := len(row.notes); n > 0 {
+			issuesPlain = fmt.Sprintf("%d notes", n)
+			if n == 1 {
+				issuesPlain = "1 note"
+			}
+			issuesColored = styleSubtitle.Render(issuesPlain)
 		}
 
 		when := truncate(relativeTime(row.activity), colWhen)
@@ -753,6 +806,9 @@ func (t Tickets) detailView(w, h int) string {
 	if t.detailAssignee != "" {
 		label += "  · assignee @" + t.detailAssignee
 	}
+	if len(t.detailIssues) == 0 {
+		label = "Ticket journey  (no GitHub issues — change notes only)"
+	}
 	header := styleTitle.Padding(0, 1).Render(label)
 
 	// Window the issue list around the cursor so a long list scrolls.
@@ -796,6 +852,9 @@ func (t Tickets) detailView(w, h int) string {
 
 	body := strings.Join(rows, "\n")
 	pos := styleSubtitle.Render(fmt.Sprintf("  %d/%d", t.detailCursor+1, len(t.detailIssues)))
+	if len(t.detailIssues) == 0 {
+		pos = ""
+	}
 	if sh := scrollHint(off, vis, len(t.detailIssues)); sh != "" {
 		pos += sh
 	}

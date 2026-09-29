@@ -182,8 +182,11 @@ problems degrade to a graph-less review, never a failed one.
   only between existing options, guarded against merged/closed PRs, kill switch
   `board_status_sync`.
 - **Lifecycle sync**: issue webhooks update Odoo (issue-state callback with the
-  full snapshot); all-closed sends the `ready` signal; merged linked PRs send a
-  change-note callback. REVA never closes/completes the ticket itself.
+  full snapshot); all-closed sends the `ready` signal; merged PRs, linked by a
+  closing ref or by a ticket id in the branch or title, send a change-summary
+  callback that also lists the modules they touched. REVA never
+  closes/completes the ticket itself. A scheduler reaper fails change notes stuck in
+  `pending` and re-triggers delivery for their tickets.
 - **Timesheet review**: batch endpoint; each line is kept / reworded / flagged
   for a human, returned via callback with per-line reasoning.
 

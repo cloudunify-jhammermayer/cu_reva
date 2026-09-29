@@ -975,3 +975,218 @@ func TestTicketDetailShowsBudgetWaitReason(t *testing.T) {
 		t.Fatalf("issue-run detail line missing the REVA-cap suffix, got:\n%s", out)
 	}
 }
+
+// --- change-notes feed (third source of Tickets rows) ---
+
+// captureJourneyClient records the arguments of the journey fetch.
+type captureJourneyClient struct {
+	api.MockClient
+	instance *int
+	model    string
+	id       int
+}
+
+func (c *captureJourneyClient) TicketJourney(odooInstanceID *int, modelName string, ticketID int) (*api.TicketJourney, error) {
+	c.instance, c.model, c.id = odooInstanceID, modelName, ticketID
+	return &api.TicketJourney{Events: []api.JourneyEvent{{Kind: "change_note", Summary: "note drafted"}}}, nil
+}
+
+func changeNote(id, ticketID int, model, repo string, created time.Time) api.ChangeNoteSummary {
+	return api.ChangeNoteSummary{
+		ID: id, RepoFullName: repo, PRNumber: id, OdooInstanceID: 7,
+		TicketID: ticketID, ModelName: model, Status: "completed", Source: "claude",
+		CreatedAt: created,
+	}
+}
+
+// notesOnlyTab holds one record (project.task#5000) that only has two change
+// notes — no analysis, no issue run.
+func notesOnlyTab(client api.ClientIface) Tickets {
+	tab := newTickets(client, "")
+	tab.width, tab.height = 120, 30
+	now := time.Now()
+	tab, _ = tab.update(changeNotesLoadedMsg{data: &api.ChangeNotePage{
+		Items: []api.ChangeNoteSummary{
+			changeNote(2, 5000, "project.task", "acme/notes-repo", now),
+			changeNote(1, 5000, "project.task", "acme/notes-repo", now.Add(-time.Hour)),
+		},
+		Total: 2,
+	}})
+	return tab
+}
+
+func TestNotesOnlyRecordGetsRowUnderItsRepo(t *testing.T) {
+	tab := notesOnlyTab(&api.MockClient{})
+	if len(tab.rows) != 1 || tab.rows[0].ticketID != 5000 {
+		t.Fatalf("rows = %+v, want one row for #5000", tab.rows)
+	}
+	if got := tab.repoKey(tab.rows[0]); got != "acme/notes-repo" {
+		t.Fatalf("repoKey = %q, want acme/notes-repo", got)
+	}
+	tab = onRow(tab, 5000)
+
+	out := tab.view(120, 30)
+	if !strings.Contains(out, "acme/notes-repo") || !strings.Contains(out, "#5000") {
+		t.Fatalf("group or row missing:\n%s", out)
+	}
+	if !strings.Contains(out, "2 notes") {
+		t.Fatalf("issues cell should read %q:\n%s", "2 notes", out)
+	}
+}
+
+func TestSingleNoteReadsSingular(t *testing.T) {
+	tab := newTickets(&api.MockClient{}, "")
+	tab.width, tab.height = 120, 30
+	tab, _ = tab.update(changeNotesLoadedMsg{data: &api.ChangeNotePage{
+		Items: []api.ChangeNoteSummary{changeNote(1, 5001, "project.task", "acme/notes-repo", time.Now())},
+		Total: 1,
+	}})
+	tab = onRow(tab, 5001)
+
+	out := tab.view(120, 30)
+	if !strings.Contains(out, "1 note") || strings.Contains(out, "1 notes") {
+		t.Fatalf("want singular %q:\n%s", "1 note", out)
+	}
+}
+
+func TestRowWithRunKeepsIssuesCellWhenItHasNotes(t *testing.T) {
+	tab := ticketsWithData()
+	tab, _ = tab.update(changeNotesLoadedMsg{data: &api.ChangeNotePage{
+		Items: []api.ChangeNoteSummary{changeNote(1, 456, "helpdesk.ticket", "acme/widgets", time.Now().Add(-time.Hour))},
+		Total: 1,
+	}})
+	tab = onRow(tab, 456)
+	after := tab.view(120, 30)
+
+	if strings.Contains(after, "1 note") {
+		t.Fatalf("row with a run must not show the notes count:\n%s", after)
+	}
+	if !strings.Contains(after, "#456") {
+		t.Fatalf("row #456 missing:\n%s", after)
+	}
+}
+
+func TestEnterOnNotesOnlyRowOpensJourney(t *testing.T) {
+	stub := &captureJourneyClient{}
+	tab := notesOnlyTab(stub)
+	tab = onRow(tab, 5000)
+
+	tab, cmd := tab.update(keyMsg("enter"))
+
+	if !tab.detail {
+		t.Fatal("enter on a notes-only row must open the detail pane")
+	}
+	if strings.Contains(tab.statusMsg, "no GitHub issues") {
+		t.Fatalf("unexpected status %q", tab.statusMsg)
+	}
+	if len(tab.detailIssues) != 0 {
+		t.Fatalf("detailIssues = %+v, want none", tab.detailIssues)
+	}
+	if tab.detailKey != issueRunKey("project.task", 5000) {
+		t.Fatalf("detailKey = %q", tab.detailKey)
+	}
+	if cmd == nil {
+		t.Fatal("enter did not return the journey fetch cmd")
+	}
+	msg := cmd().(ticketJourneyLoadedMsg)
+	if stub.instance == nil || *stub.instance != 7 || stub.model != "project.task" || stub.id != 5000 {
+		t.Fatalf("journey fetched for (%v, %q, %d), want (7, project.task, 5000)", stub.instance, stub.model, stub.id)
+	}
+	tab, _ = tab.update(msg)
+
+	out := tab.view(120, 30) // must not index into the empty issue list
+	if !strings.Contains(out, "note drafted") {
+		t.Fatalf("detail view should show the journey:\n%s", out)
+	}
+	// Navigation and open keys in the empty detail pane must not panic either.
+	tab, _ = tab.update(keyMsg("j"))
+	tab, _ = tab.update(keyMsg("o"))
+	tab, _ = tab.update(keyMsg("esc"))
+	if tab.detail {
+		t.Fatal("esc should close the detail pane")
+	}
+}
+
+func TestEnterWithoutIssuesOrNotesStillReportsNoIssues(t *testing.T) {
+	tab := newTickets(&api.MockClient{}, "")
+	tab.width, tab.height = 120, 30
+	tab, _ = tab.update(ticketAnalysesLoadedMsg{data: &api.TicketAnalysisPage{
+		Items: []api.TicketAnalysisSummary{{
+			ID: 1, TicketID: 42, ModelName: "helpdesk.ticket", Status: "completed", CreatedAt: time.Now(),
+		}},
+		Total: 1,
+	}})
+	tab = onRow(tab, 42)
+
+	tab, cmd := tab.update(keyMsg("enter"))
+
+	if tab.detail || cmd != nil {
+		t.Fatal("a row with neither issues nor notes must not open the detail pane")
+	}
+	if !strings.Contains(tab.statusMsg, "no GitHub issues") {
+		t.Fatalf("statusMsg = %q", tab.statusMsg)
+	}
+}
+
+func TestChangeNotesErrorKeepsOtherRows(t *testing.T) {
+	tab := ticketsWithData()
+	before := len(tab.rows)
+	tab, _ = tab.update(changeNotesLoadedMsg{err: errFake})
+	if len(tab.rows) != before || before == 0 {
+		t.Fatalf("rows changed on a change-notes error: %d -> %d", before, len(tab.rows))
+	}
+	if tab.err != nil {
+		t.Fatalf("a change-notes error must not blank the tab, err = %v", tab.err)
+	}
+}
+
+func TestNotesOnlyRowFilterAndActivity(t *testing.T) {
+	tab := ticketsWithData()
+	newest := time.Now().Add(time.Hour)
+	tab, _ = tab.update(changeNotesLoadedMsg{data: &api.ChangeNotePage{
+		Items: []api.ChangeNoteSummary{changeNote(1, 5000, "project.task", "acme/notes-repo", newest)},
+		Total: 1,
+	}})
+	if tab.rows[0].ticketID != 5000 {
+		t.Fatalf("newest note should put #5000 first, got #%d", tab.rows[0].ticketID)
+	}
+	tab.filter = "5000"
+	if got := tab.filteredRows(); len(got) != 1 || got[0].ticketID != 5000 {
+		t.Fatalf("filter on notes-only row = %+v", got)
+	}
+}
+
+func TestAppRoutesChangeNotesMsgToTicketsTab(t *testing.T) {
+	app := NewApp(&api.MockClient{}, "https://odoo.example.com")
+	notes, _ := (&api.MockClient{}).ChangeNotes(100)
+
+	model, _ := app.Update(changeNotesLoadedMsg{data: notes})
+
+	if len(model.(*App).tickets.notes) == 0 {
+		t.Fatal("changeNotesLoadedMsg not routed to the Tickets tab")
+	}
+}
+
+func TestDemoChangeNotesCoverNotesOnlyAndRunTickets(t *testing.T) {
+	tab := ticketsWithData()
+	notes, _ := (&api.MockClient{}).ChangeNotes(100)
+	tab, _ = tab.update(changeNotesLoadedMsg{data: notes})
+
+	var notesOnly, withRun int
+	for _, r := range tab.rows {
+		if len(r.notes) == 0 {
+			continue
+		}
+		if r.analysis == nil && r.issueRun == nil {
+			notesOnly++
+			if len(r.notes) != 2 {
+				t.Errorf("demo notes-only ticket has %d notes, want 2", len(r.notes))
+			}
+		} else if r.issueRun != nil {
+			withRun++
+		}
+	}
+	if notesOnly != 1 || withRun != 1 {
+		t.Fatalf("demo notes: notesOnly=%d withRun=%d, want 1 and 1", notesOnly, withRun)
+	}
+}

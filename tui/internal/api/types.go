@@ -315,6 +315,34 @@ type TicketIssueRunPage struct {
 	Total int                     `json:"total"`
 }
 
+// ChangeNoteSummary is one drafted change note (GET /change-notes). The note
+// text itself is not part of the feed. Modules/Submodules are nil when the PR's
+// modules were never looked up.
+type ChangeNoteSummary struct {
+	ID               int        `json:"id"`
+	RepoFullName     string     `json:"repo_full_name"`
+	PRNumber         int        `json:"pr_number"`
+	PRTitle          *string    `json:"pr_title"`
+	PRURL            *string    `json:"pr_url"`
+	OdooInstanceID   int        `json:"odoo_instance_id"`
+	TicketID         int        `json:"ticket_id"`
+	ModelName        string     `json:"model_name"`
+	Status           string     `json:"status"`
+	Source           string     `json:"source"`
+	Modules          []string   `json:"modules"`
+	Submodules       []string   `json:"submodules"`
+	ErrorMessage     *string    `json:"error_message"`
+	EstimatedCostUSD *float64   `json:"estimated_cost_usd"`
+	CreatedAt        time.Time  `json:"created_at"`
+	CompletedAt      *time.Time `json:"completed_at"`
+	DeliveredAt      *time.Time `json:"delivered_at"`
+}
+
+type ChangeNotePage struct {
+	Items []ChangeNoteSummary `json:"items"`
+	Total int                 `json:"total"`
+}
+
 type TimesheetReviewSummary struct {
 	ID               int        `json:"id"`
 	RequestID        string     `json:"request_id"`

@@ -18,6 +18,7 @@ from app.ratelimit import rate_limit
 from app.routes.v1 import (
     admin,
     audits,
+    change_notes,
     failures,
     findings,
     health,
@@ -51,6 +52,7 @@ _master.include_router(admin.router)
 _master.include_router(ticket_analyses.router)
 _master.include_router(ticket_issues.router)
 _master.include_router(ticket_journeys.router)
+_master.include_router(change_notes.router)
 _master.include_router(timesheet_reviews.router)
 _master.include_router(release_notes.router)
 _master.include_router(value_reports.router)

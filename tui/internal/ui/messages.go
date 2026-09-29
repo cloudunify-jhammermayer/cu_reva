@@ -64,6 +64,10 @@ type ticketIssueRunsLoadedMsg struct {
 	data *api.TicketIssueRunPage
 	err  error
 }
+type changeNotesLoadedMsg struct {
+	data *api.ChangeNotePage
+	err  error
+}
 type timesheetsLoadedMsg struct {
 	data *api.TimesheetReviewPage
 	err  error

@@ -2114,6 +2114,8 @@ def record_ticket_issue_run_created(db: Database, params: TicketIssueJobParams) 
             ticket_url=params.ticket_url,
             github_project_url=params.github_project_url,
             plan_date=params.plan_date,
+            release_id=params.release.id if params.release else None,
+            release_name=params.release.name if params.release else None,
             status="pending",
         )
         s.add(row)
@@ -2178,6 +2180,8 @@ def get_ticket_issue_run(db: Database, run_id: int) -> dict | None:
             "ticket_url": row.ticket_url,
             "github_project_url": row.github_project_url,
             "plan_date": row.plan_date,
+            "release_id": row.release_id,
+            "release_name": row.release_name,
             "status": row.status,
             "issues": row.issues,
             "plan_summary": row.plan_summary,
@@ -2192,6 +2196,25 @@ def get_ticket_issue_run(db: Database, run_id: int) -> dict | None:
             "budget_wait_since": row.budget_wait_since,
             "budget_wait_reason": row.budget_wait_reason,
         }
+
+
+def get_ticket_name(
+    db: Database, odoo_instance_id: int, ticket_id: int, model_name: str
+) -> str:
+    """The record's name as its newest ticket_issue_runs row carries it, "" when
+    REVA holds no run for the record."""
+    with db.session() as s:
+        name = s.execute(
+            select(TicketIssueRun.name)
+            .where(
+                TicketIssueRun.odoo_instance_id == odoo_instance_id,
+                TicketIssueRun.ticket_id == ticket_id,
+                TicketIssueRun.model_name == model_name,
+            )
+            .order_by(TicketIssueRun.created_at.desc(), TicketIssueRun.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+    return name or ""
 
 
 def get_latest_structured_analysis(
@@ -2270,6 +2293,8 @@ def _change_note_dict(row: ChangeNote) -> dict:
         "status": row.status,
         "note_html": row.note_html,
         "source": row.source,
+        "modules": row.modules,
+        "submodules": row.submodules,
         "pr_title": row.pr_title,
         "pr_url": row.pr_url,
         "error_message": row.error_message,
@@ -2311,6 +2336,55 @@ def record_change_note_failed(
         row.completed_at = datetime.now(timezone.utc)
 
 
+def record_change_note_modules(
+    db: Database, note_id: int, modules: list[str], submodules: list[str]
+) -> None:
+    """Store the PR's affected modules and moved submodules on the note. Stored
+    lists are kept: the job re-runs (RQ retry, budget deferral) and must not
+    overwrite them."""
+    with db.session() as s:
+        row = s.get(ChangeNote, note_id)
+        if row is None or row.modules is not None:
+            return
+        row.modules = modules
+        row.submodules = submodules
+
+
+def get_stored_change_note_lists(
+    db: Database, repo_full_name: str, pr_number: int
+) -> tuple[list[str], list[str]] | None:
+    """(modules, submodules) already stored for the PR, or None when no row of
+    it has them yet. The lists are per PR, so any row that has them serves."""
+    with db.session() as s:
+        row = s.execute(
+            select(ChangeNote.modules, ChangeNote.submodules)
+            .where(
+                ChangeNote.repo_full_name == repo_full_name.lower(),
+                ChangeNote.pr_number == pr_number,
+                ChangeNote.modules.is_not(None),
+            )
+            .order_by(ChangeNote.id.asc())
+            .limit(1)
+        ).first()
+    if row is None:
+        return None
+    return list(row.modules), list(row.submodules or [])
+
+
+def has_change_notes_for_pr(db: Database, repo_full_name: str, pr_number: int) -> bool:
+    """True when a change_notes row exists for the PR, whatever its status."""
+    with db.session() as s:
+        row = s.execute(
+            select(ChangeNote.id)
+            .where(
+                ChangeNote.repo_full_name == repo_full_name.lower(),
+                ChangeNote.pr_number == pr_number,
+            )
+            .limit(1)
+        ).first()
+    return row is not None
+
+
 def has_pending_change_notes(
     db: Database, odoo_instance_id: int, ticket_id: int, model_name: str
 ) -> bool:
@@ -2327,6 +2401,44 @@ def has_pending_change_notes(
             ).limit(1)
         ).first()
         return row is not None
+
+
+def reap_stale_pending_change_notes(db: Database, older_than_seconds: int) -> list[dict]:
+    """Fail change_notes stuck in `pending` longer than older_than_seconds.
+
+    A worker killed mid-job leaves its note pending forever, which blocks the
+    delivery of every later summary of that ticket. The threshold must exceed
+    the budget wait, since a note legitimately stays pending for all of it.
+    Locked FOR UPDATE SKIP LOCKED like reap_stale_running_reviews (CONC-8).
+    Returns the reaped rows so the caller can retry delivery per ticket.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=older_than_seconds)
+    with db.session() as s:
+        stale = s.execute(
+            select(ChangeNote).where(
+                ChangeNote.status == "pending",
+                ChangeNote.created_at < cutoff,
+            ).with_for_update(skip_locked=True)
+        ).scalars().all()
+        reaped = []
+        for row in stale:
+            row.status = "failed"
+            row.error_message = (
+                f"Reaped: stuck in 'pending' >{older_than_seconds}s "
+                "(worker likely died mid-job)."
+            )
+            row.completed_at = datetime.now(timezone.utc)
+            reaped.append({
+                "id": row.id,
+                "repo_full_name": row.repo_full_name,
+                "pr_number": row.pr_number,
+                "odoo_instance_id": row.odoo_instance_id,
+                "ticket_id": row.ticket_id,
+                "model_name": row.model_name,
+            })
+        if reaped:
+            logger.warning("change_notes_reaped", count=len(reaped))
+        return reaped
 
 
 def get_undelivered_change_notes(
@@ -2354,6 +2466,8 @@ def get_undelivered_change_notes(
                 "pr_url": row.pr_url,
                 "note_html": row.note_html,
                 "source": row.source,
+                "modules": row.modules,
+                "submodules": row.submodules,
             }
             for row in rows
         ]
@@ -3392,6 +3506,16 @@ def get_odoo_instance(db: Database, instance_id: int) -> dict | None:
             "created_at": row.created_at,
             "updated_at": row.updated_at,
         }
+
+
+def get_active_odoo_instance_id_by_name(db: Database, name: str) -> int | None:
+    """Id of the active odoo_instances row with this name, or None."""
+    with db.session() as s:
+        return s.execute(
+            select(OdooInstance.id).where(
+                OdooInstance.name == name, OdooInstance.active.is_(True)
+            )
+        ).scalar_one_or_none()
 
 
 def rotate_odoo_instance_key(

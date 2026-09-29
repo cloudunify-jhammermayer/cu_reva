@@ -673,6 +673,41 @@ func (m *MockClient) TicketIssueRuns(limit int) (*TicketIssueRunPage, error) {
 	return &TicketIssueRunPage{Items: items[:n], Total: len(items)}, nil
 }
 
+func (m *MockClient) ChangeNotes(limit int) (*ChangeNotePage, error) {
+	now := time.Now()
+	strPtr := func(s string) *string { return &s }
+	f64Ptr := func(f float64) *float64 { return &f }
+	done := now.Add(-2 * time.Hour)
+
+	items := []ChangeNoteSummary{
+		{
+			// project.task#901 has notes only — no demo analysis or run names it.
+			ID: 3, RepoFullName: "acme/odoo-modules", PRNumber: 58,
+			PRTitle: strPtr("Fix export wizard totals"), PRURL: strPtr("https://github.com/acme/odoo-modules/pull/58"),
+			OdooInstanceID: 1, TicketID: 901, ModelName: "project.task",
+			Status: "completed", Source: "claude", Modules: []string{"acme_export"}, Submodules: []string{},
+			EstimatedCostUSD: f64Ptr(0.0031), CreatedAt: now.Add(-3 * time.Hour), CompletedAt: &done,
+		},
+		{
+			// Same ticket, earlier PR; modules never looked up.
+			ID: 2, RepoFullName: "acme/odoo-modules", PRNumber: 55,
+			PRTitle: strPtr("Add export wizard"), PRURL: strPtr("https://github.com/acme/odoo-modules/pull/55"),
+			OdooInstanceID: 1, TicketID: 901, ModelName: "project.task",
+			Status: "pending", Source: "claude", CreatedAt: now.Add(-26 * time.Hour),
+		},
+		{
+			// helpdesk.ticket#456 also has a create-issues run (see TicketIssueRuns).
+			ID: 1, RepoFullName: "acme/widgets", PRNumber: 12,
+			PRTitle: strPtr("Login form"), PRURL: strPtr("https://github.com/acme/widgets/pull/12"),
+			OdooInstanceID: 1, TicketID: 456, ModelName: "helpdesk.ticket",
+			Status: "completed", Source: "claude", Modules: []string{"acme_login"}, Submodules: []string{},
+			CreatedAt: now.Add(-30 * time.Hour), CompletedAt: &done,
+		},
+	}
+	n := min(limit, len(items))
+	return &ChangeNotePage{Items: items[:n], Total: len(items)}, nil
+}
+
 func (m *MockClient) TimesheetReviews(limit int) (*TimesheetReviewPage, error) {
 	now := time.Now()
 	f64Ptr := func(f float64) *float64 { return &f }

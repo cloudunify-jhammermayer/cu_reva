@@ -206,8 +206,68 @@ def test_pr_closed_merged_with_closing_ref_enqueues_change_note(client_and_db):
         "pr_title": "Add feature",
         "pr_body": "Closes #102",
         "pr_url": "https://github.com/acme/widgets/pull/42",
+        "head_ref": "feat/foo",
         "installation_id": 99,
     }
+
+
+def _merged_payload(*, body, head_ref="feat/foo", title="Add feature"):
+    payload = _pr_payload("closed")
+    payload["pull_request"]["merged"] = True
+    payload["pull_request"]["body"] = body
+    payload["pull_request"]["title"] = title
+    payload["pull_request"]["head"]["ref"] = head_ref
+    payload["pull_request"]["html_url"] = "https://github.com/acme/widgets/pull/42"
+    return payload
+
+
+def _enqueued_by(client, payload, delivery):
+    q = _FakeQueue()
+    app.state.rq_queue = q
+    try:
+        resp = _post(client, payload, delivery=delivery)
+    finally:
+        app.state.rq_queue = None
+    assert resp.status_code == 202
+    return q.enqueued
+
+
+def test_pr_closed_merged_with_branch_ticket_enqueues_change_note(client_and_db):
+    client, _db = client_and_db
+    enqueued = _enqueued_by(client, _merged_payload(body=None, head_ref="cr/2010"), "merge-branch-1")
+    assert [job["func"] for job in enqueued] == ["worker.change_note_tasks.run_change_note"]
+    assert enqueued[0]["args"][0] == {
+        "repo_full_name": "acme/widgets",
+        "pr_number": 42,
+        "pr_title": "Add feature",
+        "pr_body": "",
+        "pr_url": "https://github.com/acme/widgets/pull/42",
+        "head_ref": "cr/2010",
+        "installation_id": 99,
+    }
+
+
+def test_pr_closed_merged_with_title_ticket_enqueues_change_note(client_and_db):
+    client, _db = client_and_db
+    enqueued = _enqueued_by(
+        client, _merged_payload(body="", title="[CR] 2010 - Add feature"), "merge-title-1"
+    )
+    assert [job["func"] for job in enqueued] == ["worker.change_note_tasks.run_change_note"]
+
+
+def test_pr_closed_merged_without_a_ticket_reference_enqueues_nothing(client_and_db):
+    client, _db = client_and_db
+    assert _enqueued_by(client, _merged_payload(body="Refactoring only"), "merge-none-1") == []
+
+
+def test_pr_closed_merged_branch_ticket_respects_the_kill_switch(client_and_db):
+    client, _db = client_and_db
+    app.state.github = _FakeGitHub(file_contents={".claude-review.yml": "change_notes: false\n"})
+    try:
+        enqueued = _enqueued_by(client, _merged_payload(body="", head_ref="cr/2010"), "merge-branch-off-1")
+    finally:
+        app.state.github = None
+    assert enqueued == []
 
 
 def test_pr_closed_merged_change_notes_disabled_skips_note_job(client_and_db):

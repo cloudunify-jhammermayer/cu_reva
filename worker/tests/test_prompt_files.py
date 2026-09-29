@@ -44,7 +44,7 @@ def test_prompts_dir_exists():
 
 
 def test_get_version_returns_current_version(builder):
-    assert builder.get_version() == "v2.21"
+    assert builder.get_version() == "v2.22"
 
 
 def test_ticket_issue_type_is_ticket_level():
@@ -408,3 +408,12 @@ def test_support_prompts_forbid_technical_references_in_the_answer():
         body = " ".join(path.read_text().split())
         assert "EVIDENCE, never OUTPUT" in body, path.name
         assert "`sources`" in body, path.name
+
+
+def test_change_note_prompt_has_the_setup_section():
+    prompt = (PROMPTS_DIR / "change_note.md").read_text()
+    assert "4. Setup after deployment" in prompt
+    assert "Omit this section when the change needs no setup" in prompt
+    assert "language of the PR title and description" in prompt
+    # The rule against code identifiers stays: module names travel outside the note.
+    assert "never mention file paths, class names, or code identifiers" in prompt

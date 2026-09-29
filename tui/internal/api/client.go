@@ -157,6 +157,11 @@ func (c *Client) TicketIssueRuns(limit int) (*TicketIssueRunPage, error) {
 	return &p, c.get(fmt.Sprintf("/ticket-issue-runs?limit=%d", limit), &p)
 }
 
+func (c *Client) ChangeNotes(limit int) (*ChangeNotePage, error) {
+	var p ChangeNotePage
+	return &p, c.get(fmt.Sprintf("/change-notes?limit=%d", limit), &p)
+}
+
 func (c *Client) TimesheetReviews(limit int) (*TimesheetReviewPage, error) {
 	var p TimesheetReviewPage
 	return &p, c.get(fmt.Sprintf("/timesheet-reviews?limit=%d", limit), &p)

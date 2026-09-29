@@ -61,7 +61,14 @@ def get_ticket_journey(
                 _instance(TicketIssueRun.odoo_instance_id),
             )
         ).scalars().all()
-        if not analyses and not runs:
+        notes = s.execute(
+            select(ChangeNote).where(
+                ChangeNote.ticket_id == ticket_id,
+                ChangeNote.model_name == model_name,
+                _instance(ChangeNote.odoo_instance_id),
+            )
+        ).scalars().all()
+        if not analyses and not runs and not notes:
             return None
 
         # Timesheet actuals pushed by Odoo when the ticket was marked done
@@ -118,18 +125,12 @@ def get_ticket_journey(
                 events.append({"ts": _parse_date(item["complete_date"]), "kind": "issue_closed",
                                "summary": f"#{item['number']} {item['title']} closed"})
 
-        notes = s.execute(
-            select(ChangeNote).where(
-                ChangeNote.ticket_id == ticket_id,
-                ChangeNote.model_name == model_name,
-                _instance(ChangeNote.odoo_instance_id),
-            )
-        ).scalars().all()
         note_pairs: set[tuple[str, int]] = set()  # lowercased repo names
         for cn in notes:
             note_pairs.add((cn.repo_full_name.lower(), cn.pr_number))
+            modules = f" · {', '.join(cn.modules)}" if cn.modules else ""
             events.append({"ts": cn.completed_at or cn.created_at, "kind": "change_note_posted",
-                           "summary": f"{cn.repo_full_name}#{cn.pr_number} → internal note ({cn.status})"})
+                           "summary": f"{cn.repo_full_name}#{cn.pr_number} → internal note ({cn.status}){modules}"})
 
         # Review linkage. repos/note_pairs carry LOWERCASED names (that's how
         # ticket_issue_runs.repo_full_name / change_notes.repo_full_name are

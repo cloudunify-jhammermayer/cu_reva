@@ -49,7 +49,7 @@ from reva.db.engine import Database
 from reva.errors import PermanentError, TransientError
 from reva.github_client import GitHubClient
 from reva.github_urls import parse_github_project_url, parse_github_repo_url
-from reva.types import TicketIssueJobParams
+from reva.types import ReleaseRef, TicketIssueJobParams
 
 router = APIRouter()
 create_router = APIRouter()  # instance-key gated (see routes/v1/__init__.py)
@@ -454,6 +454,13 @@ def requeue_ticket_issue_run(
         github_username=row["github_username"],
         github_project_url=row["github_project_url"],
         plan_date=row["plan_date"],
+        # The release is kept on the run (migration 053); rows from before it
+        # requeue without one.
+        release=(
+            ReleaseRef(id=row["release_id"], name=row["release_name"] or "")
+            if row["release_id"] is not None
+            else None
+        ),
     )
     writers.reset_ticket_issue_run(db, request_id)
     job_id = _enqueue(request, db, request_id, params)

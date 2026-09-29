@@ -292,6 +292,62 @@ def test_resolve_by_id_unknown_ticket_uses_default_instance(db: Database) -> Non
     assert resolve_ticket_by_id(db, "acme/widgets", 9999) == (default_id, "project.task")
 
 
+def _two_instances(db: Database) -> tuple[int, int]:
+    with db.session() as s:
+        s.add(_instance("prod", is_default=True))
+        s.add(_instance("customer"))
+    with db.session() as s:
+        ids = {i.name: i.id for i in s.query(OdooInstance).all()}
+    return ids["prod"], ids["customer"]
+
+
+def test_declared_instance_is_the_last_rung(db: Database) -> None:
+    _, customer = _two_instances(db)
+
+    assert resolve_ticket_by_id(
+        db, "acme/widgets", 9999, instance_id=customer
+    ) == (customer, "project.task")
+
+
+def test_declared_instance_filters_the_analysis_rungs(db: Database) -> None:
+    prod, customer = _two_instances(db)
+    with db.session() as s:
+        s.add(_analysis(210, odoo_instance_id=prod, model_name="helpdesk.ticket"))
+
+    # Only another instance knows the ticket: ignored, the guess applies.
+    assert resolve_ticket_by_id(
+        db, "acme/widgets", 210, instance_id=customer
+    ) == (customer, "project.task")
+
+    with db.session() as s:
+        s.add(_analysis(
+            210, odoo_instance_id=customer, model_name="helpdesk.ticket",
+            created=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        ))
+
+    assert resolve_ticket_by_id(
+        db, "acme/widgets", 210, instance_id=customer
+    ) == (customer, "helpdesk.ticket")
+
+
+def test_a_run_of_the_repo_still_wins_over_the_declared_instance(db: Database) -> None:
+    prod, customer = _two_instances(db)
+    with db.session() as s:
+        s.add(_issue_run(210, "acme/widgets", [{"number": 1}], odoo_instance_id=prod))
+
+    assert resolve_ticket_by_id(
+        db, "acme/widgets", 210, instance_id=customer
+    ) == (prod, "helpdesk.ticket")
+
+
+def test_without_a_declared_instance_the_ladder_is_unchanged(db: Database) -> None:
+    prod, _ = _two_instances(db)
+
+    assert resolve_ticket_by_id(
+        db, "acme/widgets", 9999, instance_id=None
+    ) == (prod, "project.task")
+
+
 def test_resolve_by_id_unknown_ticket_honours_helpdesk_hint(db: Database) -> None:
     with db.session() as s:
         s.add(_instance("prod", is_default=True))

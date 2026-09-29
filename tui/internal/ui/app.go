@@ -336,6 +336,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ticketIssueRunsLoadedMsg:
 		a.tickets, _ = a.tickets.update(msg)
 
+	case changeNotesLoadedMsg:
+		a.tickets, _ = a.tickets.update(msg)
+
 	case ticketRequeuedMsg:
 		a.tickets, _ = a.tickets.update(msg)
 

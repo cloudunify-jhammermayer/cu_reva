@@ -536,6 +536,10 @@ class TicketIssueRun(Base):
     # Projects interaction for this run.
     github_project_url: Mapped[str | None] = mapped_column(Text)
     plan_date: Mapped[date | None] = mapped_column(Date)
+    # Release the request named (migration 053); a requeue rebuilds its job
+    # params from these. NULL = no release, or the row predates the migration.
+    release_id: Mapped[int | None] = mapped_column(BigInteger)
+    release_name: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     # The issue plan and its creation progress:
     # [{"title", "body", "acceptance_criteria", "number", "url"}, ...]
@@ -654,6 +658,11 @@ class ChangeNote(Base):
     # 'claude' (drafted from the diff) or 'release-log' (the ticket's entry in
     # docs/releases/<name>.md, re-read at delivery; note_html stays "").
     source: Mapped[str] = mapped_column(Text, nullable=False, default="claude")
+    # Technical names of the modules the PR touched and the paths of the git
+    # submodules it moved (migration 052), written together. NULL = never
+    # looked up; [] = looked up, nothing found.
+    modules: Mapped[Any | None] = mapped_column(JSON)
+    submodules: Mapped[Any | None] = mapped_column(JSON)
     # PR title/url captured at generation time so the batched change-summary
     # (assembled later from the DB) renders each PR ref without a GitHub call.
     pr_title: Mapped[str | None] = mapped_column(Text)

@@ -437,6 +437,8 @@ def test_change_summary_posts_contract(monkeypatch):
         "pr": {"number": 7, "title": "Login rework",
                "url": "https://github.com/acme/widgets/pull/7", "repo": "acme/widgets"},
         "note_html": "<p>merged</p>",
+        "modules": ["cu_auth"],
+        "submodules": [],
     }]
     _client().change_summary(ticket_id=123, model_name="helpdesk.ticket", notes=notes)
     assert captured["url"] == "https://odoo.example.com/api/reva/tickets/change-summary"

@@ -61,6 +61,11 @@ class Settings:
     # when budget waiting itself is disabled (<= 0), a requeued run would just
     # fail again immediately, so the auto-requeue loop is a no-op too.
     budget_retry_seconds: int = 3600
+    # A change note legitimately stays pending for the whole budget wait, and
+    # the last retry can start one retry interval after it, so only rows pending
+    # longer than the worker's REVA_BUDGET_WAIT_MAX_SECONDS + REVA_BUDGET_RETRY_SECONDS
+    # (plus slack) are treated as orphaned by a killed worker.
+    stale_change_note_seconds: int = 172_800 + 3600 + 7200
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -111,4 +116,7 @@ class Settings:
                 os.environ.get("REVA_BUDGET_REQUEUE_MIN_AGE_SECONDS", "3600")
             ),
             budget_retry_seconds=int(os.environ.get("REVA_BUDGET_RETRY_SECONDS", "3600")),
+            stale_change_note_seconds=int(
+                os.environ.get("REVA_BUDGET_WAIT_MAX_SECONDS", "172800")
+            ) + max(int(os.environ.get("REVA_BUDGET_RETRY_SECONDS", "3600")), 0) + 7200,
         )

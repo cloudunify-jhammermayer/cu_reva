@@ -6,7 +6,7 @@ import fnmatch
 import hashlib
 import os
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 
 # Extensions stripped from diffs before size-guarding and Claude ingestion.
@@ -355,6 +355,39 @@ def module_root(path: str) -> str | None:
             if module:
                 return prefix + module
     return None
+
+
+def affected_modules(paths: Iterable[str]) -> list[str]:
+    """Technical names of the Odoo modules the paths belong to, sorted and
+    deduplicated. A module is the directory directly under a reviewed addons
+    prefix; a file lying directly in the prefix belongs to none."""
+    names: set[str] = set()
+    for path in paths:
+        root = module_root(path)
+        if root is not None and path.startswith(root + "/"):
+            names.add(root.rsplit("/", 1)[1])
+    return sorted(names)
+
+
+# A gitlink's patch in GitHub's changed-files listing, below the @@ header.
+_SUBMODULE_PATCH_LINE_RE = re.compile(r"[+-]Subproject commit [0-9a-f]{40,64}")
+
+
+def updated_submodules(files: Iterable[dict]) -> list[str]:
+    """Paths of the git submodules a PR moved, added or removed, sorted.
+    `files` are the items of GitHub's changed-files listing, where a submodule
+    is one entry whose patch holds `Subproject commit <sha>` lines and nothing
+    else."""
+    paths: set[str] = set()
+    for item in files:
+        lines = [
+            line
+            for line in (item.get("patch") or "").splitlines()
+            if not line.startswith("@@")
+        ]
+        if lines and all(_SUBMODULE_PATCH_LINE_RE.fullmatch(line) for line in lines):
+            paths.add(item["filename"])
+    return sorted(paths)
 
 
 def is_in_tests_dir(path: str) -> bool:

@@ -3,8 +3,10 @@
 Change notes are still generated per merged PR (change_note_runner), but delivery
 is deferred until BOTH conditions hold:
 
-  1. the ticket is ready — its union of REVA-created issues is non-empty and all
-     closed (same test the ready sender uses in ticket_issue_runner), and
+  1. the ticket is ready — its REVA-created issues are all closed (same test
+     the ready sender uses in ticket_issue_runner). A ticket without any
+     REVA-created issue (linked through the PR's branch or title, spec
+     2026-09-29) has nothing to wait for and passes, and
   2. every change_notes row for the ticket is terminal — no note is still
      generating (status 'pending').
 
@@ -54,7 +56,9 @@ def maybe_deliver_change_notes(
     the ops event was already recorded by the lookup."""
     log = log or logger
     union = writers.get_ticket_issue_union(ctx.db, odoo_instance_id, ticket_id, model_name)
-    if not (union and all(item.get("state") == "closed" for item in union)):
+    # No REVA-created issues: the ticket never turns ready, its notes ship as
+    # soon as none is pending.
+    if union and not all(item.get("state") == "closed" for item in union):
         return False
     if writers.has_pending_change_notes(ctx.db, odoo_instance_id, ticket_id, model_name):
         return False
@@ -88,6 +92,8 @@ def maybe_deliver_change_notes(
                 "repo": note["repo_full_name"],
             },
             "note_html": "" if release_log is not None else note["note_html"],
+            "modules": note["modules"] or [],
+            "submodules": note["submodules"] or [],
         }
         for note in notes
     ]
