@@ -234,7 +234,7 @@ class RepoLookup(Protocol):
         ...
 
     def get_last_completed_review(self, pull_request_id: int) -> dict | None:
-        """Returns {id, head_sha} or None if no completed review exists."""
+        """Returns {id, head_sha, diff_hash} or None if no completed review exists."""
         ...
 
     def get_prior_open_findings(self, pull_request_id: int) -> list[dict]:
@@ -490,7 +490,25 @@ class Reviewer:
         # 5c. diff_hash + cross-branch reuse (#3). Computed here — after filter_diff,
         # before the size guards — so store-point == lookup-point and a matched
         # carry-forward pre-empts a "diff too large" decline (reuse spends no Claude).
-        diff_hash = diff_content_hash(diff) if delta_base_sha is None else None
+        # Always the whole PR diff: a delta run fetches it for the fingerprint only,
+        # so a later restack of this PR can be matched against it.
+        diff_hash = diff_content_hash(diff if delta_base_sha is None else _full_diff()[1])
+        if (delta_base_sha is None and last_review is not None and not explicit
+                and diff_hash == last_review.get("diff_hash")):
+            # Restack: the base moved (no delta possible) but the PR's own diff is
+            # byte-identical to the last reviewed one → carry that verdict forward.
+            log.info("review_restack_carried_forward", prior_run=last_review["id"])
+            self._record_ops_event(
+                "reviewer", "info", "restack_carry_forward",
+                {"pr": pr_number, "prior_run": last_review["id"]},
+            )
+            muted = self.repos.get_muted_categories(params.repository_id)
+            matched = {
+                "id": last_review["id"],
+                "pull_request_id": params.pull_request_id,
+                "pr_number": pr_number,
+            }
+            return self._carry_forward_result(matched, diff, repo_config, muted)
         if (delta_base_sha is None and last_review is None and not explicit
                 and config.CROSS_BRANCH_REUSE and repo_config.cross_branch_reuse):
             try:

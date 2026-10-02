@@ -1116,8 +1116,8 @@ def find_reusable_review(
     db: Database, repository_id: int, diff_hash: str, exclude_pull_request_id: int
 ) -> dict | None:
     """Most-recent completed, POSTED, full-scope review in this repo whose
-    diff_hash matches, on a DIFFERENT PR. diff_hash is NULL on delta runs, so
-    the equality filter excludes them. Returns {id, pull_request_id, pr_number}."""
+    diff_hash matches, on a DIFFERENT PR. Delta runs store the PR-wide diff_hash
+    too, so they are excluded via delta_base_sha. Returns {id, pull_request_id, pr_number}."""
     with db.session() as s:
         row = s.execute(
             select(ReviewRun.id, ReviewRun.pull_request_id, PullRequest.pr_number)
@@ -1125,6 +1125,7 @@ def find_reusable_review(
             .where(ReviewRun.repository_id == repository_id)
             .where(ReviewRun.status == "completed")
             .where(ReviewRun.diff_hash == diff_hash)
+            .where(ReviewRun.delta_base_sha.is_(None))
             .where(ReviewRun.check_run_id.is_not(None))
             .where(ReviewRun.pull_request_id != exclude_pull_request_id)
             .order_by(ReviewRun.completed_at.desc())

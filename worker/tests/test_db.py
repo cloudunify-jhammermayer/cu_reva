@@ -153,6 +153,31 @@ def test_find_reusable_review_matches_other_pr_by_diff_hash(db, seeded):
     assert hit2["pull_request_id"] == pr2
 
 
+def test_find_reusable_review_ignores_delta_runs(db, seeded):
+    """Delta runs carry the PR-wide diff_hash too, but their own findings cover
+    only the delta — they are not a full-scope review to reuse elsewhere."""
+    pr2 = writers.upsert_pull_request(
+        db, repository_id=seeded["repository_id"], github_pr_id=9002, pr_number=2,
+        title="p2", author_login="alice", base_branch="main", head_branch="feat/2",
+        head_sha="sha2", state="open", draft=False,
+    )
+    params = JobParams(
+        repository_id=seeded["repository_id"], pull_request_id=pr2,
+        head_sha="a", installation_id=500, review_mode="diff", trigger_event="synchronize",
+    )
+    result = ReviewResult(
+        status="completed", summary="s", risk_level="low",
+        diff_hash="H", delta_base_sha="prev",
+    )
+    rid = writers.record_review_completed(db, params, result)
+    with db.session() as s:
+        s.get(ReviewRun, rid).check_run_id = 10
+
+    assert DatabaseRepoLookup(db).find_reusable_review(
+        seeded["repository_id"], "H", exclude_pull_request_id=seeded["pull_request_id"]
+    ) is None
+
+
 # --- review_runs lifecycle ---------------------------------------------------
 
 
@@ -698,6 +723,14 @@ def test_get_last_completed_review_returns_most_recent_completed(db_session):
     assert result is not None
     assert result["head_sha"] == "bbb"
     assert "id" in result
+
+
+def test_get_last_completed_review_returns_diff_hash(db_session):
+    repo_id, pr_id = _seed_repo_and_pr(db_session)
+    run_id = _seed_review_run(db_session, pr_id, repo_id, head_sha="aaa")
+    with db_session.session() as s:
+        s.get(ReviewRun, run_id).diff_hash = "H"
+    assert get_last_completed_review(db_session, pr_id)["diff_hash"] == "H"
 
 
 def test_get_last_completed_review_ignores_failed_runs(db_session):

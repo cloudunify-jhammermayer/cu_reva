@@ -809,7 +809,8 @@ def test_diverged_amend_same_base_uses_two_tree_delta():
     assert result.status == "completed"
     assert result.delta_base_sha == "prevsha"
     assert runner.two_tree_diff_calls == 1
-    assert github.diff_calls == 0            # NOT a full review
+    assert runner.last_skill == "reva-delta-review"   # NOT a full review
+    assert github.diff_calls == 1            # full PR diff fetched for the diff_hash only
     assert github.compare_diff_calls == 0    # the compare API is never used on divergence
 
 
@@ -893,6 +894,90 @@ def test_diverged_empty_delta_carries_forward_not_stale():
     assert any(f.severity == "major" for f in result.findings)  # NOT laundered to skipped
     assert runner.last_skill is None       # Claude never called
     assert github.diff_calls == 1          # full diff fetched for the carried result's `diff`
+
+
+# --- restack carry-forward (same PR, base moved, PR diff unchanged) ----------
+
+
+def _reviewed_default_diff_hash() -> str:
+    """diff_hash a completed review of the default PR diff stores."""
+    reviewer, *_ = _make_reviewer(
+        runner=FakeRunner(response=_claude_response_with_findings([]))
+    )
+    return reviewer.execute(_params()).diff_hash
+
+
+def test_restack_unchanged_pr_diff_carries_forward():
+    """A restack moves the base, so no delta is possible — but when the PR's own
+    diff is byte-identical to the last reviewed one, the verdict is carried
+    forward instead of paying for the same review again."""
+    github = FakeGitHub(head_sha="newsha", compare_status="diverged")
+    repos = FakeRepos(
+        pr=_DEFAULT_PR,
+        last_completed_review={
+            "id": 5, "head_sha": "prevsha", "diff_hash": _reviewed_default_diff_hash(),
+        },
+        open_findings=[
+            {"id": 1, "file_path": "custom_addons/m/a.py", "line_start": 3,
+             "title": "t", "body": "b", "severity": "major", "category": "bug",
+             "github_comment_id": 9},
+        ],
+    )
+    runner = FakeRunner(
+        response=_claude_response_with_findings([]),
+        two_tree_diff_result=(None, "base_moved"),
+    )
+    events: list[tuple] = []
+    reviewer, *_ = _make_reviewer(
+        github=github, repos=repos, runner=runner,
+        ops_recorder=lambda *args: events.append(args),
+    )
+
+    result = reviewer.execute(_params(head_sha="newsha", trigger_event="synchronize"))
+
+    assert result.status == "completed"
+    assert result.carried_from_run_id == 5
+    assert any(f.severity == "major" for f in result.findings)
+    assert runner.last_skill is None       # Claude never called
+    assert any(e[:3] == ("reviewer", "info", "restack_carry_forward") for e in events)
+
+
+def test_restack_changed_pr_diff_runs_full_review():
+    github = FakeGitHub(head_sha="newsha", compare_status="diverged")
+    repos = FakeRepos(
+        pr=_DEFAULT_PR,
+        last_completed_review={"id": 5, "head_sha": "prevsha", "diff_hash": "other"},
+    )
+    runner = FakeRunner(
+        response=_claude_response_with_findings([]),
+        two_tree_diff_result=(None, "base_moved"),
+    )
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+
+    result = reviewer.execute(_params(head_sha="newsha", trigger_event="synchronize"))
+
+    assert result.carried_from_run_id is None
+    assert runner.last_skill is not None   # a real (full) review ran
+
+
+def test_explicit_trigger_restack_never_carries_forward():
+    github = FakeGitHub(head_sha="newsha", compare_status="diverged")
+    repos = FakeRepos(
+        pr=_DEFAULT_PR,
+        last_completed_review={
+            "id": 5, "head_sha": "prevsha", "diff_hash": _reviewed_default_diff_hash(),
+        },
+    )
+    runner = FakeRunner(
+        response=_claude_response_with_findings([]),
+        two_tree_diff_result=(None, "base_moved"),
+    )
+    reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
+
+    result = reviewer.execute(_params(head_sha="newsha", trigger_event="comment"))
+
+    assert result.carried_from_run_id is None
+    assert runner.last_skill is not None   # /review forces a fresh review
 
 
 # --- cross-branch diff_hash carry-forward (#3, spec 2026-07-24) --------------
@@ -1087,8 +1172,15 @@ def test_no_reusable_match_runs_normal_review_and_stores_diff_hash():
     assert runner.last_skill is not None          # Claude WAS called
 
 
-def test_delta_review_never_sets_diff_hash():
-    github = FakeGitHub(head_sha="newsha", compare_diff=_DEFAULT_DIFF, compare_status="ahead")
+def test_delta_review_stores_full_pr_diff_hash():
+    """A delta run fingerprints the whole PR diff, not the delta it reviewed, so
+    a later restack of the same PR can be matched against it."""
+    delta = (
+        "diff --git a/custom_addons/other.py b/custom_addons/other.py\n"
+        "+++ b/custom_addons/other.py\n"
+        "+ follow-up\n"
+    )
+    github = FakeGitHub(head_sha="newsha", compare_diff=delta, compare_status="ahead")
     repos = FakeRepos(pr=_DEFAULT_PR, last_completed_review={"id": 1, "head_sha": "prevsha"})
     runner = FakeRunner(response=_claude_response_with_findings([]))
     reviewer, *_ = _make_reviewer(github=github, repos=repos, runner=runner)
@@ -1098,7 +1190,7 @@ def test_delta_review_never_sets_diff_hash():
     result = reviewer.execute(params)
 
     assert result.delta_base_sha == "prevsha"
-    assert result.diff_hash is None
+    assert result.diff_hash == _reviewed_default_diff_hash()
 
 
 def test_compare_status_error_falls_back_to_full_review():

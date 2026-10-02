@@ -75,10 +75,10 @@ def get_repo_meta(db: Database, repository_id: int) -> dict:
 
 
 def get_last_completed_review(db: Database, pull_request_id: int) -> dict | None:
-    """Return {id, head_sha} of the most recent completed review_run, or None."""
+    """Return {id, head_sha, diff_hash} of the most recent completed review_run, or None."""
     with db.session() as s:
         row = s.execute(
-            select(ReviewRun.id, ReviewRun.head_sha)
+            select(ReviewRun.id, ReviewRun.head_sha, ReviewRun.diff_hash)
             .where(ReviewRun.pull_request_id == pull_request_id)
             .where(ReviewRun.status == "completed")
             .order_by(ReviewRun.completed_at.desc())
@@ -86,7 +86,7 @@ def get_last_completed_review(db: Database, pull_request_id: int) -> dict | None
         ).first()
     if not row:
         return None
-    return {"id": row[0], "head_sha": row[1]}
+    return {"id": row[0], "head_sha": row[1], "diff_hash": row[2]}
 
 
 class DatabaseRepoLookup:

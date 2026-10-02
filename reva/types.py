@@ -253,7 +253,8 @@ class ReviewResult(BaseModel):
     error_message: str | None = None
     error_class: Literal["transient", "permanent"] | None = None
     delta_base_sha: str | None = None   # set when this was a delta review
-    # Cross-branch reuse fingerprint (full-scope reviews only; NULL on delta runs).
+    # Fingerprint of the PR's whole filtered diff — also on delta runs, which
+    # review less than they fingerprint (restack carry-forward, cross-branch reuse).
     diff_hash: str | None = None
     # Set on a carried-forward run: the review_runs.id whose verdict was reused.
     carried_from_run_id: int | None = None
