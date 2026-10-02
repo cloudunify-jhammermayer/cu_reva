@@ -23,9 +23,10 @@ changes to the "Changes merged" summary:
 3. **Branch-linked tickets.** A merged PR without `closes #N` still gets a
    summary when its branch or title names the ticket (`cr/2010`,
    `[CR] 2010 - …`, `sup/H1213`), resolved like the work-status fallback. A
-   ticket without REVA-created issues never turns ready, so its summary ships
-   per merged PR, as soon as no note for it is pending. Odoo heads such a note
-   "Changes merged", without "ready for review/deploy".
+   ticket without REVA-created issues has no issue to close, so its summary
+   ships per merged PR, as soon as no note for it is pending. Since Odoo module
+   19.0.57.2.0 (2026-10-02) each such summary is the ticket's ready event:
+   ready flag, `ready` route or the "REVA: review & deploy" To-Do.
 
 **Follow-ups in the same change** (spec
 `docs/superpowers/specs/archive/2026-09-30-change-summary-followups-design.md`,
