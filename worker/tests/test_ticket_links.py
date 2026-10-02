@@ -98,9 +98,21 @@ def _instance(name: str, *, is_default: bool = False, active: bool = True) -> Od
 # --- extract_ticket_id (spec 2026-07-20) ---------------------------------------
 
 
-@pytest.mark.parametrize("prefix", ["bug", "feat", "cr", "conf", "dev", "mig", "sup", "doc"])
+@pytest.mark.parametrize(
+    "prefix", ["bug", "fix", "feat", "cr", "conf", "dev", "mig", "sup", "doc"]
+)
 def test_extract_from_branch_all_type_prefixes(prefix: str) -> None:
     assert extract_ticket_id(f"{prefix}/210", None) == (210, "project.task", False)
+
+
+def test_extract_fix_from_title_tag_when_branch_has_a_slug() -> None:
+    assert extract_ticket_id(
+        "fix/8070-outstanding-analytic", "[FIX] 8070 Kostenstelle der Rechnung (cu_skonto)"
+    ) == (8070, "project.task", False)
+
+
+def test_extract_fix_from_title_slash_token() -> None:
+    assert extract_ticket_id(None, "backport of fix/99 to 17.0") == (99, "project.task", False)
 
 
 def test_extract_from_branch_is_case_insensitive() -> None:

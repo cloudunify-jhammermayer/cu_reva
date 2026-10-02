@@ -85,17 +85,17 @@ def resolve_pr_tickets(db: Database, repo_full_name: str, issue_numbers: list[in
 # project.task (see resolve_ticket_by_id). The type prefix (bug/feat/cr/…) is a
 # work-item type, not an Odoo model — never mapped.
 _TICKET_BRANCH_RE = re.compile(
-    r"^(?:bug|feat|cr|conf|dev|mig|sup|doc)/([hp])?(\d{1,9})$", re.IGNORECASE
+    r"^(?:bug|fix|feat|cr|conf|dev|mig|sup|doc)/([hp])?(\d{1,9})$", re.IGNORECASE
 )
 # Trailing \b on the tag form (matching the token form's existing one) is
 # required, not cosmetic: without it, capping the digit group at 9 chars
 # would silently truncate a >9-digit run to a false 9-digit match instead of
 # rejecting it outright.
 _TICKET_TITLE_TAG_RE = re.compile(
-    r"\[(?:bug|feat|cr|conf|dev|mig|sup|doc)\]\s*([hp])?(\d{1,9})(?!\.\d)\b", re.IGNORECASE
+    r"\[(?:bug|fix|feat|cr|conf|dev|mig|sup|doc)\]\s*([hp])?(\d{1,9})(?!\.\d)\b", re.IGNORECASE
 )
 _TICKET_TITLE_TOKEN_RE = re.compile(
-    r"\b(?:bug|feat|cr|conf|dev|mig|sup|doc)/([hp])?(\d{1,9})(?!\.\d)\b", re.IGNORECASE
+    r"\b(?:bug|fix|feat|cr|conf|dev|mig|sup|doc)/([hp])?(\d{1,9})(?!\.\d)\b", re.IGNORECASE
 )
 
 # Model for an extracted ticket REVA has never seen (spec 2026-07-20, revised):

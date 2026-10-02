@@ -255,6 +255,18 @@ def test_pr_closed_merged_with_title_ticket_enqueues_change_note(client_and_db):
     assert [job["func"] for job in enqueued] == ["worker.change_note_tasks.run_change_note"]
 
 
+def test_pr_closed_merged_with_fix_title_ticket_enqueues_change_note(client_and_db):
+    client, _db = client_and_db
+    enqueued = _enqueued_by(
+        client,
+        _merged_payload(
+            body="", head_ref="fix/8070-outstanding-analytic", title="[FIX] 8070 Kostenstelle"
+        ),
+        "merge-fix-title-1",
+    )
+    assert [job["func"] for job in enqueued] == ["worker.change_note_tasks.run_change_note"]
+
+
 def test_pr_closed_merged_without_a_ticket_reference_enqueues_nothing(client_and_db):
     client, _db = client_and_db
     assert _enqueued_by(client, _merged_payload(body="Refactoring only"), "merge-none-1") == []

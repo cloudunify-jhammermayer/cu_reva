@@ -8,6 +8,7 @@ Helper scripts for deploying and exercising REVA. Not imported by any service.
 | `setup-letsencrypt.sh` | One-time, before the first prod deploy: obtains the TLS cert via certbot standalone for `$REVA_DOMAIN`. |
 | `backup.sh` | Gzipped `pg_dump` of the Postgres DB to `REVA_BACKUP_DIR` (default `./backups`), pruning dumps older than `REVA_BACKUP_RETENTION_DAYS` (default 14). Run from a host cron job. |
 | `restore.sh` | Restore the DB from a `backup.sh` dump (newest by default, or a given file). Verifies the gzip, confirms before overwriting, restores in a single transaction with `ON_ERROR_STOP`, and prints a sanity check. |
+| `requeue_change_note.sh` | Enqueue the merge change-note job for a merged PR whose merge webhook did not enqueue it: `./scripts/requeue_change_note.sh <owner/repo> <pr-number>`. Run on the prod host. |
 | `fake-webhook.py` | Local testing: posts a correctly HMAC-signed GitHub webhook payload to a running API so you can exercise the pipeline without GitHub. |
 
 ## Backups & restore
