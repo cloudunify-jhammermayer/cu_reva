@@ -26,7 +26,9 @@ changes to the "Changes merged" summary:
    ticket without REVA-created issues has no issue to close, so its summary
    ships per merged PR, as soon as no note for it is pending. Since Odoo module
    19.0.57.2.0 (2026-10-02) each such summary is the ticket's ready event:
-   ready flag, `ready` route or the "REVA: review & deploy" To-Do.
+   ready flag, `ready` route or the "REVA: review & deploy" To-Do. Since
+   19.0.57.3.0 Odoo posts it only when the ticket's project has "Merge Note
+   Without REVA Issues" ticked (off by default); REVA still drafts and sends it.
 
 **Follow-ups in the same change** (spec
 `docs/superpowers/specs/archive/2026-09-30-change-summary-followups-design.md`,

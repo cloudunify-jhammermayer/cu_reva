@@ -289,8 +289,10 @@ the consultant knows what to install or upgrade on each environment. A merged
 PR without `closes #N` is covered too when its branch or title names the
 ticket (`cr/2010`, `[CR] 2010 - …`). Such a ticket has no REVA-created issues
 to wait for, so the rule above does not apply to it: its summary is posted per
-merged PR, and Odoo (module 19.0.57.2.0) treats each such summary as the
-ticket's ready event, the same as all issues closed.
+merged PR, and Odoo treats each such summary as the ticket's ready event, the
+same as all issues closed. Odoo only does so when the ticket's project has
+"Merge Note Without REVA Issues" ticked (module 19.0.57.3.0, off by default);
+otherwise it accepts the callback and posts nothing.
 
 ## Error notifications
 
