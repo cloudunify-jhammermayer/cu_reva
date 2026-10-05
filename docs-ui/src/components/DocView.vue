@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { store } from '../store.js'
 import { route, navigate } from '../location.js'
 import * as api from '../api.js'
@@ -10,6 +10,8 @@ const toc = ref([])
 const loading = ref(false)
 const error = ref('')
 const pendingAnchor = ref('')
+const docEl = ref(null)
+const activeId = ref('') // TOC entry for the section currently at the top
 
 const repo = computed(() => store.repos.find((r) => r.id === route.value.repoId))
 const path = computed(() => route.value.path)
@@ -22,6 +24,43 @@ const ghUrl = computed(() =>
 
 function scrollToId(id) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+// Scrollspy: the active TOC entry is the last heading that has passed the top
+// of the scrolling pane (`.content`, not the window).
+let scroller = null
+let spyQueued = false
+function updateActive() {
+  spyQueued = false
+  if (!scroller || !toc.value.length) return
+  const line = scroller.getBoundingClientRect().top + 96
+  let current = toc.value[0].id
+  for (const t of toc.value) {
+    const el = document.getElementById(t.id)
+    if (el && el.getBoundingClientRect().top <= line) current = t.id
+  }
+  activeId.value = current
+}
+function onScroll() {
+  if (spyQueued) return
+  spyQueued = true
+  requestAnimationFrame(updateActive)
+}
+onMounted(() => {
+  scroller = docEl.value?.closest('.content')
+  scroller?.addEventListener('scroll', onScroll, { passive: true })
+})
+onUnmounted(() => scroller?.removeEventListener('scroll', onScroll))
+
+// Clipboard write + a short visual confirmation on the element that was clicked.
+async function copyFrom(el, text) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    return // no clipboard access (insecure context / denied) — nothing to confirm
+  }
+  el.classList.add('copied')
+  setTimeout(() => el.classList.remove('copied'), 1400)
 }
 
 // Print-to-PDF: the @media print stylesheet reformats the page for paper; the
@@ -68,13 +107,21 @@ async function load() {
     })
     html.value = result.html
     toc.value = result.toc
+    loading.value = false // the body renders only once loading is off — the scroll below needs it in the DOM
     await nextTick()
     if (result.hasMermaid) renderMermaid()
+    // A shared section link (…#heading) lands on its section too.
+    if (!pendingAnchor.value && window.location.hash) {
+      pendingAnchor.value = decodeURIComponent(window.location.hash.slice(1))
+    }
     // Cross-doc link that carried a #section — scroll once rendered.
     if (pendingAnchor.value) {
       scrollToId(pendingAnchor.value)
       pendingAnchor.value = ''
+    } else if (scroller) {
+      scroller.scrollTop = 0
     }
+    updateActive()
   } catch (e) {
     error.value = String(e.message || e)
   } finally {
@@ -85,8 +132,22 @@ async function load() {
 watch(route, load, { immediate: true })
 
 function onClick(ev) {
+  const copyBtn = ev.target.closest('.code-copy')
+  if (copyBtn) {
+    copyFrom(copyBtn, copyBtn.parentElement.querySelector('code')?.textContent || '')
+    return
+  }
   const a = ev.target.closest('a')
   if (!a) return
+  // Heading anchor: put the section in the address bar and copy that link.
+  if (a.classList.contains('heading-anchor')) {
+    ev.preventDefault()
+    const url = new URL(window.location.href)
+    url.hash = a.getAttribute('href')
+    window.history.replaceState({}, '', url)
+    copyFrom(a, url.href)
+    return
+  }
   const docPath = a.getAttribute('data-doc-path')
   if (docPath) {
     ev.preventDefault()
@@ -103,7 +164,7 @@ function onClick(ev) {
 </script>
 
 <template>
-  <article class="doc">
+  <article ref="docEl" class="doc" :class="{ 'has-toc': !loading && !error && toc.length >= 3 }">
     <!-- Print-only header so the saved PDF is self-identifying (hidden on screen). -->
     <div class="print-header" v-if="repo">{{ repo.full_name }} · {{ path }} · ⎇ {{ branch }}</div>
     <div class="crumbs" v-if="repo">
@@ -116,14 +177,14 @@ function onClick(ev) {
     </div>
     <p v-if="loading" class="muted">Loading…</p>
     <p v-else-if="error" class="error">{{ error }}</p>
-    <template v-else>
+    <div v-else class="doc-grid">
       <nav v-if="toc.length >= 3" class="toc">
         <div class="toc-title">On this page</div>
         <a
           v-for="t in toc"
           :key="t.id"
           class="toc-link"
-          :class="{ 'toc-sub': t.level === 3 }"
+          :class="{ 'toc-sub': t.level === 3, active: t.id === activeId }"
           href="#"
           @click.prevent="scrollToId(t.id)"
           >{{ t.text }}</a
@@ -131,6 +192,6 @@ function onClick(ev) {
       </nav>
       <!-- html is DOMPurify-sanitized in renderMarkdown/renderHtml before it reaches v-html -->
       <div class="markdown-body" v-html="html" @click="onClick"></div>
-    </template>
+    </div>
   </article>
 </template>

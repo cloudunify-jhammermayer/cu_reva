@@ -18,13 +18,15 @@ repos, but does mean the edge gate is the only gate.
 
 from __future__ import annotations
 
+import html
 import mimetypes
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.dependencies import get_db, get_github_client
-from app.doc_cache import branches_cache, file_cache, tree_cache
+from app.doc_cache import branches_cache, file_cache, titles_cache, tree_cache
 from app.queries import repos as repo_q
 from app.schemas.docs import (
     DocBranchList,
@@ -32,8 +34,10 @@ from app.schemas.docs import (
     DocSearch,
     DocsRepo,
     DocsRepoList,
+    DocTitles,
     DocTree,
 )
+from reva.db import writers
 from reva.db.engine import Database
 from reva.db.repo_lookup import get_repo_meta
 from reva.errors import PermanentError, TransientError
@@ -135,6 +139,9 @@ def list_doc_repos(db: Database = Depends(get_db)) -> dict:
         for it in items
         if it["enabled"]
     ]
+    # The query orders by full_name in SQL, where the collation decides whether
+    # "POMBERGER" lands before "ast-odoo"; the sidebar wants plain A-Z.
+    repos.sort(key=lambda r: r.full_name.lower())
     return {"items": repos, "total": len(repos)}
 
 
@@ -190,6 +197,81 @@ def doc_tree(
     except TransientError:
         raise HTTPException(status_code=502, detail="Upstream GitHub error")
     return {"repository_id": repository_id, "ref": ref, **result}
+
+
+_MD_H1 = re.compile(r"^#\s+(.+?)\s*#*\s*$")
+_HTML_H1 = re.compile(r"<h1\b[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
+_HTML_TAG = re.compile(r"<[^>]+>")
+MAX_TITLE_CHARS = 120
+
+
+def _doc_title(path: str, content: str | None) -> str:
+    """The doc's first top-level heading as plain text — '' when it has none
+    (the frontend then falls back to the filename)."""
+    if not content:
+        return ""
+    if path.lower().endswith(BROWSER_DOC_EXTENSIONS):
+        m = _HTML_H1.search(content)
+        title = html.unescape(_HTML_TAG.sub("", m.group(1))) if m else ""
+    else:
+        title, fenced = "", False
+        for line in content.splitlines():
+            if line.lstrip().startswith(("```", "~~~")):
+                fenced = not fenced
+            elif not fenced and (m := _MD_H1.match(line)):
+                title = re.sub(r"[`*]", "", m.group(1))
+                break
+    return " ".join(title.split())[:MAX_TITLE_CHARS]
+
+
+@router.get("/repos/{repository_id}/titles", response_model=DocTitles)
+def doc_titles(
+    repository_id: int,
+    ref: str | None = None,
+    db: Database = Depends(get_db),
+    github=Depends(get_github_client),
+) -> dict:
+    """Display title (first top-level heading) per doc path, so the sidebar can
+    show "Kardex ledger guide" instead of `kardex_ledger.md`. Costs one file
+    fetch per doc on a cold cache, like the first /search of a repo — the
+    frontend asks only for a repo the user actually opened."""
+    meta, token = _meta_and_token(db, github, repository_id)
+    ref = ref or meta["default_branch"]
+    owner, name = meta["owner"], meta["name"]
+    hit = titles_cache.get((repository_id, ref))
+    if hit is not None:
+        return hit
+    try:
+        tree = _cached_tree(github, repository_id, owner, name, ref, token)
+    except PermanentError:
+        raise HTTPException(status_code=404, detail=f"Tree not found for ref {ref!r}")
+    except TransientError:
+        raise HTTPException(status_code=502, detail="Upstream GitHub error")
+
+    paths = [e["path"] for e in tree["entries"]][:MAX_SEARCH_FILES]
+    failed: list[str] = []
+
+    def title_of(path):
+        try:
+            content = _cached_file(github, repository_id, owner, name, path, ref, token)
+        except TransientError:
+            failed.append(path)
+            return ""
+        return _doc_title(path, content)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        titles = {p: t for p, t in zip(paths, pool.map(title_of, paths)) if t}
+    result = {"repository_id": repository_id, "ref": ref, "titles": titles}
+    if failed:
+        # Those docs keep their filename in the sidebar; leave the result
+        # uncached so the next open retries them.
+        writers.record_ops_event(
+            db, "docs", "warning", "doc_titles_fetch_failed",
+            {"repository_id": repository_id, "ref": ref, "failed": len(failed)},
+        )
+    else:
+        titles_cache.set((repository_id, ref), result)
+    return result
 
 
 @router.get("/repos/{repository_id}/file", response_model=DocFile)

@@ -11,7 +11,7 @@ from app.doc_cache import clear_all
 from app.main import app
 from app.settings import Settings
 from reva.db import Base, Database, create_engine_from_url, writers
-from reva.db.models import Repository
+from reva.db.models import OpsEvent, Repository
 from reva.errors import TransientError
 
 
@@ -90,6 +90,16 @@ def test_list_repos_returns_enabled_only(env):
     assert item["id"] == rid
     assert item["full_name"] == "acme/widgets"
     assert item["default_branch"] == "develop"
+
+
+def test_list_repos_sorted_case_insensitively(env):
+    client, db, _ = env
+    for name in ("POMBERGER", "awak_onpremise", "Aufschnaiter", "ast-odoo"):
+        _seed_repo(db, owner="Cloudunify", name=name)
+    body = client.get("/repo-docs/repos").json()
+    assert [it["name"] for it in body["items"]] == [
+        "ast-odoo", "Aufschnaiter", "awak_onpremise", "POMBERGER",
+    ]
 
 
 # --- GET /repo-docs/repos/{id}/branches ---------------------------------------
@@ -231,6 +241,63 @@ def test_file_path_traversal_is_422(env):
     rid = _seed_repo(db)
     _use_github(_FakeGitHub())
     assert client.get(f"/repo-docs/repos/{rid}/file?path=../../etc/passwd.md").status_code == 422
+
+
+# --- GET /repo-docs/repos/{id}/titles -----------------------------------------
+
+def test_titles_first_heading_per_doc(env):
+    client, db, _ = env
+    rid = _seed_repo(db)
+    _use_github(_FakeGitHub(
+        tree={"tree": [
+            {"path": "custom_addons/cu_x/docs/a.md", "type": "blob", "size": 1},
+            {"path": "custom_addons/cu_x/docs/fenced.md", "type": "blob", "size": 1},
+            {"path": "custom_addons/cu_x/docs/plain.md", "type": "blob", "size": 1},
+            {"path": "custom_addons/cu_x/docs/page.html", "type": "blob", "size": 1},
+        ], "truncated": False},
+        files={
+            "custom_addons/cu_x/docs/a.md": "intro\n# Kardex `ledger` guide\n## Sub\n",
+            "custom_addons/cu_x/docs/fenced.md": "```bash\n# not a title\n```\n# Real title\n",
+            "custom_addons/cu_x/docs/plain.md": "no heading here\n",
+            "custom_addons/cu_x/docs/page.html": "<h1 class='t'>Release <b>19.0</b> &amp; notes</h1>",
+        },
+    ))
+    body = client.get(f"/repo-docs/repos/{rid}/titles").json()
+    assert body["titles"] == {
+        "custom_addons/cu_x/docs/a.md": "Kardex ledger guide",
+        "custom_addons/cu_x/docs/fenced.md": "Real title",
+        "custom_addons/cu_x/docs/page.html": "Release 19.0 & notes",
+    }
+
+
+def test_titles_upstream_failure_degrades_and_records_ops_event(env):
+    client, db, _ = env
+    rid = _seed_repo(db)
+
+    class _Flaky(_FakeGitHub):
+        def get_file_content(self, token, owner, repo, path, ref):
+            if path.endswith("b.md"):
+                raise TransientError("boom")
+            return super().get_file_content(token, owner, repo, path, ref)
+
+    _use_github(_Flaky(
+        tree={"tree": [
+            {"path": "custom_addons/cu_x/docs/a.md", "type": "blob", "size": 1},
+            {"path": "custom_addons/cu_x/docs/b.md", "type": "blob", "size": 1},
+        ], "truncated": False},
+        files={"custom_addons/cu_x/docs/a.md": "# Alpha\n"},
+    ))
+    body = client.get(f"/repo-docs/repos/{rid}/titles").json()
+    assert body["titles"] == {"custom_addons/cu_x/docs/a.md": "Alpha"}
+    with db.session() as s:
+        events = [e.event for e in s.query(OpsEvent).all()]
+    assert events == ["doc_titles_fetch_failed"]
+
+
+def test_titles_unknown_repo_404(env):
+    client, _, _ = env
+    _use_github(_FakeGitHub())
+    assert client.get("/repo-docs/repos/9999/titles").status_code == 404
 
 
 # --- GET /repo-docs/repos/{id}/search -----------------------------------------

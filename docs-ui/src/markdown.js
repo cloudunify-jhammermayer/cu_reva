@@ -2,7 +2,8 @@
 //
 // - Repo-relative links/images are rewritten so docs render outside their repo
 //   (images -> /raw proxy; *.md links -> in-app nav; other -> GitHub blob).
-// - Headings get GitHub-style slug ids + a click-to-anchor, and feed the TOC.
+// - Headings get GitHub-style slug ids + a copy-link anchor, and feed the TOC.
+// - Code blocks get a copy button (the click is handled in DocView).
 // - ```mermaid blocks become <div class="mermaid"> for DocView to render lazily.
 // DOMPurify runs before any rewrite, so doc content can never inject script.
 // <style> is stripped from both markdown- and html-sourced docs.
@@ -124,6 +125,15 @@ function postProcess(clean, { repoId, path, owner, name, branch }) {
     div.textContent = code.textContent || ''
     code.parentElement.replaceWith(div)
     hasMermaid = true
+  }
+
+  // Copy button on every remaining code block.
+  for (const pre of tpl.content.querySelectorAll('pre')) {
+    const btn = document.createElement('button')
+    btn.className = 'code-copy'
+    btn.setAttribute('type', 'button')
+    btn.textContent = 'Copy'
+    pre.prepend(btn)
   }
 
   return { html: tpl.innerHTML, toc, hasMermaid }

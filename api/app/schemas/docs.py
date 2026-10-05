@@ -30,6 +30,12 @@ class DocTree(BaseModel):
     truncated: bool
 
 
+class DocTitles(BaseModel):
+    repository_id: int
+    ref: str
+    titles: dict[str, str]  # path -> display title; docs without a heading are absent
+
+
 class DocFile(BaseModel):
     repository_id: int
     path: str

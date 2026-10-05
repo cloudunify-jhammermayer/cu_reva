@@ -1,7 +1,8 @@
 // Shared reactive state (no Pinia needed for this size). Repo list loads once.
 // Per repo, branches + the doc tree load lazily on first expand; the tree
-// reloads when the selected branch changes. Typing a filter eagerly loads every
-// repo's tree so search spans all repos.
+// reloads when the selected branch changes. Every repo's tree is loaded up
+// front (one cached call each) so the sidebar knows which repos carry docs and
+// the filter spans all of them; titles load only for a repo the user opened.
 
 import { reactive } from 'vue'
 import * as api from './api.js'
@@ -13,7 +14,8 @@ export const store = reactive({
   branches: {}, // repoId -> { items:[{name,sha,is_default}], loading, error, loaded }
   selectedRef: {}, // repoId -> branch name
   trees: {}, // repoId -> { entries, truncated, loading, error, loaded }
-  contentHits: {}, // repoId -> { q, paths: [] }  (full-text matches for the live filter)
+  titles: {}, // repoId -> { ref, map: { path: title } }
+  contentHits: {}, // repoId -> { q, snippets: { path: line } }  (full-text matches for the live filter)
   filter: '',
 })
 
@@ -27,7 +29,10 @@ export function searchContent(repoId, q, ref) {
     if (store.filter.trim() !== query) return // stale
     try {
       const data = await api.searchDocs(repoId, query, ref)
-      store.contentHits[repoId] = { q: query, paths: data.items.map((i) => i.path) }
+      store.contentHits[repoId] = {
+        q: query,
+        snippets: Object.fromEntries(data.items.map((i) => [i.path, i.snippet])),
+      }
     } catch { /* ignore search errors — filename filter still works */ }
   }, 350)
 }
@@ -100,6 +105,21 @@ export async function loadTree(repoId, { force = false } = {}) {
       error: String(e.message || e),
       loaded: false,
     }
+  }
+}
+
+// Doc headings for the sidebar labels. Best-effort: on failure the tree keeps
+// showing filenames.
+export async function loadTitles(repoId) {
+  await loadBranches(repoId)
+  const ref = store.selectedRef[repoId]
+  if (store.titles[repoId]?.ref === ref) return
+  store.titles[repoId] = { ref, map: {} }
+  try {
+    const data = await api.getTitles(repoId, shaForRef(repoId, ref))
+    if (store.titles[repoId]?.ref === ref) store.titles[repoId] = { ref, map: data.titles }
+  } catch {
+    if (store.titles[repoId]?.ref === ref) delete store.titles[repoId] // retry on next open
   }
 }
 

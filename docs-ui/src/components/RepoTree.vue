@@ -1,12 +1,14 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
-import { store, loadTree, setBranch, searchContent } from '../store.js'
+import { computed, watch } from 'vue'
+import { store, loadTree, loadTitles, setBranch, searchContent } from '../store.js'
+import { ui, toggleOpen } from '../persist.js'
 import { buildDocTree } from '../tree.js'
 import DocTreeNode from './DocTreeNode.vue'
 
 const props = defineProps({ repo: { type: Object, required: true } })
 
-const manualOpen = ref(false)
+const openKey = `r:${props.repo.id}`
+const manualOpen = computed(() => !!ui.open[openKey])
 const tree = computed(() => store.trees[props.repo.id])
 const branches = computed(() => store.branches[props.repo.id])
 const selectedRef = computed(() => store.selectedRef[props.repo.id] || props.repo.default_branch)
@@ -19,17 +21,35 @@ const filteredEntries = computed(() => {
   if (!q) return entries
   const f = q.toLowerCase()
   const hits = store.contentHits[props.repo.id]
-  const contentPaths = hits && hits.q === q ? new Set(hits.paths) : null
-  return entries.filter((e) => e.path.toLowerCase().includes(f) || contentPaths?.has(e.path))
+  const snippets = hits && hits.q === q ? hits.snippets : null
+  return entries.filter(
+    (e) => e.path.toLowerCase().includes(f) || (snippets && e.path in snippets),
+  )
 })
-const nodes = computed(() => buildDocTree(filteredEntries.value))
+const nodes = computed(() => {
+  const hits = store.contentHits[props.repo.id]
+  return buildDocTree(filteredEntries.value, {
+    titles: store.titles[props.repo.id]?.map,
+    snippets: filtering.value && hits?.q === store.filter.trim() ? hits.snippets : {},
+  })
+})
 
 const open = computed(() => manualOpen.value || (filtering.value && nodes.value.length > 0))
 
 function toggle() {
-  manualOpen.value = !manualOpen.value
+  toggleOpen(openKey)
   if (manualOpen.value) loadTree(props.repo.id)
 }
+
+// Headings replace filenames once the repo is actually open (also when it was
+// restored open from the last visit, or its branch changed).
+watch(
+  () => (open.value ? selectedRef.value : ''),
+  (ref) => {
+    if (ref) loadTitles(props.repo.id)
+  },
+  { immediate: true },
+)
 
 function onBranchChange(e) {
   setBranch(props.repo.id, e.target.value)

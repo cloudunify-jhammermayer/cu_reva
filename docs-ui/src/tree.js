@@ -6,20 +6,29 @@
 const SCOPE_PREFIXES = ['custom_addons', 'custom-addons']
 
 // Returns an array of nodes:
-//   { type: 'dir',  name, children: Node[] }
-//   { type: 'file', name, path }      // path = full repo path, for fetching
-export function buildDocTree(entries) {
-  const root = { dirs: new Map(), files: [] }
+//   { type: 'dir',  name, path, children: Node[] }  // path = displayed folder path
+//   { type: 'file', name, path, title, snippet }    // path = full repo path, for fetching
+// `titles` / `snippets` map a file path to its heading / its search-hit line.
+export function buildDocTree(entries, { titles = {}, snippets = {} } = {}) {
+  const root = { dirs: new Map(), files: [], path: '' }
   for (const e of entries) {
     let segs = e.path.split('/').filter(Boolean)
     if (SCOPE_PREFIXES.includes(segs[0])) segs = segs.slice(1)
     if (!segs.length) continue
     let node = root
     for (const dir of segs.slice(0, -1)) {
-      if (!node.dirs.has(dir)) node.dirs.set(dir, { dirs: new Map(), files: [] })
+      if (!node.dirs.has(dir)) {
+        const path = node.path ? `${node.path}/${dir}` : dir
+        node.dirs.set(dir, { dirs: new Map(), files: [], path })
+      }
       node = node.dirs.get(dir)
     }
-    node.files.push({ name: segs[segs.length - 1], path: e.path })
+    node.files.push({
+      name: segs[segs.length - 1],
+      path: e.path,
+      title: titles[e.path] || '',
+      snippet: snippets[e.path] || '',
+    })
   }
   return docsFirst(toNodes(root))
 }
@@ -31,13 +40,16 @@ function docsFirst(nodes) {
   return i <= 0 ? nodes : [nodes[i], ...nodes.slice(0, i), ...nodes.slice(i + 1)]
 }
 
+// A folder's README is its entry point — it leads the folder's files.
+const isReadme = (name) => /^readme\./i.test(name)
+
 function toNodes(node) {
   const dirs = [...node.dirs.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([name, child]) => ({ type: 'dir', name, children: toNodes(child) }))
+    .map(([name, child]) => ({ type: 'dir', name, path: child.path, children: toNodes(child) }))
   const files = node.files
     .slice()
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((f) => ({ type: 'file', name: f.name, path: f.path }))
+    .sort((a, b) => isReadme(b.name) - isReadme(a.name) || a.name.localeCompare(b.name))
+    .map((f) => ({ type: 'file', ...f }))
   return [...dirs, ...files] // folders first, then files
 }

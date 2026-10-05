@@ -32,6 +32,9 @@ export const searchDocs = (repoId, q, ref) =>
 export const getTree = (repoId, ref) =>
   getJSON(`${BASE}/repos/${repoId}/tree?${withRef(new URLSearchParams(), ref)}`)
 
+export const getTitles = (repoId, ref) =>
+  getJSON(`${BASE}/repos/${repoId}/titles?${withRef(new URLSearchParams(), ref)}`)
+
 // File/raw take the branch NAME — the Contents API resolves it (slashes too).
 export const getFile = (repoId, filePath, ref) =>
   getJSON(`${BASE}/repos/${repoId}/file?${withRef(new URLSearchParams({ path: filePath }), ref)}`)
