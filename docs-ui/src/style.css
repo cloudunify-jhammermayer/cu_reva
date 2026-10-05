@@ -75,6 +75,12 @@ body {
   margin: 0 auto 0 0;
 }
 
+/* Page switch: Docs / How it works / Internal modules. */
+.pages { display: flex; gap: 14px; padding: 4px 16px 8px; font-size: 12.5px; }
+.pages a { color: var(--text-muted); text-decoration: none; padding-bottom: 3px; border-bottom: 2px solid transparent; }
+.pages a:hover { color: var(--text-normal); }
+.pages a.active { color: var(--accent-hover); border-bottom-color: var(--brand-orange); }
+
 .search {
   margin: 4px 14px 10px;
   padding: 7px 10px;

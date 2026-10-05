@@ -3,6 +3,8 @@ import { onMounted, onUnmounted, watch, computed, ref } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import DocView from './components/DocView.vue'
 import CommandPalette from './components/CommandPalette.vue'
+import PageSwitch from './components/PageSwitch.vue'
+import InternalModules from './components/InternalModules.vue'
 import { store, loadRepos, loadAllTrees } from './store.js'
 import { route } from './location.js'
 import { ui } from './persist.js'
@@ -24,7 +26,7 @@ const hasSelection = computed(() => route.value.repoId && route.value.path)
 // and its state is not remembered. On a desktop the choice persists.
 const narrowQuery = window.matchMedia('(max-width: 768px)')
 const narrow = ref(narrowQuery.matches)
-const drawer = ref(!hasSelection.value)
+const drawer = ref(!hasSelection.value && !route.value.page)
 const onNarrowChange = (e) => { narrow.value = e.matches }
 
 const sidebarShown = computed(() => (narrow.value ? drawer.value : ui.sidebar))
@@ -56,13 +58,15 @@ onUnmounted(() => {
         <button class="kbd-hint" title="Quick open (Ctrl/⌘ K)" @click="paletteOpen = true">⌘K</button>
         <button class="kbd-hint" title="Hide sidebar" aria-label="Hide sidebar" @click="toggleSidebar">«</button>
       </header>
+      <PageSwitch />
       <input class="search" v-model="store.filter" type="search" placeholder="Filter docs…" />
       <p v-if="store.reposError" class="error">{{ store.reposError }}</p>
       <Sidebar />
     </aside>
     <main class="content">
       <button class="sidebar-show" title="Show sidebar" aria-label="Show sidebar" @click="toggleSidebar">☰</button>
-      <DocView v-if="hasSelection" />
+      <InternalModules v-if="route.page === 'internal-modules'" />
+      <DocView v-else-if="hasSelection" />
       <div v-else class="placeholder">
         <p>Select a document, or press <kbd>Ctrl</kbd>+<kbd>K</kbd> to search.</p>
       </div>

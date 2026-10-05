@@ -95,6 +95,11 @@ def test_how_it_works_page_is_html(env):
     assert r.headers["content-type"].startswith("text/html")
     assert "/review-all" in r.text and ".claude-review.yml" in r.text
     assert client.get("/reviews/").text.count("how-it-works") >= 1   # nav link
+    # both pages link to the docs browser and its internal-modules page
+    for page in ("/reviews/", "/reviews/how-it-works"):
+        html = client.get(page).text
+        assert 'href="/docs/"' in html
+        assert 'href="/docs/?page=internal-modules"' in html
 
 
 def test_page_is_html(env):
