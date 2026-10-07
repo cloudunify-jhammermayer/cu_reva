@@ -1,5 +1,5 @@
 // Minimal query-param router: `?repo=<id>&path=<file>&ref=<branch>` for a doc,
-// `?page=<name>` for a standalone page (see PageSwitch.vue). Query-param
+// `?page=<name>` for a standalone page (see SiteHeader.vue). Query-param
 // (not hash) routing keeps in-doc `#heading` anchors working and lets a plain
 // static host serve index.html for every visit with no rewrite rules.
 

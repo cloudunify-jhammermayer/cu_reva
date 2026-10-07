@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>REVA / Odoo.sh backups</title>
+<link rel="stylesheet" href="reva.css">
+<style>
+  h2 { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:0 0 10px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; }
+  .tldr { font-size:15px; max-width:70ch; } .tldr b { font-weight:600; }
+  ol.flow { margin:0; padding-left:20px; display:grid; gap:6px; max-width:66ch; }
+  table { border-collapse:collapse; width:100%; min-width:560px; }
+  th, td { text-align:left; padding:9px 14px; border-top:1px solid var(--line); vertical-align:top; }
+  th { border-top:0; font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600; }
+  td.k { white-space:nowrap; }
+  dd code { white-space: normal; overflow-wrap: anywhere; }
+  dl { display:grid; grid-template-columns:max-content 1fr; gap:6px 14px; margin:0; } dt { font-weight:600; white-space:nowrap; } dd { margin:0; max-width:60ch; }
+  @media (max-width:520px) { dl { grid-template-columns:1fr; } dt { margin-top:6px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="site-header">
+    <h1>REVA <span>/ Odoo.sh backups</span></h1>
+    <nav class="site-nav"><a href="/docs/">Docs</a><a href="./">Status</a><a href="how-it-works">How it works</a><a href="/docs/?page=internal-modules">Internal modules</a><a href="backups" class="active">Backups</a></nav>
+  </header>
+
+  <section>
+    <h2>TL;DR</h2>
+    <div class="panel tldr">
+      <p><b>Every night we pull a copy of each customer's Odoo.sh production</b> (database and filestore) to our own backup server and store it encrypted on a Hetzner storage box. Retention: 7 daily, 4 weekly, 6 monthly snapshots. It is independent of Odoo.sh's own backups, so a customer can get data back from us even when the Odoo.sh project is gone.</p>
+      <p>For that to work, the backup server needs SSH access to the customer's Odoo.sh project. Setting that up is the consultant's part. Everything else is done by tech.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Your three steps · in the customer's Odoo.sh project</h2>
+    <p class="note" style="margin:0 0 10px">A project admin is needed, which is usually us. If the customer administers the project, send them the steps.</p>
+    <div class="grid">
+      <div class="panel">
+        <h3>1. Give us the domain</h3>
+        <p>Send tech the project's Odoo.sh domain and the SSH command of the production branch.</p>
+        <dl>
+          <dt>Domain</dt><dd><code>&lt;project&gt;.odoo.com</code></dd>
+          <dt>SSH command</dt><dd>Open the production branch in Odoo.sh and copy the command shown under "Shell" or "SSH". It looks like <code>ssh 12345678@&lt;project&gt;.odoo.com</code>. The number is the production build id; tech needs both the number and the host.</dd>
+        </dl>
+      </div>
+      <div class="panel">
+        <h3>2. Allow the IP</h3>
+        <p>Odoo.sh project, Settings, Firewall: add <b>178.105.100.225</b> for SSH. Takes up to 5 minutes to apply.</p>
+        <p class="note">Odoo.sh only accepts SSH from IPs that are allowed in the project's firewall.</p>
+      </div>
+      <div class="panel">
+        <h3>3. Put in the user</h3>
+        <p>Odoo.sh project, Settings, Collaborators: add the Odoo.sh user <b>CU-odoo-sh-backup</b> with access to the production branch.</p>
+        <p class="note">This user belongs to us. Its profile holds the backup server's SSH key, so no key has to be exchanged per customer.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Hand over to tech</h2>
+    <div class="panel">
+      <p>Open a ticket for tech with:</p>
+      <ol class="flow">
+        <li>client short name (lowercase, used as the backup name, e.g. <code>pomberger</code>),</li>
+        <li>the domain and the SSH command from step 1,</li>
+        <li>confirmation that steps 2 and 3 are done.</li>
+      </ol>
+      <p style="margin-top:8px">Tech runs the onboarding on the backup server. It verifies the access, sets up the encrypted repository and does a first full backup right away. The client is onboarded when tech reports the first snapshot.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>How you know it keeps working</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Nightly message</th><th>Meaning</th><th>What to do</th></tr></thead>
+      <tbody>
+        <tr><td class="k"><span class="pill ok">green</span></td><td>Snapshot of tonight exists.</td><td>Nothing.</td></tr>
+        <tr><td class="k"><span class="pill over">red</span></td><td>Something failed, with the reason.</td><td>To tech. The most common reason is that the IP was removed from the firewall or the collaborator was removed from the project. Both are fixed by repeating steps 2 and 3.</td></tr>
+        <tr><td class="k"><span class="pill wait">no message</span></td><td>The backup server or its timer is down.</td><td>To tech.</td></tr>
+      </tbody>
+    </table></div>
+    <p class="note" style="margin:8px 0 0">One message per night at 00:45 UTC in the backup Google Chat space, one line per client.</p>
+  </section>
+
+  <section>
+    <h2>When a client leaves · Restoring data</h2>
+    <div class="grid">
+      <div class="panel">
+        <h3>When a client leaves</h3>
+        <p>Tell tech. They stop the nightly backup and ask you one question: keep the existing snapshots for a retention period, or delete them now. Then remove CU-odoo-sh-backup from the collaborators and the IP from the firewall in the Odoo.sh project.</p>
+      </div>
+      <div class="panel">
+        <h3>Restoring data</h3>
+        <p>Ask tech. They can restore any snapshot of the last 6 months as a database dump plus filestore.</p>
+        <p class="note">What that involves on the server is documented for tech in the cu_reva repo (<code>docs/odoo-sh-backup-technical.md</code>).</p>
+      </div>
+    </div>
+  </section>
+</div>
+</body>
+</html>

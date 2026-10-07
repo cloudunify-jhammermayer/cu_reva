@@ -20,6 +20,15 @@ from reva.db.engine import Database
 router = APIRouter()
 _PAGE = Path(__file__).resolve().parent.parent / "static" / "reviews.html"
 _HOWTO = Path(__file__).resolve().parent.parent / "static" / "how-it-works.html"
+_BACKUPS = Path(__file__).resolve().parent.parent / "static" / "backups.html"
+_CSS = Path(__file__).resolve().parent.parent / "static" / "reva.css"
+
+
+@router.get("/reva.css", include_in_schema=False)
+def shared_css() -> FileResponse:
+    """The shared look of every consultant page (generated from docs-ui/src/reva.css)."""
+    return FileResponse(_CSS, media_type="text/css; charset=utf-8",
+                        headers={"Cache-Control": "public, max-age=300"})
 
 
 @router.get("/", include_in_schema=False)
@@ -32,6 +41,13 @@ def page() -> FileResponse:
 def how_it_works() -> FileResponse:
     """Static developer TL;DR: when REVA reviews, commands, replies, config."""
     return FileResponse(_HOWTO, media_type="text/html; charset=utf-8",
+                        headers={"Cache-Control": "no-store"})
+
+
+@router.get("/backups", include_in_schema=False)
+def backups() -> FileResponse:
+    """Consultant page: the Odoo.sh backup onboarding steps and what the nightly message means."""
+    return FileResponse(_BACKUPS, media_type="text/html; charset=utf-8",
                         headers={"Cache-Control": "no-store"})
 
 

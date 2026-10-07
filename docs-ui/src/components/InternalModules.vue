@@ -154,7 +154,7 @@ const age = (iso) => {
         <p v-if="!details[r.repository_id].data.modules.length" class="muted">
           No modules found on the version branches.
         </p>
-        <div v-else class="table-wrap">
+        <div v-else class="tablewrap">
           <table>
             <thead>
               <tr>

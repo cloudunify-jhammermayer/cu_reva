@@ -1,5 +1,34 @@
 # REVA — Work Handoff
 
+## Addendum 2026-10-07 — one look for all consultant pages, Backups page
+
+**Status: implemented, not deployed** (plan
+`docs/superpowers/plans/archive/2026-10-07-unified-site-design.md`; mockup
+approved in chat, no spec). The status and how-it-works pages lead; the docs
+SPA now follows them: shared tokens and components in `docs-ui/src/reva.css`,
+copied by `npm run build:theme` to `api/app/static/reva.css` and served at
+`/reviews/reva.css`; the SPA imports it directly and dropped its dark-only
+Cloudunify palette, Inter and the orange marker (the mark stays as favicon).
+Light first, dark by system preference, no toggle; accent navy (`#1f3f7a` / `#8fa9dd`), chosen from seven candidates. highlight.js switches
+theme by media query, mermaid by `matchMedia`. The SPA header is the same
+header + nav as the static pages (`SiteHeader.vue`, replacing `PageSwitch`).
+New static page `/reviews/backups` (`api/app/static/backups.html`) carries
+the consultant half of the Odoo.sh backup docs; the technical half stays
+repo-only in `docs/odoo-sh-backup-technical.md`, and the consultant markdown
+was removed. Every page's nav now has five entries incl. Backups.
+
+**Deploy:** api image (routes + static files) and nginx image (SPA). No
+migration. `/reviews/backups` and `/reviews/reva.css` sit under the already
+gated `/reviews` prefix.
+
+**Verified / owed:** api suite green; `npm run build:theme && npm run build`
+clean; headless Chrome screenshots of the built SPA shell (light and dark,
+without api data), the How it works page and the Backups page all render with
+the shared header and navy accent. Owed before deploy: a browser check with
+real data (sidebar tree, a doc with TOC and code block in both themes,
+Internal modules, phone-width drawer, print) and one release-log page in
+light mode.
+
 ## Addendum 2026-10-07 — Internal modules page lists the product repos
 
 **Status: implemented, not deployed** (spec
@@ -161,9 +190,7 @@ filter.
 (shared `reva/` plus api/worker changes); both compose files already pass the
 `REVA_BUDGET_RETRY_SECONDS` / `REVA_BUDGET_WAIT_MAX_SECONDS` env vars.
 
-**Ops step owed:** add the `/reviews` path prefix to the existing Cloudflare
-Access application (alongside `/docs` and `/repo-docs`) — until then the page
-is reachable by anyone with the hostname.
+**Ops step done** (verified 2026-10-07): the `/reviews` path prefix is in the Cloudflare Access application; `/reviews/*` and `/docs/` redirect to the Access login without a session.
 
 **Not live-validated (unit-tested only):** the real RQ `enqueue_in` round trip
 (worker runs `with_scheduler=True`), the Postgres migration itself, and the

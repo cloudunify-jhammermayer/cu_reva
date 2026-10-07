@@ -4,8 +4,8 @@
 // docs/releases/<name>.html. The fragment carries no <style> (the docs site's
 // sanitizer strips it), so the look lives here, once, for every project:
 //   - `.rl-page` carries the light token set: what Odoo's iframe shows.
-//   - `.markdown-body .rl-page` switches to the dark set matching the docs
-//     site (`--bg-primary #1e1e1e`); the same fragment reads right in both.
+//   - The docs SPA sets no `data-theme`, so `prefers-color-scheme: dark`
+//     decides there too (see the last block).
 //   - Embedded copies (Odoo's iframe): `html[data-theme="dark"] .rl-page`
 //     switches to dark when the host stamps that on <html>; with no stamp,
 //     `prefers-color-scheme: dark` decides instead.
@@ -75,11 +75,10 @@
   li em { color: var(--rl-muted); font-style: normal; }
   code {
     font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.9em;
-    background: var(--rl-panel); padding: 1px 5px; border-radius: 2px;
+    background: var(--rl-panel); padding: 1px 5px; border-radius: 2px; color: inherit;
   }
 }
 
-.markdown-body .rl-page { @include rl-dark; }
 
 // Embedded copies (Odoo's iframe): the host stamps data-theme on <html>;
 // without a stamp the browser preference decides.

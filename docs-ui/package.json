@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:theme": "sass src/release-log.scss ../reva/static/release-log.css --no-source-map",
+    "build:theme": "sass src/release-log.scss ../reva/static/release-log.css --no-source-map && cp src/reva.css ../api/app/static/reva.css",
     "preview": "vite preview"
   },
   "dependencies": {

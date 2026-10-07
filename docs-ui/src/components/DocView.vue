@@ -81,7 +81,7 @@ function downloadPdf() {
 async function renderMermaid() {
   try {
     const { default: mermaid } = await import('mermaid')
-    mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' })
+    mermaid.initialize({ startOnLoad: false, theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default', securityLevel: 'strict' })
     await mermaid.run({ querySelector: '.markdown-body .mermaid' })
   } catch { /* a bad diagram shouldn't break the page */ }
 }

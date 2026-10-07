@@ -1,6 +1,6 @@
 # Odoo.sh backups — technical
 
-The consultant's part is on the [consultant page](odoo-sh-backup-consultant.md).
+The consultant's part is the Backups page on the REVA site (/reviews/backups, source api/app/static/backups.html).
 This page covers what tech does and how the system works. The full operational
 docs live on the backup server itself in `/root/docs/`.
 

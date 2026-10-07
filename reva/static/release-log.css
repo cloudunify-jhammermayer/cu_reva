@@ -69,22 +69,7 @@
   background: var(--rl-panel);
   padding: 1px 5px;
   border-radius: 2px;
-}
-
-.markdown-body .rl-page {
-  --rl-ground: #1e1e1e;
-  --rl-panel: #262626;
-  --rl-line: #363636;
-  --rl-line-strong: #4a4a4a;
-  --rl-ink: #e8e9e6;
-  --rl-muted: #a3a8a4;
-  --rl-accent: #5fb3c4;
-  --rl-accent-ink: #86c9d6;
-  --rl-pill-ink: #131414;
-  --st-umgesetzt: #3fae78;
-  --st-weitgehend: #86bf58;
-  --st-teilweise: #d9a441;
-  --st-offen: #858b87;
+  color: inherit;
 }
 
 html[data-theme=dark] .rl-page {

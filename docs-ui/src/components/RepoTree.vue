@@ -75,7 +75,7 @@ watch(
     <div v-if="open" class="files">
       <div v-if="branches?.items?.length" class="branch-row">
         <span class="branch-ico">⎇</span>
-        <select class="branch-select" :value="selectedRef" @change="onBranchChange">
+        <select class="branch-select field" :value="selectedRef" @change="onBranchChange">
           <option v-for="b in branches.items" :key="b.name" :value="b.name">
             {{ b.name }}{{ b.is_default ? ' (default)' : '' }}
           </option>

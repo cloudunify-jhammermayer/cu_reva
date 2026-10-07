@@ -1,6 +1,6 @@
 import { createApp } from 'vue'
 import App from './App.vue'
-import 'highlight.js/styles/github-dark.css'
+import './reva.css'
 import './style.css'
 import './release-log.scss'
 

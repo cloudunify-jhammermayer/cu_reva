@@ -4,24 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>REVA budgets</title>
+<link rel="stylesheet" href="reva.css">
 <style>
-  :root { --bg:#f5f6f8; --surface:#fff; --line:#dde1e7; --ink:#1d2430; --muted:#64707f;
-          --accent:#2f5fa8; --wait:#b7791f; --over:#b23a3a; --over-soft:#f9e3e3; --ok:#2e7d4f; --ok-soft:#e3f3e8;
-          --accent-soft:#e4ecf8; --track:#e8ebf0; }
-  @media (prefers-color-scheme: dark) { :root { color-scheme:dark; --bg:#14181e; --surface:#1c2229;
-          --line:#2c343e; --ink:#e6eaef; --muted:#98a3b1; --accent:#7ea6e6; --wait:#e0a94a;
-          --over:#e57373; --over-soft:#3f2222; --ok:#6cc08b; --ok-soft:#1e3326; --accent-soft:#223247; --track:#2a323c; } }
-  body { margin:0; padding:0 16px 48px; background:var(--bg); color:var(--ink);
-         font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
-  .wrap { max-width:1080px; margin:0 auto; display:grid; gap:28px; }
-  nav a { color:var(--accent); text-decoration:none; margin-right:16px; font-size:13px; } nav a.active { font-weight:600; border-bottom:2px solid var(--accent); }
-  header { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:baseline;
-           gap:8px 24px; padding:22px 0 14px; border-bottom:1px solid var(--line); }
-  h1 { font-size:20px; margin:0; } h1 span { color:var(--muted); font-weight:400; }
   .meta { color:var(--muted); font-size:13px; }
   h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:0 0 10px; }
   .budgets { display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; }
-  .panel { background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:14px 16px; }
   .panel h3 { font-size:14px; margin:0 0 12px; display:flex; justify-content:space-between; }
   .panel h3 small { color:var(--muted); font-weight:400; font-size:12px; }
   .meter { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 12px; align-items:center;
@@ -31,8 +18,7 @@
   .num b { color:var(--ink); font-weight:500; }
   .track { grid-column:1/-1; height:6px; background:var(--track); border-radius:3px; overflow:hidden; }
   .fill { height:100%; background:var(--accent); } .fill.warn { background:var(--wait); } .fill.over { background:var(--over); }
-  .pill { font-size:11px; font-weight:600; text-transform:uppercase; padding:1px 7px; border-radius:3px; }
-  .pill.over { background:var(--over-soft); color:var(--over); } .pill.off { background:var(--accent-soft); color:var(--accent); }
+  .pill.off { background:var(--accent-soft); color:var(--accent); }
   .repo { background:var(--surface); border:1px solid var(--line); border-radius:6px; margin-top:8px; }
   .repo summary { list-style:none; cursor:pointer; display:grid; grid-template-columns:auto minmax(0,1fr) auto;
                   gap:12px; align-items:center; padding:10px 14px; }
@@ -41,7 +27,6 @@
   .title { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .title .sub { font-weight:400; color:var(--muted); font-size:12.5px; margin-left:8px; }
   .right { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; color:var(--muted); white-space:nowrap; }
-  .tablewrap { overflow-x:auto; background:var(--surface); border:1px solid var(--line); border-radius:6px; }
   .repo .tablewrap { border:0; border-top:1px solid var(--line); border-radius:0 0 6px 6px; }
   table { border-collapse:collapse; width:100%; min-width:560px; }
   th, td { text-align:left; padding:9px 14px; border-top:1px solid var(--line); vertical-align:top; }
@@ -55,8 +40,7 @@
   .banner { background:var(--over-soft); color:var(--over); border:1px solid var(--over);
             border-radius:6px; padding:10px 14px; font-size:13px; font-weight:500; }
   .status-ok { color:var(--ok); } .status-wait { color:var(--wait); } .status-over { color:var(--over); }
-  #author { font:inherit; padding:6px 10px; border:1px solid var(--line); border-radius:4px;
-            background:var(--surface); color:var(--ink); margin-bottom:10px; width:220px; }
+  #author { margin-bottom:10px; width:220px; }
   details.legend { background:var(--surface); border:1px solid var(--line); border-radius:6px;
                    padding:10px 14px; margin-top:8px; }
   details.legend summary { cursor:pointer; font-weight:600; }
@@ -66,9 +50,9 @@
 </head>
 <body>
 <div class="wrap">
-  <header>
+  <header class="site-header">
     <h1>REVA <span>/ budgets and waiting work</span></h1>
-    <nav><a href="/docs/">Docs</a><a href="./" class="active">Status</a><a href="how-it-works">How it works</a><a href="/docs/?page=internal-modules">Internal modules</a></nav>
+    <nav class="site-nav"><a href="/docs/">Docs</a><a href="./" class="active">Status</a><a href="how-it-works">How it works</a><a href="/docs/?page=internal-modules">Internal modules</a><a href="backups">Backups</a></nav>
     <div class="meta" id="meta">Loading…</div>
   </header>
   <div class="banner" id="banner" style="display:none"></div>
@@ -76,7 +60,7 @@
   <section><h2>Queue</h2><div class="budgets" id="queue"></div></section>
   <section><h2>Budgets, rolling 24 h</h2><div class="budgets" id="budgets"></div></section>
   <section><h2>PRs</h2>
-    <input type="text" id="author" placeholder="GitHub login" autocomplete="off">
+    <input type="text" class="field" id="author" placeholder="GitHub login" autocomplete="off">
     <div id="prs"></div>
     <details class="legend">
       <summary>Why a review didn't happen</summary>

@@ -21,6 +21,8 @@ endpoints carry no app-layer auth. Docs are pulled live from each repo's default
 branch via the GitHub App token — there is no clone or rebuild step, so a doc
 edit is visible on the next page load.
 
+Every consultant page (this SPA, `/reviews/`, `/reviews/how-it-works`, `/reviews/backups`) shares one look: `src/reva.css` holds the tokens and base components; `npm run build:theme` copies it to `api/app/static/reva.css` (commit the copy), which the api serves at `/reviews/reva.css`. Light first, dark follows the system; the accent is navy.
+
 ## Develop
 
 Needs Node ≥ 22.12. Run the REVA stack (`make dev`, api on :8080), then:
@@ -46,14 +48,15 @@ docker compose -f docker-compose.prod.yml up -d nginx
 
 To build just the static assets locally: `npm run build` → `dist/`.
 
-### Release-log theme
+### Themes
 
 `src/release-log.scss` styles the `rl-*` release-log fragments customer repos
 commit under `docs/releases/`. It is bundled into the SPA by `npm run build`
 **and** compiled standalone by `npm run build:theme` into
 `../reva/static/release-log.css`, which the worker sends to Odoo with every
 release-log callback. Run `build:theme` after every SCSS change and commit the
-CSS; the nginx image build does not run it.
+CSS; the nginx image build does not run it. `build:theme` also copies
+`src/reva.css` to `../api/app/static/reva.css` (see "How it fits").
 
 ### Cloudflare Access
 
@@ -69,6 +72,7 @@ complete an SSO login, and the TUI authenticates to `/api` with a Bearer key.
 
 ## Features
 
+- The shared REVA look (light or dark by system setting).
 - Scrollable sidebar of all enabled repos; expand a repo to lazy-load its doc
   tree — the repo-root `docs/` folder first, then each `custom_addons/` addon.
   `CLAUDE.md` and any `superpowers/` folder are never listed.

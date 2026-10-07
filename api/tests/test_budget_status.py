@@ -485,3 +485,27 @@ def test_data_health_workers_alive_from_patched_registry(env):
                         SimpleNamespace(all=lambda connection: [object(), object(), object()]))
     body = client.get("/reviews/data").json()
     assert body["health"]["workers_alive"] == 3
+
+
+def test_reva_css_served(env):
+    client, _, _ = env
+    r = client.get("/reviews/reva.css")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/css")
+    assert "--accent:" in r.text
+
+
+def test_static_pages_link_shared_css_and_backups(env):
+    client, _, _ = env
+    for path in ("/reviews/", "/reviews/how-it-works"):
+        body = client.get(path).text
+        assert '<link rel="stylesheet" href="reva.css">' in body
+        assert 'href="backups"' in body
+
+
+def test_backups_page_served(env):
+    client, _, _ = env
+    r = client.get("/reviews/backups")
+    assert r.status_code == 200
+    assert "CU-odoo-sh-backup" in r.text
+    assert '<link rel="stylesheet" href="reva.css">' in r.text
