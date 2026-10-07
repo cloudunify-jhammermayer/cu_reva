@@ -21,6 +21,7 @@ from reva.odoo_manifest import parse_manifest
 VERSION_BRANCH_RE = re.compile(r"^\d+\.0$")
 MAX_VERSION_BRANCHES = 3          # Cloudunify does not backport; older branches are frozen
 STATUSES = ("available", "planned", "discontinued")
+PERIODS = ("month", "year")
 WONT_DO_WINDOW = timedelta(days=90)
 MAX_ISSUES = 50
 # `#12` in a PR title/body, but not `acme/other#12` (cross-repo) or `a#12`.
@@ -52,7 +53,9 @@ class ModuleMeta:
     """One `modules.<name>` entry of product.yml, already validated."""
 
     owner: str | None = None
-    price: str | int | float | None = None   # "free" | number (EUR) | None
+    price: str | int | float | None = None   # "free" | number (EUR, one-time) | None
+    subscription: int | float | None = None  # EUR per `per`; a module may carry both prices
+    per: str | None = None                   # "month" | "year", required with subscription
     tldr: str | None = None
     features: list[str] = field(default_factory=list)
     status: str = "available"
@@ -104,6 +107,16 @@ def parse_product_yml(text: str | None) -> tuple[dict[str, ModuleMeta], list[str
             meta.price = "free"
         else:
             warnings.append(f"product.yml: `{name}.price` must be a number or `free`; ignored")
+        sub, per = raw.get("subscription"), raw.get("per")
+        if sub is not None:
+            if not isinstance(sub, (int, float)) or isinstance(sub, bool):
+                warnings.append(f"product.yml: `{name}.subscription` must be a number; ignored")
+            elif per not in PERIODS:
+                warnings.append(
+                    f"product.yml: `{name}.per` must be `month` or `year` with a subscription; ignored"
+                )
+            else:
+                meta.subscription, meta.per = sub, per
         features = raw.get("features")
         if isinstance(features, list):
             meta.features = [str(f) for f in features if f is not None]
@@ -198,7 +211,7 @@ def merge_repo(
     """One ProductModule dict per technical name across the branches given
     highest first. Owner, price, TL;DR and features come from the highest
     branch with a yml entry; name from the highest branch with a manifest;
-    TL;DR falls back to the manifest summary. Owner/price drift on a lower
+    TL;DR falls back to the manifest summary. Owner/price/subscription drift on a lower
     branch is reported, not silently overridden."""
     modules: dict[str, dict] = {}
     source: dict[str, str] = {}   # module -> branch its yml values came from
@@ -207,6 +220,7 @@ def merge_repo(
         for module, bm in rows.items():
             row = modules.setdefault(module, {
                 "module": module, "name": None, "tldr": None, "owner": None, "price": None,
+                "subscription": None, "per": None,
                 "features": [], "has_yml_entry": False, "versions": {},
             })
             row["versions"][branch] = bm.version
@@ -216,12 +230,13 @@ def merge_repo(
                 if not row["has_yml_entry"]:
                     row["has_yml_entry"] = True
                     row["owner"], row["price"] = bm.meta.owner, bm.meta.price
+                    row["subscription"], row["per"] = bm.meta.subscription, bm.meta.per
                     row["features"] = list(bm.meta.features)
                     source[module] = branch
                     if row["tldr"] is None:
                         row["tldr"] = bm.meta.tldr
                 else:
-                    for key in ("owner", "price"):
+                    for key in ("owner", "price", "subscription", "per"):
                         if getattr(bm.meta, key) != row[key]:
                             warnings.append(
                                 f"`{module}`: {key} differs between {source[module]} and {branch}"

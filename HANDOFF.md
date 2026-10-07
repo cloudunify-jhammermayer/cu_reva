@@ -2,7 +2,7 @@
 
 ## Addendum 2026-10-07 — one look for all consultant pages, Backups page
 
-**Status: implemented, not deployed** (plan
+**Status: implemented and deployed 2026-10-07 (prod 87897c6)** (plan
 `docs/superpowers/plans/archive/2026-10-07-unified-site-design.md`; mockup
 approved in chat, no spec). The status and how-it-works pages lead; the docs
 SPA now follows them: shared tokens and components in `docs-ui/src/reva.css`,
@@ -31,7 +31,7 @@ light mode.
 
 ## Addendum 2026-10-07 — Internal modules page lists the product repos
 
-**Status: implemented, not deployed** (spec
+**Status: implemented and deployed 2026-10-07 (prod 31a1cc5)** (spec
 `docs/superpowers/specs/archive/2026-10-07-product-modules-overview-design.md`,
 plan `docs/superpowers/plans/archive/2026-10-07-product-modules-overview.md`).
 The docs site's "Internal modules" placeholder is now a live overview of the

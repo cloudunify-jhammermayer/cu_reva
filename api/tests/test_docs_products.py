@@ -271,3 +271,14 @@ def test_product_detail_is_cached(env):
                   "closed_at": None, "state_reason": None}]
     second = client.get(f"/repo-docs/products/{rid}").json()
     assert second == first
+
+
+def test_product_detail_passes_subscription_through(env):
+    client, db, _ = env
+    rid, gh = _product_repo(db, branches=("19.0",))
+    gh.files["product.yml"] = (
+        "modules:\n  cu_helpdesk_sla:\n    price: 1200\n    subscription: 90\n    per: month\n"
+    )
+    _use_github(gh)
+    sla = client.get(f"/repo-docs/products/{rid}").json()["modules"][0]
+    assert (sla["price"], sla["subscription"], sla["per"]) == (1200, 90, "month")

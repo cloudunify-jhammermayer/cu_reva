@@ -234,3 +234,38 @@ def test_classify_issues_wont_do_window():
 def test_classify_issues_capped_at_50():
     issues = [_issue(n) for n in range(1, 61)]
     assert len(classify_issues(issues, [], NOW)) == 50
+
+
+# --- subscriptions -------------------------------------------------------------
+
+def test_parse_product_yml_subscription_needs_per():
+    entries, warnings = parse_product_yml(
+        "modules:\n"
+        "  cu_a:\n    price: 1200\n    subscription: 90\n    per: month\n"   # both prices
+        "  cu_b:\n    subscription: 900\n    per: year\n"                   # subscription only
+        "  cu_c:\n    subscription: 50\n"                                   # no per -> ignored
+        "  cu_d:\n    subscription: 50\n    per: week\n"                    # bad per -> ignored
+        "  cu_e:\n    subscription: cheap\n    per: month\n"               # bad amount -> ignored
+    )
+    assert (entries["cu_a"].price, entries["cu_a"].subscription, entries["cu_a"].per) == (
+        1200, 90, "month",
+    )
+    assert (entries["cu_b"].price, entries["cu_b"].subscription, entries["cu_b"].per) == (
+        None, 900, "year",
+    )
+    for name in ("cu_c", "cu_d", "cu_e"):
+        assert entries[name].subscription is None and entries[name].per is None
+    joined = "\n".join(warnings)
+    assert "cu_c.per" in joined and "cu_d.per" in joined and "cu_e.subscription" in joined
+    assert len(warnings) == 3
+
+
+def test_merge_repo_carries_subscription_and_reports_drift():
+    hi = ModuleMeta(owner="J", price=1200, subscription=90, per="month")
+    lo = ModuleMeta(owner="J", price=1200, subscription=80, per="month")
+    modules, warnings = merge_repo([
+        ("19.0", {"cu_a": _bm("cu_a", hi)}),
+        ("18.0", {"cu_a": _bm("cu_a", lo)}),
+    ])
+    assert (modules[0]["subscription"], modules[0]["per"]) == (90, "month")
+    assert warnings == ["`cu_a`: subscription differs between 19.0 and 18.0"]

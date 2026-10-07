@@ -108,7 +108,9 @@ technical name (the directory name); every key is optional.
 modules:
   cu_helpdesk_sla:
     owner: Joseph Hammermayer      # free text; a name consultants recognise
-    price: 1200                    # EUR, or the word free
+    price: 1200                    # one-time, net EUR, or the word free
+    subscription: 90               # optional, net EUR per `per`; both prices may be set
+    per: month                     # month | year, required with subscription
     tldr: SLA timers and escalation on helpdesk tickets
     features:
       - Per-team SLA policies with business-hours calendars

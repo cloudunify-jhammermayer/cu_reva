@@ -96,7 +96,9 @@ class ProductModule(BaseModel):
     name: str | None = None
     tldr: str | None = None
     owner: str | None = None
-    price: str | int | float | None = None   # "free" | EUR amount
+    price: str | int | float | None = None   # "free" | EUR amount, one-time
+    subscription: int | float | None = None  # EUR per `per`
+    per: str | None = None                   # month | year
     features: list[str] = []
     has_yml_entry: bool
     versions: dict[str, ModuleVersion]

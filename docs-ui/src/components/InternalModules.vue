@@ -88,8 +88,15 @@ function onReadmeClick(ev, repo, m) {
   navigate(repo.repository_id, docPath, readmes[key(repo, m)]?.branch)
 }
 
-const price = (p) =>
-  p == null ? '—' : p === 'free' ? 'free' : `€ ${Number(p).toLocaleString('de-AT')}`
+// "free", "€ 1.200", "€ 90 / month" or "€ 1.200 + € 90 / month"; em dash when nothing is set.
+const eur = (n) => `€ ${Number(n).toLocaleString('de-AT')}`
+const price = (m) => {
+  if (m.price === 'free') return 'free'
+  const parts = []
+  if (m.price != null) parts.push(eur(m.price))
+  if (m.subscription != null) parts.push(`${eur(m.subscription)} / ${m.per}`)
+  return parts.length ? parts.join(' + ') : '—'
+}
 const allDiscontinued = (repo, m) =>
   Object.keys(m.versions).length > 0 &&
   Object.values(m.versions).every((v) => v.status === 'discontinued')
@@ -161,7 +168,7 @@ const age = (iso) => {
                 <th>Module</th>
                 <th>Summary</th>
                 <th>Owner</th>
-                <th class="price">Price (one-time, net EUR)</th>
+                <th class="price">Price (net EUR)</th>
                 <th v-for="b in details[r.repository_id].data.branches" :key="b" class="ver">
                   {{ b }}
                 </th>
@@ -186,7 +193,7 @@ const age = (iso) => {
                     <template v-else>{{ m.tldr || '—' }}</template>
                   </td>
                   <td class="owner">{{ m.owner || '—' }}</td>
-                  <td class="price" :class="{ free: m.price === 'free' }">{{ price(m.price) }}</td>
+                  <td class="price" :class="{ free: m.price === 'free' }">{{ price(m) }}</td>
                   <td v-for="b in details[r.repository_id].data.branches" :key="b" class="ver">
                     <template v-if="!m.versions[b]"><span class="absent">—</span></template>
                     <template v-else-if="m.versions[b].status === 'available'">
