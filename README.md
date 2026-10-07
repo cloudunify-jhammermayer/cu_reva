@@ -128,6 +128,7 @@ Per-repo config (`.claude-review.yml`):
 | `max_diff_tokens` | 60 000 | Decline if the estimated prompt tokens exceed this. |
 | `max_xml_diff_lines` / `max_xml_diff_tokens` | none | Optional stricter cap for XML-only PRs (verbose view dumps). |
 | `review_all_paths` | `false` | Review every changed path, not just `custom_addons/`. |
+| `product` | `false` | Marks a sellable-addons repo: listed on the docs site's Internal modules page and implies `review_all_paths`. |
 | `skip_paths` | `[]` | Glob patterns to drop from the diff. |
 | `block_on_severity` | `major` | Lowest finding severity that fails the Check Run (`none` never blocks). |
 | `verify_findings` | global | Per-repo override for the second-pass self-critique (see `REVA_VERIFY_HIGH_COST`). |

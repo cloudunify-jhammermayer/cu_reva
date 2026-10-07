@@ -71,7 +71,7 @@ function postProcess(clean, { repoId, path, owner, name, branch }) {
   for (const img of tpl.content.querySelectorAll('img[src]')) {
     const src = img.getAttribute('src')
     if (src && !EXTERNAL.test(src)) {
-      img.setAttribute('src', rawUrl(repoId, resolvePath(baseDir, src)))
+      img.setAttribute('src', rawUrl(repoId, resolvePath(baseDir, src), branch))
       img.setAttribute('loading', 'lazy')
     }
   }

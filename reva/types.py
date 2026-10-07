@@ -66,6 +66,11 @@ class RepoConfig(BaseModel):
     # When true, review every changed path (like the /review-all command),
     # not just the custom_addons prefixes. Default keeps the custom_addons lock.
     review_all_paths: bool = False
+    # A Cloudunify product repo: Odoo addons sold to customers, one branch per
+    # Odoo version, addons at the repo root (OCA layout). Lists the repo on the
+    # docs site's "Internal modules" page and implies review_all_paths, since
+    # the default custom_addons/ lock would review nothing in such a repo.
+    product: bool = False
     odoo: bool = False
     framework: str | None = None
     custom_instructions: str | None = None
@@ -125,6 +130,12 @@ class RepoConfig(BaseModel):
             s = str(v)
             return s if "." in s else f"{s}.0"
         return v
+
+    @model_validator(mode="after")
+    def _product_widens_review_scope(self) -> "RepoConfig":
+        if self.product:
+            self.review_all_paths = True
+        return self
 
 
 # --- Finding ------------------------------------------------------------------

@@ -65,3 +65,59 @@ class DocSearch(BaseModel):
     ref: str
     q: str
     items: list[DocSearchHit]
+
+
+# --- product page (Internal modules) -------------------------------------------
+
+
+class ProductRepoRef(BaseModel):
+    repository_id: int
+    full_name: str
+    owner: str
+    name: str
+    html_url: str
+
+
+class ProductList(BaseModel):
+    items: list[ProductRepoRef]
+
+
+class ModuleVersion(BaseModel):
+    status: str                      # available | planned | discontinued
+    version: str | None = None
+    eta: str | None = None
+    note: str | None = None
+    manifest_error: str | None = None
+    readme_path: str | None = None
+
+
+class ProductModule(BaseModel):
+    module: str
+    name: str | None = None
+    tldr: str | None = None
+    owner: str | None = None
+    price: str | int | float | None = None   # "free" | EUR amount
+    features: list[str] = []
+    has_yml_entry: bool
+    versions: dict[str, ModuleVersion]
+
+
+class RepoIssue(BaseModel):
+    number: int
+    title: str
+    url: str
+    state: str                        # in_progress | planned | wont_do
+    assignee: str | None = None
+    pr_number: int | None = None
+    milestone: str | None = None
+    created_at: str
+    closed_at: str | None = None
+
+
+class ProductRepo(ProductRepoRef):
+    loaded_at: str
+    branches: list[str]
+    ignored_branches: list[str]
+    modules: list[ProductModule]
+    issues: list[RepoIssue]
+    warnings: list[str]

@@ -1294,6 +1294,20 @@ def test_review_all_paths_yml_flag_reviews_outside_custom_addons():
     assert "scripts/deploy.py" in runner.last_params["changed_files"]
 
 
+def test_product_yml_flag_reviews_outside_custom_addons():
+    # `product: true` alone widens the scope: product repos have no custom_addons/.
+    github = FakeGitHub(
+        diff=_OUTSIDE_DIFF,
+        files=[{"filename": "scripts/deploy.py"}],
+        file_contents={".claude-review.yml": "product: true\n"},
+    )
+    runner = FakeRunner(response=_claude_response_with_findings([]))
+    reviewer, *_ = _make_reviewer(github=github, runner=runner)
+    result = reviewer.execute(_params(review_mode="diff"))
+    assert result.status == "completed"
+    assert "scripts/deploy.py" in runner.last_params["diff"]
+
+
 def test_default_keeps_custom_addons_lock_without_flag():
     # Without the flag, the custom_addons prefix filter still drops outside paths.
     github = FakeGitHub(

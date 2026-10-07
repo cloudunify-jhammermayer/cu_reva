@@ -23,7 +23,7 @@ from reva.db import writers
 from reva.errors import PermanentError, TransientError
 from reva.github_urls import parse_github_repo_url
 from reva.types import ReleaseNoteJobParams
-from worker.repo_config import load_repo_config
+from reva.repo_config import load_repo_config
 from worker.runner import build_odoo_client, get_context
 
 logger = structlog.get_logger()

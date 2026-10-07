@@ -82,22 +82,33 @@ def in_scope(path: str) -> bool:
     )
 
 
-def browser_in_scope(path: str) -> bool:
+def browser_in_scope(path: str, addon_roots: tuple[str, ...] | frozenset[str] = ()) -> bool:
     """True for anything the consultant docs browser serves as text.
 
     Every markdown doc `in_scope` covers, plus HTML that sits inside a `docs/`
     folder — the repo root's or an addon's own. `in_scope` stays the narrower
     grounding scope; only `api/app/routes/docs.py` calls this one.
+
+    `addon_roots` names the top-level addon directories of a *product* repo
+    (addons at the repo root, OCA layout): markdown anywhere under such a
+    root and HTML under its `docs/` are in scope too. Empty for every other
+    repo, so the default behaviour is unchanged.
     """
     if in_scope(path):
         return True
     segments = [seg.lower() for seg in path.split("/")[:-1]]
-    return (
-        path.lower().endswith(BROWSER_DOC_EXTENSIONS)
-        and path.startswith(SCOPE_PREFIXES)
-        and "docs" in segments
-        and not any(seg in EXCLUDED_SEGMENTS for seg in segments)
-    )
+    if any(seg in EXCLUDED_SEGMENTS for seg in segments):
+        return False
+    lower = path.lower()
+    if lower.endswith(BROWSER_DOC_EXTENSIONS) and path.startswith(SCOPE_PREFIXES):
+        return "docs" in segments
+    if addon_roots and segments and path.split("/")[0] in addon_roots:
+        if path.endswith(tuple("/" + b for b in EXCLUDED_BASENAMES)):
+            return False
+        if lower.endswith(DOC_EXTENSIONS):
+            return True
+        return lower.endswith(BROWSER_DOC_EXTENSIONS) and "docs" in segments
+    return False
 
 
 def doc_priority(path: str) -> tuple[int, str]:

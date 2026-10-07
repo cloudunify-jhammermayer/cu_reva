@@ -272,6 +272,30 @@ class GitHubClient:
         return {"title": data.get("title") or "", "body": data.get("body") or "",
                 "node_id": data.get("node_id")}
 
+    def list_issues(
+        self, token: str, owner: str, repo: str, *, state: str, since: str | None = None
+    ) -> list[dict]:
+        """One page (100) of a repo's issues as GitHub returns them — PRs
+        included, the caller drops entries carrying `pull_request`. Backs the
+        docs site's product page. `since` (ISO 8601) filters on updated_at,
+        which the page uses as "closed within the window" (a close is an
+        update). Newest first."""
+        params: dict = {
+            "state": state, "per_page": PAGE_SIZE, "sort": "created", "direction": "desc",
+        }
+        if since:
+            params["since"] = since
+        response = self._get(token, f"/repos/{owner}/{repo}/issues", params=params)
+        return response.json()
+
+    def list_open_pull_requests(self, token: str, owner: str, repo: str) -> list[dict]:
+        """One page (100) of open PRs, raw payloads (title/body are what the
+        product page scans for `#<issue>` references)."""
+        response = self._get(
+            token, f"/repos/{owner}/{repo}/pulls", params={"state": "open", "per_page": PAGE_SIZE}
+        )
+        return response.json()
+
     # --- security alerts (scanner-feed spec) -------------------------------
 
     def _list_alerts(self, token: str, path: str) -> list[dict] | None:

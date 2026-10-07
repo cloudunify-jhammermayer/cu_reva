@@ -28,6 +28,8 @@ class ManifestData:
     depends: list[str]
     data: list[str]
     demo: list[str]
+    name: str | None = None
+    summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -56,11 +58,14 @@ def parse_manifest(text: str) -> ManifestData | None:
         return [x for x in val if isinstance(x, str)] if isinstance(val, list) else []
 
     version = node.get("version")
+    name, summary = node.get("name"), node.get("summary")
     return ManifestData(
         version=version if isinstance(version, str) else None,
         depends=_strlist("depends"),
         data=_strlist("data"),
         demo=_strlist("demo"),
+        name=name if isinstance(name, str) else None,
+        summary=summary if isinstance(summary, str) else None,
     )
 
 

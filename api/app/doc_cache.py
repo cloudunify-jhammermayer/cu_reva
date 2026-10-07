@@ -51,6 +51,10 @@ file_cache = TTLCache(ttl=120)
 # One entry costs a file fetch per doc, and a title drifts only when a doc's
 # first heading is edited — so this one may lag longer than the tree itself.
 titles_cache = TTLCache(ttl=600)
+# Product page (Internal modules). The flag gates both the product list and
+# the widened docs-tree scope; a detail is one repo's whole section.
+product_flag_cache = TTLCache(ttl=300)
+products_cache = TTLCache(ttl=300)
 
 
 def clear_all() -> None:
@@ -59,3 +63,5 @@ def clear_all() -> None:
     tree_cache.clear()
     file_cache.clear()
     titles_cache.clear()
+    product_flag_cache.clear()
+    products_cache.clear()

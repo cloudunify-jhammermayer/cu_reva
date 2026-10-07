@@ -58,7 +58,7 @@ from reva.types import (
     RiskLevel,
     Severity,
 )
-from worker.repo_config import load_repo_config
+from reva.repo_config import load_repo_config
 
 logger = structlog.get_logger()
 

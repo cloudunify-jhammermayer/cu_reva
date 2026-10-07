@@ -22,13 +22,13 @@ from reva.github_urls import parse_github_repo_url
 from reva.golden_estimates import apply_anchor, calibration_block, load
 from reva.html_guard import ensure_renderable
 from reva.ticket_formatter import format_ticket_html
+from reva.repo_config import load_repo_config
 from reva.ticket_knowledge import build_ticket_knowledge, core_source_param
 from reva.types import TicketJobParams
 from worker.golden_support import record_degradations
 from worker.image_staging import staged_images
 from worker.repo_config import (
     code_grounding_allowed,
-    load_repo_config,
     resolve_repo_context,
 )
 from worker.runner import (

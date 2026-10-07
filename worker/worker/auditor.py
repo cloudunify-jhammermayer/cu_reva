@@ -19,7 +19,7 @@ from reva.cost import estimate_cost
 from reva.diff_utils import is_excluded_path
 from reva.errors import PermanentError
 from reva.types import AuditJobParams, AuditResult, Finding
-from worker.repo_config import load_repo_config
+from reva.repo_config import load_repo_config
 
 logger = structlog.get_logger()
 

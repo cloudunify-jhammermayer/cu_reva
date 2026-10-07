@@ -84,3 +84,39 @@ complete an SSO login, and the TUI authenticates to `/api` with a Bearer key.
 - Deep-linkable: the selected doc lives in the URL.
 - **Download PDF** — reformats the current doc for clean light-paper print
   (`@media print`) and opens the browser's print dialog ("Save as PDF").
+- **Internal modules** page (`?page=internal-modules`): every repo whose
+  `.claude-review.yml` says `product: true`, one table per repo with a row
+  per root-level addon and a column per Odoo version branch (the three
+  highest `NN.0` branches). Owner, price, summary, features and the
+  `planned` / `discontinued` exceptions come from a `product.yml` at the
+  branch root; name and version from the manifest; the README renders
+  inline on expand; the repo's issues list below (in progress / planned /
+  won't do). Backed by `GET /repo-docs/products` and
+  `/repo-docs/products/{id}` (5-minute caches). Product repos also get their
+  root-level addon docs listed in the tree.
+
+### product.yml
+
+At the root of every version branch of a product repo, keyed by the module's
+technical name (the directory name); every key is optional.
+
+```yaml
+modules:
+  cu_helpdesk_sla:
+    owner: Joseph Hammermayer      # free text; a name consultants recognise
+    price: 1200                    # EUR, or the word free
+    tldr: SLA timers and escalation on helpdesk tickets
+    features:
+      - Per-team SLA policies with business-hours calendars
+      - Escalation mail on breach
+      - SLA column and filters on the ticket list
+  cu_helpdesk_kb:
+    owner: Markus B.
+    price: free
+    tldr: Suggest knowledge articles while typing a ticket reply
+    status: planned                # no directory yet
+    eta: 2027-Q1                   # free text, shown verbatim
+  cu_helpdesk_chat:
+    status: discontinued
+    note: Replaced by Odoo 19's native live-chat handover
+```

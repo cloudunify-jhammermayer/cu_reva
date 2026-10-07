@@ -106,3 +106,19 @@ def test_check_version_format_ignores_missing():
 def test_check_version_format_flags_short_version():
     issue = check_version_format("1.0")
     assert issue is not None and issue.kind == "version_format"
+
+
+def test_parse_manifest_exposes_name_and_summary():
+    data = parse_manifest(
+        "{'name': 'Helpdesk SLA', 'summary': 'SLA timers', 'version': '19.0.1.3.0',"
+        " 'depends': ['helpdesk']}"
+    )
+    assert data.name == "Helpdesk SLA"
+    assert data.summary == "SLA timers"
+    assert data.version == "19.0.1.3.0"
+
+
+def test_parse_manifest_non_string_name_is_none():
+    data = parse_manifest("{'name': 42, 'summary': None}")
+    assert data.name is None
+    assert data.summary is None

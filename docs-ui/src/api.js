@@ -41,3 +41,7 @@ export const getFile = (repoId, filePath, ref) =>
 
 export const rawUrl = (repoId, filePath, ref) =>
   `${BASE}/repos/${repoId}/raw?${withRef(new URLSearchParams({ path: filePath }), ref)}`
+
+// Internal modules page: product repos, then one detail per repo.
+export const listProducts = () => getJSON(`${BASE}/products`)
+export const getProduct = (repoId) => getJSON(`${BASE}/products/${repoId}`)

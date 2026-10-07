@@ -465,3 +465,22 @@ def test_sync_lowercases_repo_key(db):
     )
     sync_repo_docs(db, gh, "Acme", "Widgets")
     assert len(_sections(db, "acme/widgets")) == 1
+
+
+def test_browser_in_scope_addon_roots_widen_product_repos():
+    roots = ("cu_a", "cu_b")
+    # root-level addon docs become visible
+    assert browser_in_scope("cu_a/README.md", roots)
+    assert browser_in_scope("cu_a/docs/consultant.md", roots)
+    assert browser_in_scope("cu_a/docs/guide.html", roots)
+    # html outside a docs/ folder stays out, as does the manifest stub
+    assert not browser_in_scope("cu_a/static/description/index.html", roots)
+    # directories without a manifest are not addons
+    assert not browser_in_scope("scripts/README.md", roots)
+    # repo-root files and agent files stay out
+    assert not browser_in_scope("README.md", roots)
+    assert not browser_in_scope("cu_a/CLAUDE.md", roots)
+    assert not browser_in_scope("cu_a/docs/superpowers/x.md", roots)
+    # the default (no roots) is unchanged
+    assert not browser_in_scope("cu_a/README.md")
+    assert browser_in_scope("custom_addons/cu_a/README.md")

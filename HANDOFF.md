@@ -1,5 +1,40 @@
 # REVA — Work Handoff
 
+## Addendum 2026-10-07 — Internal modules page lists the product repos
+
+**Status: implemented, not deployed** (spec
+`docs/superpowers/specs/archive/2026-10-07-product-modules-overview-design.md`,
+plan `docs/superpowers/plans/archive/2026-10-07-product-modules-overview.md`).
+The docs site's "Internal modules" placeholder is now a live overview of the
+repos whose `.claude-review.yml` says `product: true` (which also implies
+`review_all_paths`, since product repos keep their addons at the root). Per
+repo the api reads the three highest `NN.0` branches — manifests,
+`product.yml` (owner, price, tldr, features, `planned`/`discontinued`
+exceptions), README presence — plus the repo's issues (state from assignee /
+linked PR / close reason, milestone as ETA). New `GET /repo-docs/products` and
+`/repo-docs/products/{id}` (`api/app/routes/docs.py`), pure rules in
+`reva/product_catalog.py`, the config loader moved to `reva/repo_config.py`,
+two new GitHub client list calls. Product repos also get root-level addon
+docs listed in the docs tree (`browser_in_scope(path, addon_roots)`); the
+grounding scope is unchanged. No migration, no TUI change.
+
+**Deploy:** api, worker and scheduler images (shared `reva/`), nginx (SPA).
+No new Access prefix: `/repo-docs` is already gated.
+
+**Verified / owed:** unit-tested (worker, api and scheduler suites). Browser
+check NOT performed: no dev stack was available, so the page, the version-cell
+links, the expand panel with inline README, the "open in docs" link, the
+persisted-open-row reload and the issue links are verified by code reading
+only; all of these are owed before deploy. Three plan-text defects were fixed
+during implementation and are in the code (not open): `parse_product_yml`
+catches `ValueError` too (PyYAML raises it on an impossible date); `doc_file`
+maps GitHub errors to 404/502 instead of a silent 415 and rejects non-doc
+extensions before any lookup; the SPA reads `branches` from the loaded detail.
+No product repo exists yet, so the page shows the empty-state text until one
+sets the flag. Deferred (spec "Explicitly deferred"): `custom_addons/`
+assumptions in change-note module naming, the skill prompts and ticket
+grounding must be revisited when the first product repo is onboarded.
+
 ## Addendum 2026-09-29 — change summary lists the affected modules
 
 **Status: implemented, not deployed** (spec
