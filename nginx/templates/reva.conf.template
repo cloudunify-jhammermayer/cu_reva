@@ -9,6 +9,12 @@ limit_req_zone $binary_remote_addr zone=webhooks:10m rate=30r/m;
 # 120r/m = 2 req/s sustained; burst=20 absorbs TUI tab-switching and scripted polling.
 limit_req_zone $binary_remote_addr zone=api:10m rate=120r/m;
 
+# Docs browser data: the SPA loads every enabled repo's branches and tree on
+# page load (2 requests per repo, 26 repos today = 50+ in one burst), so the api
+# zone's burst=20 answered 503 to every page load since 2026-10-07. Sized for
+# one page load with headroom; the surface sits behind Cloudflare Access.
+limit_req_zone $binary_remote_addr zone=docs:10m rate=600r/m;
+
 # Plain-HTTP origin. TLS is terminated at the Cloudflare edge; a cloudflared
 # tunnel forwards requests for ${REVA_DOMAIN} to this server. No certs here.
 server {
@@ -91,9 +97,9 @@ server {
     # application at the edge; leave /webhooks (GitHub can't SSO), /api, and
     # /health untouched.
 
-    # Docs data API — browser-driven, so reuse the per-IP api rate-limit zone.
+    # Docs data API — browser-driven fan-out, own zone (see docs above).
     location /repo-docs/ {
-        limit_req zone=api burst=20 nodelay;
+        limit_req zone=docs burst=150 nodelay;
         proxy_pass http://$api_upstream:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
