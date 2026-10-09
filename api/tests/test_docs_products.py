@@ -8,7 +8,8 @@ from tests.test_docs import _FakeGitHub, _seed_repo, _use_github, env  # noqa: F
 from reva.db.models import OpsEvent
 from reva.errors import TransientError
 
-MANIFEST = "{'name': 'Helpdesk SLA', 'summary': 'SLA timers', 'version': '%s.1.0.0'}"
+MANIFEST = ("{'name': 'Helpdesk SLA', 'summary': 'SLA timers', 'version': '%s.1.0.0', "
+            "'depends': ['helpdesk'], 'external_dependencies': {'python': ['holidays']}}")
 
 
 class _ProductGitHub(_FakeGitHub):
@@ -16,8 +17,10 @@ class _ProductGitHub(_FakeGitHub):
     with a plain `path` fallback so a file can be the same on every branch."""
 
     def __init__(self, *, trees=None, files=None, branches=None, issues=None, prs=None,
-                 tree_errors=None, file_errors=()):
+                 tree_errors=None, file_errors=(), commit_dates=None):
         super().__init__(branches=branches)
+        self.commit_dates = commit_dates or {}   # (ref, path) -> ISO date
+        self.commit_error = None
         self.trees = trees or {}
         self.files = files or {}
         self.issues = issues or []
@@ -40,6 +43,11 @@ class _ProductGitHub(_FakeGitHub):
             return self.files[(ref, path)]
         return self.files.get(path)
 
+    def get_last_commit_date(self, token, owner, repo, ref, path):
+        if self.commit_error:
+            raise self.commit_error
+        return self.commit_dates.get((ref, path))
+
     def list_issues(self, token, owner, repo, *, state, since=None):
         return [i for i in self.issues if i["state"] == state]
 
@@ -61,6 +69,8 @@ def _product_repo(db, name="cu-helpdesk", branches=("19.0", "18.0")):
         files={".claude-review.yml": "product: true\n",
                **{(b, "cu_helpdesk_sla/__manifest__.py"): MANIFEST % b for b in branches},
                "product.yml": "modules:\n  cu_helpdesk_sla:\n    owner: J\n    price: 1200\n"},
+        commit_dates={(b, "cu_helpdesk_sla"): f"2026-10-0{i + 1}T12:00:00Z"
+                      for i, b in enumerate(branches)},
     )
     return rid, gh
 
@@ -191,11 +201,16 @@ def test_product_detail_modules_versions_and_issues(env):
     assert sla["has_yml_entry"] is True
     assert sla["versions"]["19.0"]["version"] == "19.0.1.0.0"
     assert sla["versions"]["19.0"]["readme_path"] == "cu_helpdesk_sla/README.md"
+    assert sla["versions"]["19.0"]["depends"] == ["helpdesk"]
+    assert sla["versions"]["19.0"]["python_deps"] == ["holidays"]
+    assert sla["versions"]["19.0"]["updated_at"] == "2026-10-01T12:00:00Z"
+    assert sla["versions"]["18.0"]["updated_at"] == "2026-10-02T12:00:00Z"
     assert sla["versions"]["17.0"]["status"] == "available"
     kb = mods["cu_helpdesk_kb"]
     assert list(kb["versions"]) == ["18.0"]
     assert kb["versions"]["18.0"] == {"status": "planned", "version": None, "eta": "Q1",
-                                      "note": None, "manifest_error": None, "readme_path": None}
+                                      "note": None, "manifest_error": None, "readme_path": None,
+                                      "depends": [], "python_deps": [], "updated_at": None}
     assert [(i["number"], i["state"]) for i in body["issues"]] == [
         (2, "in_progress"), (1, "in_progress"),
     ]
@@ -250,6 +265,22 @@ def test_product_detail_degrades_per_step_with_ops_events(env):
         steps = sorted(e.detail["step"] for e in s.query(OpsEvent).all()
                        if e.event == "product_catalog_degraded")
     assert steps == ["issues", "manifests:19.0", "tree:18.0"]
+
+
+def test_product_detail_commit_lookup_failure_degrades_with_ops_event(env):
+    client, db, _ = env
+    rid, gh = _product_repo(db, branches=("19.0",))
+    gh.commit_error = TransientError("commits down")
+    _use_github(gh)
+    body = client.get(f"/repo-docs/products/{rid}").json()
+    sla = body["modules"][0]
+    assert sla["versions"]["19.0"]["version"] == "19.0.1.0.0"   # the row survives
+    assert sla["versions"]["19.0"]["updated_at"] is None
+    assert len(body["warnings"]) == 1
+    with db.session() as s:
+        steps = [e.detail["step"] for e in s.query(OpsEvent).all()
+                 if e.event == "product_catalog_degraded"]
+    assert steps == ["commits:19.0"]
 
 
 def test_product_detail_warns_on_truncated_tree(env):

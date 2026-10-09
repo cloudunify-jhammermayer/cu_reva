@@ -93,9 +93,11 @@ complete an SSO login, and the TUI authenticates to `/api` with a Bearer key.
   per root-level addon and a column per Odoo version branch (the three
   highest `NN.0` branches). Owner, price, summary, features and the
   `planned` / `discontinued` exceptions come from a `product.yml` at the
-  branch root; name and version from the manifest; the README renders
-  inline on expand; the repo's issues list below (in progress / planned /
-  won't do). Backed by `GET /repo-docs/products` and
+  branch root; name, version, `depends` and python `external_dependencies`
+  from the manifest; the date of the last commit touching the module shows
+  under each version; the README and the dependencies (a dependency shipped
+  by another product repo is tagged with that repo) render inline on expand;
+  the repo's issues list below (in progress / planned / won't do). Backed by `GET /repo-docs/products` and
   `/repo-docs/products/{id}` (5-minute caches). Product repos also get their
   root-level addon docs listed in the tree.
 
@@ -103,6 +105,11 @@ complete an SSO login, and the TUI authenticates to `/api` with a Bearer key.
 
 At the root of every version branch of a product repo, keyed by the module's
 technical name (the directory name); every key is optional.
+
+A column exists only for a version branch that exists. To announce a module
+for an Odoo version whose branch is not there yet ("20.0: planned, eta Q1"),
+create that branch with only a `product.yml` carrying `status: planned` and
+`eta`; the module directory follows when the port lands.
 
 ```yaml
 modules:

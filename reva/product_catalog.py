@@ -119,7 +119,13 @@ def parse_product_yml(text: str | None) -> tuple[dict[str, ModuleMeta], list[str
                 meta.subscription, meta.per = sub, per
         features = raw.get("features")
         if isinstance(features, list):
+            # `- Text: more text` is a one-key mapping to YAML, not a sentence;
+            # keep the row readable and tell the author to quote the line.
             meta.features = [str(f) for f in features if f is not None]
+            if any(isinstance(f, dict) for f in features):
+                warnings.append(
+                    f"product.yml: `{name}.features` has an entry with an unquoted colon; quote it"
+                )
         elif features is not None:
             warnings.append(f"product.yml: `{name}.features` must be a list; ignored")
         status = raw.get("status")
@@ -153,7 +159,9 @@ class BranchModule:
 
 
 def _version(status: str, version: str | None, meta: ModuleMeta | None,
-             manifest_error: str | None, readme_path: str | None) -> dict:
+             manifest_error: str | None, readme_path: str | None,
+             depends: list[str] = (), python_deps: list[str] = (),
+             updated_at: str | None = None) -> dict:
     return {
         "status": status,
         "version": version,
@@ -161,6 +169,9 @@ def _version(status: str, version: str | None, meta: ModuleMeta | None,
         "note": meta.note if meta else None,
         "manifest_error": manifest_error,
         "readme_path": readme_path,
+        "depends": list(depends),
+        "python_deps": list(python_deps),
+        "updated_at": updated_at,
     }
 
 
@@ -169,10 +180,13 @@ def build_branch(
     manifests: dict[str, str | None],
     readmes: set[str],
     yml: dict[str, ModuleMeta],
+    updated: dict[str, str | None] | None = None,
 ) -> tuple[dict[str, BranchModule], list[str]]:
     """Rows for one version branch. `manifests` maps module dir -> manifest
     text (None when the fetch failed); `readmes` holds the blob paths of the
-    README.md files present on the branch."""
+    README.md files present on the branch; `updated` maps module dir -> ISO
+    date of the last commit touching it (None when unknown)."""
+    updated = updated or {}
     rows: dict[str, BranchModule] = {}
     warnings: list[str] = []
     for module, text in manifests.items():
@@ -190,6 +204,9 @@ def build_branch(
                 meta,
                 None if data else "manifest could not be parsed",
                 readme if readme in readmes else None,
+                depends=data.depends if data else (),
+                python_deps=data.python_deps if data else (),
+                updated_at=updated.get(module),
             ),
         )
     for module, meta in yml.items():

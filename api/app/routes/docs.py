@@ -313,15 +313,29 @@ def product_detail(
                 _failed.append(path)
                 return None
 
+        commit_failed: list[str] = []
+
+        def last_change(root, _branch=branch, _failed=commit_failed):
+            try:
+                return github.get_last_commit_date(token, owner, name, _branch, root)
+            except (PermanentError, TransientError):
+                _failed.append(root)
+                return None
+
         with ThreadPoolExecutor(max_workers=8) as pool:
             texts = list(pool.map(fetch, [f"{r}/__manifest__.py" for r in roots]))
+            dates = list(pool.map(last_change, roots))
         manifests = dict(zip(roots, texts))
+        updated = dict(zip(roots, dates))
         yml, yml_warnings = parse_product_yml(fetch("product.yml"))
         warnings.extend(f"{branch}: {w}" for w in yml_warnings)
         if failed:
             warnings.append(_degrade(db, repository_id, f"manifests:{branch}",
                                      TransientError(f"{len(failed)} file fetches failed")))
-        rows, row_warnings = build_branch(branch, manifests, readmes, yml)
+        if commit_failed:
+            warnings.append(_degrade(db, repository_id, f"commits:{branch}",
+                                     TransientError(f"{len(commit_failed)} commit lookups failed")))
+        rows, row_warnings = build_branch(branch, manifests, readmes, yml, updated)
         warnings.extend(row_warnings)
         per_branch.append((branch, rows))
 

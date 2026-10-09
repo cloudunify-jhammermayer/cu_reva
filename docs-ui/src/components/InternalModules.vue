@@ -103,6 +103,29 @@ const allDiscontinued = (repo, m) =>
 const discontinuedNote = (m) =>
   Object.values(m.versions).find((v) => v.status === 'discontinued')?.note
 const stateLabel = { in_progress: 'in progress', planned: 'planned', wont_do: "won't do" }
+const day = (iso) => iso.slice(0, 10)
+// Technical module name -> name of the product repo that ships it, across every
+// loaded repo; a dependency on another product becomes "requires <repo>".
+const productRepoOf = (module) => {
+  for (const r of repos.value) {
+    const d = details[r.repository_id]?.data
+    if (d && d.modules.some((m) => m.module === module)) return r.name
+  }
+  return null
+}
+// One line per version branch: manifest depends (tagged when another product
+// repo ships the module) and python packages from external_dependencies.
+const depsRows = (repo, m) =>
+  details[repo.repository_id].data.branches
+    .filter((b) => m.versions[b] && (m.versions[b].depends.length || m.versions[b].python_deps.length))
+    .map((b) => ({
+      branch: b,
+      depends: m.versions[b].depends.map((name) => {
+        const from = productRepoOf(name)
+        return { name, repo: from && from !== repo.name ? from : null }
+      }),
+      python: m.versions[b].python_deps,
+    }))
 const loadedAt = (iso) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 const age = (iso) => {
@@ -205,6 +228,7 @@ const age = (iso) => {
                       >{{ m.versions[b].version || 'no version' }}</a>
                       <span v-else>{{ m.versions[b].version || 'no version' }}</span>
                       <span v-if="m.versions[b].manifest_error" class="eta">{{ m.versions[b].manifest_error }}</span>
+                      <span v-else-if="m.versions[b].updated_at" class="eta" :title="`last change on ${b}`">{{ day(m.versions[b].updated_at) }}</span>
                     </template>
                     <template v-else>
                       <span class="pill" :class="m.versions[b].status">{{ m.versions[b].status }}</span>
@@ -224,6 +248,18 @@ const age = (iso) => {
                 </tr>
                 <tr v-if="isOpen(r, m)" class="features">
                   <td :colspan="5 + details[r.repository_id].data.branches.length">
+                    <div class="deps" v-if="depsRows(r, m).length">
+                      <div class="label">Depends on</div>
+                      <ul>
+                        <li v-for="d in depsRows(r, m)" :key="d.branch">
+                          <span class="num">{{ d.branch }}</span>
+                          <span class="list">
+                            <template v-for="(dep, i) in d.depends" :key="dep.name"><template v-if="i">, </template><code>{{ dep.name }}</code><span v-if="dep.repo" class="pill" :title="`shipped by ${dep.repo}`">{{ dep.repo }}</span></template>
+                            <template v-if="d.python.length"><span v-if="d.depends.length"> · </span>pip: <code>{{ d.python.join(', ') }}</code></template>
+                          </span>
+                        </li>
+                      </ul>
+                    </div>
                     <div class="label">Features</div>
                     <ul v-if="m.features.length"><li v-for="f in m.features" :key="f">{{ f }}</li></ul>
                     <p v-else class="muted">No features listed in product.yml.</p>

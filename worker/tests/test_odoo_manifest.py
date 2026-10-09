@@ -22,6 +22,13 @@ def test_parse_manifest_normal():
     assert m.demo == ["demo/d.xml"]
 
 
+def test_parse_manifest_python_external_dependencies():
+    m = parse_manifest("{'name': 'M', 'external_dependencies': {'python': ['fastapi', 3], 'bin': ['x']}}")
+    assert m is not None
+    assert m.python_deps == ["fastapi"]
+    assert parse_manifest("{'external_dependencies': ['bad']}").python_deps == []
+
+
 def test_parse_manifest_with_comment_header():
     m = parse_manifest("# -*- coding: utf-8 -*-\n{'name': 'M', 'depends': ['base']}")
     assert m is not None

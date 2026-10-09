@@ -253,6 +253,22 @@ class GitHubClient:
                 break
         return out
 
+    def get_last_commit_date(
+        self, token: str, owner: str, repo: str, ref: str, path: str
+    ) -> str | None:
+        """ISO committer date of the newest commit on `ref` touching `path`
+        (a module directory), or None when the path has no history there.
+        One call per module and branch; the product page caches the result."""
+        response = self._get(
+            token,
+            f"/repos/{owner}/{repo}/commits",
+            params={"sha": ref, "path": path, "per_page": 1},
+        )
+        batch = response.json()
+        if not batch:
+            return None
+        return ((batch[0].get("commit") or {}).get("committer") or {}).get("date")
+
     def get_issue(
         self, token: str, owner: str, repo: str, issue_number: int
     ) -> dict | None:

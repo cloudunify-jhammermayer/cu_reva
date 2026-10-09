@@ -89,6 +89,9 @@ class ModuleVersion(BaseModel):
     note: str | None = None
     manifest_error: str | None = None
     readme_path: str | None = None
+    depends: list[str] = []              # manifest `depends`
+    python_deps: list[str] = []          # manifest `external_dependencies.python`
+    updated_at: str | None = None        # ISO date of the last commit touching the module on this branch
 
 
 class ProductModule(BaseModel):

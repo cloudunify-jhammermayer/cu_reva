@@ -15,7 +15,7 @@ from __future__ import annotations
 import ast
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+\.\d+\.\d+$")  # Odoo 5-part SERIES.x.y.z
 _GLOB_CHARS = ("*", "?", "[")
@@ -30,6 +30,7 @@ class ManifestData:
     demo: list[str]
     name: str | None = None
     summary: str | None = None
+    python_deps: list[str] = field(default_factory=list)  # external_dependencies.python
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,8 @@ def parse_manifest(text: str) -> ManifestData | None:
 
     version = node.get("version")
     name, summary = node.get("name"), node.get("summary")
+    external = node.get("external_dependencies")
+    python_deps = external.get("python") if isinstance(external, dict) else None
     return ManifestData(
         version=version if isinstance(version, str) else None,
         depends=_strlist("depends"),
@@ -66,6 +69,8 @@ def parse_manifest(text: str) -> ManifestData | None:
         demo=_strlist("demo"),
         name=name if isinstance(name, str) else None,
         summary=summary if isinstance(summary, str) else None,
+        python_deps=[x for x in python_deps if isinstance(x, str)]
+        if isinstance(python_deps, list) else [],
     )
 
 

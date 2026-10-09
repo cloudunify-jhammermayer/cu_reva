@@ -77,6 +77,14 @@ def test_parse_product_yml_tolerates_missing_and_malformed():
     assert entries == {} and "cu_x" in warnings[0]
 
 
+def test_parse_product_yml_warns_on_feature_with_unquoted_colon():
+    entries, warnings = parse_product_yml(
+        "modules:\n  cu_a:\n    features:\n      - Validation: cent-exact sums\n      - 'Quoted: fine'\n"
+    )
+    assert entries["cu_a"].features[1] == "Quoted: fine"
+    assert warnings == ["product.yml: `cu_a.features` has an entry with an unquoted colon; quote it"]
+
+
 def test_parse_product_yml_impossible_date_degrades_to_warning():
     entries, warnings = parse_product_yml("modules:\n  cu_a:\n    eta: 2026-13-45\n")
     assert entries == {} and len(warnings) == 1 and "not valid YAML" in warnings[0]
@@ -122,9 +130,12 @@ def test_build_branch_merges_manifest_yml_and_readme():
     )
     rows, warnings = build_branch(
         "19.0",
-        {"cu_a": "{'name': 'A', 'summary': 'Sum', 'version': '19.0.1.0.0'}", "cu_broken": "import os"},
+        {"cu_a": "{'name': 'A', 'summary': 'Sum', 'version': '19.0.1.0.0', 'depends': ['base', 'sale'],"
+                 " 'external_dependencies': {'python': ['fastapi']}}",
+         "cu_broken": "import os"},
         {"cu_a/README.md"},
         yml,
+        {"cu_a": "2026-10-08T10:00:00Z", "cu_broken": None},
     )
     assert set(rows) == {"cu_a", "cu_broken", "cu_planned"}
     a = rows["cu_a"]
@@ -132,14 +143,17 @@ def test_build_branch_merges_manifest_yml_and_readme():
     assert a.version == {
         "status": "discontinued", "version": "19.0.1.0.0", "eta": None, "note": "gone",
         "manifest_error": None, "readme_path": "cu_a/README.md",
+        "depends": ["base", "sale"], "python_deps": ["fastapi"], "updated_at": "2026-10-08T10:00:00Z",
     }
     broken = rows["cu_broken"]
     assert broken.meta is None
     assert broken.version["manifest_error"] and broken.version["version"] is None
     assert broken.version["readme_path"] is None
+    assert (broken.version["depends"], broken.version["updated_at"]) == ([], None)
     assert rows["cu_planned"].version == {
         "status": "planned", "version": None, "eta": "Q1", "note": None,
         "manifest_error": None, "readme_path": None,
+        "depends": [], "python_deps": [], "updated_at": None,
     }
     assert warnings == ["product.yml on 19.0: `cu_ghost` has no module directory; ignored"]
 
@@ -148,7 +162,8 @@ def _bm(module, branch_meta=None, name=None, summary=None, version="19.0.1.0.0")
     return BranchModule(
         module=module, name=name, summary=summary, meta=branch_meta,
         version={"status": branch_meta.status if branch_meta else "available", "version": version,
-                 "eta": None, "note": None, "manifest_error": None, "readme_path": None},
+                 "eta": None, "note": None, "manifest_error": None, "readme_path": None,
+                 "depends": [], "python_deps": [], "updated_at": None},
     )
 
 
