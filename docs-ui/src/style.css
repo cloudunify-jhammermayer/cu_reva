@@ -193,8 +193,8 @@ a { color: var(--accent); text-decoration: none; }
 .product button.feat { font: inherit; font-size: 12px; width: 22px; height: 22px; padding: 0; line-height: 1; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--accent); cursor: pointer; }
 .product button.feat:hover, .product button.feat:focus-visible { border-color: var(--accent); outline: none; }
 .product tr.features td { background: var(--bg); padding: 10px 14px 12px 44px; }
-.product tr.features ul { margin: 0; padding-left: 18px; line-height: 1.6; font-size: 13px; columns: 2; column-gap: 32px; }
-.product tr.features li { break-inside: avoid; }
+.product tr.features td > ul { margin: 0; padding-left: 18px; line-height: 1.6; font-size: 13px; columns: 2; column-gap: 32px; }
+.product tr.features td > ul > li { break-inside: avoid; }
 .product tr.features .label { display: flex; gap: 10px; align-items: baseline; margin-bottom: 4px; }
 .product tr.features .label a { text-transform: none; letter-spacing: 0; font-size: 12px; margin-left: auto; }
 .product .readme { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); max-width: 72ch; }
@@ -212,7 +212,7 @@ a { color: var(--accent); text-decoration: none; }
 .product .chip { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 1px 7px; border-radius: 3px; white-space: nowrap; background: var(--accent-soft); color: var(--accent); }
 .product .chip.in_progress { background: var(--ok-soft); color: var(--ok); }
 .product .chip.wont_do { background: var(--over-soft); color: var(--over); }
-@media (max-width: 768px) { .product tr.features ul { columns: 1; } }
+@media (max-width: 768px) { .product tr.features td > ul { columns: 1; } }
 
 /* --- Print / Save-as-PDF: clean light paper (driven by the Download PDF button) --- */
 @media print {
